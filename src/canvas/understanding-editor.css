@@ -1,0 +1,53 @@
+.chapter-understanding-simple { margin-block: 16px 24px; }
+.reader-understanding-map .route-adjusting { display: flex; flex-direction: column; gap: 0; max-width: 960px; }
+.route-adjusting li + li { border-top: 1px solid var(--border); }
+.route-adjusting .route-card { flex: 1; flex-direction: row; align-items: center; gap: 12px; min-height: 0; padding: 10px 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.reader-understanding-map .route-adjusting .route-card-main { flex: 1; max-width: none; padding: 0; }
+.route-adjusting .route-card-label .route-responsibility { display: none; }
+.reader-understanding-map .route-adjusting .route-card-tools { padding: 0; }
+.chapter-understanding-simple .diagram-workspace-preview { margin-bottom: 14px; }
+.chapter-personal-notes, .chapter-understanding-settings { margin-block: 10px; color: var(--muted); font-size: 13px; }
+.chapter-personal-notes > summary, .chapter-understanding-settings summary { display: flex; align-items: center; gap: 8px; padding: 8px 0; cursor: pointer; list-style: none; }
+.chapter-personal-notes > summary::before, .chapter-understanding-settings summary::before { content: "›"; font-size: 16px; }
+.chapter-personal-notes[open] > summary::before, .chapter-understanding-settings details[open] > summary::before, .chapter-understanding-settings[open] > summary::before { transform: rotate(90deg); }
+.chapter-personal-notes summary small { color: var(--faint); font-size: 11px; }
+.chapter-personal-notes ul, .chapter-understanding-settings ul { margin: 4px 0 10px; padding: 0; list-style: none; }
+.chapter-personal-notes li + li, .chapter-understanding-settings li + li { border-top: 1px solid var(--border); }
+.chapter-personal-notes li > button { display: grid; gap: 4px; width: 100%; padding: 10px 0; text-align: left; border: 0; background: transparent; color: var(--text); }
+.chapter-personal-notes li strong { font-size: 13px; font-weight: 600; }
+.chapter-personal-notes li span { color: var(--muted); font-size: 12px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.chapter-add-note { border: 0; background: transparent; color: var(--accent); padding: 6px 0; font-size: 13px; }
+.chapter-understanding-settings { font-size: 12px; }
+.chapter-understanding-settings > details { padding-left: 16px; }
+.chapter-understanding-settings li { display: flex; gap: 6px; align-items: center; padding: 6px 0; }
+.chapter-understanding-settings li button { border: 0; background: transparent; color: var(--muted); padding: 4px; }
+.chapter-understanding-settings li button:first-child { flex: 1; text-align: left; color: var(--text); overflow-wrap: anywhere; }
+.map-detail-overlay .understanding-editor, .map-detail-overlay .understanding-note-detail { position: fixed; right: 24px; bottom: 24px; width: min(440px, calc(100vw - 32px)); max-height: min(680px, calc(100dvh - 48px)); display: flex; flex-direction: column; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-solid); color: var(--text); box-shadow: 0 16px 48px #00000030; overflow: hidden; z-index: 43; }
+.understanding-editor > header, .understanding-note-detail > header { display: flex; justify-content: space-between; align-items: center; flex: none; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.map-detail-overlay .understanding-editor button, .map-detail-overlay .understanding-note-detail button { max-width: none; align-items: center; justify-content: center; padding: 6px 10px; font-size: 13px; }
+.understanding-editor > header button, .understanding-note-detail > header button { border: 0; background: transparent; padding: 4px; }
+.understanding-editor-body, .understanding-note-detail > div { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px; }
+.understanding-editor-body { display: grid; gap: 16px; }
+.understanding-editor label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.understanding-editor :is(input, textarea, select) { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; font: inherit; font-size: 13px; line-height: 1.7; background: var(--surface); color: var(--text); }
+.understanding-editor textarea { resize: vertical; }
+.understanding-editor-options { font-size: 12px; color: var(--muted); }
+.understanding-editor-options > summary { display:flex; align-items:center; gap:8px; min-height:36px; cursor:pointer; padding:4px 0; list-style:none; font-size:14px; }
+.understanding-editor-options > summary::-webkit-details-marker { display:none; }
+.understanding-editor-options > summary > svg { flex:none; margin-left:auto; color:var(--muted); transition:transform .15s; }
+.understanding-editor-options[open] > summary > svg { transform:rotate(180deg); }
+.understanding-editor-options > summary:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:4px; }
+@media (prefers-reduced-motion:reduce) { .understanding-editor-options > summary > svg { transition:none; } }
+.understanding-editor-options[open] { display: grid; gap: 14px; }
+.understanding-editor-options > :not(summary) { margin-top: 12px; }
+.understanding-editor .route-link-editor { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; }
+.understanding-editor .route-link-editor > div { display: flex; gap: 6px; }
+.understanding-editor .route-link-editor select { flex: 1; width: 0; }
+.understanding-editor .project-concept-associations label { display: flex; align-items: center; gap: 8px; }
+.understanding-editor .project-concept-associations input { width: auto; }
+.understanding-editor footer, .understanding-note-detail footer { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); }
+.understanding-editor footer .understanding-delete { margin-right: auto; }
+.map-detail-overlay .understanding-editor footer button.primary { background: var(--accent); color: #052e16; border-color: var(--accent); font-weight: 600; }
+.understanding-editor [role=alert] { margin: 0; font-size: 12px; }
+.understanding-note-detail > div .chapter-guide { font-size: 14px; }
+@media (max-width: 640px) { .map-detail-overlay .understanding-editor, .map-detail-overlay .understanding-note-detail { right: 16px; bottom: 16px; max-height: calc(100dvh - 32px); } }

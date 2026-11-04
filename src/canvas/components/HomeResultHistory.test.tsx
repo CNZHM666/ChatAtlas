@@ -1,0 +1,57 @@
+import "fake-indexeddb/auto";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { HomeResultHistory } from "./HomeResultHistory";
+import { HomeTaskWorkspace } from "./HomeTaskWorkspace";
+import { saveHomeResult } from "../../storage/home-results";
+import { saveFocusSession } from "../../storage/focus-sessions";
+import { getDatabase } from "../../storage/db";
+import { projectSession } from "../../test/project-fixture";
+import { planHomeTask } from "../../ai/home-task";
+vi.mock("../../ai/home-task", async importOriginal => ({ ...await importOriginal<typeof import("../../ai/home-task")>(), planHomeTask: vi.fn() }));
+beforeEach(async () => { vi.clearAllMocks(); const db = await getDatabase(); await db.clear("homeResults"); await db.clear("focusSessions"); await db.clear("aiSettings"); });
+afterEach(cleanup);
+const record = () => ({ id: "past-answer", question: "以前讨论的硬件AI方案是什么？", topicGoal: "硬件AI", poolIds: ["missing-original"], answer: { ...projectSession(), sections: [{ id: "s", title: "历史结论", body: "保存的讨论结论", kind: "finding" as const, evidenceIds: ["e1"], transition: "" }] }, createdAt: 1 });
+it("lists saved answers and existing project/review results together and filters without model requests", async () => {
+  const saved = record(); await saveHomeResult(saved);
+  const project = projectSession(), review = { ...project, id: "review", mode: "review" as const, title: "数学复习" }; const onResult = vi.fn(), onSession = vi.fn();
+  render(<HomeResultHistory sessions={[project, review]} zh onBack={vi.fn()} onResult={onResult} onSession={onSession} />);
+  fireEvent.click(await screen.findByRole("button", {name:/以前讨论的硬件AI/})); expect(onResult).toHaveBeenCalledWith(saved);
+  fireEvent.click(screen.getByRole("button", {name:/数学复习/})); expect(onSession).toHaveBeenCalledWith("review");
+  fireEvent.change(screen.getByRole("textbox", {name:"搜索历史记录"}), {target:{value:"硬件AI"}});
+  expect(screen.queryByRole("button", {name:/数学复习/})).not.toBeInTheDocument(); expect(planHomeTask).not.toHaveBeenCalled();
+});
+it("reopens a past answer offline without regenerating it, even when its original source was deleted", async () => {
+  render(<HomeTaskWorkspace initialRecord={record()} goal={record().question} poolIds={record().poolIds} conversations={[]} sessions={[]} zh onBack={vi.fn()} onHydrate={vi.fn()} onStart={vi.fn()} />);
+  expect(screen.getByText("保存的讨论结论")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("combobox", {name:"选择生成 AI"})).toBeInTheDocument()); expect(planHomeTask).not.toHaveBeenCalled();
+  const input = screen.getByRole("textbox", {name:"继续提问"}); expect(input.closest("footer")).toHaveClass("home-task-composer"); expect(input.closest(".home-task-body")).toBeNull();
+});
+it("shows search and topic entries with truthful completion state and opens their original scope",async()=>{
+  const search={id:"search",kind:"search" as const,question:"查找 Orama",topicGoal:"Orama",poolIds:["selected"],createdAt:3,status:"completed" as const,matchCount:2},topic={id:"topic",kind:"discovery" as const,question:"继续硬件项目",topicGoal:"硬件",poolIds:["a","b"],createdAt:4,status:"started" as const};
+  await saveHomeResult(search);await saveHomeResult(topic);const onResult=vi.fn();render(<HomeResultHistory sessions={[]} zh onResult={onResult} onSession={vi.fn()} onBack={vi.fn()}/>);
+  const topicButton=await screen.findByRole("button",{name:/继续硬件项目.*未完成/});fireEvent.click(topicButton);expect(onResult).toHaveBeenCalledWith(topic);
+  const searchButton=screen.getByRole("button",{name:/查找 Orama.*2 条匹配/});fireEvent.click(searchButton);expect(onResult).toHaveBeenLastCalledWith(search);expect(screen.getByRole("heading",{name:"历史记录"})).toBeVisible();expect(planHomeTask).not.toHaveBeenCalled();
+});
+it("clears history only after confirmation, retaining saved documents and keeping cleared entries hidden after edits", async () => {
+  const saved = record(), project = projectSession(), db = await getDatabase();
+  await saveHomeResult(saved); await db.put("focusSessions", project);
+  const props = { sessions: [project], zh: true, onBack: vi.fn(), onResult: vi.fn(), onSession: vi.fn() };
+  const first = render(<HomeResultHistory {...props} />);
+  await screen.findByRole("button", { name: /以前讨论的硬件AI/ });
+  fireEvent.click(screen.getByRole("button", { name: "清空历史记录" }));
+  expect(await db.getAll("homeResults")).toHaveLength(1);
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(screen.getByRole("button", { name: /以前讨论的硬件AI/ })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "清空历史记录" }));
+  fireEvent.click(screen.getByRole("button", { name: "清空记录" }));
+  await screen.findByRole("heading", { name: "还没有历史记录" });
+  expect(await db.getAll("homeResults")).toHaveLength(0);
+  expect(await db.get("focusSessions", project.id)).toMatchObject({ sections: project.sections, notes: project.notes, historyHiddenAt: expect.any(Number) });
+  await saveFocusSession({ ...project, notes: "Edited after clearing history" });
+  first.unmount();
+  const next = { ...project, id: "new-result", title: "新的整理成果" };
+  render(<HomeResultHistory {...props} sessions={[project, next]} />);
+  await waitFor(() => expect(screen.queryByRole("button", { name: new RegExp(project.title) })).toBeNull());
+  expect(screen.getByRole("button", { name: /新的整理成果/ })).toBeVisible();
+});

@@ -1,0 +1,73 @@
+/* Keep body text quiet so authored and local reading emphasis stays visible. */
+.conversation-answer-markdown.reader-guide-prose { font-weight:400; }
+.conversation-answer-markdown.reader-guide-prose strong,
+.wiki-chapter-overview .wiki-chapter-overview-content .reader-guide-prose strong { font-weight:600; font-synthesis:weight; color:var(--text); }
+.document-overview .project-overview-intro .reader-guide-prose > p:first-child { font-weight:400; }
+
+/* Document reading: distinct sections, bounded lines and readable comparisons. */
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose {
+  font-size: 16px; line-height: 1.75; color: var(--text); overflow-wrap: anywhere;
+}
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose > p { margin: 0 0 18px; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose :is(h1,h2) {
+  margin: 36px 0 14px; padding: 0; border: 0;
+  font-size: 22px; line-height: 1.45; font-weight: 600; letter-spacing: normal;
+}
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose h3 {
+  margin: 28px 0 12px; font-size: 18px; font-weight: 600; line-height: 1.5;
+}
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose :is(h4,h5,h6) { font-size: 16px; margin: 24px 0 10px; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose > :is(h1,h2,h3):first-child { margin-top: 0; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose :is(ul,ol) { padding-left: 1.5em; margin: 12px 0 20px; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose li { padding-left: .3em; margin: 6px 0; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose li > p { margin: 6px 0; }
+/* Stage cards keep their own spacing: the list indent and item padding above would press the text to the border. */
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reading-stage-flow { padding: 0; margin: 0; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reading-stage-flow > li { margin: 0; padding: var(--stage-card-padding); }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reading-stage-flow.is-labelled > li { padding: var(--stage-card-labelled-padding); }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reading-stage-flow > li > p { margin: 0; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose blockquote {
+  margin: 20px 0 24px; padding: 4px 0 4px 18px; border-left: 2px solid var(--border);
+  border-radius: 0; color: var(--muted); background: transparent;
+}
+.reader-guide-prose .reader-table-scroll {
+  width: 100%; max-width: 100%; overflow-x: auto; margin: 20px 0 28px;
+  border: 0; border-radius: 0; background: transparent; overscroll-behavior-x: contain;
+}
+.reader-guide-prose .reader-table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reader-table-scroll > table,
+.reader-guide-prose .reader-table-scroll > table {
+  display: table; width: 100%; max-width: none; margin: 0; border: 0;
+  border-collapse: collapse; background: transparent; font-size: 15px; line-height: 1.65;
+}
+.reader-guide-prose .reader-table-scroll :is(th,td) {
+  padding: 13px 16px; border: 0; border-bottom: 1px solid var(--border);
+  text-align: left; vertical-align: top; min-width: 120px; overflow-wrap: anywhere;
+}
+.reader-guide-prose .reader-table-scroll th { background: transparent; color: var(--text); font-weight: 600; }
+.reader-guide-prose .reader-table-scroll tr:last-child td { border-bottom: 0; }
+.reader-guide-prose .reader-table-scroll :is(tr,td),
+.reader-guide-prose .reader-table-scroll tbody tr:hover { background: transparent; }
+.reader-guide-prose .reader-table-scroll :is(th,td):first-child { padding-left: 0; }
+.reader-guide-prose .reader-table-scroll :is(th,td):last-child { padding-right: 0; }
+@media(max-width:620px) {
+  :is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose :is(h1,h2) { font-size: 21px; margin-top: 30px; }
+  .reader-guide-prose .reader-table-scroll :is(th,td) { padding: 10px 12px; }
+}
+
+.reader-guide-prose .reader-table-scroll table:has(th:nth-child(3)) { min-width: 560px; }
+
+/* The article title sits above Markdown's own hierarchy without heavy display type. */
+:is(.focus-workspace,.focus-preview) .wiki-document .wiki-document-heading h1 {
+  font-size: clamp(26px, 2.5vw, 34px); font-weight: 600; line-height: 1.35; letter-spacing: normal;
+}
+
+/* A run of arrowed steps inside a sentence reads as a strip; the written arrow stays in the text for copying and is
+   drawn as a quiet chevron. A long paragraph's first sentence is set apart so the paragraph can be skimmed. */
+/* Inline, not an inline-flex box: a box too wide for the rest of the line dropped whole onto the next one, leaving
+ * a gap after the words before it. Steps wrap with the sentence; a step broken over two lines keeps its tint. */
+.reading-inline-flow { display: inline; margin: 0 2px; }
+.reading-inline-flow-step { padding: 1px 7px; border-radius: 6px; background: var(--accent-soft); color: var(--text); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.reading-inline-flow-arrow { font-size: 0; }
+.reading-inline-flow-arrow::after { content: "→"; padding: 0 5px; color: var(--muted); font-size: 13px; }
+.reading-lead { color: var(--text); font-weight: 600; }

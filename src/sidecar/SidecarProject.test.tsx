@@ -1,0 +1,96 @@
+import "fake-indexeddb/auto";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { SidecarProject } from "./SidecarProject";
+import { projectSession } from "../test/project-fixture";
+import { getDatabase } from "../storage/db";
+import { savedSidecarProjects } from "./project-model";
+import { sourceChanges } from "../canvas/source-freshness";
+import { invalidateStoredMessageSearchIndex } from "../storage/messages";
+vi.mock("../canvas/source-freshness",async original=>({...await original<typeof import("../canvas/source-freshness")>(),sourceChanges:vi.fn(async()=>[])}));
+const send=vi.fn(), copy=vi.fn();
+beforeEach(async()=>{
+  vi.clearAllMocks(); vi.mocked(sourceChanges).mockResolvedValue([]);
+  vi.stubGlobal("chrome",{runtime:{sendMessage:send,onMessage:{addListener:vi.fn(),removeListener:vi.fn()}}});
+  Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:copy}}); copy.mockResolvedValue(undefined); send.mockResolvedValue({ok:true});
+  const db=await getDatabase(); await db.clear("contextFavorites"); await db.clear("sidecarSearches"); await db.clear("aiSettings"); await db.clear("focusSessions"); await db.clear("conversations"); await db.clear("messages"); await db.clear("canvases"); invalidateStoredMessageSearchIndex();
+  const project=projectSession(); project.projectMaintenance={modules:{"module:input":{...project.projectState!.modules[0],purpose:"我的职责修改"}},decisions:{"decision:scope":{text:"先验证核心流程",confirmed:true}},actions:{"action:test":{text:"完成规则校验测试",done:true},"user:next":{text:"补齐边界验证",done:false}}};
+  await db.put("focusSessions",project);
+});
+afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+const renderProject=(node:React.ReactNode)=>render(node);
+it("keeps project linking and local search without context-generation entry points",async()=>{
+ renderProject(<SidecarProject conversationId="source" zh/>);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"关联项目"})).toBeEnabled());
+ expect(screen.getByRole("searchbox",{name:"搜索历史对话"})).toBeVisible();
+ expect(screen.queryByRole("button",{name:"项目上下文"})).toBeNull();
+ expect(screen.queryByRole("button",{name:"复制上下文"})).toBeNull();
+ expect(screen.queryByRole("textbox",{name:"当前任务"})).toBeNull();
+ expect(copy).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();
+});
+it("does not select an unrelated project automatically and keeps saved candidates out of the picker",async()=>{
+ const saved=projectSession(),candidate={...saved,id:"preview",rootSessionId:saved.id,status:"preview" as const,createdAt:5,updatedAt:5};expect(savedSidecarProjects([saved,candidate]).map(item=>item.id)).toEqual([saved.id]);expect(savedSidecarProjects([candidate])).toEqual([]);
+ renderProject(<SidecarProject conversationId="unlinked" zh/>);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"关联项目"})).toBeEnabled());
+ fireEvent.click(screen.getByRole("button",{name:"关联项目"}));
+ expect(screen.getByRole("button",{name:`关联到：${saved.title}`})).toBeVisible();
+ expect(screen.queryByText(/使用已关联项目/)).toBeNull();expect(screen.queryByRole("button",{name:"复制上下文"})).toBeNull();
+});
+it("imports only the current conversation with one action and then updates the same stored conversation",async()=>{
+  const db=await getDatabase();
+  send.mockImplementation(async message=>{
+    if(message.type==="ATLAS_SIDECAR_SYNC")await db.put("conversations",{id:message.conversationId,title:"当前对话",platform:"chatgpt",url:`https://chatgpt.com/c/${message.conversationId}`,updatedAt:Date.now(),messageCount:2,hydrationState:"hydrated",importState:"complete"});
+    return {ok:true};
+  });
+  const {container}=render(<SidecarProject conversationId="source" zh/>);
+  await waitFor(()=>expect(screen.getByRole("button",{name:"导入当前对话"})).toBeEnabled());
+  expect(screen.queryByRole("button",{name:"保存消息"})).not.toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:"同步对话"})).not.toBeInTheDocument();
+  expect(container.querySelector('input[type="file"]')).toBeNull();
+  expect(within(container.querySelector("footer")!).queryByRole("button",{name:/导入/})).not.toBeInTheDocument();
+  const button=screen.getByRole("button",{name:"导入当前对话"});fireEvent.click(button);fireEvent.click(button);
+  await screen.findByText("当前对话已导入，可在工作台和对话库中查看。");
+  expect(send).toHaveBeenCalledExactlyOnceWith({type:"ATLAS_SIDECAR_SYNC",conversationId:"source"});
+  await waitFor(()=>expect(screen.getByRole("button",{name:"更新对话"})).toBeEnabled());
+  expect(screen.queryByRole("button",{name:"导入当前对话"})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:"更新对话"}));
+  await screen.findByText("当前对话已更新，可在工作台和对话库中查看。");
+  expect(await db.count("conversations")).toBe(1);
+  expect(send.mock.calls.map(call=>call[0])).toEqual([{type:"ATLAS_SIDECAR_SYNC",conversationId:"source"},{type:"ATLAS_SIDECAR_SYNC",conversationId:"source"}]);
+});
+it("links an unsaved current conversation directly from the searchable picker and keeps manual knowledge",async()=>{
+  const db=await getDatabase(), target={...projectSession(),id:"target",canvasId:"target-canvas",title:"ChatAtlas 目标项目"};
+  await db.put("focusSessions",target);await db.put("canvases",{id:target.canvasId,name:target.title,createdAt:1,updatedAt:1});
+  send.mockImplementation(async message=>{
+    if(message.type==="ATLAS_SIDECAR_SYNC")await db.put("conversations",{id:"unsaved",title:"尚未导入的当前讨论",platform:"chatgpt",url:"https://chatgpt.com/c/unsaved",updatedAt:1,messageCount:1,importState:"complete",hydrationState:"hydrated"});
+    return {ok:true};
+  });
+  renderProject(<SidecarProject conversationId="unsaved" zh/>);
+  await waitFor(()=>expect(screen.getByRole("button",{name:"关联项目"})).toBeEnabled());
+  fireEvent.click(screen.getByRole("button",{name:"关联项目"}));
+  const search=screen.getByRole("searchbox",{name:"搜索项目"});expect(search).toHaveFocus();
+  fireEvent.change(search,{target:{value:"目标项目"}});
+  expect(screen.queryByRole("button",{name:`关联到：${projectSession().title}`})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:"关联到：ChatAtlas 目标项目"}));
+  await screen.findByText("已关联，整理时再确认项目更新");
+  await waitFor(()=>expect(screen.queryByRole("region",{name:"选择关联项目"})).not.toBeInTheDocument());
+  expect(send).toHaveBeenCalledExactlyOnceWith({type:"ATLAS_SIDECAR_SYNC",conversationId:"unsaved"});
+  const saved=await db.get("focusSessions",target.id);
+  expect(saved?.sidecarConversationIds).toContain("unsaved");expect(saved?.sections).toEqual(target.sections);expect(saved?.projectMaintenance).toEqual(target.projectMaintenance);
+  fireEvent.click(screen.getByRole("button",{name:"关联项目"}));
+  expect(screen.getByRole("button",{name:"使用已关联项目：ChatAtlas 目标项目"})).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("searchbox",{name:"搜索项目"}),{key:"Escape"});
+  await waitFor(()=>expect(screen.queryByRole("region",{name:"选择关联项目"})).not.toBeInTheDocument());
+});
+it("does not show the previous conversation's import receipt after switching conversations",async()=>{
+  let complete!:(value:unknown)=>void;send.mockImplementationOnce(()=>new Promise(resolve=>{complete=resolve;}));
+  const view=render(<SidecarProject conversationId="first" conversationTitle="第一个对话" zh/>);
+  await waitFor(()=>expect(screen.getByRole("button",{name:"导入当前对话"})).toBeEnabled());
+  fireEvent.click(screen.getByRole("button",{name:"导入当前对话"}));
+  view.rerender(<SidecarProject conversationId="second" conversationTitle="第二个对话" zh/>);
+  await screen.findByText("第二个对话");
+  complete({ok:true});
+  await waitFor(()=>expect(screen.getByRole("button",{name:"导入当前对话"})).toBeEnabled());
+  expect(screen.queryByText("当前对话已导入，可在工作台和对话库中查看。")).not.toBeInTheDocument();
+  expect(send).toHaveBeenCalledExactlyOnceWith({type:"ATLAS_SIDECAR_SYNC",conversationId:"first"});
+});

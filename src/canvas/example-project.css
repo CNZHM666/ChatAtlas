@@ -1,0 +1,16 @@
+.example-project-workspace { background: var(--page); outline: none; }
+.example-project-workspace.is-example-overlay { position: fixed; inset: 0; z-index: 1000; }
+.example-project-workspace .reading-outline .outline-item[aria-current=page] { background: var(--accent-soft); color: var(--accent); }
+.example-project-workspace .focus-reader-location small { font-size: var(--text-xs); }
+.example-project-workspace .reader-content > :is(.example-project-sources, .example-source-reader) { width: 100%; max-width: 820px; margin-inline: auto; }
+.example-query-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 24px; }
+.example-query-welcome { text-align: center; }
+.example-query-model { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.example-original-message { margin-block: 24px; padding: 20px 0; border-block: 1px solid var(--border); }
+.example-original-message > small { color: var(--muted); }
+.example-project-workspace .focus-editor textarea { min-height: 320px; }
+@media(max-width:620px) {
+  .example-project-workspace .focus-reader-toolbar { flex-wrap: wrap; }
+  .example-project-workspace .focus-reader-toolbar-actions { margin-left: auto; flex-wrap: wrap; }
+  .example-project-workspace .focus-reader-location { flex: 1; min-width: 0; }
+}

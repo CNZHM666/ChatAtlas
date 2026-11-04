@@ -1,0 +1,42 @@
+.document-overview{max-width:880px;margin:0 auto;padding:4px 0 32px}
+.document-overview>.document-overview-heading{margin:0 0 28px;padding:0;border:0}
+/* Title row: the title with its two icon actions on the right, aligned to it. */
+.document-overview-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.document-overview .document-overview-heading h1{font-size:clamp(26px,2.5vw,34px);font-weight:600;line-height:1.35;letter-spacing:normal;margin:0;overflow-wrap:anywhere}
+.document-overview-title-row>.document-overview-actions{flex:none;padding-top:4px}
+.document-overview .project-overview-intro{margin:0 0 28px;padding:0;position:relative}
+.document-overview-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.document-overview-actions>span{display:flex}
+.document-overview-actions .project-intro-edit,.document-overview-actions .evidence-review-button.is-icon{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:36px;min-height:36px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted)}
+.document-overview-actions .project-intro-edit:hover,.document-overview-actions .evidence-review-button.is-icon:hover{background:var(--surface-muted);color:var(--text)}
+.document-overview-title-notice{font-size:13px;line-height:1.6;color:var(--muted);margin:10px 0}
+.document-overview-title-notice button{margin-left:8px}
+.document-overview .project-overview-intro textarea{box-sizing:border-box;width:100%;resize:vertical}
+.document-overview-chapters h2{display:flex;align-items:center;gap:8px;font-size:15px;margin:0 0 10px}
+.document-overview-chapters ol{list-style:none;padding:0;margin:0;border-top:1px solid var(--border)}
+.document-overview-chapters li{border-bottom:1px solid var(--border)}
+.document-overview-part+.document-overview-part{margin-top:20px}
+.document-overview-part h3{font-size:13px;font-weight:600;color:var(--text-secondary);margin:0 0 8px}
+.document-overview-chapters li>button{display:flex;align-items:center;gap:16px;text-align:left;width:100%;border:0;background:transparent;border-radius:8px;padding:17px 8px;color:inherit}
+.document-overview-chapters li>button:hover{background:var(--card-secondary-bg)}
+.document-chapter-number{font-size:12px;font-variant-numeric:tabular-nums;color:var(--text-secondary);flex-shrink:0}
+.document-overview-chapters li>button>span:nth-child(2){display:grid;gap:5px;min-width:0;flex:1}
+.document-overview-chapters strong{font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.document-overview-chapters li small{font-size:13px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+.document-overview-sources{display:flex;align-items:center;gap:8px;margin-top:22px;font-size:13px}
+@media(max-width:600px){.document-overview-chapters li>button{gap:10px;padding:15px 4px}.document-overview-heading h1{font-size:25px}}
+/* ONE quiet line: facts · content status · organizing scope (opens below). */
+/* Every item carries a leading separator; the -20px offset and left clip hide it
+ * wherever an item starts a line, so a wrapped line never begins with "·". */
+.document-overview-meta{display:flex;flex-wrap:wrap;align-items:baseline;row-gap:4px;font-size:13px;line-height:1.6;color:var(--text-secondary);margin:0 0 22px -20px;clip-path:inset(0 0 0 20px)}
+.document-overview-meta>span::before{content:"·";display:inline-block;width:20px;text-align:center;color:var(--text-secondary)}
+/* The overview line holds only what asks for the reader, each a way there. */
+.document-overview-meta:has(.document-review-link){gap:8px;margin:0 0 22px;clip-path:none}
+.document-overview .document-review-link{display:inline-flex;align-items:center;min-height:28px;padding:2px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface-solid);color:var(--text);font:inherit;font-size:13px;cursor:pointer}
+.document-overview .document-review-link:hover{border-color:var(--accent);color:var(--accent)}
+
+/* A document masthead: title, then the saved explanation in a separate reading rhythm. */
+.document-overview .project-overview-intro .reader-guide-prose {font-size:16px;line-height:1.75;font-weight:400;color:var(--text)}
+.document-overview .project-overview-intro .reader-guide-prose > p {margin:0 0 20px}
+.document-overview .project-overview-intro .reader-guide-prose > p:last-child {margin-bottom:0}
+@media(max-width:600px){.document-overview-title-row{flex-wrap:wrap}.document-overview-title-row>.document-overview-actions{padding-top:0}.document-overview .document-overview-heading h1{font-size:26px}}

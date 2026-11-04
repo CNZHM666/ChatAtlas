@@ -1,0 +1,61 @@
+{
+  "name": "chatatlas",
+  "private": true,
+  "version": "0.1.1",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:slow": "vitest run --config vitest.slow.config.ts",
+    "benchmark:organization": "node scripts/benchmark-organization.mjs",
+    "eval:wiki": "node scripts/eval-wiki.mjs",
+    "test:worker-build": "node --experimental-vm-modules scripts/verify-worker-import.mjs",
+    "check": "npm run lint && npm run check:unused && npm run typecheck && npm run test && npm run build && npm run test:worker-build && npm run check:public",
+    "check:public": "node scripts/public-source.mjs",
+    "check:unused": "node scripts/unused-modules.mjs",
+    "notices": "node scripts/update-third-party-notices.mjs"
+  },
+  "dependencies": {
+    "@orama/orama": "^3.1.18",
+    "@xyflow/react": "^12.8.5",
+    "elkjs": "^0.12.0",
+    "idb": "^8.0.3",
+    "katex": "^0.18.9",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.2",
+    "@eslint/js": "^9.17.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/chrome": "^0.0.287",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "fake-indexeddb": "^6.2.5",
+    "globals": "^15.14.0",
+    "jsdom": "^25.0.1",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.18.2",
+    "vite": "^6.4.3",
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "katex": "$katex"
+  }
+}

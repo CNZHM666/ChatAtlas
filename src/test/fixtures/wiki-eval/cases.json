@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "document": "Synthetic notes app",
+  "cases": [
+    { "id": "A1", "type": "adoption", "statement": "SQLite", "expected": "decision", "note": "The user replied 'yes, use SQLite' to the single proposal." },
+    { "id": "A2", "type": "adoption", "statement": "云同步", "expected": "proposal", "note": "Only the assistant suggested cloud sync." },
+    { "id": "B1", "type": "subject", "aliases": ["同步队列", "sync queue"], "expectedChapter": "同步" },
+    { "id": "C1", "type": "duplicate", "terms": ["本地数据库", "唯一事实来源"] },
+    { "id": "D1", "type": "detail", "pattern": "30 秒" },
+    { "id": "D2", "type": "detail", "pattern": "仅在 Wi-?Fi 下" },
+    { "id": "E1", "type": "forbidden", "pattern": "用户已确认(?:采用)?云同步" },
+    { "id": "F1", "type": "structure", "chapters": [2, 6], "maxSubtopics": 4, "forbiddenChapterTitles": "^(?:Notes App 项目|核心机制|其他)$" }
+  ]
+}

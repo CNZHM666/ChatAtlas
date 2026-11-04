@@ -1,0 +1,90 @@
+.settings-panel.settings-panel { top: 64px; bottom: auto; right: 16px; width: min(420px, calc(100vw - 32px)); height: min(560px, calc(100dvh - 88px)); max-height: none; border-radius: 14px; box-shadow: 0 12px 40px #00000016; outline: none; }
+.settings-panel > .settings-heading { padding: 12px 12px 8px 16px; align-items: center; border-bottom: 0; }
+.settings-heading h2 { margin: 0; font-size: 16px; line-height: 1.4; font-weight: 650; }
+.settings-heading p { margin: 0; font-size: 13px; }
+.settings-heading .icon-button { flex: none; width: 30px; height: 30px; border-radius: 8px; }
+.settings-panel > .settings-tabs { flex: none; display: flex; width: auto; max-width: none; gap: 4px; margin: 0 16px; padding: 3px; border-radius: 9px; }
+.settings-panel > .settings-tabs button { flex: 1 1 0; gap: 6px; height: auto; min-height: 32px; padding: 5px 8px; font-size: 12.5px; white-space: nowrap; }
+.settings-panel > :is(.settings-data,.ai-settings-form,.settings-usage) { min-height: 0; flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 12px 12px 14px 16px; }
+.settings-panel .ai-settings-form { display: grid; gap: 10px; align-content: start; }
+.settings-panel .settings-form-group { display: grid; grid-template-columns: minmax(0,1fr); gap: 10px; min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: transparent; }
+.settings-panel .settings-group-heading { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.settings-panel .settings-group-heading h3 { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; }
+.settings-panel .ai-settings-form label { gap: 6px; min-width: 0; color: var(--text); font-size: 12.5px; font-weight: 500; }
+.settings-panel .ai-settings-form :is(input,select) { min-width: 0; height: 34px; font-size: 13px; font-weight: 400; }
+.settings-panel .ai-settings-form small { font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+.settings-panel .settings-inline-hint { font-size: 12px; line-height: 1.6; margin: -3px 0 0; }
+.settings-panel .model-select-row { display: flex; min-width: 0; gap: 8px; }
+.settings-panel .model-select-row select { flex: 1 1 0; width: 0; }
+.settings-panel .model-select-row button { flex: none; gap: 6px; padding: 7px 10px; font-size: 12px; border-radius: 8px; }
+.settings-panel .ai-settings-advanced { border: 1px solid var(--border); border-radius: 12px; }
+.settings-panel .ai-settings-advanced > summary { padding: 10px 14px; color: var(--text); font-size: 12.5px; }
+.settings-panel .ai-settings-advanced-fields { gap: 14px; padding: 2px 14px 14px; }
+.settings-panel .ai-settings-advanced > summary svg { transition: transform .15s; }
+.settings-panel .settings-save-bar { flex: none; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--surface-solid); }
+.settings-panel .ai-settings-actions { display: flex; justify-content: space-between; margin: 0; gap: 12px; }
+.settings-panel .ai-settings-actions button { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; gap: 6px; padding: 6px 14px; border-radius: 8px; font-size: 13px; }
+.settings-panel .ai-settings-actions .primary { min-width: 110px; }
+.settings-panel .settings-feedback { margin: 8px 0 0; font-size: 12.5px; color: var(--accent); }
+.settings-panel .settings-feedback.error { color: #b34d4d; }
+.settings-panel .settings-data { display: grid; gap: 10px; align-content: start; }
+.settings-panel .settings-data :is(.settings-privacy-card,.settings-backup,.web-capture-settings) { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: transparent; }
+.settings-panel .settings-backup > div:not(.settings-backup-confirm) { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.settings-panel .settings-backup button { min-height: 36px; font-size: 13px; }
+.settings-panel .settings-usage .ai-usage-ledger { min-width: 0; }
+.settings-panel :is(button,summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* Models: main and economy side by side, sharing one load button in the group header. */
+.settings-panel .settings-group-heading .settings-load-models { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 3px 9px; border-radius: 7px; font-size: 12px; }
+.settings-panel .settings-model-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.settings-panel .settings-field { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.settings-panel .settings-field > label, .settings-panel .settings-field-label { color: var(--text); font-size: 12.5px; font-weight: 500; }
+.settings-panel .settings-field > select { width: 100%; }
+.settings-panel .settings-manual-models > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.settings-panel .settings-manual-models[open] > summary { margin-bottom: 8px; }
+.settings-panel .settings-manual-models > small { display: block; margin-top: 6px; }
+.settings-panel .settings-segmented { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; }
+.settings-panel .settings-segmented > button { flex: 1 1 0; min-height: 28px; padding: 3px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.settings-panel .settings-segmented > button[aria-checked="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.settings-panel .settings-connections ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.settings-panel .settings-connections li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); }
+.settings-panel .settings-connections li:first-child { border-top: 0; padding-top: 0; }
+.settings-panel .settings-connections li > div { display: grid; min-width: 0; }
+.settings-panel .settings-connections strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; }
+.settings-panel .settings-connections small { font-size: 11.5px; color: var(--muted); }
+.settings-panel .settings-current { flex: none; font-size: 11.5px; color: var(--accent); }
+.settings-panel .settings-connection-actions { flex: none; display: flex; gap: 4px; }
+.settings-panel .settings-connection-actions button { min-height: 26px; padding: 2px 8px; border-radius: 6px; font-size: 12px; }
+@media (max-width: 600px) {
+  .settings-panel .settings-model-grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-panel.settings-panel { top: 56px; bottom: auto; right: 8px; width: calc(100vw - 16px); height: calc(100dvh - 72px); border-radius: 12px; }
+  .settings-panel > .settings-heading { padding: 10px 10px 8px 14px; }
+  .settings-panel > .settings-tabs { margin-inline: 16px; gap: 2px; }
+  .settings-panel > .settings-tabs button { padding-inline: 5px; font-size: 12px; gap: 5px; }
+  .settings-panel > :is(.settings-data,.ai-settings-form,.settings-usage) { padding: 12px 14px; }
+  .settings-panel .settings-form-group { padding: 12px; }
+  .settings-panel .settings-save-bar { padding: 10px 14px; }
+}
+/* Usage history inside settings: developer views are secondary text tabs, time range is a chip row. */
+.settings-panel .ai-usage-views { margin-bottom: 12px; padding: 0; gap: 14px; background: transparent; border-bottom: 1px solid var(--border); border-radius: 0; }
+.settings-panel .ai-usage-views button { min-height: 30px; padding: 4px 0; border-radius: 0; font-size: 12.5px; }
+.settings-panel .ai-usage-views button[aria-pressed=true] { background: transparent; box-shadow: inset 0 -2px 0 var(--accent); color: var(--text); }
+.settings-panel .ai-usage-filters { display: flex; gap: 4px; margin-bottom: 10px; }
+.settings-panel .ai-usage-filters button { min-height: 26px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.settings-panel .ai-usage-filters button[aria-pressed=true] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.settings-panel .ai-usage-heading strong { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.settings-panel .ai-usage-token-detail { gap: 8px 24px; margin: 10px 0 4px; }
+.settings-panel .ai-usage-token-detail dd small { color: var(--muted); }
+.settings-panel .ai-usage-list > div { padding: 6px 0; font-size: 12.5px; }
+.settings-panel .ai-usage-list > div > span { flex: 1 1 auto; min-width: 0; }
+.settings-panel .ai-usage-empty { color: var(--muted); font-size: 12.5px; }
+.settings-panel :is(.settings-load-models,.settings-connection-actions button) { border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
+.settings-panel :is(.settings-load-models,.settings-connection-actions button):hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+/* AI connection as three steps: connect, choose a model, optionally turn on semantic understanding. */
+.settings-panel .settings-step-number { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 650; }
+.settings-panel .settings-optional { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.settings-panel .settings-load-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; border-radius: 8px; font-size: 13px; }
+.settings-panel .settings-more-models { display: grid; gap: 12px; }
+.settings-panel .settings-embedding-on { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--accent); font-size: 12.5px; }
+.settings-panel .settings-embedding-on > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-panel .settings-embedding-on > button { flex: none; }
+.settings-panel .settings-step .settings-manual-models label { display: grid; margin-top: 4px; }

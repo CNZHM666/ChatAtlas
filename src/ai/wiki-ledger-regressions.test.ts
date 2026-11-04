@@ -1,0 +1,351 @@
+import { gatherNamedItems, gatherPositioning, gatherVersions } from "./wiki-knowledge-organize";
+import { ensureWikiDecisions } from "./wiki-decision-coverage";
+import { retitleMisnamedChapters, routeOutOfReferences, routeWikiUnits, wikiUnitLane } from "./wiki-unit-routing";
+import { componentExceptions, componentParts, notePartExceptions } from "./wiki-component-values";
+import { currentCapabilityState } from "./wiki-capability-state";
+import { expect, it } from "vitest";
+import { claimSupported } from "./wiki-claim-support";
+import { resolveWikiReading } from "./wiki-knowledge-reading";
+import { currentBaseline, laterTakenUp, scopedWishes, wikiUnitStatuses } from "./wiki-knowledge-state";
+import { curateWikiUnits } from "./wiki-knowledge-select";
+import { holderRunClaims, validateFinalClaims, writeLedgerDraft } from "./wiki-knowledge-write";
+import { ledgerDocument } from "./wiki-ledger-document";
+import { wikiVersionQuestions, withVersionAnswer } from "./wiki-key-decisions";
+import { exclusiveWikiVersions } from "./wiki-version-conflict";
+import { foreignDetail, ownSection, wikiUnitDetails, CRITICAL_PROBLEM, scopedWikiDraft, wikiDraftMarkdown, type WikiDraftChapter, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiDraftClaim } from "../shared/wiki-knowledge";
+
+const unit = (n: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${n}`, subject: "项目", statement, kind: "plan", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: `e${n}`, conversationId: "c", messageId: `m${n}`, messageIndex: n, role: "assistant", pasted: false, quote: statement }, ...extra });
+const book = (units: WikiKnowledgeUnit[]): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: units.length, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "项目", aliases: [], unitIds: units.map(unit => unit.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "项目", question: "如何继续？", group: "", subtopics: [{ title: "方案", subjectIds: ["s"] }] }] } });
+const chapter = (units: WikiKnowledgeUnit[], text: string, claims: WikiDraftClaim[] = [{ text, unitIds: units.map(unit => unit.id) }]): WikiDraftChapter => ({ id: "ch", title: "项目", question: "如何继续？", group: "", body: text, paragraphs: [{ subtopic: "方案", text, unitIds: units.map(unit => unit.id), claims }], problems: [] });
+const withDraft = (ledger: WikiKnowledgeLedger, chapters: WikiDraftChapter[]): WikiKnowledgeLedger => ({ ...ledger, draft: { version: 1, generatedAt: 5, status: "complete", chapters, report: {} } });
+
+it("uses the same derived replacement in the ledger and the document without changing source decisions", () => {
+  const old = unit(1, "API Key 只能使用服务端环境变量。"), next = unit(9, "确定采用 BYOK 模式，由用户提供 API 密钥，而非仅使用服务端环境变量。");
+  const ledger = withDraft(book([old, next]), [chapter([old], old.statement)]), original = JSON.stringify(ledger);
+  expect(resolveWikiReading(ledger).statuses.get(old.id)).toBe("history");
+  expect(ledgerDocument(ledger, {}).sections[0].claims?.[0].holder).toBe("earlier");
+  expect(JSON.stringify(ledger)).toBe(original);
+  const confirmed = { ...ledger, decisions: { [old.id]: { verdict: "confirmed" as const, at: 10 } } };
+  expect(ledgerDocument(confirmed, {}).sections[0].claims?.[0].holder).toBe("decided");
+});
+
+it("never infers a temporal replacement or a narrowed wish across conversation indices", () => {
+  const old = unit(1, "API Key 只能使用服务端环境变量。"), next = unit(999, "确定采用 BYOK 模式，由用户提供 API 密钥，而非仅使用服务端环境变量。");
+  next.evidence.conversationId = "another";
+  expect(resolveWikiReading(book([old, next])).statuses.get(old.id)).toBe("proposal");
+  const scope = unit(2, "本阶段禁止开发拍照识别。"), later = unit(999, "必须完整跑通拍照识别全链路。");
+  later.evidence.conversationId = "another";
+  expect(laterTakenUp([scope, later]).size).toBe(0);
+});
+
+it("keeps adoption independent of an assistant's narrower phase scope", () => {
+  const wish = unit(1, "项目应提供拍照识别。", { kind: "decision", adoption: { status: "user_decision" } });
+  wish.evidence = { ...wish.evidence, role: "user", quote: "我想提供拍照识别" };
+  const scope = unit(2, "本阶段禁止开发拍照识别。", { kind: "constraint" }), ledger = book([wish, scope]);
+  const organized = scopedWishes(ledger.organization!, new Map([wish, scope].map(unit => [unit.id, unit])));
+  expect(organized.relations).toMatchObject([{ kind: "narrows" }]);
+  expect(wikiUnitStatuses([wish, scope], organized).get(wish.id)).toBe("confirmed");
+});
+
+it("protects a later proposed phase even with a freeze and a very small editorial budget", () => {
+  const old = unit(1, "项目正式定义为 Milestone 3.1，完成数据流。"), next = unit(77, "建议进入 Milestone 5 Alpha Validation 阶段，冻结大功能 1-2 周，仅测试现有链路。"), tip = unit(100, "默认只展示当前阶段最需要的下一步。");
+  const ledger = book([old, next, tip]), statuses = wikiUnitStatuses([old, next, tip], ledger.organization!);
+  const baseline = currentBaseline([old, next, tip], statuses);
+  expect(baseline.filter(item => item.part === "now").map(item => item.unitIds)).toEqual([[next.id]]);
+  expect(baseline[0].holder).toBeUndefined();
+  expect(curateWikiUnits(ledger, statuses, 1, 10, 10).selected.has(next.id)).toBe(true);
+});
+
+it("does not ask for a choice between style and journey, or a mock and deferred API integration", () => {
+  const flow = unit(1, "首页类似 ChatGPT，输入需求后经对话层进入 Canvas，再识别旧物并仿真。", { facet: "交互流程" });
+  const style = unit(2, "首页采用 ChatGPT/Claude 简洁风格，中央为大输入框。", { facet: "视觉风格", kind: "decision" });
+  const mock = unit(3, "第一阶段允许 Mock AI，准备三个 Demo，确保 IR 到 Canvas 稳定后再接模型。"), api = unit(4, "第一阶段不依赖 LLM API，准备三个 Demo 以证明 IR 到 Canvas 链路稳定。");
+  const ledger = book([flow, style, mock, api]);
+  ledger.organization!.relations = [{ older: flow.id, newer: style.id, kind: "replaces", status: "unresolved" }, { older: mock.id, newer: api.id, kind: "replaces", status: "unresolved" }];
+  expect(exclusiveWikiVersions(mock, api)).toBe(false);
+  expect(wikiVersionQuestions(ledger, true).filter(question => question.kind === "versions")).toEqual([]);
+  // Even a question kept by an older UI cannot discard the independent journey.
+  const next = withVersionAnswer(ledger, { id: "old-question", kind: "versions", question: "?", options: [{ id: "older", label: flow.statement, unitIds: [flow.id] }, { id: "newer", label: style.statement, unitIds: [style.id] }] }, "newer");
+  expect(next.decisions?.[style.id].verdict).toBe("confirmed");
+  expect(next.decisions?.[flow.id]).toBeUndefined();
+  const existing = { ...ledger, decisions: { [flow.id]: { verdict: "rejected" as const, at: 10 } } };
+  expect(resolveWikiReading(existing).statuses.get(flow.id)).toBe("history");
+});
+
+it("does not hide the distinguishing end of a genuine version choice", () => {
+  const prefix = "索引持久化方式".repeat(13), old = unit(1, `${prefix}：索引放在内存里。`, { kind: "mechanism" }), next = unit(2, `${prefix}：索引改放 IndexedDB。`, { kind: "mechanism" });
+  const ledger = book([old, next]);
+  ledger.organization!.relations = [{ older: old.id, newer: next.id, kind: "replaces", status: "unresolved" }];
+  expect(wikiVersionQuestions(ledger, true)[0].options[1].label).toBe(next.statement);
+});
+
+it("does not use numbers elsewhere in a large quote to justify a point or borrow its decision label", () => {
+  const style = unit(1, "首页采用简洁风格和大输入框。", { kind: "decision" });
+  const header = unit(2, "Header 高度约 56-64px，右侧最多 3 个 action。", { kind: "constraint" });
+  style.evidence.quote += header.statement;
+  expect(claimSupported(header.statement, [style])).toBe(false);
+  const ledger = withDraft({ ...book([style, header]), decisions: { [style.id]: { verdict: "confirmed", at: 1 } } }, [chapter([style, header], `${style.statement}${header.statement}`, [{ text: style.statement, unitIds: [style.id] }, { text: header.statement, unitIds: [style.id], markOnly: true }])]);
+  const claim = ledgerDocument(ledger, {}).sections[0].claims!.find(claim => claim.text === header.statement)!;
+  expect(claim.unitIds).toEqual([header.id]);
+  expect(claim.holder).toBe("ai");
+  expect(claim.userDecided).toBeUndefined();
+});
+
+it("never turns an unsupported following sentence into a holder mark on the preceding decision", () => {
+  const style = unit(1, "首页采用简洁风格。", { kind: "decision" });
+  const runs = holderRunClaims({ text: `${style.statement}Header 高度为 64px。`, unitIds: [style.id], claims: [{ text: style.statement, unitIds: [style.id] }] }, new Map([[style.id, style]]), new Map([[style.id, "confirmed"]]), new Map());
+  expect(runs.some(claim => claim.text.includes("64px"))).toBe(false);
+  const ledger = withDraft({ ...book([style]), decisions: { [style.id]: { verdict: "confirmed", at: 1 } } }, [chapter([style], "Header 高度为 64px。")]);
+  expect(ledgerDocument(ledger, {}).sections[0].claims?.[0].userDecided).toBeUndefined();
+});
+
+it("checks presentation marks after final formatting and flags an unsupported number", () => {
+  const style = unit(1, "首页采用简洁风格。", { kind: "decision" }), header = unit(2, "Header 高度约 56-64px，右侧最多 3 个 action。", { kind: "constraint" });
+  const written = chapter([style, header], `${style.statement}${header.statement}`, [{ text: header.statement, unitIds: [style.id], markOnly: true }]);
+  const report: Record<string, number> = {};
+  validateFinalClaims([written], new Map([style, header].map(unit => [unit.id, unit])), report);
+  expect(written.paragraphs[0].claims![0].unitIds).toEqual([header.id]);
+  expect(report.claim_sources_rebound).toBe(1);
+  const unsupported = chapter([style], "Header 高度为 900px。", [{ text: "Header 高度为 900px。", unitIds: [style.id], markOnly: true }]);
+  validateFinalClaims([unsupported], new Map([[style.id, style]]));
+  expect(unsupported.problems.some(problem => CRITICAL_PROBLEM.test(problem))).toBe(true);
+});
+
+it("gives own positioning its own subject when the positioning chapter only holds a competitor", () => {
+  const own = unit(1, "项目定位为面向初学者的创作工作台。"), code = unit(2, "密钥存于 session storage。"), rival = unit(3, "OtherTool 采用订阅制。", { about: { name: "OtherTool", role: "competitor" } });
+  const ledger = book([own, code, rival]);
+  ledger.organization!.subjects = [{ id: "s", name: "产品定位", aliases: [], unitIds: [own.id, code.id] }, { id: "r", name: "OtherTool 竞品分析", aliases: [], unitIds: [rival.id] }];
+  ledger.organization!.chapters = [{ id: "ch", title: "技术架构", question: "?", group: "", subtopics: [{ title: "技术", subjectIds: ["s"] }] }, { id: "position", title: "产品定位与用户价值", question: "?", group: "", subtopics: [{ title: "竞品", subjectIds: ["r"] }] }];
+  const { organization } = resolveWikiReading(ledger);
+  const home = organization!.subjects.find(subject => subject.unitIds.includes(own.id))!;
+  expect(home.id).not.toBe("r");
+  expect(organization!.chapters.find(chapter => chapter.id === "position")!.subtopics.flatMap(topic => topic.subjectIds)).toContain(home.id);
+  expect(organization!.subjects.find(subject => subject.unitIds.includes(code.id))!.id).toBe("s");
+});
+
+it("does not resurrect excluded projects when writing fails and an earlier draft is retained", async () => {
+  const own = unit(1, "本项目使用本地索引。"), other = unit(2, "AnotherProject 使用云端服务。", { about: { name: "AnotherProject", role: "other_project" } });
+  const ledger = withDraft(book([own, other]), [chapter([own], own.statement), { ...chapter([other], other.statement), id: "other", title: "相关项目：AnotherProject" }]);
+  ledger.organization!.subjects = [{ id: "s", name: "索引", aliases: [], unitIds: [own.id] }, { id: "other", name: "AnotherProject", aliases: [], unitIds: [other.id] }];
+  ledger.organization!.chapters.push({ id: "other", title: "相关项目：AnotherProject", question: "?", group: "", subtopics: [{ title: "AnotherProject", subjectIds: ["other"] }] });
+  ledger.scopeAnswers = { anotherproject: "exclude" };
+  const original = JSON.stringify(ledger.draft);
+  const failed = await writeLedgerDraft(ledger, { ai: { generateStructured: async () => { throw new Error("offline"); } }, locale: "zh-CN", signal: new AbortController().signal });
+  expect(failed.lastFailure?.step).toBe("write");
+  expect(JSON.stringify(failed.draft)).toBe(original);
+  expect(scopedWikiDraft(failed)!.chapters.map(chapter => chapter.id)).toEqual(["ch"]);
+  expect(ledgerDocument(failed, {}).sections.map(section => section.id)).toEqual(["ch"]);
+  expect(wikiDraftMarkdown(failed, "项目")).not.toContain("AnotherProject");
+});
+
+it("does not lend a confirmed buying direction to an adjacent feasibility question",()=>{
+ const photo=unit(1,"支持拍照识别闲置零件。",{adoption:{status:"user_decision"}});
+ photo.evidence={...photo.evidence,role:"user",quote:"可以做拍照识别的吗，识别以前不用的零件，你感觉怎么样"};
+ const buy=unit(2,"直接询问购买元件，并提供比价推荐及链接。",{adoption:{status:"user_decision"}});
+ buy.evidence={...buy.evidence,role:"user",quote:"我想直接询问购买元件，并提供比价推荐及链接"};
+ const text="支持拍照识别闲置零件；直接询问购买元件，并提供比价推荐及链接。";
+ const ledger=withDraft(book([photo,buy]),[chapter([photo,buy],text)]);
+ const claims=ledgerDocument(ledger,{}).sections[0].claims!;
+ expect(claims.find(claim=>claim.text.includes("拍照识别"))?.userDecided).toBeUndefined();
+ expect(claims.find(claim=>claim.text.includes("比价推荐"))?.holder).toBe("decided");
+});
+
+it("checks unsupported replacement stories introduced by a supplement or final formatting",()=>{
+ const flow=unit(1,"先确认需求再进入画布。"),style=unit(2,"首页采用大输入框和简洁风格。");
+ const text="先确认需求再进入画布。该流程取代了早期的大输入框和简洁风格。";
+ const saved=chapter([flow,style],text);
+ validateFinalClaims([saved],new Map([flow,style].map(unit=>[unit.id,unit])));
+ expect(saved.body).not.toContain("取代了");
+ expect(saved.body).toContain(flow.statement);
+});
+
+it("keeps an explicit key-ownership decision independent of mixed implementation details",()=>{
+ const key=unit(1,"让用户自己接 API，不用开发者的 Key。",{kind:"decision",adoption:{status:"user_decision"}});
+ key.evidence={...key.evidence,role:"user",quote:"我想让用户自己接api，不想别人用我自己的"};
+ const detail=unit(2,"ProviderConfig 允许配置模型和密钥。",{kind:"mechanism"});
+ const written=chapter([key,detail],"系统复用 BYOK ProviderConfig，并允许配置模型和密钥。",[{text:"系统复用 BYOK ProviderConfig，并允许配置模型和密钥。",unitIds:[key.id,detail.id]}]);
+ const ledger=book([key,detail]),statuses=wikiUnitStatuses([key,detail],ledger.organization!);
+ expect(ensureWikiDecisions([written],ledger.organization!,[key,detail],statuses)).toBe(1);
+ expect(written.paragraphs.find(paragraph=>paragraph.text===key.statement)?.claims).toEqual([{text:key.statement,unitIds:[key.id]}]);
+ expect(ensureWikiDecisions([written],ledger.organization!,[key,detail],statuses)).toBe(0);
+ const claims=ledgerDocument(withDraft(ledger,[written]),{}).sections[0].claims!;
+ expect(claims.find(claim=>claim.text===key.statement)?.userDecided).toBe(true);
+});
+
+it("routes documentation, examples and progress out of broad positioning subjects without losing sources",()=>{
+ const purpose=unit(1,"项目定位为面向初学者的创作平台。",{subject:"产品定位",kind:"fact"});
+ const example=unit(2,"设备持续检测环境温度，超过阈值后报警。",{subject:"使用示例",kind:"mechanism"});
+ const docs=unit(3,"建议将项目文档分为概览、架构和历史。",{subject:"文档结构"});
+ const progress=unit(4,"已完成主框架和基础测试。",{subject:"Project Status",facet:"Completed Features",kind:"report"});
+ const workflow=unit(5,"输入需求后确认方案。",{subject:"核心流程"}),technical=unit(6,"ProviderConfig 保存非敏感配置。",{subject:"架构",kind:"mechanism"}),plan=unit(7,"下一阶段开始验证。",{subject:"开发计划"});
+ const units=[purpose,example,docs,progress,workflow,technical,plan],ledger=book(units);
+ ledger.organization!.subjects=[{id:"s",name:"项目定位",aliases:[],unitIds:[purpose.id,example.id,progress.id]},{id:"w",name:"流程",aliases:[],unitIds:[workflow.id]},{id:"t",name:"技术",aliases:[],unitIds:[technical.id,docs.id]},{id:"p",name:"计划",aliases:[],unitIds:[plan.id]}];
+ ledger.organization!.chapters=[...[["a","产品定位","s"],["b","核心工作流","w"],["c","技术架构","t"],["d","开发计划与质量保障","p"]].map(([id,title,subject])=>({id,title,question:"",group:"",subtopics:[{title,subjectIds:[subject]}]}))];
+ ledger.organization!.groups=[{id:"mixed",core:workflow.statement,homeSubjectId:"w",anchorUnitId:workflow.id,signature:"mixed",members:[workflow,docs].map(unit=>({unitId:unit.id,support:unit.statement,adds:[],role:"adds" as const}))}];
+ const before=JSON.stringify(ledger.organization),routed=routeWikiUnits(ledger.organization!,new Map(units.map(unit=>[unit.id,unit])));
+ const home=(id:string)=>routed.chapters.find(chapter=>chapter.subtopics.some(topic=>topic.subjectIds.some(subject=>routed.subjects.find(row=>row.id===subject)?.unitIds.includes(id))))!.id;
+ expect(home(purpose.id)).toBe("a");expect(home(example.id)).toBe("b");expect(home(docs.id)).toBe("d");expect(home(progress.id)).toBe("d");
+ expect(routed.subjects.flatMap(subject=>subject.unitIds).sort()).toEqual(units.map(unit=>unit.id).sort());
+ expect(JSON.stringify(ledger.organization)).toBe(before);
+ expect(wikiUnitLane(example)).toBe("example");
+ expect(routed.groups?.some(group=>group.members.some(member=>member.unitId===docs.id))).toBe(false);
+});
+
+it("repairs a table's counted object before final source validation",()=>{
+ const task=unit(1,"准备20~30个真实用户任务，统计解析通过率。");
+ const table="| 阶段 | 数量 | 指标 |\n| --- | --- | --- |\n| 真实用户 | 20~30个 | 解析通过率 |";
+ const written=chapter([task],table),report:Record<string,number>={};
+ validateFinalClaims([written],new Map([[task.id,task]]),report);
+ expect(written.body).toContain("真实用户任务");
+ expect(report.quantity_objects_restored).toBe(1);
+});
+
+it("routes a stage out of the interface chapter, README rules to the development plan and key rules to security",()=>{
+ const freeze=unit(1,"建议进入Milestone 5 Alpha Validation阶段，冻结大功能1-2周。",{subject:"Milestone 5",facet:"Alpha Validation"});
+ const theme=unit(2,"所有新页面必须支持 Dark Mode。",{subject:"Dark Mode",kind:"constraint"});
+ const readme=unit(3,"README需增加Pipeline Hardening章节。",{subject:"文档更新",facet:"README要求"});
+ const shop=unit(4,"第一版只提供缺件清单。",{subject:"采购"});
+ const proxy=unit(5,"/api/ai/proxy 仅接受结构化生成，不记录密钥。",{subject:"AI代理限制",facet:"后端安全",kind:"mechanism"});
+ const rollback=unit(6,"Candidate IR 依次通过 Zod 与 Validator，失败即回滚。",{subject:"Transaction / Rollback",facet:"安全机制",kind:"mechanism"});
+ const roadmap=unit(7,"按阶段推进。",{subject:"路线"}),key=unit(8,"API Key 由用户提供。",{subject:"BYOK",kind:"decision"}),architecture=unit(9,"Hardware IR 是唯一事实源。",{subject:"架构",kind:"mechanism"});
+ const example=unit(10,"设备持续检测环境温度，超过阈值后报警。",{subject:"使用示例",kind:"mechanism"});
+ const units=[freeze,theme,readme,shop,proxy,rollback,roadmap,key,architecture,example],ledger=book(units);
+ ledger.organization!.subjects=[{id:"ui",name:"界面",aliases:[],unitIds:[freeze.id,theme.id]},{id:"buy",name:"采购",aliases:[],unitIds:[readme.id,shop.id]},{id:"plan",name:"规划",aliases:[],unitIds:[proxy.id,roadmap.id,example.id]},{id:"tech",name:"技术",aliases:[],unitIds:[rollback.id,architecture.id]},{id:"safe",name:"密钥",aliases:[],unitIds:[key.id]}];
+ ledger.organization!.chapters=[["a","界面设计与交互体验","ui"],["b","采购与实物集成","buy"],["c","开发规划与质量保障","plan"],["d","技术架构与数据模型","tech"],["e","硬件验证与安全策略","safe"]].map(([id,title,subject])=>({id,title,question:"",group:"",subtopics:[{title,subjectIds:[subject]}]}));
+ const routed=routeWikiUnits(ledger.organization!,new Map(units.map(item=>[item.id,item])));
+ const home=(id:string)=>routed.chapters.find(chapter=>chapter.subtopics.some(topic=>topic.subjectIds.some(subject=>routed.subjects.find(row=>row.id===subject)?.unitIds.includes(id))))!.id;
+ expect([freeze,theme,readme,proxy,rollback,example].map(item=>home(item.id))).toEqual(["c","a","c","e","d","c"]);
+});
+
+it("leaves out the untagged rest of an excluded project, and a subtopic named for it, though nothing was extracted again",()=>{
+ const atlas={about:{name:"ChatAtlas",role:"other_project" as const}};
+ const said=(n:number,statement:string,extra:Partial<WikiKnowledgeUnit>={})=>unit(n,statement,{evidence:{evidenceId:`e${n}`,conversationId:"c",messageId:"review",messageIndex:9,role:"assistant",pasted:false,quote:statement},...extra});
+ const own=Array.from({length:22},(_,index)=>unit(index+20,`Hardware IR 方案第 ${index} 条：Validator 检查 GPIO 冲突。`));
+ const review=[said(1,"每条结论区分已决定和建议。",atlas),said(2,"文档顶部显示当前状态快照。",atlas),said(3,"需识别新决定替代旧决定的关系。"),said(4,"建立人工标注的项目事件基准。",{subject:"Project Understanding Bench"})];
+ const units=[...own,...review],ledger={...book(units),scopeAnswers:{chatatlas:"exclude" as const}};
+ ledger.organization!.subjects=[{id:"s",name:"项目",aliases:[],unitIds:own.map(item=>item.id)},{id:"a",name:"ChatAtlas",aliases:[],unitIds:review.slice(0,2).map(item=>item.id)},{id:"b",name:"决策演变",aliases:[],unitIds:[review[2].id]},{id:"x",name:"基准",aliases:[],unitIds:[review[3].id]}];
+ ledger.organization!.chapters=[{id:"ch",title:"竞品分析",question:"",group:"",subtopics:[{title:"方案",subjectIds:["s"]},{title:"相关项目：ChatAtlas",subjectIds:["a","b"]},{title:"评测",subjectIds:["x"]}]}];
+ const live=new Set(resolveWikiReading(ledger).organization!.subjects.flatMap(subject=>subject.unitIds));
+ expect(review.filter(item=>live.has(item.id))).toEqual([]);
+ expect(own.every(item=>live.has(item.id))).toBe(true);
+});
+
+it("routes the code's layout to the architecture, a development stage out of the interface, and a theme rule out of the plan",()=>{
+ expect(wikiUnitLane(unit(1,"采用 Next.js App Router 结构，包含 app/api、components。",{subject:"项目目录结构"}))).toBe("technical");
+ expect(wikiUnitLane(unit(2,"第一阶段允许 Mock AI，先准备三个 Demo。",{subject:"Mock AI策略",facet:"开发阶段安排"}))).toBe("stage");
+ expect(wikiUnitLane(unit(3,"提供 Light/Dark/System 选项，localStorage 保存设置。",{subject:"Theme Toggle",facet:"主题同步",kind:"constraint"}))).toBe("interface");
+});
+
+it("gathers versions of one setting told with other values in two subjects, and keeps different objects apart",()=>{
+ const first=unit(1,"底部区域默认折叠为36-40px的Bottom Bar以最大化Canvas空间，点击后展开显示BOM、Validation及Design Intent等信息。",{kind:"constraint"});
+ const later=unit(2,"底部Drawer默认收起，仅保留40-48px高的Tab Bar（架构/BOM/校验），点击后展开对应内容。",{kind:"decision"});
+ const toolbar=unit(3,"顶部工具栏高度44~50px，左侧显示项目名。",{kind:"constraint"}),nav=unit(4,"导航栏高度约56~64px，左侧为Logo。",{kind:"constraint"});
+ const units=[first,later,toolbar,nav],ledger=book(units);
+ ledger.organization!.subjects=[{id:"a",name:"工作台",aliases:[],unitIds:[first.id,toolbar.id]},{id:"b",name:"布局",aliases:[],unitIds:[later.id,nav.id]}];
+ ledger.organization!.chapters=[{id:"c",title:"界面",question:"",group:"",subtopics:[{title:"工作台",subjectIds:["a"]},{title:"布局",subjectIds:["b"]}]}];
+ const gathered=gatherVersions(ledger.organization!,new Map(units.map(item=>[item.id,item])));
+ const home=(id:string)=>gathered.subjects.find(subject=>subject.unitIds.includes(id))!.id;
+ expect([home(first.id),home(later.id),home(toolbar.id),home(nav.id)]).toEqual(["a","a","a","b"]);
+});
+
+it("names a chapter for the user's own direction by what it holds when it holds none of it",()=>{
+ const phase=unit(1,"采用分阶段开发，先完成 Phase A 再开始 Phase B。"),alpha=unit(2,"Alpha 阶段通过标准为核心 E2E 流程通过率>95%。"),path=unit(3,"我需要学习 FreeRTOS 和 ROS2，最终汇合到机器人领域。");
+ const plan=book([phase,alpha]);plan.organization!.chapters=[{id:"ch",title:"个人方向与学习路线",question:"",group:"",subtopics:[{title:"方案",subjectIds:["s"]}]}];
+ expect(retitleMisnamedChapters(plan.organization!,new Map([phase,alpha].map(item=>[item.id,item]))).chapters[0].title).toBe("开发计划与流程");
+ // Holding the user's direction, it keeps its title.
+ const own=book([phase,path]);own.organization!.chapters=[{id:"ch",title:"个人方向与学习路线",question:"",group:"",subtopics:[{title:"方案",subjectIds:["s"]}]}];
+ expect(retitleMisnamedChapters(own.organization!,new Map([phase,path].map(item=>[item.id,item]))).chapters[0].title).toBe("个人方向与学习路线");
+});
+
+it("routes whole roadmaps to the plan chapter and tells the positioning in one subtopic",()=>{
+ const phases=unit(1,"分7个Phase：1.Foundation, 2.Hardware Domain, 3.Canvas, 4.Workspace UI。"),milestones=unit(2,"开发按7个里程碑推进：静态Canvas、IR转Canvas、Prompt转IR。"),panel=unit(3,"右侧AI面板定位为Hardware Copilot。",{kind:"decision"});
+ const first=unit(4,"项目定位为面向硬件小白的AI辅助硬件设计工具。",{kind:"fact"}),second=unit(5,"产品形态定位为Web端可视化工作台。",{kind:"fact"});
+ const units=[phases,milestones,panel,first,second],ledger=book(units);
+ ledger.organization!.subjects=[{id:"ui",name:"界面",aliases:[],unitIds:[phases.id]},{id:"tech",name:"架构",aliases:[],unitIds:[milestones.id]},{id:"plan",name:"计划",aliases:[],unitIds:[]},{id:"p1",name:"核心",aliases:[],unitIds:[first.id,panel.id]},{id:"p2",name:"形态",aliases:[],unitIds:[second.id]}];
+ ledger.organization!.chapters=[{id:"a",title:"产品定位与用户价值",question:"",group:"",subtopics:[{title:"核心",subjectIds:["p1"]},{title:"形态",subjectIds:["p2"]}]},{id:"b",title:"界面设计",question:"",group:"",subtopics:[{title:"界面",subjectIds:["ui"]}]},{id:"c",title:"技术架构",question:"",group:"",subtopics:[{title:"架构",subjectIds:["tech"]}]},{id:"d",title:"开发计划与流程",question:"",group:"",subtopics:[{title:"计划",subjectIds:["plan"]}]}];
+ const known=new Map(units.map(item=>[item.id,item]));
+ const routed=routeWikiUnits(gatherPositioning(ledger.organization!,known),known);
+ const home=(id:string)=>routed.chapters.find(chapter=>chapter.subtopics.some(topic=>topic.subjectIds.some(subject=>routed.subjects.find(row=>row.id===subject)?.unitIds.includes(id))))!.id;
+ const subjectOf=(id:string)=>routed.subjects.find(subject=>subject.unitIds.includes(id))!.id;
+ expect([home(phases.id),home(milestones.id)]).toEqual(["d","d"]);
+ expect(subjectOf(second.id)).toBe(subjectOf(first.id));
+ expect(wikiUnitLane(panel)).not.toBe("roadmap");
+});
+
+it("moves this project's own points out of the references chapter, and gathers one tool's plans in one place",()=>{
+ const flux={about:{name:"Boardly",role:"competitor" as const}};
+ const rival=unit(1,"Boardly 面向专业工程师，覆盖从需求到 PCB 仿真。",{kind:"fact",...flux}),theme=unit(2,"提供Light/Dark/System选项，localStorage保存设置，切换时禁止React Flow背景残留白色。",{subject:"Theme Toggle",kind:"constraint"});
+ const ui=unit(3,"复用现有 Light/Dark/System Theme，Light 模式 Page #FAFAFA。",{subject:"主题",kind:"constraint"}),own=unit(4,"刻意避开灵犀造物路线，形成差异化。",{kind:"plan"});
+ const integrate=unit(5,"集成 Wokwi 在线仿真器，用于验证生成的代码。",{kind:"mechanism"}),send=unit(6,"V1 不自建仿真器，而是生成项目后引导用户跳转至 Wokwi 进行在线仿真。",{kind:"decision"}),later=unit(7,"Wokwi仿真集成推迟至Prompt到Code流程稳定后进行。",{kind:"decision"});
+ const listed=unit(8,"当前阶段禁止扩展PCB、KiCad、Wokwi、代码生成、复杂接线、数据库。",{kind:"constraint"});
+ const units=[rival,theme,ui,own,integrate,send,later,listed],ledger=book(units);
+ ledger.organization!.subjects=[{id:"r",name:"竞品",aliases:[],unitIds:[rival.id,theme.id,own.id,send.id]},{id:"u",name:"主题",aliases:[],unitIds:[ui.id]},{id:"v",name:"验证",aliases:[],unitIds:[integrate.id]},{id:"p",name:"路线",aliases:[],unitIds:[later.id,listed.id]}];
+ ledger.organization!.chapters=[["a","竞品分析与参考项目","r"],["b","界面设计与交互体验","u"],["c","硬件知识库与验证引擎","v"],["d","开发规划与发布策略","p"]].map(([id,title,subject])=>({id,title,question:"",group:"",subtopics:[{title,subjectIds:[subject]}]}));
+ const known=new Map(units.map(item=>[item.id,item]));
+ const routed=gatherNamedItems(routeOutOfReferences(ledger.organization!,known),known);
+ const home=(id:string)=>routed.chapters.find(chapter=>chapter.subtopics.some(topic=>topic.subjectIds.some(subject=>routed.subjects.find(row=>row.id===subject)?.unitIds.includes(id))))!.id;
+ // A competitor, and a comparison, stay; the theme rule goes to the interface.
+ expect([home(rival.id),home(own.id),home(theme.id)]).toEqual(["a","a","b"]);
+ // The three plans for Wokwi sit with the latest; a list only naming it stays where it is.
+ expect([home(integrate.id),home(send.id),home(later.id),home(listed.id)]).toEqual(["d","d","d","d"]);
+ expect(routed.subjects.find(subject=>subject.unitIds.includes(listed.id))!.id).toBe("p");
+});
+
+it("routes a page layout out of the architecture and a version's scope out of the visual rules", () => {
+  expect(wikiUnitLane(unit(1, "采用大面积空白和极简Hero，中间放置宽约600～720px的输入框及CTA。", { subject: "Landing Page", facet: "视觉极简主义", kind: "decision" }))).toBe("interface");
+  expect(wikiUnitLane(unit(2, "第一版严格限定为 ESP32 DevKit V1 + 常见模块，禁止加入 PCB设计、STM32、高压电路。", { subject: "V0.1 范围", facet: "功能限制", kind: "constraint" }))).toBe("stage");
+});
+
+it("names the parts that set a global rule's property otherwise, and what the user says a part does not do yet", () => {
+  const rule = unit(1, "全局圆角统一控制在6px~8px，禁止使用16px以上的大圆角。", { subject: "Border Radius", kind: "constraint" });
+  const composer = unit(2, "采用极简设计，圆角极轻边框，无阴影；max-width 760~800px，border-radius 20~26px，padding 16~20px。", { subject: "Welcome Screen", kind: "decision" });
+  const button = unit(3, "Primary按钮高度40~44px，圆角6~8px。", { subject: "CTA", kind: "decision" });
+  expect([...componentExceptions([rule, composer, button])]).toEqual([[rule.id, ["Welcome Screen：border-radius 20~26px"]]]);
+  const report = unit(4, "当前画布仅为架构预览；Validator不检查电压、GPIO冲突或电源安全。", { kind: "constraint" });
+  report.evidence = { ...report.evidence, role: "user" };
+  const engine = unit(5, "构建 Compatibility Engine，用于实时检查电压、电流及通信协议冲突。", { kind: "fact" });
+  const shopping = unit(6, "商品搜索后必须经过“兼容性检查”的确定性流程，需确保逻辑电压符合当前设计。", { kind: "constraint" });
+  const lacks = currentCapabilityState([report, engine, shopping], new Map());
+  expect([...lacks.keys()]).toEqual([engine.id]);
+  expect(lacks.get(engine.id)).toContain("Validator不检查电压");
+});
+
+it("never lets an earlier point replace one said after it, and notes a global rule's part values", () => {
+  const decision = unit(50, "采用 BYOK 模式，默认仅保存在当前浏览器会话中，不保存到服务器。", { kind: "decision", adoption: { status: "user_decision" } });
+  decision.evidence = { ...decision.evidence, role: "user", quote: "我想让用户自己接api" };
+  const how = unit(53, "默认将 API Key 仅保存在运行时内存，刷新即消失；可选 sessionStorage，禁止默认使用 localStorage。", { kind: "mechanism" });
+  const ledger = book([decision, how]);
+  ledger.organization!.relations = [{ older: how.id, newer: decision.id, kind: "replaces", status: "resolved", evidence: "我想让用户自己接api" }];
+  const read = resolveWikiReading(ledger);
+  expect(read.organization!.relations).toContainEqual(expect.objectContaining({ older: decision.id, newer: how.id, kind: "supplements" }));
+  expect(wikiUnitStatuses([decision, how], read.organization!).get(how.id)).not.toBe("history");
+  const rule = unit(1, "全局圆角统一控制在6px~8px，禁止使用16px以上的大圆角。", { kind: "constraint" });
+  const composer = unit(2, "max-width 760~800px，border-radius 20~26px，padding 16~20px。", { kind: "decision" });
+  composer.subject = "Welcome Screen";
+  const paragraph = { text: "- **圆角**：全局圆角统一控制在 6px~8px。\n- **间距**：节点间距增加 15%。", unitIds: [rule.id], claims: [{ text: "全局圆角统一控制在 6px~8px。", unitIds: [rule.id] }] };
+  expect(notePartExceptions([paragraph], new Map([[rule.id, rule], [composer.id, composer]]), componentParts([rule, composer]))).toBe(1);
+  expect(paragraph.text.split("\n")[0]).toBe("- **圆角**：全局圆角统一控制在 6px~8px（以下组件另有取值：Welcome Screen border-radius 20~26px；是组件例外还是后来的规范，讨论中未明确）。");
+  expect(paragraph.text.includes(paragraph.claims[0].text)).toBe(true);
+});
+
+it("leaves a code from the section before a quote's break out of the unit's details", () => {
+  const quote = "> `LOAD_REQUIRES_DRIVER ERROR`\n\n技术 code 可以内部保留。\n\n---\n\n# 第九阶段：Canvas通过以后，才出现下一步\n\n只有设计达到 VERIFIED 或允许继续，才出现仿真入口，侧重行为模拟。";
+  const simulation = unit(1, "仿真入口仅在 Canvas 设计通过（VERIFIED 或允许继续）后才出现，侧重行为模拟。", { kind: "decision", details: ["LOAD_REQUIRES_DRIVER ERROR", "VERIFIED"] });
+  simulation.evidence = { ...simulation.evidence, quote };
+  expect(foreignDetail(simulation, "LOAD_REQUIRES_DRIVER ERROR")).toBe(true);
+  expect(wikiUnitDetails(simulation)).not.toContain("LOAD_REQUIRES_DRIVER ERROR");
+  expect(ownSection(quote, simulation.statement)).toContain("仿真入口");
+});
+
+it("keeps open whether a part's own value is an exception, and has the line cite the parts", () => {
+  const rule = unit(1, "全局圆角统一控制在6px~8px，禁止使用16px以上的大圆角。", { kind: "constraint" });
+  const composer = unit(2, "max-width 760~800px，border-radius 20~26px，padding 16~20px。", { kind: "decision" });
+  composer.subject = "Welcome Screen";
+  const line = "- **圆角规范**：全局圆角统一控制在6px~8px，禁止使用16px以上的大圆角；Welcome Screen border-radius 20~26px为组件例外。";
+  const paragraph = { text: line, unitIds: [rule.id], claims: [{ text: line.slice(line.indexOf("全局")), unitIds: [rule.id] }] };
+  expect(notePartExceptions([paragraph], new Map([[rule.id, rule], [composer.id, composer]]), componentParts([rule, composer]))).toBe(1);
+  expect(paragraph.text).toBe("- **圆角规范**：全局圆角统一控制在6px~8px，禁止使用16px以上的大圆角；Welcome Screen border-radius 20~26px另有取值（是组件例外还是后来的规范，讨论中未明确）。");
+  expect(paragraph.claims[0].unitIds).toEqual([rule.id, composer.id]);
+  expect(paragraph.text.includes(paragraph.claims[0].text)).toBe(true);
+  expect(paragraph.unitIds).toContain(composer.id);
+});

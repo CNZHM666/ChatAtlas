@@ -1,0 +1,113 @@
+/* Developer controls share the compact borders, typography and focus of Settings. */
+.ai-usage-ledger :is(.developer-analysis,.developer-project-tests) :is(button,.developer-export-menu > summary) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 34px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12.5px;
+  font-weight: 500; line-height: 20px; white-space: nowrap; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.ai-usage-ledger :is(.developer-analysis,.developer-project-tests) button:disabled { opacity: .5; cursor: default; }
+.ai-usage-ledger :is(.developer-analysis,.developer-project-tests) :is(button,.developer-export-menu > summary):hover:not(:disabled) { background: var(--surface-muted); border-color: var(--border-strong); }
+.ai-usage-ledger .developer-project-tests button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+.ai-usage-ledger .developer-project-tests button.primary:hover { background: var(--accent); filter: brightness(.94); }
+.ai-usage-ledger :is(button,select,summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ai-usage-ledger :is(button,summary) svg { flex: none; }
+.ai-usage-ledger .developer-export-menu > summary { list-style: none; }
+.ai-usage-ledger .developer-export-menu > summary::-webkit-details-marker { display: none; }
+.ai-usage-ledger .developer-export-menu[open] > summary { border-color: var(--border-strong); background: var(--surface-muted); }
+.ai-usage-ledger .developer-export-menu > div { z-index: 5; padding: 5px; min-width: 172px; }
+.ai-usage-ledger :is(.developer-analysis,.developer-project-tests) .developer-export-menu > div > button { justify-content: flex-start; border: 0; background: transparent; width: 100%; }
+.ai-usage-ledger .developer-analysis-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.ai-usage-ledger .developer-analysis-heading > label { flex: 1 1 140px; max-width: none; }
+.ai-usage-ledger .developer-analysis-heading > label > select { height: 34px; border-radius: 8px; font-size: 12.5px; padding: 5px 9px; }
+.ai-usage-ledger .developer-analysis-heading > div { flex: none; display: flex; align-items: center; gap: 6px; }
+.ai-usage-ledger .developer-analysis-empty { display: grid; justify-items: center; gap: 8px; padding: 30px 18px; border: 1px solid var(--border); border-radius: 10px; text-align: center; }
+.ai-usage-ledger .developer-analysis-empty > svg { margin-bottom: 2px; color: var(--faint); }
+.ai-usage-ledger .developer-analysis-empty > strong { font-size: 13px; font-weight: 500; }
+.ai-usage-ledger .developer-analysis-empty > p { max-width: 300px; margin: 0; font-size: 12px; line-height: 1.65; }
+.ai-usage-ledger .developer-project-test-body { padding-top: 2px; gap: 14px; }
+.ai-usage-ledger .developer-test-start { display: grid; gap: 8px; }
+.ai-usage-ledger .developer-test-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-usage-ledger .developer-test-section-heading strong { font-size: 13px; font-weight: 600; }
+.ai-usage-ledger .developer-test-start > p { font-size: 12px; line-height: 1.65; }
+.ai-usage-ledger .developer-test-tools { justify-content: flex-start; gap: 8px; }
+/* Override Settings' icon/content section grid for nested developer sections. */
+.settings-panel .developer-project-test-body section { grid-template-columns: minmax(0,1fr); }
+.ai-usage-ledger .developer-benchmark, .settings-panel .developer-benchmark { display: grid; grid-template-columns: minmax(0,1fr); align-content: start; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: transparent; }
+.ai-usage-ledger .developer-benchmark-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.ai-usage-ledger .developer-benchmark-heading > strong { font-size: 13px; font-weight: 600; }
+.ai-usage-ledger .developer-benchmark > p { margin: 0; font-size: 12px; line-height: 1.65; }
+.ai-usage-ledger .developer-benchmark-files { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.ai-usage-ledger .developer-benchmark-file { display: grid; align-content: start; gap: 7px; min-width: 0; font-size: 12px; }
+.ai-usage-ledger .developer-file-trigger { position: relative; display: flex; align-items: center; gap: 7px; min-height: 38px; padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--surface-muted); color: var(--muted); cursor: pointer; }
+.ai-usage-ledger .developer-file-trigger > svg { flex: none; }
+.ai-usage-ledger .developer-file-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-usage-ledger .developer-file-trigger:hover { border-color: var(--accent); color: var(--accent); }
+.ai-usage-ledger .developer-file-trigger:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ai-usage-ledger .developer-file-trigger > input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; padding: 0; cursor: pointer; }
+.ai-usage-ledger .developer-benchmark-file > small { color: var(--muted); font-size: 11.5px; }
+.ai-usage-ledger .developer-control-error { font-size: 12px; color: #b34d4d; }
+.ai-usage-ledger .developer-project-test-body > details > summary { padding: 9px 0; cursor: pointer; font-size: 12.5px; }
+.ai-usage-ledger .developer-manual-plan { padding-top: 4px; }
+/* Wiki generation tests: a heading with the new-test button, one card per test or document, the fallback switch last. */
+.ai-usage-ledger .developer-units, .settings-panel .developer-units { display: grid; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
+.ai-usage-ledger .developer-units-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ai-usage-ledger .developer-units-heading > div { display: grid; gap: 3px; min-width: 0; }
+.ai-usage-ledger .developer-units-heading strong { font-size: 13px; font-weight: 600; }
+.ai-usage-ledger .developer-units-heading small, .ai-usage-ledger .developer-units-empty { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.ai-usage-ledger .developer-units button.developer-units-new { flex: none; }
+.ai-usage-ledger .developer-units-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ai-usage-ledger .developer-units-list > li { display: grid; gap: 6px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); }
+.ai-usage-ledger .developer-units-list > li.is-running { border-color: var(--accent); }
+.ai-usage-ledger .developer-unit-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ai-usage-ledger .developer-unit-title > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 500; }
+.ai-usage-ledger .developer-unit-kind { flex: none; padding: 1px 6px; border-radius: 4px; background: var(--surface-muted); color: var(--muted); font-size: 11px; line-height: 16px; }
+.ai-usage-ledger .developer-unit-status { color: var(--muted); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.ai-usage-ledger .developer-unit-warning { color: #a15c07; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.ai-usage-ledger .developer-units-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 2px; }
+.ai-usage-ledger .developer-project-tests .developer-units-actions button, .ai-usage-ledger .developer-project-tests .developer-units-actions .developer-export-menu > summary { min-height: 30px; padding: 4px 9px; font-size: 12px; }
+.ai-usage-ledger .developer-project-tests .developer-unit-title > button.developer-unit-delete { flex: none; width: 26px; min-height: 26px; margin: -3px -4px -3px auto; padding: 0; border-color: transparent; background: transparent; color: var(--muted); }
+.ai-usage-ledger .developer-project-tests .developer-unit-title > button.developer-unit-delete:hover:not(:disabled) { border-color: transparent; background: var(--surface-muted); color: #b91c1c; }
+/* The step menu opens under its button across the card, so it never runs past a narrow panel. */
+.ai-usage-ledger .developer-units-list > li { position: relative; }
+.ai-usage-ledger .developer-unit-steps { position: static; }
+.ai-usage-ledger .developer-unit-steps > div { top: auto; left: 8px; right: 8px; min-width: 0; margin-top: 4px; }
+.ai-usage-ledger .developer-project-tests .developer-unit-steps > div > button { align-items: flex-start; gap: 8px; min-height: 0; padding: 7px 8px; white-space: normal; text-align: left; }
+.ai-usage-ledger .developer-project-tests .developer-unit-steps > div > button > svg { margin-top: 3px; }
+.ai-usage-ledger .developer-unit-steps > div > button > span { display: grid; gap: 1px; }
+.ai-usage-ledger .developer-unit-steps > div > button small { color: var(--muted); font-size: 11.5px; font-weight: 400; line-height: 1.45; }
+.ai-usage-ledger .developer-units-fallback { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ai-usage-ledger .developer-units-fallback > span { display: grid; gap: 2px; min-width: 0; }
+.ai-usage-ledger .developer-units-fallback strong { font-size: 12.5px; font-weight: 500; }
+.ai-usage-ledger .developer-units-fallback small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.ai-usage-ledger .developer-units button.developer-units-switch { flex: none; justify-content: flex-start; width: 34px; min-height: 20px; height: 20px; padding: 2px; border: 0; border-radius: 999px; }
+.ai-usage-ledger .developer-units button.developer-units-switch, .ai-usage-ledger .developer-units button.developer-units-switch:hover:not(:disabled) { background: var(--border-strong); }
+.ai-usage-ledger .developer-units button.developer-units-switch[aria-checked="true"], .ai-usage-ledger .developer-units button.developer-units-switch[aria-checked="true"]:hover:not(:disabled) { background: var(--accent); }
+.ai-usage-ledger .developer-units-switch > span { width: 16px; height: 16px; border-radius: 50%; background: var(--surface-solid); box-shadow: 0 1px 3px #0002; transition: transform .15s; }
+.ai-usage-ledger .developer-units-switch[aria-checked="true"] > span { transform: translateX(14px); }
+@media (prefers-reduced-motion: reduce) { .ai-usage-ledger .developer-units-switch > span { transition: none; } }
+.ai-usage-ledger .developer-units-picker { display: grid; gap: 8px; min-width: 0; }
+.ai-usage-ledger .developer-units-picker > input { min-width: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-solid); color: inherit; font: inherit; font-size: 12.5px; }
+.ai-usage-ledger .developer-units-picker > ul { display: grid; gap: 2px; max-height: 260px; margin: 0; padding: 4px; overflow: auto; list-style: none; border: 1px solid var(--border); border-radius: 6px; }
+.ai-usage-ledger .developer-units-picker li { display: block; }
+.ai-usage-ledger .developer-units-picker label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 3px 4px; font-size: 12.5px; cursor: pointer; }
+.ai-usage-ledger .developer-units-picker label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-usage-ledger .developer-units-picker label > small { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.ai-usage-ledger .developer-units-picker-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.ai-usage-ledger .developer-units-picker-actions > small { margin-right: auto; color: var(--muted); font-size: 12px; }
+@media (max-width: 380px) {
+  .ai-usage-ledger .developer-analysis-heading { flex-wrap: wrap; }
+  .ai-usage-ledger .developer-analysis-heading > label { flex-basis: 100%; }
+  .ai-usage-ledger .developer-benchmark-files { grid-template-columns: minmax(0,1fr); }
+  .ai-usage-ledger .developer-test-section-heading { flex-wrap: wrap; }
+}
+
+:root[data-theme="dark"] .ai-usage-ledger .developer-project-tests button.primary { color: #18201d; }
+:root[data-theme="dark"] .ai-usage-ledger .developer-control-error { color: #fca5a5; }
+:root[data-theme="dark"] .ai-usage-ledger .developer-unit-warning { color: #fbbf24; }
+/* The running step's bar sits under its status. */
+.ai-usage-ledger .developer-units-progress { width: 100%; height: 4px; border: 0; border-radius: 999px; overflow: hidden; appearance: none; background: var(--border); accent-color: var(--accent); }
+.ai-usage-ledger .developer-units-progress::-webkit-progress-bar { background: var(--border); border-radius: 999px; }
+.ai-usage-ledger .developer-units-progress::-webkit-progress-value { background: var(--accent); border-radius: 999px; transition: width .2s; }
+.ai-usage-ledger .developer-units-progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
+@media (prefers-reduced-motion: reduce) { .ai-usage-ledger .developer-units-progress::-webkit-progress-value { transition: none; } }

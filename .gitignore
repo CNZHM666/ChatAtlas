@@ -1,0 +1,35 @@
+node_modules/
+dist/
+dist-dev/
+coverage/
+*.tsbuildinfo
+backend/
+deploy-output/
+.qa/
+.env*
+!.env.example
+*.pem
+*.key
+*.log
+.test-output.txt
+.ai-package.ps1
+artifacts/
+docs/AI_ANALYSIS_*.md
+docs/AI_DIAGNOSIS_*.md
+docs/AI_TIMEOUT_FIX_*.md
+docs/AI_READING_V*.md
+release-output/
+
+# Maintainer-only history and machine context; never publish private diagnostics.
+/AGENTS.md
+docs/archive/
+docs/screenshots/
+evaluation/**/cases.json
+evaluation/**/report.*
+.github-runtime-audit.json
+*.zip
+.DS_Store
+Thumbs.db
+
+# Private Wiki exports kept for evaluation runs
+evaluation/**/exports/

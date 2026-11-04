@@ -1,0 +1,28 @@
+name: 问题反馈 / Bug report
+description: 提供可复现步骤，勿提交密钥或私人聊天内容。
+body:
+  - type: input
+    id: environment
+    attributes:
+      label: 版本与环境
+      placeholder: ChatAtlas 0.1.1 / Chrome 版本 / 服务商与模型（如适用）
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 如何复现
+      description: 使用脱敏或虚构材料说明步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: 预期与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 错误代码或截图（可选）
+      description: 删除 API Key、身份信息和私人对话，不上传未经脱敏的完整诊断文件。

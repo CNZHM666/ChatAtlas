@@ -1,0 +1,5 @@
+.workspace-pane-resize { position: absolute; inset: 0 auto 0 -5px; width: 10px; z-index: 3; cursor: col-resize; touch-action: none; }
+.workspace-pane-resize::after { content: ""; position: absolute; inset: 0 auto 0 4px; width: 2px; background: transparent; }
+.workspace-pane-resize:is(:hover,:focus-visible,.is-dragging)::after { background: var(--accent); }
+.workspace-pane-resize:focus-visible { outline: none; }
+.record-detail-surface, .workspace-source-panel { position: relative; }

@@ -1,0 +1,13 @@
+{
+  "conversations": [
+    {
+      "title": "Redacted sample",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Only save after explicit confirmation. Preserve originals on failure."
+        }
+      ]
+    }
+  ]
+}

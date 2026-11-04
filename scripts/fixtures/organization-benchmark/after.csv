@@ -1,0 +1,2 @@
+run_id,status,requests,input_tokens,output_tokens,failed_requests,cached_input_tokens,first_readable_ms,elapsed_ms,failures_by_origin,request_stage_metrics
+after,completed,4,9000,2000,1,3000,8000,24000,"{""local"": 0, ""model"": 1, ""provider"": 0, ""network"": 0, ""unknown"": 0}","[{""stage"": ""reading"", ""requests"": 2}, {""stage"": ""writing"", ""requests"": 2}]"

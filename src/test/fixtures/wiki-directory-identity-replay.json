@@ -1,0 +1,10 @@
+{
+  "provenance": "Reconstructed from the 2026-10-24 user screenshot and af94e7cd CSV diagnostics. The export contains no raw model response; titles and IDs below are synthetic. This is a failure-signature replay, not a live-provider quality evaluation.",
+  "expected": {"missingIds": [], "duplicateIds": [], "unknownIds": ["m99"], "parentMismatchIds": []},
+  "pages": [
+    {"title": "本地存储", "subtopics": [{"title": "保存原文", "sectionIds": ["m0"]}]},
+    {"title": "访问权限", "subtopics": [{"title": "授权边界", "sectionIds": ["m1"]}]},
+    {"title": "同步恢复", "subtopics": [{"title": "失败恢复", "sectionIds": ["m2"]}]},
+    {"title": "来源检索", "subtopics": [{"title": "定位原文", "sectionIds": ["m3", "m99"]}]}
+  ]
+}

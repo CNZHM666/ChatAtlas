@@ -1,0 +1,71 @@
+.file-import-guide-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; background: #0006; }
+.file-import-guide { width: min(680px, 100%); max-height: min(780px, calc(100dvh - 48px)); display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-solid); color: var(--text); box-shadow: 0 24px 80px #0003; text-align: left; }
+.file-import-guide-header { flex: none; display: flex; align-items: start; gap: 20px; padding: 24px 28px 20px; border-bottom: 1px solid var(--border); }
+.file-import-guide-header > div { flex: 1; min-width: 0; }
+.file-import-guide-eyebrow { color: var(--accent); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+.file-import-guide h2 { margin: 4px 0 0; font-size: 23px; line-height: 1.35; letter-spacing: -.02em; }
+.file-import-guide h2:focus { outline: none; }
+.file-import-guide .file-import-guide-close { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: none; border-radius: 7px; color: var(--muted); background: transparent; }
+.file-import-guide .file-import-guide-close:hover { background: var(--surface-muted); }
+.file-import-guide-body { padding: 20px 28px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; line-height: 1.65; scrollbar-gutter: stable; }
+.file-import-guide-path { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 20px; padding: 10px 14px; border-radius: 8px; background: var(--surface-muted); font-size: 13px; }
+.file-import-guide-path > span[aria-hidden] { color: var(--muted); }
+.file-import-guide-path strong { font-weight: 600; }
+.file-import-guide-steps { list-style: none; counter-reset: import-step; margin: 0; padding: 0; }
+.file-import-guide-steps > li { counter-increment: import-step; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; margin-bottom: 18px; }
+.file-import-guide-steps > li:last-child { margin-bottom: 0; }
+.file-import-guide-steps > li::before { content: counter(import-step); display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 650; }
+.file-import-guide h3 { margin: 1px 0 6px; font-size: 15px; line-height: 1.65; font-weight: 650; }
+.file-import-guide-steps p { margin: 0 0 6px; font-size: 14px; overflow-wrap: anywhere; }
+.file-import-guide a { display: inline-flex; align-items: center; gap: 3px; color: var(--accent); font-size: 13px; text-decoration: none; }
+.file-import-guide a:hover { text-decoration: underline; }
+.file-import-guide a:focus-visible, .file-import-guide button:focus-visible, .file-import-guide summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.file-import-guide .file-import-guide-muted { color: var(--muted); font-size: 13px; }
+.file-import-guide-timing { display: flex; flex-wrap: wrap; column-gap: 16px; row-gap: 3px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.file-import-guide-formats { display: flex; align-items: start; gap: 12px; margin: 0 0 20px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+.file-import-guide-formats > svg { flex: none; color: var(--accent); margin-top: 3px; }
+.file-import-guide-formats strong { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 600; }
+.file-import-guide-formats p { margin: 0; color: var(--muted); font-size: 13px; }
+.file-import-guide-faq { margin-top: 16px; border: 1px solid var(--border); border-radius: 10px; }
+.file-import-guide-faq + .file-import-guide-faq { margin-top: 8px; }
+.file-import-guide-faq summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; box-sizing: border-box; padding: 12px 14px; border-radius: 9px; color: var(--text); font-size: 13px; font-weight: 500; line-height: 1.5; list-style: none; cursor: pointer; transition: background .15s ease; }
+.file-import-guide-faq summary::-webkit-details-marker { display: none; }
+.file-import-guide-faq summary::marker { content: ""; }
+.file-import-guide-faq summary::after { content: ""; flex: none; width: 7px; height: 7px; margin: -4px 3px 0 0; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); transition: transform .18s ease, border-color .15s ease; }
+.file-import-guide-faq summary:hover { background: var(--surface-muted); }
+.file-import-guide-faq summary:hover::after { border-color: var(--text); }
+.file-import-guide-faq[open] > summary, .file-import-guide-faq details[open] > summary { background: var(--surface-muted); }
+.file-import-guide-faq[open] > summary::after, .file-import-guide-faq details[open] > summary::after { margin-top: 4px; transform: rotate(225deg); }
+.file-import-guide-faq summary:focus-visible { outline-offset: -2px; }
+.file-import-guide-faq details { margin: 0 14px; border-top: 1px solid var(--border); }
+.file-import-guide-faq details > summary { padding-inline: 0; border-radius: 6px; }
+.file-import-guide-faq p { margin: 12px 14px 14px; font-size: 13px; color: var(--muted); }
+.file-import-guide-faq details p { margin-inline: 0; }
+.file-import-guide-faq > .file-import-guide-example { margin-inline: 14px; }
+.file-import-guide-faq > .file-import-guide-template { margin: 10px 14px 14px; }
+.file-import-guide-faq details .file-import-guide-example { margin-bottom: 12px; }
+.file-import-guide-faq details .file-import-guide-template { margin: 0 0 14px; }
+@media(prefers-reduced-motion: reduce) { .file-import-guide-faq summary, .file-import-guide-faq summary::after { transition: none; } }
+.file-import-guide .file-import-guide-official { margin-top: 16px; }
+.file-import-guide-footer { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 14px 28px; border-top: 1px solid var(--border); background: var(--surface-solid); }
+.file-import-guide .file-import-guide-cancel { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 9px 15px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: 13px; font-weight: 500; line-height: 1.5; cursor: pointer; }
+.file-import-guide .file-import-guide-cancel:hover { background: var(--surface-muted); }
+.file-import-guide .file-import-guide-choose { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 9px 15px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: white; font-size: 13px; font-weight: 600; cursor: pointer; }
+.file-import-guide-choose:disabled { opacity: .5; cursor: default; }
+@media(max-width:600px) { .file-import-guide-backdrop { padding: 12px; } .file-import-guide { max-height: calc(100dvh - 24px); border-radius: 13px; } .file-import-guide-header { padding: 18px; } .file-import-guide h2 { font-size: 20px; } .file-import-guide-body { padding: 18px; } .file-import-guide-steps > li { gap: 10px; } .file-import-guide-footer { padding: 14px 18px; } .file-import-guide-choose { width: 100%; } }
+
+:root[data-theme="dark"] .file-import-guide .file-import-guide-choose { color: #14201a; }
+.file-import-guide-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }
+.file-import-guide-tabs > button { min-height: 32px; padding: 5px 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; cursor: pointer; }
+.file-import-guide-tabs > button[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.file-import-guide-example { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-import-guide .file-import-guide-template { display: inline-flex; gap: 6px; margin-top: 10px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-weight: 500; }
+.file-import-guide-template:hover { background: var(--surface-muted); }
+.file-import-guide-direct-note { margin:0; color:var(--muted); font-size:14px; line-height:1.75; }
+.native-import-dialog{max-width:520px}
+.native-import-dialog .file-import-guide-header h2{flex:1}
+.native-import-choice{display:flex;align-items:center;gap:12px;padding:14px 12px;border:1px solid var(--line,#ddd);border-radius:10px;margin:10px 0;cursor:pointer}
+.native-import-choice input{width:18px;height:18px;accent-color:#15803d}
+.native-import-choice span{display:flex;flex-direction:column;gap:4px}
+.native-import-choice small{opacity:.7}
+.native-import-links{display:flex;flex-wrap:wrap;gap:14px;margin:20px 0}

@@ -1,0 +1,264 @@
+.workspace-source-panel { flex: 0 0 clamp(360px, 30vw, 460px); display: flex; flex-direction: column; min-height: 0; min-width: 0; height: 100%; color: var(--text); background: var(--surface-solid); border-left: 1px solid var(--border); z-index: 35; }
+.focus-preview:has(> .wiki-scope-reader),.focus-workspace:has(> .wiki-scope-reader) { position:relative; }
+.focus-workspace:has(> .wiki-scope-reader) > .project-reading-base { flex:1; min-width:0; }
+.focus-workspace:has(> .wiki-scope-reader) > .project-reading-base > .reading-outline { flex-basis:210px; }
+.wiki-scope-reader .wiki-scope-reader-content { max-width:100%; font-size:15px; line-height:1.75; overflow-wrap:anywhere; white-space:normal; }
+.workspace-source-panel.wiki-scope-reader .wiki-scope-reader-content :is(p,li) { font-size:15px; line-height:1.75; }
+.workspace-source-panel.wiki-scope-reader .wiki-scope-reader-content p { margin:0 0 12px; }
+.workspace-source-panel.wiki-scope-reader .wiki-scope-reader-content blockquote p { white-space:pre-line; }
+.workspace-source-panel.wiki-scope-reader .wiki-scope-reader-content :is(h1,h2,h3,h4,h5,h6) { display:block; margin:22px 0 10px; font-weight:600; line-height:1.55; overflow:visible; }
+.workspace-source-panel.wiki-scope-reader .wiki-scope-reader-content h1 { font-size:20px; }
+.workspace-source-panel.wiki-scope-reader .wiki-scope-reader-content h2 { font-size:18px; }
+.workspace-source-panel.wiki-scope-reader .wiki-scope-reader-content :is(h3,h4,h5,h6) { font-size:16px; }
+.wiki-scope-reader .wiki-scope-reader-content > :first-child { margin-top:0; }
+.wiki-scope-reader .wiki-scope-reader-content hr { border:0; border-top:1px solid var(--border); margin:20px 0; }
+.wiki-scope-reader .wiki-scope-reader-content :is(table,pre) { display:block; max-width:100%; overflow:auto; }
+.wiki-scope-reader .wiki-scope-reader-content ul { list-style-type:disc; padding-inline-start:22px; }
+.wiki-scope-reader .wiki-scope-reader-content ul ul { list-style-type:circle; }
+/* Why the material was flagged leads the pane, as a short tinted note. */
+.wiki-scope-reader-basis { margin:0 0 22px; padding:12px 14px; border-radius:8px; background:var(--surface-muted); font-size:13px; line-height:1.7; color:var(--text-secondary,var(--muted)); }
+.wiki-scope-reader-basis > h3 { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin:0 0 4px; font-size:13px; font-weight:600; color:var(--text); }
+.wiki-scope-reader-basis > p { margin:0; }
+.wiki-scope-reader .wiki-scope-tag { display:inline-block; padding:0 7px; border-radius:999px; background:var(--surface-solid); color:var(--muted); font-size:12px; font-weight:500; line-height:20px; }
+.wiki-scope-reader-basis > article { margin-top:14px; padding:12px; border:1px solid var(--border); border-radius:8px; color:var(--text); }
+.wiki-scope-reader-basis h4 { margin:0 0 10px; font-size:13px; color:var(--muted); }
+.wiki-scope-originals > h3 { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; margin:0 0 12px; font-size:14px; font-weight:600; }
+.wiki-scope-originals > h3 small { color:var(--muted); font-size:12px; font-weight:400; }
+.wiki-scope-original-message + .wiki-scope-original-message { margin-top:18px; padding-top:16px; border-top:1px solid var(--border); }
+.wiki-scope-original-message > h4 { margin:0 0 8px; color:var(--muted); font-size:12px; font-weight:600; }
+.wiki-scope-original-message > button { margin:10px 8px 0 0; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .wiki-scope-original-message > button.wiki-scope-original-link { min-height:0; padding:0; border:0; background:transparent; color:var(--muted); font-size:12px; text-decoration:underline; text-underline-offset:3px; }
+.workspace-source-panel.wiki-scope-reader .conversation-answer-markdown :is(p,li) { font-size:15px; line-height:1.75; }
+/* Header: label with position, title, then small step and close buttons on one row. */
+.wiki-scope-reader-tools { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.wiki-scope-reader-steps { display:inline-flex; gap:4px; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .wiki-scope-reader-steps button { width:32px; height:32px; min-height:32px; padding:0; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel.wiki-scope-reader > header { min-height:0; padding:16px 20px; }
+.workspace-source-panel.wiki-scope-reader > header h2 { font-size:18px; }
+/* The choice stays visible while reading long originals. */
+.wiki-scope-reader-decision { flex:0 0 auto; display:flex; justify-content:center; padding:12px 20px; border-top:1px solid var(--border); background:var(--surface-solid); }
+.wiki-scope-reader-decision .wiki-scope-actions { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .wiki-scope-reader-decision .wiki-scope-action { min-height:34px; padding:6px 14px; border:0; border-left:1px solid var(--border); border-radius:0; background:transparent; font-size:13px; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .wiki-scope-reader-decision .wiki-scope-action:first-child { border-left:0; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .wiki-scope-reader-decision .wiki-scope-action[aria-pressed=true] { background:var(--accent-soft); color:var(--accent); font-weight:600; }
+.wiki-scope-generated { margin-top:24px; padding-top:16px; border-top:1px solid var(--border); }
+.wiki-scope-generated > summary { color:var(--muted); cursor:pointer; font-size:13px; }
+.wiki-scope-generated[open] > summary { margin-bottom:12px; }
+.workspace-source-panel > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 20px; border-bottom: 1px solid var(--border); }
+.workspace-source-panel > header > div { min-width: 0; }
+.workspace-source-panel > header small { color: var(--muted); font-size: 13px; }
+.workspace-source-panel h2 { margin: 7px 0 0; font-size: 17px; font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; }
+.workspace-source-panel > header { flex:0 0 auto; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 9px; min-height: 34px; font-size: 14px; background: var(--surface-solid); border: 1px solid var(--border); border-radius: 7px; }
+.workspace-source-panel .workspace-source-close { flex-shrink: 0; }
+.workspace-source-claim { margin: 0; padding: 14px 20px; font-size: 14px; font-weight: 550; line-height: 1.7; background: var(--surface-muted); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.workspace-source-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px; }
+.workspace-source-message + .workspace-source-message { padding-top: 22px; margin-top: 22px; border-top: 1px solid var(--border); }
+.workspace-source-message-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 12px; margin-bottom: 14px; font-size: 13px; color: var(--muted); }
+.workspace-source-message-meta strong { font-weight: 550; color: var(--text); }
+.workspace-source-message .conversation-answer-markdown { font-size: 16px; line-height: 1.85; }
+.workspace-source-panel .source-message-content :is(img,video,table,pre) { max-width: 100%; }
+.workspace-source-panel :is(table,pre) { overflow-x: auto; }
+.workspace-source-notice, .workspace-source-unavailable > p { margin: 0 0 16px; font-size: 14px; color: var(--muted); line-height: 1.7; }
+.workspace-source-panel > footer { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+.focus-workspace.has-original-panel > .project-reading-base > .reading-outline { flex-basis: 210px; }
+::highlight(atlas-original-proof) { background: #facc1540; color: inherit; text-decoration: none; }
+::highlight(atlas-original-context) { background: #facc1515; color: inherit; }
+::highlight(atlas-original-related) { background: transparent; color: inherit; text-decoration: underline dashed #94a3b8; }
+.workspace-source-highlight.is-context { background:#facc1515; }
+.workspace-source-highlight.is-related { background:transparent; border-bottom:1px dashed #94a3b8; }
+.workspace-source-claims { flex:0 0 auto; max-height:24vh; overflow:auto; padding:12px 20px; border-bottom:1px solid var(--border); }
+.workspace-source-claims p { margin:0 0 8px; font-size:13px; color:var(--muted); }
+.workspace-source-claims button { display:block; width:100%; margin-top:6px; text-align:left; }
+.workspace-source-claims button[aria-pressed="true"] { border-color:var(--accent); }
+.workspace-source-related-label { margin:0; padding:8px 20px; font-size:13px; color:var(--muted); }
+.workspace-source-panel > .workspace-source-notice { padding:8px 20px; margin:0; font-size:13px; max-height:16vh; overflow:auto; }
+.workspace-source-panel.is-overlay { position: absolute; inset: 0 0 0 auto; width: min(460px, 100%); box-shadow: -10px 0 36px #00000020; }
+.focus-workspace.has-original-panel { position: relative; }
+.focus-workspace.has-original-panel > .project-reading-base { flex: 1; min-width: 0; }
+.workspace-source-panel .conversation-answer-markdown :is(p,li) { font-size: 16px; line-height: 1.85; }
+.workspace-source-panel :is(button,select):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media(max-width:620px) { .workspace-source-panel { width: 100%; border-left: 0; } }
+/* Desktop sources and record details use the same split column size. */
+:is(.focus-workspace,.focus-preview) > .workspace-source-panel:not(.is-overlay) { flex-basis: var(--workspace-pane-width,clamp(360px,38%,540px)); }
+.workspace-source-panel.is-overlay { width: min(520px,100%); }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel > header { padding: 20px; min-height: 104px; margin: 0; }
+.workspace-source-panel > header h2 { font-size: 22px; font-weight: 650; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .workspace-source-close { width: 36px; height: 36px; padding: 0; min-height: 36px; }
+@media(max-width:620px) { .workspace-source-panel.is-overlay { width: 100%; } :is(.focus-workspace,.focus-preview) .workspace-source-panel > header { padding: 18px; min-height: 94px; } .workspace-source-panel > header h2 { font-size: 21px; } }
+.discussion-context { display:grid; gap:12px; }
+.discussion-context label { display:grid; gap:8px; font-size:14px; color:var(--muted); }
+.discussion-context :is(input,textarea) { box-sizing:border-box; width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:9px; background:var(--surface-solid); color:var(--text); font:inherit; }
+.discussion-context textarea { min-height:260px; resize:vertical; line-height:1.7; }
+.discussion-context > button { justify-self:end; }
+.discussion-context-preview { overflow-wrap:anywhere; font-size:14px; line-height:1.75; }
+.discussion-context-preview h1 { font-size:18px; }
+.discussion-context-preview :is(h2,h3) { font-size:16px; }
+.discussion-context-actions { display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .discussion-context-actions button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+:root[data-theme="dark"] :is(.focus-workspace,.focus-preview) .workspace-source-panel .discussion-context-actions button.primary { color:#14201a; }
+.workspace-source-panel > footer { flex-wrap:wrap; }
+.workspace-source-body { position:relative; }
+.workspace-source-highlight { position:absolute; pointer-events:none; background:#facc1538; border-radius:2px; }
+.workspace-source-message.is-source-target { border-left:2px solid var(--accent); padding-left:12px; }
+.workspace-source-panel.is-embedded { position:relative; inset:auto; flex:1 1 auto; width:100%; min-height:0; border:0; box-shadow:none; z-index:auto; }
+.workspace-source-panel.is-embedded > header { padding:16px 20px; min-height:0; align-items:center; }
+.workspace-source-panel.is-embedded h2 { font-size:18px; }
+.workspace-source-panel.is-embedded .workspace-source-close { width:auto; height:auto; min-height:34px; padding:6px 10px; font-size:13px; white-space:nowrap; }
+.project-context-dialog > .workspace-source-panel.is-embedded { flex:1; height:auto; min-height:0; overflow:hidden; }
+.workspace-source-panel button { color:var(--text); }
+.project-source-links > div > button { display:flex; align-items:center; justify-content:space-between; width:100%; gap:12px; text-align:left; }
+.project-source-links > div > button > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.project-source-links small { display:block; margin:4px 0 10px; color:var(--muted); font-size:12px; line-height:1.6; }
+
+:is(.focus-workspace,.focus-preview) .workspace-source-panel.is-embedded > header { flex:0 0 auto; min-height:0; padding:16px 20px; align-items:center; }
+.workspace-source-panel.is-embedded > header > div { flex:1; min-width:0; }
+.workspace-source-panel.is-embedded > header h2 { margin:4px 0 0; font-size:17px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workspace-source-panel.is-embedded > footer { flex:0 0 auto; padding:12px 20px; gap:8px; }
+.workspace-source-panel.is-embedded > .workspace-source-body { margin:0 20px; padding:16px; border:1px solid var(--border); border-radius:10px; }
+.workspace-source-panel.is-embedded > header h2 { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; max-height:3em; white-space:normal; }
+@media(max-width:620px) {
+  :is(.focus-workspace,.focus-preview) .workspace-source-panel.is-embedded > header { padding:14px 16px; }
+  .workspace-source-panel.is-embedded > .workspace-source-body { margin-inline:16px; }
+  .workspace-source-panel.is-embedded > footer { padding-inline:16px; }
+}
+.workspace-source-panel.is-embedded .workspace-source-message .conversation-answer-markdown,
+.workspace-source-panel.is-embedded .workspace-source-message .conversation-answer-markdown :is(p,li) { font-size:14px; line-height:1.75; }
+.workspace-source-panel.is-embedded .workspace-source-message-meta { font-size:12px; margin-bottom:10px; }
+.workspace-source-panel.is-embedded .workspace-source-message + .workspace-source-message { margin-top:18px; padding-top:18px; }
+.workspace-source-panel.is-embedded .conversation-answer-markdown :is(h1,h2,h3,h4) { font-size:16px; line-height:1.6; }
+.workspace-source-panel.is-embedded .conversation-answer-markdown table { font-size:13px; table-layout:auto; }
+
+
+.workspace-source-navigation { display:flex; align-items:center; justify-content:space-between; flex:0 0 auto; gap:10px; padding:8px 20px; border-bottom:1px solid var(--border); color:var(--muted); font-size:13px; }
+.workspace-source-navigation button { min-width:32px; }
+
+.workspace-source-message.is-user-message { padding: 14px 16px; border: 1px solid color-mix(in srgb,var(--accent) 22%,var(--border)); border-radius: 10px; background: color-mix(in srgb,var(--accent-soft) 65%,var(--surface-solid)); }
+.workspace-source-message.is-user-message + .workspace-source-message { border-top: 0; padding-top: 0; }
+.workspace-source-message.is-user-message .workspace-source-message-meta strong { color: var(--accent); }
+.workspace-source-message.is-user-message .conversation-answer-markdown > :last-child { margin-bottom: 0; }
+
+.workspace-source-body { overflow-anchor:none; scroll-behavior:auto; padding-top:24px; }
+.workspace-source-pending { margin:0; padding:6px 20px; font-size:12px; color:var(--muted); border-top:1px solid var(--border); }
+
+/* Evidence reading has one frame and one scroll surface. */
+.workspace-source-panel > header h2 { margin-top:0; }
+.workspace-source-panel > footer .workspace-source-reviewed { margin-left:auto; white-space:nowrap; }
+.workspace-source-panel > footer .workspace-source-review-all { white-space:nowrap; font-size:12px; color:var(--muted); }
+.workspace-source-reviewed[aria-pressed="true"] { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+.project-context-dialog.is-reviewing { width:min(860px,calc(100vw - 32px)); height:min(760px,calc(100dvh - 48px)); padding:0; gap:0; overflow:hidden; }
+.project-context-dialog.is-reviewing > .workspace-source-panel.is-embedded { margin:0; }
+.project-context-dialog.is-reviewing .workspace-source-panel.is-embedded > header { padding:18px 22px 12px; gap:16px; border-bottom:0; }
+.project-context-dialog.is-reviewing .workspace-source-panel.is-embedded > header h2 { margin:0; font-size:17px; line-height:1.6; }
+.project-context-dialog.is-reviewing .workspace-source-close { display:inline-flex; align-items:center; gap:5px; border:0; background:transparent; color:var(--muted); }
+.project-context-dialog.is-reviewing .workspace-source-navigation { padding:0 22px 10px; justify-content:flex-end; gap:12px; }
+.project-context-dialog.is-reviewing .workspace-source-navigation button { width:30px; min-height:30px; padding:4px; }
+.project-context-dialog.is-reviewing .workspace-source-navigation > span { order:-1; margin-right:auto; }
+.project-context-dialog.is-reviewing .workspace-source-panel.is-embedded > .workspace-source-body { margin:0; padding:20px 22px; border:0; border-radius:0; }
+.project-context-dialog.is-reviewing .workspace-source-panel.is-embedded > footer { padding:12px 22px; gap:8px; }
+.project-context-dialog.is-reviewing .workspace-source-panel button { display:inline-flex; align-items:center; justify-content:center; gap:6px; font:inherit; font-size:13px; padding:7px 10px; min-height:34px; border:1px solid var(--border); border-radius:7px; background:var(--surface-solid); }
+.project-context-dialog.is-reviewing .workspace-source-panel button:disabled { opacity:.45; cursor:default; }
+.project-context-dialog.is-reviewing .workspace-source-panel .workspace-source-close { border:0; }
+.project-context-dialog.is-reviewing .workspace-source-reviewed[aria-pressed="true"] { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+@media(max-width:620px) {
+ .project-context-dialog.is-reviewing { width:calc(100vw - 20px); height:calc(100dvh - 24px); }
+ .project-context-dialog.is-reviewing .workspace-source-panel.is-embedded > header { padding:14px 16px 10px; }
+ .project-context-dialog.is-reviewing .workspace-source-navigation { padding-inline:16px; }
+ .project-context-dialog.is-reviewing .workspace-source-panel.is-embedded > .workspace-source-body { padding:16px; }
+ .project-context-dialog.is-reviewing .workspace-source-panel.is-embedded > footer { padding:10px 16px; }
+ .project-context-dialog.is-reviewing .workspace-source-panel > header { flex-wrap:wrap; }
+ .project-context-dialog.is-reviewing .workspace-source-panel > header > div { flex-basis:100%; order:1; }
+}
+/* Point mode: the header says which claim, who said it, and steps between claims;
+   the body leads with the quoted sentence. Full message and conversation are opt-in. */
+.workspace-source-panel > header.is-point { padding: 14px 16px 14px 20px; align-items: flex-start; }
+.workspace-source-point-head { display: grid; gap: 8px; min-width: 0; flex: 1; }
+.workspace-source-point-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; }
+.workspace-source-panel > header.is-point h2 { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.6; -webkit-line-clamp: 4; }
+.workspace-source-origin { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.workspace-source-points { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .workspace-source-points button { min-height: 28px; width: 28px; padding: 0; border-color: transparent; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .workspace-source-points button:not(:disabled):hover { border-color: var(--border); }
+.workspace-source-kind { flex-shrink: 0; padding: 1px 9px; font-size: 12px; font-weight: 600; line-height: 1.8; border-radius: 999px; color: var(--muted); background: var(--surface-muted); border: 1px solid var(--border); }
+.workspace-source-kind:is(.is-decision,.is-report,.is-preference) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.workspace-source-kind.is-approximate { border-style: dashed; }
+.workspace-source-point-note { margin: 0; padding: 8px 20px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.workspace-source-quote { margin: 0 0 14px; padding: 14px 16px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong, var(--border)); border-radius: 8px; background: var(--surface-solid); }
+.workspace-source-quote.is-user { border-left-color: var(--accent); }
+.workspace-source-quote figcaption { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+.workspace-source-quote figcaption strong { color: var(--text); font-weight: 600; }
+.workspace-source-quote blockquote { margin: 0; padding: 0; border: 0; font-size: 14px; line-height: 1.85; white-space: normal; overflow-wrap: anywhere; color: var(--text); }
+.workspace-source-quote-content > :first-child { margin-top:0; }
+.workspace-source-quote-content > :last-child { margin-bottom:0; }
+.workspace-source-quote-content :is(p,li) { font-size:14px; line-height:1.85; }
+.workspace-source-quote-content pre { max-width:100%; max-height:280px; overflow:auto; white-space:pre; font-size:13px; line-height:1.65; }
+.workspace-source-quote mark { padding:1px 0; border-radius:2px; color:inherit; background:var(--accent-soft); box-shadow:none; text-decoration:none; }
+.workspace-source-ellipsis { display:block; color:var(--muted); font-size:13px; line-height:1.5; }
+.workspace-source-expand { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .workspace-source-expand button { min-height: 30px; padding: 4px 10px; font-size: 13px; color: var(--muted); }
+:is(.focus-workspace,.focus-preview) .workspace-source-panel .workspace-source-expand button:hover { color: var(--accent); }
+.workspace-source-quote figcaption small { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+
+/* Reading an original from a chapter's sources: a short title, a light note of the claim it was opened for,
+   the claims it backs as a quiet two-line list, and one row of actions with the review mark on the right. */
+.workspace-source-panel > header:not(.is-point) h2 { font-size: 16px; font-weight: 600; line-height: 1.55; }
+.workspace-source-claim { padding: 10px 20px; font-size: 13px; font-weight: 400; line-height: 1.65; color: var(--muted); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.workspace-source-claims { padding: 10px 12px 10px 20px; }
+.workspace-source-claims > p { margin: 0 0 4px; font-size: 12px; color: var(--muted); }
+.workspace-source-claims > button { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 6px; width: 100%; margin: 0; padding: 6px 8px 6px 6px; border: 0; border-left: 2px solid transparent; border-radius: 0 6px 6px 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 1.6; text-align: left; cursor: pointer; }
+.workspace-source-claims > button > span:first-child { color: var(--muted); font-size: 12px; text-align: right; }
+.workspace-source-claims > button > span:last-child { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.workspace-source-claims > button:hover { background: var(--surface-muted); }
+.workspace-source-claims > button[aria-pressed="true"] { border-left-color: var(--accent); background: var(--accent-soft); }
+.workspace-source-claims > button[aria-pressed="true"] > span:last-child { -webkit-line-clamp: unset; }
+.workspace-source-panel > footer { flex-wrap: nowrap; align-items: center; gap: 4px; padding: 10px 16px; }
+.workspace-source-panel > footer > button:not(.workspace-source-reviewed) { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.workspace-source-panel > footer > button:not(.workspace-source-reviewed):hover:not(:disabled) { background: var(--surface-muted); color: var(--text); }
+.workspace-source-panel > footer .workspace-source-reviewed { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 6px 14px; font-size: 13px; }
+
+/* Why a point is in the review: the one thing to check, in the accent warning tone. */
+.workspace-source-attention { margin: 8px 0 0; padding: 6px 10px; border-radius: 6px; background: #fff7e6; color: #8a5300; font-size: 12.5px; line-height: 1.6; }
+:root[data-theme="dark"] .workspace-source-attention { background: #3a2a0f; color: #fbbf24; }
+.evidence-review-button.has-attention { color: var(--text); border-color: var(--border); background: var(--surface-solid); }
+.evidence-review-button.has-attention:hover { background: var(--surface-muted); border-color: var(--border-strong); }
+.evidence-review-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* One header for both ways in: a claim's points or a chapter's originals step with the same arrows beside the
+   close button; reading an original shows no title, since the highlighted message below is that original. */
+.workspace-source-panel > header.is-message { align-items: center; padding-block: 12px; }
+.workspace-source-panel > header.is-message .workspace-source-point-head { flex: 1; }
+.workspace-source-single { color: var(--muted); font-size: 13px; }
+.workspace-source-panel > footer > button[aria-pressed="true"]:not(.workspace-source-reviewed) { color: var(--accent); }
+
+/* One compact header in both modes; the warning spans the panel under it. */
+:is(.focus-workspace,.focus-preview) .workspace-source-panel > header.is-point { min-height: 0; padding: 12px 16px 12px 20px; }
+.workspace-source-panel > .workspace-source-attention { flex: 0 0 auto; margin: 0; padding: 10px 20px; border-radius: 0; border-bottom: 1px solid var(--border); }
+/* Reading the whole conversation: the cited turn stays clear, the rest recedes and is separated by turn. */
+.workspace-source-panel.is-context .workspace-source-message:not(.is-source-target) { opacity: .78; }
+.workspace-source-panel.is-context .workspace-source-message + .workspace-source-message { margin-top: 18px; }
+.workspace-source-panel.is-context .workspace-source-message.is-source-target { opacity: 1; }
+/* One question about the sentence and its answers: answering is how a wrong status is fixed. The current answer is
+   pressed; answering moves on to the next point. */
+.workspace-source-holder { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.workspace-source-holder > span { color: var(--text); font-size: 14px; font-weight: 600; }
+.workspace-source-holder > span small { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; font-weight: 400; }
+.workspace-source-holder > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.workspace-source-holder button { min-height: 32px; padding: 4px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid, transparent); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.workspace-source-holder button:hover { background: var(--surface-muted); }
+.workspace-source-holder button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.workspace-source-holder button.is-holder-open[aria-pressed="true"] { border-color: #d97706; background: color-mix(in srgb, #d97706 14%, transparent); color: #b45309; }
+.workspace-source-holder button.is-holder-earlier[aria-pressed="true"] { border-color: var(--muted); background: var(--surface-muted); color: var(--muted); }
+.workspace-source-holder button.workspace-source-holder-more,
+.workspace-source-holder-change { min-height: 32px; padding: 4px 6px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.workspace-source-holder button.workspace-source-holder-more:hover,
+.workspace-source-holder-change:hover { color: var(--text); background: transparent; text-decoration: underline; }
+.workspace-source-holder button.is-quiet { border-color: transparent; background: transparent; color: var(--muted); }
+.workspace-source-holder-done { display: flex; align-items: center; gap: 4px; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+.workspace-source-holder-done b { color: var(--text); font-weight: 600; }
+.workspace-source-holder-done .workspace-source-holder-change { min-height: 26px; margin-left: 4px; }
+.workspace-source-holder button:focus-visible,
+.workspace-source-holder-change:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A workspace check reaching a chapter's last point: one clear way on to the next chapter. */
+.workspace-source-next-chapter { display: block; width: calc(100% - 32px); margin: 8px 16px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.workspace-source-next-chapter:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.workspace-source-next-chapter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

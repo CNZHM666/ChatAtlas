@@ -1,0 +1,36 @@
+.ai-platform-filter{display:flex;align-items:stretch;gap:12px;min-width:0;border-bottom:1px solid var(--border)}
+.ai-platform-tabs{display:flex;align-items:stretch;gap:12px;min-width:0;flex:1;overflow-x:auto;scrollbar-width:none}
+.ai-platform-tabs::-webkit-scrollbar{display:none}
+.ai-platform-filter .ai-platform-tabs>button{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:9px;flex:none;min-height:56px;margin:0;padding:15px 10px 17px;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--muted);font-size:13px;line-height:20px;font-weight:400;white-space:nowrap;cursor:pointer}
+.ai-platform-filter .ai-platform-tabs>button:hover{color:var(--text)}
+.ai-platform-filter .ai-platform-tabs>button[aria-pressed=true]{color:var(--accent);font-weight:600}
+.ai-platform-tabs>button::after{content:"";position:absolute;inset:auto 0 0;height:2px;border-radius:2px;background:transparent}
+.ai-platform-tabs>button[aria-pressed=true]::after{background:var(--accent)}
+.ai-platform-tabs>button small{font-size:11px;font-weight:400;font-variant-numeric:tabular-nums;opacity:.7}
+.ai-platform-filter .ai-platform-tabs>button:focus-visible,.ai-platform-filter .ai-platform-more-trigger:focus-visible{outline:2px solid var(--accent);outline-offset:-3px;border-radius:6px}
+.ai-platform-more{position:relative;display:flex;align-items:center;flex:none;width:168px;max-width:45%;margin:0;padding-left:14px}
+.ai-platform-more::before{content:"";position:absolute;left:0;top:13px;bottom:13px;width:1px;background:var(--border)}
+.ai-platform-filter .ai-platform-more-trigger{display:flex;align-items:center;gap:8px;width:100%;min-width:0;min-height:36px;margin:0;padding:8px 10px;border:1px solid transparent;border-radius:7px;background:transparent;box-shadow:none;color:var(--muted);font:inherit;font-size:13px;line-height:20px;cursor:pointer}
+.ai-platform-more-trigger>span:not(.ai-platform-icon){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-platform-more-trigger>svg:last-child{margin-left:auto;flex:none;transition:transform .15s}
+.ai-platform-more-trigger[aria-expanded=true]>svg:last-child{transform:rotate(180deg)}
+.ai-platform-more-trigger>small{margin-left:auto;font-size:11px;font-variant-numeric:tabular-nums}
+.ai-platform-filter .ai-platform-more-trigger:hover,.ai-platform-filter .ai-platform-more-trigger[aria-expanded=true]{background:var(--surface-muted);color:var(--text)}
+.ai-platform-filter .ai-platform-more.is-active .ai-platform-more-trigger{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.ai-platform-icon{display:inline-flex;align-items:center;justify-content:center;flex:0 0 20px;width:20px;height:20px;color:var(--text);line-height:1}
+.ai-platform-icon>img{display:block;width:20px;height:20px;object-fit:contain}
+.ai-platform-icon-mask{display:block;width:20px;height:20px;mask-position:center;mask-repeat:no-repeat;mask-size:contain;-webkit-mask-position:center;-webkit-mask-repeat:no-repeat;-webkit-mask-size:contain;background:currentColor}
+.ai-platform-icon.is-yuanbao{color:#00ac65}
+.ai-platform-menu{position:fixed;z-index:1000;box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;padding:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface-solid);box-shadow:0 8px 30px #0002;color:var(--text);scrollbar-width:thin}
+.ai-platform-menu>button{display:flex;align-items:center;gap:11px;width:100%;min-height:44px;margin:0;padding:10px 12px;border:0;border-radius:7px;background:transparent;color:var(--text);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.ai-platform-menu>button>span:not(.ai-platform-icon){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-platform-menu>button>small{margin-left:auto;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+.ai-platform-menu>button>svg{flex:none;color:var(--accent)}
+.ai-platform-menu>button:hover,.ai-platform-menu>button:focus-visible{background:var(--surface-muted);outline:0}
+.ai-platform-menu>button[aria-selected=true]{color:var(--accent);background:var(--accent-soft);font-weight:600}
+.workbench-sync{grid-template-columns:minmax(0,1fr)}
+.workbench-platform-row{min-width:0;padding:0 20px;background:transparent}
+.review-home:not(.is-import-first) .home-materials .workbench-platform-row{padding-inline:0}
+.review-home .home-materials .workbench-platform-row+.workbench-sync-toolbar{margin-top:0;padding-top:12px}
+
+@media(max-width:640px){.workbench-platform-row{padding-inline:12px}.ai-platform-filter{gap:10px}.ai-platform-tabs{gap:10px}.ai-platform-filter .ai-platform-tabs>button{min-height:50px;padding:12px 6px 14px}.ai-platform-filter .ai-platform-tabs>button,.ai-platform-filter .ai-platform-more-trigger{font-size:12px}.ai-platform-more{width:142px;padding-left:10px}.ai-platform-filter .ai-platform-more-trigger{gap:7px;padding-inline:8px}}

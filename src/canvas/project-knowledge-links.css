@@ -1,0 +1,78 @@
+.matter-knowledge-actions { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 18px; }
+.matter-knowledge-toolbar, .matter-knowledge-links { display: grid; gap: 10px; }
+.matter-knowledge-toolbar > button { justify-self: start; }
+.matter-knowledge-actions blockquote { padding-left: 12px; border-left: 2px solid var(--border); margin: 0; }
+.wiki-knowledge-links { padding-top: 24px; margin-top: 28px; border-top: 1px solid var(--border); }
+.wiki-knowledge-links > section + section { margin-top: 28px; }
+.wiki-knowledge-links section > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.focus-workspace .wiki-knowledge-links section > header { padding: 0; margin: 0; border: 0; min-height: 0; }
+.wiki-knowledge-links h2 { font-size: 18px; margin: 0; }
+.wiki-knowledge-links h3 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
+.wiki-linked-conclusion { padding: 16px 0; }
+.wiki-linked-conclusion + .wiki-linked-conclusion { border-top: 1px solid var(--border); }
+.wiki-linked-conclusion p { font-size: 16px; line-height: 1.75; margin: 6px 0 10px; white-space: pre-wrap; }
+.wiki-linked-conclusion small { color: var(--muted); font-size: 13px; }
+.wiki-linked-conclusion footer, .wiki-linked-conclusion footer > div, .wiki-linked-conclusion footer small { display: flex; align-items: center; gap: 8px; }
+.wiki-linked-conclusion footer { justify-content: space-between; gap: 12px; }
+.wiki-linked-conclusion :is(h3,p) { overflow-wrap: anywhere; }
+.wiki-knowledge-links header > small { color: var(--muted); font-size: 13px; }
+.focus-workspace .wiki-knowledge-links button { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; padding: 5px 0; background: transparent; border: 0; }
+.knowledge-more { position: relative; flex-shrink: 0; }
+.knowledge-more > summary { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; cursor: pointer; list-style: none; color: var(--muted); border-radius: 6px; }
+.knowledge-more > summary::-webkit-details-marker { display: none; }
+.knowledge-more > summary:hover { background: var(--surface-muted); color: var(--text); }
+.knowledge-more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.knowledge-more > div { position: absolute; right: 0; top: 100%; z-index: 5; min-width: 170px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); box-shadow: 0 8px 24px #0002; }
+.focus-workspace .knowledge-more > div > button { display: block; text-align: left; width: 100%; padding: 8px 10px; }
+.focus-workspace .knowledge-more > div > button:hover { background: var(--surface-muted); }
+.wiki-knowledge-links ul { padding: 0; list-style: none; display: grid; gap: 10px; }
+.wiki-knowledge-links .project-record-editor label { display: flex; align-items: center; gap: 8px; }
+.focus-workspace .wiki-knowledge-links input[type=checkbox] { width: auto; }
+.record-detail-body .project-record-editor input[type=checkbox] { width: auto; }
+.record-detail-body .project-record-editor label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 10px; }
+@media(max-width: 520px) { .wiki-linked-conclusion footer { flex-wrap: wrap; } .wiki-linked-conclusion footer > div { margin-left: auto; } }
+.matter-candidate-review > ul { list-style: none; padding: 0; }
+.matter-candidate-review li { padding: 16px 0; border-top: 1px solid var(--border); }
+.matter-candidate-review label { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.focus-workspace .matter-candidate-review input { width: auto; }
+.matter-candidate-review strong { flex: 1; font-size: 16px; }
+.matter-candidate-review small { font-size: 13px; color: var(--muted); }
+.matter-candidate-review details { margin-top: 8px; }
+.matter-candidate-review p { font-size: 15px; line-height: 1.8; }
+.home-recent-projects { margin-bottom: 28px; }
+.review-home .home-recent-projects .reading-list .focus-result-group > button { display: grid; grid-template-columns: 20px minmax(0,1fr) 16px; align-items: center; }
+.home-recent-projects .focus-result-group > button > span { min-width: 0; }
+.home-project-next { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; }
+.home-intent-choice { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 0; }
+.home-intent-choice > p { width: 100%; margin: 0 0 4px; color: var(--muted); font-size: 14px; }
+.history-candidate-entry { border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+.history-candidate-entry > button:first-child { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; text-align: left; background: transparent; border: 0; }
+.history-candidate-entry > button:first-child > span:first-of-type { flex: 1; min-width: 0; }
+.history-candidate-entry strong { display: block; font-size: 16px; }
+.history-candidate-entry small { display: block; font-size: 13px; color: var(--muted); line-height: 1.65; margin-top: 5px; }
+.review-home .history-candidate-sources { border: 0; background: transparent; color: var(--muted); font-size: 13px; margin-left: 38px; }
+.record-detail-body .home-discovery-evidence { position: relative; height: 600px; width: 100%; min-height: 0; margin: 0; padding: 0; background: transparent; border: 0; }
+.home-discovery-evidence .workspace-source-panel { position: static; flex: 1; width: 100%; border: 0; box-shadow: none; }
+.home-discovery-evidence .workspace-source-panel > header { padding:16px 20px; }
+.home-discovery-evidence .workspace-source-body { padding:20px; }
+.home-discovery-evidence .workspace-source-panel > footer { padding-inline: 0; }
+.wiki-inline-diagram { margin: 22px 0 28px; }
+.wiki-inline-diagram:empty { display: none; }
+.focus-workspace .wiki-inline-diagram > header { display: flex; align-items: center; justify-content: space-between; padding: 0; margin: 0 0 12px; border: 0; }
+.wiki-inline-diagram > header small { font-size: 13px; color: var(--muted); }
+.wiki-diagram-suggestion { display: flex; align-items: center; gap: 10px; padding: 14px 0; font-size: 15px; }
+.wiki-diagram-suggestion > span { flex: 1; }
+.wiki-diagram-suggestion > span { min-width: 0; overflow-wrap: anywhere; }
+.wiki-diagram-suggestion > :is(svg,button) { flex-shrink: 0; }
+.wiki-diagram-position { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wiki-diagram-position > label { flex: 1; min-width: 180px; }
+.wiki-sources-unified { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+.wiki-sources-unified > .wiki-evidence { border: 0; margin: 8px 0 16px; padding: 0; }
+.wiki-sources-unified .wiki-evidence > ul { padding: 0; }
+.wiki-sources-unified .wiki-evidence li { margin: 0; }
+.wiki-sources-unified .chapter-source-conversations > section { padding-top: 12px; }
+.wiki-knowledge-links > section + section { margin-top: 12px; }
+.wiki-knowledge-links header:empty { display: none; }
+.wiki-knowledge-links .wiki-linked-conclusion:last-child { padding-bottom: 0; }
+.focus-workspace .wiki-document .knowledge-more > summary { padding: 0; min-height: 32px; height: 32px; width: 32px; border: 0; }
+.wiki-edit-structure { margin-top: 24px; }

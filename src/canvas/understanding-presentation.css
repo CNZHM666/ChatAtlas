@@ -1,0 +1,122 @@
+.understanding-blocks { border: 1px solid var(--border); border-radius: 12px; padding: 8px 20px; background: var(--surface); }
+.understanding-point-group + .understanding-point-group { border-top: 1px solid var(--border); padding-top: 12px; }
+.understanding-point-group h3 { margin: 8px 0 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+:is(.focus-workspace,.focus-preview) .understanding-point-group ol { display: block; list-style: none; padding: 0; margin: 0; }
+:is(.focus-workspace,.focus-preview) .understanding-point-group li { margin: 0; }
+.understanding-point-group li + li { border-top: 1px solid var(--border); }
+:is(.focus-workspace,.focus-preview) .understanding-point-group button { width: 100%; max-width: none; display: flex; align-items: center; gap: 14px; padding: 14px 0; border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: start; }
+.understanding-point-group button:hover .understanding-point-text strong { color: var(--accent); }
+.understanding-point-text { flex: 1; min-width: 0; display: grid; gap: 5px; }
+:is(.focus-workspace,.focus-preview) .understanding-point-text strong { color: var(--text); font-size: 15px; line-height: 1.55; font-weight: 600; overflow-wrap: anywhere; }
+.understanding-point-text > span { color: var(--muted); font-size: 14px; line-height: 1.65; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.understanding-point-group button > small { flex: none; font-size: 12px; color: var(--muted); }
+.understanding-point-arrow { flex: none; color: var(--muted); font-size: 14px; }
+.understanding-recall { border: 1px solid var(--border); border-radius: 12px; }
+.understanding-recall > summary { cursor: pointer; padding: 16px 20px; font-size: 14px; font-weight: 500; }
+.understanding-recall .understanding-blocks { border: 0; border-top: 1px solid var(--border); border-radius: 0 0 12px 12px; }
+.understanding-comparison { overflow-x: auto; padding-block: 12px; }
+:is(.focus-workspace,.focus-preview) .understanding-comparison .conversation-answer-markdown table { display: table; width: 100%; min-width: 440px; font-size: 14px; }
+.understanding-version-points ol { margin-left: 6px; border-left: 2px solid var(--border); }
+.understanding-version-points li { position: relative; padding-left: 20px; }
+.understanding-version-points li::before { content: ""; position: absolute; top: 22px; left: -5px; height: 8px; width: 8px; border-radius: 50%; background: var(--accent); }
+.understanding-secondary { margin-top: 12px; }
+.understanding-secondary > summary { font-size: 13px; color: var(--muted); cursor: pointer; padding: 8px 0; }
+.understanding-delete { margin-right: auto; color: var(--muted); }
+@media (max-width: 600px) { .understanding-blocks { padding-inline: 14px; } .understanding-point-group button { gap: 8px; } }
+
+/* Scope beats the legacy SVG/list selectors, independent of stylesheet load order. */
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-blocks { padding: 18px; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group + .understanding-point-group { margin-top: 22px; padding-top: 0; border: 0; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group h3 { margin: 0 0 10px; font-size: 14px; line-height: 1.5; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; border: 0; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group li { display: flex; min-width: 0; margin: 0; padding: 0; border: 0; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group li::before, :is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group li::after { display: none; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group li > button { display: flex; width: 100%; max-width: none; min-height: 104px; height: 100%; padding: 14px 16px; gap: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid); align-items: flex-start; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-text { display: grid; flex: 1; gap: 6px; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-text > strong { display: block; font-size: 15px; line-height: 1.5; color: var(--text); }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-text > span { display: -webkit-box; font-size: 14px; line-height: 1.65; color: var(--muted); }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group li > button > :is(small,.understanding-point-arrow) { flex: none; margin-top: 2px; font-size: 12px; line-height: 1.5; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group li > button:hover { border-color: var(--border-strong); background: var(--surface-muted); }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-version-points .understanding-point-group ol { display: block; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-version-points .understanding-point-group li + li { margin-top: 10px; }
+@media (max-width: 680px) { :is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-point-group ol { grid-template-columns: minmax(0, 1fr); } }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-version-points .understanding-point-group ol { margin-left: 6px; border-left: 2px solid var(--border); }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-version-points .understanding-point-group li { display: block; padding-left: 20px; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-version-points .understanding-point-group li::before { display: block; left: -5px; top: 22px; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-version-points .understanding-point-group li > button { height: auto; min-height: 0; padding: 14px 0; border: 0; background: transparent; }
+/* Adaptive reading surfaces deliberately avoid the legacy diagram/card grid. */
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-digest { border: 1px solid var(--border); border-radius: 12px; padding: 4px 20px; background: var(--surface); }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-digest-list { display: block; list-style: none; padding: 0; margin: 0; border: 0; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-digest-list > li { display: block; width: auto; margin: 0; padding: 0; border: 0; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-digest-list > li::before,
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-digest-list > li::after { display: none; }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-digest-list > li + li { border-top: 1px solid var(--border); }
+:is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-digest-list button { display: flex; width: 100%; max-width: none; min-height: 0; height: auto; align-items: flex-start; gap: 14px; padding: 16px 0; text-align: start; border: 0; border-radius: 0; background: transparent; color: var(--text); }
+.understanding-digest-copy { display: grid; flex: 1; min-width: 0; gap: 5px; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.understanding-digest-name { display: flex; align-items: baseline; gap: 10px; }
+:is(.focus-workspace,.focus-preview) .understanding-digest-name strong { font-size: 15px; line-height: 1.6; font-weight: 600; color: var(--text); }
+.understanding-digest-name small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.understanding-digest-copy > span:not(.understanding-digest-name) { color: var(--muted); }
+.understanding-digest-open { color: var(--muted); font-size: 14px; margin-top: 2px; }
+.understanding-digest-list button:hover .understanding-digest-name strong { color: var(--accent); }
+.understanding-digest-io { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 5px 18px; margin-top: 3px; font-size: 13px; }
+.understanding-digest-io > span { display: flex; gap: 8px; }
+.understanding-digest-io b { flex: none; font-weight: 500; color: var(--text); }
+.understanding-step-number { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 50%; color: var(--muted); font-size: 12px; }
+:is(.focus-workspace,.focus-preview) .understanding-digest .understanding-step-transfer { margin: 10px 0 0 40px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.understanding-digest > .understanding-secondary { margin: 0; border-top: 1px solid var(--border); }
+.understanding-digest > .understanding-secondary > summary { padding: 12px 0; }
+.understanding-recall .understanding-digest { border: 0; }
+@media(max-width:600px) { .understanding-digest-io { grid-template-columns: minmax(0,1fr); } :is(.focus-workspace,.focus-preview) .reader-understanding-map .understanding-digest { padding-inline: 14px; } }
+
+/* Source-backed explanations complement compact diagrams without duplicating the article. */
+:is(.focus-workspace,.focus-preview) .understanding-guide { margin: 0 0 12px; padding: 0; background: transparent; color: var(--muted); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.understanding-guide strong { font-weight: 500; color: var(--text); }
+:is(.focus-workspace,.focus-preview) .chapter-map-details .route-relations.concrete-relations > ul { display: block; margin-top: 4px; }
+:is(.focus-workspace,.focus-preview) .chapter-map-details .route-relations.concrete-relations > ul > li { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px 14px; padding: 10px 0; border: 0; border-radius: 0; background: transparent; }
+:is(.focus-workspace,.focus-preview) .chapter-map-details .route-relations.concrete-relations > ul > li + li { border-top: 1px solid var(--border); }
+:is(.focus-workspace,.focus-preview) .chapter-map-details .relation-reference { display: none; }
+:is(.focus-workspace,.focus-preview) .chapter-map-details .route-relations.concrete-relations .relation-explain { padding: 0; width: auto; align-self: center; }
+:is(.focus-workspace,.focus-preview) .chapter-map-details .relation-evidence { grid-column: 1 / -1; font-size: 13px; }
+.understanding-digest-heading { padding: 14px 0 0; color: var(--muted); font-size: 12px; }
+:is(.focus-workspace,.focus-preview) .understanding-digest-modules .understanding-digest-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 24px; }
+:is(.focus-workspace,.focus-preview) .understanding-digest-modules .understanding-digest-list > li { border-bottom: 1px solid var(--border); border-top: 0; }
+.chapter-project-links { margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+.chapter-project-links summary { cursor: pointer; }
+.chapter-project-links > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+@media(max-width:600px) { :is(.focus-workspace,.focus-preview) .understanding-digest-modules .understanding-digest-list { grid-template-columns: minmax(0,1fr); } }
+
+/* Reading aids appear only when they add relationships or personal understanding. */
+.chapter-understanding-tools, .project-topic-index > details, .reader-supplement { margin: 14px 0; color: var(--muted); font-size: 13px; }
+.chapter-understanding-tools > summary, .project-topic-index > details > summary, .reader-supplement > summary { cursor: pointer; padding: 8px 0; }
+.chapter-understanding-tools > button, .project-topic-index > details > button { margin: 8px 8px 0 0; }
+.chapter-reading-guide { margin: 20px 0; padding: 16px 18px; border-radius: 12px; background: var(--surface-muted); }
+.chapter-reading-guide > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.chapter-reading-guide h2 { margin: 0; font-size: var(--text-lg); line-height: 1.5; }
+.chapter-reading-guide > p { margin: 10px 0 0; font-size: var(--text-sm); color: var(--muted); }
+.chapter-reading-guide nav ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; list-style: none; margin: 10px 0 0; padding: 0; }
+:is(.focus-workspace,.focus-preview) .chapter-reading-guide nav button { display: block; width: 100%; padding: 6px 0; text-align: left; border: 0; background: transparent; color: var(--text); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.chapter-reading-guide nav button:hover { color: var(--accent); }
+.chapter-reading-guide nav details { margin-top: 6px; color: var(--muted); font-size: var(--text-sm); }
+.chapter-reading-guide nav summary { cursor: pointer; }
+.chapter-reading-guide .chapter-understanding-tools { margin-bottom: 0; }
+@media (max-width: 560px) { .chapter-reading-guide nav ol { grid-template-columns: minmax(0, 1fr); } }
+.project-topic-index nav { display: grid; gap: 4px; margin: 8px 0; }
+.project-topic-index nav button { display: flex; align-items: center; justify-content: space-between; text-align: left; border: 0; background: transparent; padding: 10px 12px; color: var(--text); border-radius: 8px; }
+.project-topic-index nav button:hover { background: var(--surface-muted); }
+.project-topic-index > section > h2 { font-size: 16px; }
+.reader-supplement table { margin-top: 8px; }
+.project-architecture-empty { padding: 14px 0; color: var(--muted); font-size: var(--text-sm); }
+.project-architecture-empty p { margin: 0 0 10px; }
+.project-architecture-empty > button { margin-right: 10px; }
+.chapter-product-context { margin: 16px 0 22px; padding: 14px 18px; border-left: 2px solid var(--accent); background: var(--surface-muted); border-radius: 0 8px 8px 0; }
+.chapter-product-context h2 { margin: 0 0 10px; font-size: var(--text-sm); font-weight: 500; color: var(--muted); }
+.chapter-product-context ul { margin: 0; padding: 0; list-style: none; }
+.chapter-product-context li + li { margin-top: 12px; }
+.chapter-context-module { display: flex; align-items: baseline; gap: 10px; }
+.chapter-context-module > span { font-size: var(--text-xs); color: var(--muted); }
+:is(.focus-workspace,.focus-preview) .chapter-product-context button { border: 0; background: transparent; padding: 0; color: var(--text); text-align: left; font-size: var(--text-sm); }
+:is(.focus-workspace,.focus-preview) .chapter-product-context button:hover { color: var(--accent); }
+.chapter-context-connections p { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 6px 0 0; font-size: var(--text-sm); }
+.chapter-context-connections span, .chapter-context-io { color: var(--muted); font-size: var(--text-xs); }
+.chapter-context-io { margin: 6px 0 0; }
