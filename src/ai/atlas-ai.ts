@@ -68,9 +68,8 @@ const NETWORK_RETRY_DELAYS_MS = [2000, 8000, 20000];
 /** A provider that is busy (429, 503) generated nothing: the same quiet resends, waiting at least as long as
  * it asks, at most this long. */
 const BUSY_RETRY_MAX_MS = 30_000;
-/** Multiplies every retry pause. Always 1 in the product; a test that exercises
- * many retries may set 0 so it does not wait in real time. */
-export const aiRetryTiming = { scale: 1 };
+import { aiRetryTiming } from "./retry-timing";
+export { aiRetryTiming };
 /** Streaming providers send response headers within about 4 s of accepting a request.
  * A failure with no header inside this window means the connection never opened: on
  * Windows the TCP connect timeout ends such requests at about 21 s (every network

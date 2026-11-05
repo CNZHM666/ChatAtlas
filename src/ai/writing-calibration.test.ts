@@ -20,7 +20,10 @@ async function organize(model: string) {
   vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
     const parsed = JSON.parse((JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }).messages[1].content);
     let value: unknown;
-    if (parsed.presentation === "wiki_topic_plan") {
+    // The title pass carries no data: read as a passage, it threw, was taken for a dropped connection and resent after a
+    // real 2-second wait, twice per run. That wait, not the work, put this test at the 5-second limit on CI.
+    if (parsed.presentation === "wiki_title_edit") value = { titles: (parsed.titles as Array<{ id: string; title: string }>).map(item => ({ id: item.id, title: item.title, keep: true })) };
+    else if (parsed.presentation === "wiki_topic_plan") {
       value = {scope:[],  pages: [{ title: "消息检索", group: "功能", question: "检索如何工作？", subtopics: [{ key: "t0", title: "具体机制", question: "哪些机制？" }] }], assignments: Object.fromEntries((parsed.sections as Array<{ id: string }>).map(section => [section.id, "t0"])) };
     } else if (!parsed.data.coverage?.final) {
       value = { notes: [{ title: "消息检索", text: parsed.data.passages[0].text, start: 0, phase: "讨论", transition: "" }] };
