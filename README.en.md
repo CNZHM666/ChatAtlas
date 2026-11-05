@@ -23,15 +23,16 @@ ChatAtlas is a local-first Chrome extension. It saves your conversations from AI
 
 What each part is for:
 
-| Part | Purpose |
-| --- | --- |
-| Sidecar | The current conversation, local search and project links; short actions, little on screen |
-| Conversation library | The original material, in its original question-and-answer order |
-| Knowledge Space | What to organize, decided by your goal and the sources you confirm |
-| Reader | Continuous reading along knowledge and its related originals |
-| Overview and Wiki | The overview gives a short introduction, reading order and sources; lasting detail lives in the Wiki |
+| Part | Where you open it | Purpose |
+| --- | --- | --- |
+| Workbench home | The extension icon | One input to search past discussions or get an answer from them; manage source material and sync; pick up the last reading or project |
+| Discover topics | **Discover topics** on the home page | AI finds projects worth organizing and topics worth reviewing in your recent conversations, each listing its sources for you to check first (needs an AI connection) |
+| Conversation reader | A search result or the source list | Read a whole conversation in its original question-and-answer order, and locate it on the original website |
+| Project document | **Organize into a project** on the home page | Choose sources and a goal, answer the questions before writing, and generate an overview and Wiki; review, edit, update and export |
+| Chapter reading | Inside a project document | Read along Wiki chapters and their originals, going straight on to the next chapter |
+| Side panel | Beside an AI website | Local search for the current conversation, project links, and filling the composer |
 
-The intended reading path is knowledge graph → Reader → continuous context → previous/next knowledge. That is the direction, not yet fully built. See the [product principles](docs/en/PRODUCT_PRINCIPLES.md).
+The usual path: **search or ask → read the original conversation → organize a project document → read along chapters and sources → export to another AI**. Searching, reading and exporting need no AI key. Product decisions follow the [product principles](docs/en/PRODUCT_PRINCIPLES.md).
 
 ## Supported platforms
 
