@@ -160,7 +160,7 @@ export class NativeHistoryAdapter {
           }
           items = branch;
         }
-        batch = items.map(row => {
+        batch = items.flatMap(row => {
           const role = string(row.role).toLowerCase();
           if (role !== "user" && role !== "assistant") return fail();
           const fragments = row.fragments == null ? [] : rows(row.fragments);
@@ -172,12 +172,17 @@ export class NativeHistoryAdapter {
           // named as the other platforms name attachments. Without them the whole conversation was refused. A file without a name still counts.
           const files = [row.files, ...fragments.map(fragment => fragment.files)].flatMap(list => Array.isArray(list) ? list.map(file => { const item = object(file); return string(item.file_name ?? item.name ?? item.fileName ?? item.title); }) : []);
           const attached = files.map(name => name ? `【附件 ${name}】` : "【附件】").join("\n");
-          // A user message whose text sits in a fragment type this reader does not know yet; the model's reasoning and searches are never the user's words.
-          const otherText = role === "user" ? fragments.filter(fragment => fragment.type !== "THINK" && fragment.type !== "SEARCH").map(fragment => text(fragment.content)).filter(value => value.trim()).join("\n\n") : "";
+          // Text in a fragment type this reader does not know yet; the model's reasoning and searches are never the discussion.
+          const otherText = fragments.filter(fragment => fragment.type !== "THINK" && fragment.type !== "SEARCH").map(fragment => text(fragment.content)).filter(value => value.trim()).join("\n\n");
           const content = fragmentText || (bodyText.trim() ? bodyText : text(row.text)) || otherText || attached;
           const messageId = string(row.message_id ?? row.id) || fail();
-          if (!content.trim()) shapes.set(messageId, `${Object.keys(row).sort().join(",")}${fragments.length ? `; fragments ${fragments.map(fragment => string(fragment.type) || "?").join(",")}` : ""}`);
-          return { id: messageId, role, content, createdAt: sourceTimestamp(row.inserted_at ?? row.created_at) };
+          // An answer stopped, failed or cut off before it said anything (the website shows it empty, or only its
+          // reasoning) holds no text to lose: it is left out. Refusing it failed the whole conversation, whose every
+          // other message read fine. A user message without text still refuses: its words would be lost.
+          if (!content.trim() && role === "assistant") return [];
+          // The fragment types first: the field list is cut to fit the message.
+          if (!content.trim()) shapes.set(messageId, `${fragments.length ? `fragments ${fragments.map(fragment => string(fragment.type) || "?").join(",")}; ` : ""}${Object.keys(row).sort().join(",")}`);
+          return [{ id: messageId, role, content, createdAt: sourceTimestamp(row.inserted_at ?? row.created_at) }];
         });
         next = more(data.has_more, data.next_cursor);
       } else if (platform === "kimi") {

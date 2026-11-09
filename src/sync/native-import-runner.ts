@@ -178,6 +178,13 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
       await publish(job);
     }
   };
+  // A saved source keeps the tab it was detected in, which may have closed since: the AI's tabs open now replace it.
+  const refreshTabs = (job: ImportJob, open: NativeImportSource[]) => {
+    for (const source of job.native!.sources) {
+      const match = open.find(item => item.id === source.id && item.platform === source.platform && item.origin === source.origin);
+      if (match) source.tabId = match.tabId;
+    }
+  };
   const launch = async (job: ImportJob) => {
     paused = false; sourceLimits.clear(); current = job; await publish(job);
     const activity = setInterval(() => {
@@ -201,6 +208,7 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
         else {
           const runningJob = current!;
           const records = await Promise.all(ids.map(getConversation));
+          refreshTabs(runningJob, available);
           for (const item of records) {
             if (!item) throw Error("Selected source missing");
             if (runningJob.native!.sources.some(source => source.id === item.nativeHistorySourceId)) continue;
@@ -220,6 +228,7 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
       const records = await Promise.all([...new Set(ids)].map(getConversation));
       const valid = records.filter((item): item is Conversation => Boolean(item));
       if (valid.length !== new Set(ids).size) throw Error("所选来源缺失 / Selected source missing");
+      refreshTabs(job, available);
       for (const item of valid) {
         if (job.native.sources.some(source => source.id === item.nativeHistorySourceId)) continue;
         const source = available.find(source => source.id === item.nativeHistorySourceId);
@@ -247,10 +256,7 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
       if (flight) return structuredClone(current!);
       const job = await getImportJob();
       if (!job?.native) throw Error("No native import checkpoint");
-      if (sources) for (const source of job.native.sources) {
-        const match = sources.find(item => item.id === source.id && item.platform === source.platform && item.origin === source.origin);
-        if (match) source.tabId = match.tabId;
-      }
+      if (sources) refreshTabs(job, sources);
       for (const source of job.native.sources) delete source.error;
       job.pendingIds = [...new Set([...job.pendingIds, ...job.failedIds])];
       job.failedIds = []; job.lastError = undefined;

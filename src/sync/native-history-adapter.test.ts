@@ -95,7 +95,18 @@ describe("native history protocols", () => {
   it("names the fields of a DeepSeek message it cannot read, without its text", async () => {
     const s = { ...source("deepseek"), account: "account-a" };
     const adapter = new NativeHistoryAdapter(s, async () => reply({ data: { biz_data: { chat_messages: [{ message_id: 1, role: "USER", fragments: [{ type: "THINK", content: "Secret" }], extra: 1 }] } } }));
-    await expect(adapter.detail({ id: "deepseek:a", platform: "deepseek", title: "A", url: "", updatedAt: 1, messageCount: null })).rejects.toThrow("字段 extra,fragments,message_id,role; fragments THINK");
+    await expect(adapter.detail({ id: "deepseek:a", platform: "deepseek", title: "A", url: "", updatedAt: 1, messageCount: null })).rejects.toThrow("字段 fragments THINK; extra,fragments,message_id,role");
+  });
+  it("leaves out a DeepSeek answer stopped before it said anything, and reads an answer in an unknown fragment type", async () => {
+    const s = { ...source("deepseek"), account: "account-a" };
+    const adapter = new NativeHistoryAdapter(s, async () => reply({ data: { biz_data: { chat_messages: [
+      { message_id: 1, role: "USER", fragments: [{ type: "REQUEST", content: "First question" }] },
+      { message_id: 2, role: "ASSISTANT", fragments: [{ type: "THINK", content: "Reasoning" }], incomplete_message: true, has_pending_fragment: false },
+      { message_id: 3, role: "USER", fragments: [{ type: "REQUEST", content: "Asked again" }] },
+      { message_id: 4, role: "ASSISTANT", fragments: [{ type: "ANSWER", content: "New answer type" }] },
+    ] } } }));
+    const capture = await adapter.detail({ id: "deepseek:a", platform: "deepseek", title: "A", url: "", updatedAt: 1, messageCount: null });
+    expect(capture.messages.map(message => message.content)).toEqual(["First question", "Asked again", "New answer type"]);
   });
   it("dates a DeepSeek conversation that its list gave no start time by its first message", async () => {
     const s = { ...source("deepseek"), account: "account-a" };

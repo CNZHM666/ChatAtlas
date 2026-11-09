@@ -45,3 +45,17 @@ it("rejects an account switch both before and during a history request", async (
   expect(fetch).not.toHaveBeenCalled();
   await expect(nativeHistoryRequest({ ...source }, { path: "/api/v0/chat_session/fetch_page" })).rejects.toThrow("session changed");
 });
+it("reads through another open tab of the same AI when the detected tab has closed, and says to open the AI when none is", async () => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: { biz_data: { chat_sessions: [], has_more: false } } }) });
+  vi.stubGlobal("fetch", fetch);
+  const get = vi.fn(async (id: number) => { if (id === 3) throw Error("No tab with id: 3."); return { id, url: "https://chat.deepseek.com/a/chat/s/x" }; });
+  const query = vi.fn().mockResolvedValue([{ id: 9, url: "https://chatgpt.com/" }, { id: 7, url: "https://chat.deepseek.com/a/chat/s/x" }]);
+  const executeScript = vi.fn(async (options: { target: { tabId: number }; func: (...args: unknown[]) => unknown; args: unknown[] }) => [{ result: await options.func(...options.args) }]);
+  vi.stubGlobal("chrome", { tabs: { get, query }, scripting: { executeScript } });
+  const moved = { ...source, id: "https://chat.deepseek.com" };
+  await nativeHistoryRequest(moved, { path: "/api/v0/chat_session/fetch_page" });
+  expect(executeScript.mock.calls[0][0].target.tabId).toBe(7);
+  expect(moved.tabId).toBe(7);
+  query.mockResolvedValue([]);
+  await expect(nativeHistoryRequest({ ...moved, tabId: 3 }, { path: "/api/v0/chat_session/fetch_page" })).rejects.toThrow("请先在浏览器中打开 DeepSeek");
+});

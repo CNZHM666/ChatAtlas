@@ -1,10 +1,23 @@
 import type { NativeImportSource, NativeReply, NativeRequest } from "../shared/native-import";
 import { webCaptureSite } from "../shared/web-capture";
+import { nativeImportSources } from "../shared/native-import-sources";
+
+/** The tab to read through: the one the source was detected in, else another open tab of the same AI and account slot.
+ * A source remembers the tab it was first found in; once that tab closes or leaves the site, every conversation of a
+ * later sync failed with Chrome's "No tab with id", though the AI was open in another tab. */
+async function sourceTab(source: NativeImportSource): Promise<chrome.tabs.Tab> {
+  const tab = await chrome.tabs.get(source.tabId).catch(() => undefined);
+  if (tab?.url && new URL(tab.url).origin === source.origin) return tab;
+  const other = nativeImportSources(await chrome.tabs.query({})).find(item => item.id === source.id || item.origin === source.origin && item.platform === source.platform && !item.id.startsWith(`${source.origin}:`));
+  if (!other) throw Error(`请先在浏览器中打开 ${source.label} 并保持登录，然后重试 / Open ${source.label}, stay signed in, and retry`);
+  source.tabId = other.tabId;
+  return chrome.tabs.get(other.tabId);
+}
 
 /** Runs read-only requests inside the selected site's session. Credentials never
  * cross the scripting boundary or enter IndexedDB, logs, or model requests. */
 export async function nativeHistoryRequest(source: NativeImportSource, request: NativeRequest): Promise<NativeReply> {
-  const tab = await chrome.tabs.get(source.tabId);
+  const tab = await sourceTab(source);
   const address = new URL(tab.url ?? "about:blank");
   if (address.origin !== source.origin || (source.platform === "chatgpt" ? address.origin !== "https://chatgpt.com" : webCaptureSite(address.href)?.id !== source.platform)) throw Error("来源网页已变化，请重新检测 AI / Source page changed; detect AI again.");
   const result = await chrome.scripting.executeScript({
