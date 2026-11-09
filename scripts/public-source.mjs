@@ -18,7 +18,7 @@ async function walk(directory) {
 }
 
 export async function publicSourceFiles() {
-  return [...new Set([...rootFiles, ...docs.map(name => `docs/${name}`),...englishDocs.map(name=>`docs/en/${name}`), ...await walk("src"), ...await walk("scripts"), ...await walk(".github"), ...await walk("docs/handoff"), ...await walk("samples"), "evaluation/memory-search/cases.ts"])].sort();
+  return [...new Set([...rootFiles, ...docs.map(name => `docs/${name}`),...englishDocs.map(name=>`docs/en/${name}`), ...await walk("src"), ...await walk("scripts"), ...await walk(".github"), ...await walk("docs/handoff"), ...await walk("docs/images"), ...await walk("samples"), "evaluation/memory-search/cases.ts"])].sort();
 }
 
 export async function verifyPublicSource({ checkGit = true } = {}) {
@@ -26,7 +26,7 @@ export async function verifyPublicSource({ checkGit = true } = {}) {
   const issues = [];
   for (const name of files) {
     const bytes = await readFile(path.join(root, name));
-    if (/^src\/assets\/brand\/(?:logo-(?:light|dark)|icon-(?:dark-)?(?:16|32|48|128))\.png$/u.test(name)) {
+    if (/^src\/assets\/brand\/(?:logo-(?:light|dark)|icon-(?:dark-)?(?:16|32|48|128))\.png$/u.test(name) || /^docs\/images\/[a-z0-9-]+\.png$/u.test(name)) {
       if (bytes.length < 24 || bytes.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a" || bytes.toString("ascii", 12, 16) !== "IHDR") issues.push(`${name}: invalid brand PNG`);
       continue;
     }

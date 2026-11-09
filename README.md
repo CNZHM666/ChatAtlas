@@ -13,6 +13,12 @@ ChatAtlas 是本地优先的 Chrome 扩展：把你在各个 AI 网站上的对�
 > 演示 GIF 占位：待录制（安装 → 导入对话 → 无 Key 搜索 → 阅读原文 → 整理 Wiki）。
 <!-- demo-gif-placeholder: 待录制，尚无演示文件。 -->
 
+| 工作台：搜索历史、整理项目、按 AI 浏览来源 | 项目文档：总览与章节目录 |
+| --- | --- |
+| ![ChatAtlas 工作台首页（深色）](docs/images/home-zh-dark.png) | ![项目文档总览](docs/images/project-overview-light.png) |
+
+![Wiki 章节阅读：按主题整理的决定与细节](docs/images/wiki-chapter-light.png)
+
 ## 能做什么
 
 - **保存对话**：导入官方导出文件，或在支持的 AI 网页上自动保存已加载的对话。全部保存在当前浏览器。

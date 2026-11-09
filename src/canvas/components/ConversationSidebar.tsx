@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, PanelLeftClose
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ContextEpisode, Conversation, ConversationChapter, ConversationMessage, OrganizationRun } from "../../shared/types";
 import { conversationDragType, parseConversationDragPayload, type ConversationDragPayload } from "../conversation-graph";
-import { questionDisplayTitle } from "../conversation-structurer";
+import { questionDisplayTitle, questionPlainText } from "../conversation-structurer";
 import { usePreferences } from "../preferences";
 import { TaskSidebarSection } from "./TaskSidebarSection";
 import { readerQuestionIndex } from "../reader-position";
@@ -153,7 +153,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
     title={props.editable ? locale === "zh-CN" ? "拖到上方章节，或点击阅读" : "Drag into a chapter or click to read" : message.content.trim() || message.preview.trim()}
   >
     <span className="message-number">{nested ? "├" : String(index + 1).padStart(2, "0")}</span>
-    <span className="message-list-copy"><small>{displayTitle?.trim() || props.questionTitles?.get(message.id)?.trim() || (props.questionNavigation ? message.content.trim() || message.preview.trim() : questionDisplayTitle(message.content.trim() || message.preview.trim()))}</small>{snippet ? <span className="message-search-snippet">{locale === "zh-CN" ? "回答中：" : "In the answer: "}{snippet}</span> : null}</span>
+    <span className="message-list-copy"><small>{displayTitle?.trim() || props.questionTitles?.get(message.id)?.trim() || (props.questionNavigation ? questionPlainText(message.content) || questionPlainText(message.preview) : questionDisplayTitle(message.content.trim() || message.preview.trim()))}</small>{snippet ? <span className="message-search-snippet">{locale === "zh-CN" ? "回答中：" : "In the answer: "}{snippet}</span> : null}</span>
     {props.editable ? <GripVertical className="message-grip" size={14} /> : null}
   </button>;
   const currentChapterId = props.selectedChapterId ?? chapters.find((chapter) => chapter.questionIds.includes(`conversation-message-${props.selectedMessageId}`))?.id;

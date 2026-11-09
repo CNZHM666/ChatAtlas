@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Conversation, ConversationMessage } from "../shared/types";
-import { buildConversationStructure, cleanChapterTitle, questionDisplayTitle, refineChapterGroups } from "./conversation-structurer";
+import { buildConversationStructure, cleanChapterTitle, questionDisplayTitle, questionPlainText, refineChapterGroups } from "./conversation-structurer";
 
 const conversation: Conversation = { id: "chapters", platform: "chatgpt", title: "Product notes", url: "https://chatgpt.com/c/chapters", updatedAt: 1, messageCount: 0 };
 const question = (id: number, content: string): ConversationMessage => ({ id: `q${id}`, conversationId: conversation.id, messageIndex: id, role: "user", content, preview: content, contentHash: `${id}`, createdAt: id, updatedAt: id });
@@ -73,4 +73,10 @@ describe("local conversation structure", () => {
     expect(structure.chapters.map((chapter) => chapter.title)).not.toContain("咋调");
     expect(structure.chapters.every((chapter) => chapter.summary?.endsWith("。"))).toBe(true);
   });
+});
+
+it("reads a pasted table or Markdown question as its words", () => {
+  expect(questionPlainText("| ★ 确定：默认**专注 25 分钟、休息 5 分钟** |\n| ----------------- |")).toBe("★ 确定：默认专注 25 分钟、休息 5 分钟");
+  expect(questionPlainText("★ 第一版**不做数据云同步**，以后再说。")).toBe("★ 第一版不做数据云同步，以后再说。");
+  expect(questionPlainText("## 标题\n- 第一点\n1. 第二点 `code`")).toBe("标题 第一点 第二点 code");
 });

@@ -236,3 +236,15 @@ export class DeterministicConversationStructurer implements ConversationStructur
     return buildConversationStructure(conversation, messages);
   }
 }
+
+/** A question as plain text for the question list: a pasted table or Markdown ("| ★ 确定：默认**专注 25 分钟** | |
+ * ----- |") read as its words, not its marks. */
+export function questionPlainText(original: string): string {
+  return original
+    .replace(/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/gmu, " ")
+    .replace(/```[^\n]*/gu, " ")
+    .replace(/\*\*|__|`|^\s{0,3}#{1,6}\s+|^\s{0,3}>\s?|^\s*(?:[-*+]|\d+[.)])\s+/gmu, "")
+    .replace(/\s*\|\s*/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
