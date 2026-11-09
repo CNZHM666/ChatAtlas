@@ -3,11 +3,11 @@ import zh from "../../README.md?raw";
 import en from "../../README.en.md?raw";
 import principles from "../../PRODUCT_PRINCIPLES.md?raw";
 
-it("makes no-key basic search and pending demo visible before the product introduction in both languages",()=>{
+it("makes no-key basic search visible before the product introduction, and shows the product before what it does, in both languages",()=>{
  expect(zh.indexOf("基础搜索不需要 AI Key")).toBeLessThan(zh.indexOf("ChatAtlas 是"));
  expect(en.indexOf("Basic search needs no AI key")).toBeLessThan(en.indexOf("ChatAtlas is"));
- expect(zh).toContain("演示 GIF 占位：待录制");expect(en).toContain("Demo GIF placeholder: recording pending");
- for(const text of [zh,en])expect(text).toContain("<!-- demo-gif-placeholder:");
+ expect(zh.indexOf("docs/images/sidecar-chatgpt-light.png")).toBeLessThan(zh.indexOf("## 能做什么"));
+ expect(en.indexOf("docs/images/sidecar-chatgpt-light.png")).toBeLessThan(en.indexOf("## What it does"));
 });
 it("publishes no empty timing table and walks through installing the release ZIP in both languages",()=>{
  expect(zh).not.toContain("## 生成耗时");expect(en).not.toContain("## Generation time");

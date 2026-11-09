@@ -12,9 +12,6 @@ ChatAtlas 是本地优先的 Chrome 扩展：把你在各个 AI 网站上的对�
 
 > **早期预览（0.1.2 Early Preview）。** 功能、交互和数据结构仍会调整；Wiki 整理属于实验功能，生成结果需要你对照来源核对。升级前请先备份本地数据。
 
-> 演示 GIF 占位：待录制（安装 → 导入对话 → 无 Key 搜索 → 阅读原文 → 整理 Wiki）。
-<!-- demo-gif-placeholder: 待录制，尚无演示文件。 -->
-
 ![在 ChatGPT 旁打开 ChatAtlas 侧栏：查找已整理的知识和相关对话](docs/images/sidecar-chatgpt-light.png)
 
 <p align="center"><sub>在 AI 网页旁打开侧栏，随时查找已整理的知识和相关对话</sub></p>
