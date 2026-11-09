@@ -21,7 +21,12 @@ export interface WorkspaceEvidenceOptions { references?: FocusEvidence[]; quote?
   /** The original the panel shows now, so the document can highlight the claims that cite it. */
   shown?: FocusEvidence;
   /** Point-by-point checking: the panel steps through these instead of the whole chapter's sources. */
-  points?: EvidencePoint[]; pointIndex?: number }
+  points?: EvidencePoint[]; pointIndex?: number;
+  /** "check" steps through the points to confirm; opening one sentence's source is a plain view. */
+  mode?: "check" | "view";
+  /** Opens the conversation in the reader, in its full context, instead of the side panel: a chapter's source list
+   * goes from a conversation to its whole discussion, while a sentence's marker goes to the words behind it. */
+  reader?: boolean }
 
 export const WorkspaceEvidenceContext = createContext<{
   close?: () => void;

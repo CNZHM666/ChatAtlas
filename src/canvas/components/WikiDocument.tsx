@@ -20,7 +20,7 @@ import {ProjectKnowledgeActions} from "../project-knowledge-actions";
 import {jumpToSentence} from "../stance-jump";
 import {wikiTitleReviewIncomplete} from "../../shared/wiki-title-review";
 import {WikiChapterOverview} from "./WikiChapterOverview";
-import { ChevronLeft, ChevronRight, Quote, Tags, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, History, Layers, PencilLine, Quote, Tags, X } from "lucide-react";
 import { issueBlockText, issueLabel } from "../document-review";
 import { meaningTerms, paintHolderRuns } from "../claim-highlight";
 import type { WikiBlockIssue } from "../../shared/wiki-explanations";
@@ -31,14 +31,18 @@ import { WikiHistoryCard } from "./WikiHistoryCard";
 import { WikiClaimMarkerContext } from "../wiki-claim-marker-context";
 import { useEvidencePoints } from "../use-evidence-points";
 
-export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview }: {
+export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed }: {
   section: FocusSection; session: FocusSession; zh: boolean; structure: ReactNode; editor?: ReactNode;
   /** A pending problem in this chapter the overview sent the reader to: its paragraph is marked and named. */
   issue?: { issue: WikiBlockIssue; index: number; total: number }; onIssueStep?: (delta: number) => void; onIssueClose?: () => void;
   /** Sent from the overview to check evidence: the review opens on its own, once per value. */
   autoReview?: number;
+  /** The request to open the check is used once: coming back to the chapter or switching wikis does not reopen it. */
+  onAutoReviewed?: () => void;
   onLocate: (ref: FocusEvidence) => void; onCurrent: () => void;
-  onFinishEdit?: () => void; onEdit?: () => void; updatedConversationIds?: string[];
+  onFinishEdit?: () => void;
+  /** Opens the editor at this text: the paragraph in view, or the problem being shown. */
+  onEdit?: (target?: string) => void; updatedConversationIds?: string[];
   headingTarget?:{title:string;revision:number};
   scrollRef?:RefObject<HTMLElement|null>;
 }) {
@@ -73,13 +77,19 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   const reviewEvidence=()=>{
     const first=attention[0];
     if(!first){if(ordered[0])openPoint(ordered[0].key);return;}
-    if(evidencePanel)evidencePanel.open(first.reference,{references:first.references,quote:first.quote,claim:first.claim,points:attention,pointIndex:0});else onLocate(first.reference);
+    if(evidencePanel)evidencePanel.open(first.reference,{references:first.references,quote:first.quote,claim:first.claim,points:attention,pointIndex:0,mode:"check"});else onLocate(first.reference);
   };
   // Sent here to check evidence: the review opens once the chapter's points are known.
   const reviewed=useRef<number>();
-  useEffect(()=>{if(!autoReview||reviewed.current===autoReview||!ordered.length)return;reviewed.current=autoReview;reviewEvidence();
+  useEffect(()=>{if(!autoReview||reviewed.current===autoReview||!ordered.length)return;reviewed.current=autoReview;reviewEvidence();onAutoReviewed?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when sent here, not on every point change.
   },[autoReview,ordered.length]);
+  // The first paragraph whose text is on screen: editing opens there rather than at the chapter's first line.
+  const paragraphInView=()=>{
+    const top=scrollRef?.current?.getBoundingClientRect().top??0;
+    const block=[...articleRef.current?.querySelectorAll<HTMLElement>("p, li, h2, h3, h4, td")??[]].find(element=>element.getBoundingClientRect().bottom>top+24&&element.textContent?.trim());
+    return block?.textContent?.trim().slice(0,80);
+  };
   // A pending problem: its paragraph is found in the rendered chapter, scrolled to and marked.
   const issueText=issue?issueBlockText(session,issue.issue):undefined;
   useEffect(()=>{
@@ -137,13 +147,19 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   const parts=wikiDiagramParts(readingBody,section.wikiDiagram?.afterHeading??suggestedDiagramHeading(section));
   const read=(body:string)=>body.trim()?<div className="chapter-guide"><ReaderGuide hideCitationAnnotations content={body} sourceTexts={session.evidence.filter(ref=>section.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt)} zh={zh} complete hideEvidenceMarkers={!section.userEdited&&section.origin!=="user"} claimMarkers={claimMarkers}/></div>:null;
   return <WorkspaceEvidenceContext.Provider value={evidencePanel?{...evidencePanel,open:(ref,options)=>evidencePanel.open(ref,options?.points?options:{...options,sectionId:section.id,references:sources})}:undefined}><WikiClaimMarkerContext.Provider value={markerContext}><article ref={articleRef} className={`wiki-document${marksHidden?" hides-holder-marks":""}`} aria-label={review?zh?"复习文档":"Review document":zh?"Wiki 文档":"Wiki document"}>
-    <header className="wiki-document-heading"><div className="wiki-document-location"><span>{location}</span><div>{!editor?ordered.length?<button type="button" className={`evidence-review-button${attention.length?" has-attention":""}`} title={attention.length?zh?"原话已自动对照原文；只带你看需要确认的几处":"Quotes were checked against the originals; only the points that need a look are shown":zh?"引文已在原文中找到；不代表结论准确、方案已采纳或实现已验证。点开逐条核对":"Quoted passages were located; this does not verify meaning, adoption or implementation. Open to review."} onClick={reviewEvidence}><Quote size={15} aria-hidden="true"/>{attention.length?zh?`核对依据 · ${attention.length} 条待看`:`Check evidence · ${attention.length} to review`:zh?"原文已定位":"Originals located"}</button>:<EvidenceReviewButton sources={sources} zh={zh} onLocate={onLocate} historical={Boolean(section.userEdited||section.origin)}/>:null}{!editor&&hasHolders?<button type="button" className="holder-marks-toggle" aria-pressed={holderMarks} title={zh?"标出哪些话是你说的、哪些来自你提供的资料，并给各自的句子上色；已定、未定和此前总会标出":"Mark what you said and what came from material you provided, and tint those sentences; decided, open and earlier points are always marked"} onClick={()=>setHolderMarks(!holderMarks)}><Tags size={15} aria-hidden="true"/>{holderMarks?zh?"收起出处":"Hide sources":zh?"显示出处":"Show sources"}</button>:null}{editor&&onFinishEdit?<button type="button" onClick={onFinishEdit}>{zh?"保存并结束编辑":"Save and finish editing"}</button>:!editor&&onEdit?<button type="button" onClick={onEdit}>{zh?"编辑":"Edit"}</button>:null}{!editor&&changes.length?<button type="button" onClick={onCurrent}>{zh?"当前方案":"Current plan"}</button>:null}{!review&&!editor&&(changes.length||session.wikiSuggestions?.[section.id])?<button type="button" onClick={()=>setUpdatesOpen(true)}>{zh?"相关更新":"Related updates"}</button>:null}</div></div><h1 title={section.title}>{localizedWikiTitle(section,zh)}</h1>{section.userEdited?<small className="muted">{zh?"个人编辑内容":"Your edited content"}</small>:null}</header>
+    {!editor?<nav className="wiki-tool-rail" aria-label={zh?"文档工具":"Document tools"}>
+      {ordered.length?<button type="button" className={`wiki-tool evidence-review-button${attention.length?" has-attention":""}`} aria-label={attention.length?zh?`核对依据 · ${attention.length} 条待确认`:`Check evidence · ${attention.length} to confirm`:zh?"原文已定位":"Originals located"} title={attention.length?zh?`核对依据：${attention.length} 处需要你确认，逐条带你看`:`Check evidence: ${attention.length} points need your look`:zh?"原文已定位，点开逐条查看出处":"Originals located. Open to go through the sources"} onClick={reviewEvidence}><Quote size={17} aria-hidden="true"/>{attention.length?<span className="wiki-tool-badge" aria-hidden="true">{attention.length}</span>:null}</button>:<EvidenceReviewButton iconOnly sources={sources} zh={zh} onLocate={onLocate} historical={Boolean(section.userEdited||section.origin)}/>}
+      {hasHolders?<button type="button" className="wiki-tool holder-marks-toggle" aria-pressed={holderMarks} aria-label={holderMarks?zh?"收起出处":"Hide sources":zh?"显示出处":"Show sources"} title={zh?"标出哪些话是你说的、哪些来自你提供的资料，并给各自的句子上色；已定、未定和此前总会标出":"Mark what you said and what came from material you provided, and tint those sentences; decided, open and earlier points are always marked"} onClick={()=>setHolderMarks(!holderMarks)}><Tags size={17} aria-hidden="true"/></button>:null}
+      {onEdit?<button type="button" className="wiki-tool" aria-label={zh?"编辑":"Edit"} title={zh?"编辑本章（从你正在读的地方开始）":"Edit this chapter, from where you are reading"} onClick={()=>onEdit(paragraphInView())}><PencilLine size={17} aria-hidden="true"/></button>:null}
+      {changes.length?<button type="button" className="wiki-tool" aria-label={zh?"当前方案":"Current plan"} title={zh?"当前方案":"Current plan"} onClick={onCurrent}><Layers size={17} aria-hidden="true"/></button>:null}
+      {!review&&(changes.length||session.wikiSuggestions?.[section.id])?<button type="button" className="wiki-tool" aria-label={zh?"相关更新":"Related updates"} title={zh?"相关更新":"Related updates"} onClick={()=>setUpdatesOpen(true)}><History size={17} aria-hidden="true"/></button>:null}
+    </nav>:null}<header className="wiki-document-heading"><div className="wiki-document-location"><span>{location}</span>{editor&&onFinishEdit?<div><button type="button" onClick={onFinishEdit}>{zh?"保存并结束编辑":"Save and finish editing"}</button></div>:null}</div><h1 title={section.title}>{localizedWikiTitle(section,zh)}</h1>{section.userEdited?<small className="muted">{zh?"个人编辑内容":"Your edited content"}</small>:null}</header>
     {!editor&&wikiTitleReviewIncomplete(section.wikiTitleReview)?<p className="muted" role="status">{zh?"标题未整理完成，已保留原名和正文。":"Title editing could not finish. The original name and prose are preserved."}</p>:null}
     {!review&&!editor&&chapterStatus?<p className="wiki-chapter-status muted">{stances.length?<button type="button" className="wiki-stance-jump" title={zh?"跳到正文中的这句话":"Go to the sentence in the text"} onClick={jumpToStance}>{chapterStatus}{stances.length>1?` · ${zh?"查看":"show"} ${stanceAt%stances.length+1}/${stances.length}`:""}</button>:chapterStatus}</p>:null}
-    {!review&&!editor&&stanceJump&&stances.length?<div className="wiki-stance-actions" role="group" aria-label={zh?"处理这句表态":"Resolve this stance"}><span>{zh?"高亮的表述符合你的意思吗？保留文字不会将建议记录为已采纳。":"Does the wording match your meaning? Keeping text does not record adoption."}</span>{knowledgeActions?<button type="button" className="primary" disabled={stanceSaving} onClick={()=>void keepStance()}>{zh?"表述符合我的意思":"The wording matches my meaning"}</button>:null}{onEdit?<button type="button" onClick={onEdit}>{zh?"改写这句":"Rewrite it"}</button>:null}{stances.length>1?<button type="button" onClick={jumpToStance}>{zh?"下一处":"Next"}</button>:null}<button type="button" className="wiki-stance-dismiss" aria-label={zh?"收起":"Dismiss"} onClick={()=>setStanceJump(undefined)}>×</button></div>:null}
+    {!review&&!editor&&stanceJump&&stances.length?<div className="wiki-stance-actions" role="group" aria-label={zh?"处理这句表态":"Resolve this stance"}><span>{zh?"高亮的表述符合你的意思吗？保留文字不会将建议记录为已采纳。":"Does the wording match your meaning? Keeping text does not record adoption."}</span>{knowledgeActions?<button type="button" className="primary" disabled={stanceSaving} onClick={()=>void keepStance()}>{zh?"表述符合我的意思":"The wording matches my meaning"}</button>:null}{onEdit?<button type="button" onClick={()=>onEdit(stanceJump.sentence)}>{zh?"改写这句":"Rewrite it"}</button>:null}{stances.length>1?<button type="button" onClick={jumpToStance}>{zh?"下一处":"Next"}</button>:null}<button type="button" className="wiki-stance-dismiss" aria-label={zh?"收起":"Dismiss"} onClick={()=>setStanceJump(undefined)}>×</button></div>:null}
     {issue?<div className="wiki-issue-bar" role="status"><span>{zh?`待处理 ${issue.index+1}/${issue.total}`:`To review ${issue.index+1}/${issue.total}`}</span><strong>{issueLabel(issue.issue,zh)}</strong>
       <span className="wiki-issue-actions"><button type="button" aria-label={zh?"上一处":"Previous"} disabled={!issue.index} onClick={()=>onIssueStep?.(-1)}><ChevronLeft size={15} aria-hidden="true"/></button><button type="button" aria-label={zh?"下一处":"Next"} disabled={issue.index>=issue.total-1} onClick={()=>onIssueStep?.(1)}><ChevronRight size={15} aria-hidden="true"/></button>
-        {onEdit?<button type="button" onClick={onEdit}>{zh?"编辑本章":"Edit chapter"}</button>:null}<button type="button" aria-label={zh?"关闭":"Close"} onClick={onIssueClose}><X size={15} aria-hidden="true"/></button></span></div>:null}
+        {onEdit?<button type="button" onClick={()=>onEdit(issueText)}>{zh?"编辑本章":"Edit chapter"}</button>:null}<button type="button" aria-label={zh?"关闭":"Close"} onClick={onIssueClose}><X size={15} aria-hidden="true"/></button></span></div>:null}
     {!review&&!editor?<WikiChapterOverview overview={page.overview} zh={zh} emphasize={!section.userEdited&&section.origin!=="user"} claimMarkers={claimMarkers}/>:null}
     {!editor?<WikiSectionLocator headings={page.headings} contentRef={content} scrollRef={scrollRef} zh={zh}/>:null}
     {section.reviewIssue?<p className="wiki-review-warning" role="status">{zh?"本章为待核验草稿。":"This chapter is a draft awaiting review."}</p>:null}

@@ -9,8 +9,8 @@ it("requires confirmation before emptying Trash and allows canceling without rem
   const empty = vi.fn().mockResolvedValue(undefined), restore = vi.fn();
   render(<PreferencesProvider><MapSidebar canvases={[]} activeId="" onSelect={vi.fn()} onRename={vi.fn()} deletedProjects={[{ id: "deleted", title: "旧项目", name: "旧项目", createdAt: 1, updatedAt: 1 }]} onRestore={restore} onEmptyTrash={empty} /></PreferencesProvider>);
   fireEvent.click(screen.getByText("回收站 · 1"));
-  // The clear action is on the 回收站 row; it opens the list to ask before anything is deleted.
-  expect(screen.getByRole("button", { name: "清空回收站" }).closest("summary")).not.toBeNull();
+  // Opened, the 回收站 row offers to clear it; it asks before anything is deleted.
+  expect((await screen.findByRole("button", { name: "清空回收站" })).closest("summary")).not.toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "清空回收站" }));
   expect(empty).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "取消" }));
@@ -21,16 +21,19 @@ it("requires confirmation before emptying Trash and allows canceling without rem
   expect(restore).not.toHaveBeenCalled();
 });
 
-it("shows 清空回收站 on the 回收站 row again once the list is closed while asking", () => {
+it("shows 清空回收站 only once the 回收站 is opened, and again after closing it while asking", () => {
   localStorage.setItem("atlas-locale", "zh-CN");
   render(<PreferencesProvider><MapSidebar canvases={[]} activeId="" onSelect={vi.fn()} onRename={vi.fn()} deletedProjects={[{ id: "deleted", title: "旧项目", name: "旧项目", createdAt: 1, updatedAt: 1 }]} onRestore={vi.fn()} onEmptyTrash={vi.fn().mockResolvedValue(undefined)} /></PreferencesProvider>);
-  // Closed: the action is on the row.
-  expect(screen.getByRole("button", { name: "清空回收站", hidden: true })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "清空回收站", hidden: true }));
-  expect(screen.queryByRole("button", { name: "清空回收站", hidden: true })).toBeNull();
-  // Closed without answering: the question is dropped and the action is back on the row.
   const details = document.querySelector("details.project-trash") as HTMLDetailsElement;
-  details.open = false;
-  fireEvent(details, new Event("toggle"));
-  expect(screen.getByRole("button", { name: "清空回收站", hidden: true }).closest("summary")).not.toBeNull();
+  const toggle = (open: boolean) => { details.open = open; fireEvent(details, new Event("toggle")); };
+  // Closed: the row shows only the trash and its count.
+  expect(screen.queryByRole("button", { name: "清空回收站", hidden: true })).toBeNull();
+  toggle(true);
+  fireEvent.click(screen.getByRole("button", { name: "清空回收站" }));
+  expect(screen.queryByRole("button", { name: "清空回收站", hidden: true })).toBeNull();
+  // Closed without answering: the question is dropped; opened again, the action is back on the row.
+  toggle(false);
+  expect(screen.queryByRole("button", { name: "清空回收站", hidden: true })).toBeNull();
+  toggle(true);
+  expect(screen.getByRole("button", { name: "清空回收站" }).closest("summary")).not.toBeNull();
 });

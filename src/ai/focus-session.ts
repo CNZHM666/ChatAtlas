@@ -234,6 +234,9 @@ async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: 
         const answered = await options.settleWriterQuestions(raised.ledger);
         signal.throwIfAborted();
         ledger = await reviseForAnswers(answered, raised.added, { ai, locale, signal, runId });
+        // The answers are in the document now: answered after the chapters were written, they would otherwise read as
+        // newer than the draft, and the ledger asked to rewrite a document that already follows them.
+        if (ledger.draft && ledger.decisionsAt && ledger.decisionsAt > ledger.draft.generatedAt) ledger = { ...ledger, draft: { ...ledger.draft, generatedAt: ledger.decisionsAt } };
       }
     }
     const session = await ledgerDocumentSession(ledger, { id: crypto.randomUUID(), runId, goal, mode, strategy, scope, title, locale: zh ? "zh-CN" : "en",

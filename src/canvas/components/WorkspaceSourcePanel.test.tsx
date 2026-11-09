@@ -11,6 +11,8 @@ import {markEvidenceRead} from "../../storage/evidence-reading";
 vi.mock("../../storage/source-versions", () => ({readSessionSource:vi.fn()}));
 vi.mock("../../storage/evidence-reading",async importOriginal=>({...await importOriginal<typeof import("../../storage/evidence-reading")>(),evidenceWasRead:vi.fn().mockResolvedValue(false),markEvidenceRead:vi.fn().mockResolvedValue(undefined),markEvidenceReadBatch:vi.fn().mockResolvedValue(undefined)}));
 afterEach(()=>{cleanup();vi.clearAllMocks();vi.restoreAllMocks();vi.unstubAllGlobals();});
+/** Everything marked as the claim's source: the original's own words and the sentences close in wording. */
+const markedRanges=(marks:Map<string,Set<Range>>)=>[...(marks.get("atlas-original-proof")??[]),...(marks.get("atlas-original-similar")??[])];
 const original:ConversationMessage = {id:"message",conversationId:"source",role:"user",content:"首版支持预览。后续再考虑实物控制。",messageIndex:2,createdAt:1_700_000_000_000,updatedAt:1_800_000_000_000,contentHash:"",preview:""};
 
 it.each([
@@ -23,11 +25,11 @@ it.each([
  vi.mocked(readSessionSource).mockResolvedValue([{...original,role:'assistant',content}]);
  const marks=new Map<string,Set<Range>>();vi.stubGlobal('CSS',{...globalThis.CSS,highlights:marks});vi.stubGlobal('Highlight',class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
  const {container}=render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote} claim={claim} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
- await waitFor(()=>expect(marks.get('atlas-original-proof')?.size).toBeGreaterThan(0));
- const ranges=[...marks.get('atlas-original-proof')!];
+ await waitFor(()=>expect(markedRanges(marks).length).toBeGreaterThan(0));
+ const ranges=markedRanges(marks);
  expect(ranges.map(range=>range.toString()).join('|')).toContain(wanted);
  expect(ranges.some(range=>range.startContainer.parentElement?.closest(selector))).toBe(true);
- expect(Boolean(screen.queryByText('按措辞找到的相近原文，请核对对应关系'))).toBe(approximate);
+ expect(Boolean(screen.queryByText('措辞相近'))).toBe(approximate);
  expect(container.querySelector('pre svg, iframe')).toBeNull();
 });
 
@@ -40,12 +42,12 @@ it("rejects a color quote for a static-animation claim and finds its short sourc
   vi.stubGlobal("CSS", { ...globalThis.CSS, highlights: marks });
   vi.stubGlobal("Highlight", class extends Set<Range> { constructor(...ranges: Range[]) { super(ranges); } });
   render(<WorkspaceSourcePanel session={session} reference={reference} quote="默认中性灰。" claim="V0.1 保持静态，不大量动画。" zh onSelect={vi.fn()} onClose={vi.fn()} />);
-  await waitFor(() => expect(marks.get("atlas-original-proof")?.size).toBeGreaterThan(0));
-  const highlighted = [...marks.get("atlas-original-proof")!].map(range => range.toString()).join("|");
+  await waitFor(() => expect(markedRanges(marks).length).toBeGreaterThan(0));
+  const highlighted = markedRanges(marks).map(range => range.toString()).join("|");
   expect(highlighted).toContain("保持静态");
   expect(highlighted).toContain("不要大量动画");
   expect(highlighted).not.toContain("默认中性灰");
-  expect(screen.getByText("按措辞找到的相近原文，请核对对应关系")).toBeVisible();
+  expect(screen.getByText("措辞相近")).toBeVisible();
 });
 
 it("rebuilds code evidence ranges when lazy formatting replaces the original text nodes",async()=>{
@@ -55,14 +57,14 @@ it("rebuilds code evidence ranges when lazy formatting replaces the original tex
  vi.mocked(readSessionSource).mockResolvedValue([{...original,role:'assistant',content}]);
  const marks=new Map<string,Set<Range>>();vi.stubGlobal('CSS',{...globalThis.CSS,highlights:marks});vi.stubGlobal('Highlight',class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
  const {container}=render(<WorkspaceSourcePanel session={session} reference={reference} quote='Beginner Journey 自然' claim='Beginner Journey 自然' zh onSelect={vi.fn()} onClose={vi.fn()}/>);
- await waitFor(()=>expect(marks.get('atlas-original-proof')?.size).toBeGreaterThan(0));
+ await waitFor(()=>expect(markedRanges(marks).length).toBeGreaterThan(0));
  const previous=marks.get('atlas-original-proof');
  await act(async()=>{container.querySelector('pre code')!.innerHTML='<span>1. Beginner Journey 自然</span>\n2. 保持 Workspace 稳定\n';});
  // Formatting may commit more than once; the final range must reference the
  // current nodes, not merely be a different Highlight object.
  await waitFor(()=>{
   expect(marks.get('atlas-original-proof')).not.toBe(previous);
-  const ranges=[...marks.get('atlas-original-proof')!];
+  const ranges=markedRanges(marks);
   expect(ranges[0].toString()).toBe('Beginner Journey 自然');
   expect(ranges[0].startContainer.isConnected).toBe(true);
  });
@@ -76,7 +78,7 @@ it.each(['明显愿意做自己的硬件项目：','**10个人以上**','若10�
  const marks=new Map<string,Set<Range>>();vi.stubGlobal('CSS',{...globalThis.CSS,highlights:marks});vi.stubGlobal('Highlight',class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
  render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote} claim='若 10 人以上明显愿意做项目。' zh onSelect={vi.fn()} onClose={vi.fn()}/>);
  await waitFor(()=>{
-  const marked=[...marks.get('atlas-original-proof')??[]].map(range=>range.toString()).join('|');
+  const marked=markedRanges(marks).map(range=>range.toString()).join('|');
   expect(marked).toContain('10个人以上');expect(marked).toContain('明显愿意做自己的硬件项目');
   expect(marked).not.toContain('5～8个人');
  });
@@ -100,8 +102,8 @@ it("rejects an unrelated saved quote when the actual claim is spread across a co
  vi.mocked(readSessionSource).mockResolvedValue([{...original,role:'assistant',content}]);
  const marks=new Map<string,Set<Range>>();vi.stubGlobal('CSS',{...globalThis.CSS,highlights:marks});vi.stubGlobal('Highlight',class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
  render(<WorkspaceSourcePanel session={session} reference={reference} quote='默认中性灰。' claim='Beginner Journey 自然度 > 界面简单性 > 复用底层系统 > 保持 Workspace 稳定 > 视觉装饰。' zh onSelect={vi.fn()} onClose={vi.fn()}/>);
- await waitFor(()=>expect(marks.get('atlas-original-proof')?.size).toBeGreaterThan(0));
- const marked=[...marks.get('atlas-original-proof')!].map(range=>range.toString()).join('|');
+ await waitFor(()=>expect(markedRanges(marks).length).toBeGreaterThan(0));
+ const marked=markedRanges(marks).map(range=>range.toString()).join('|');
  expect(marked).toContain('Beginner Journey 是否自然');expect(marked).toContain('5. 最后才是视觉装饰');expect(marked).not.toContain('默认中性灰');
 });
 
@@ -114,7 +116,7 @@ it("keeps the same claim on its second source and never borrows another claim on
  const view=render(<WorkspaceSourcePanel {...props} reference={first}/>);
  await waitFor(()=>expect(marks.has("atlas-original-proof")).toBe(true));
  view.rerender(<WorkspaceSourcePanel {...props} reference={second}/>);
- await waitFor(()=>expect([...marks.get("atlas-original-proof")!].map(range=>range.toString())).toEqual(["共同引文。"]));
+ await waitFor(()=>expect(markedRanges(marks).map(range=>range.toString())).toEqual(["共同引文。"]));
  view.rerender(<WorkspaceSourcePanel {...props} quote="不存在的引文" reference={second}/>);
  expect(await screen.findByText("该来源中未定位到此结论的引文")).toBeVisible();expect(marks.has("atlas-original-proof")).toBe(false);
 });
@@ -126,7 +128,7 @@ it("marks every quote of the claims citing an original and displays local role w
  render(<WorkspaceSourcePanel session={session} reference={ref} references={[ref]} sectionId={session.sections[0].id} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
  expect(await screen.findByText(/引文来自助手消息/)).toBeVisible();expect(screen.getByText(/依据是计划或建议/)).toBeVisible();
  // Every quote of the claims citing this original is marked; the claims are highlighted in the document, not listed here.
- await waitFor(()=>expect(marks.get("atlas-original-proof")?.size).toBe(2));
+ await waitFor(()=>expect(markedRanges(marks).length).toBe(2));
  expect(screen.queryByRole("button",{name:"1. 用户确认本地存储"})).toBeNull();
 });
 it("labels lexical reading hints and registers them separately from claim quotations",async()=>{
@@ -148,7 +150,7 @@ it("keeps a selected quotation precise even with multiple aliases and claims on 
  vi.stubGlobal("Highlight",class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
  render(<WorkspaceSourcePanel session={session} reference={session.evidence[0]} references={session.evidence} sectionId={session.sections[0].id} quote="Hardware IR 统一数据。" claim="统一数据" zh onSelect={vi.fn()} onClose={vi.fn()}/>);
  await waitFor(()=>expect(marks.has("atlas-original-proof")).toBe(true));
- expect([...marks.get("atlas-original-proof")!].map(range=>range.toString())).toEqual(["Hardware IR 统一数据。"]);
+ expect(markedRanges(marks).map(range=>range.toString())).toEqual(["Hardware IR 统一数据。"]);
 });
 it("reads retained sources selected by their original evidence actions without an extra source dropdown",async()=>{
   const session=projectSession(),ref={...session.evidence[0],excerpt:"首版支持预览。",sourceVersionId:"retained-original"},second={...ref,id:"second",messageId:"reply",excerpt:"实物控制是后续计划。"};
@@ -163,18 +165,18 @@ it("reads retained sources selected by their original evidence actions without a
   expect(within(panel).queryByRole("heading",{name:original.content})).toBeNull();
   expect(within(panel).getByText("用户")).toBeVisible();expect(panel.querySelector("time")?.dateTime).toBe(new Date(original.createdAt!).toISOString());
   expect(screen.getByText(reply.content)).toBeVisible();
-  // With Reader at hand, one way to the conversation around it: no in-panel toggle beside it.
-  expect(within(panel).queryByRole("button",{name:"上下文"})).toBeNull();
+  // The quote/context switch reads the turn or the whole conversation in place; Reader is one icon beside it.
+  expect(within(panel).getByRole("button",{name:"原话"})).toHaveAttribute("aria-pressed","true");
   expect(within(panel).queryByRole("combobox",{name:"切换来源"})).not.toBeInTheDocument();fireEvent.click(screen.getByRole("button",{name:"核对另一条依据"}));await waitFor(()=>expect(panel.querySelector('[data-message-id="reply"]')).toHaveClass("is-source-target"));
   expect(readSessionSource).toHaveBeenCalledOnce();expect(within(panel).queryByRole("status")).toBeNull();
   expect(screen.getByTestId("article")).toBe(article);expect(article.scrollTop).toBe(140);
-  fireEvent.click(within(panel).getByRole("button",{name:"查看前后文"}));expect(onReader).toHaveBeenCalledOnce();fireEvent.keyDown(panel,{key:"Escape"});expect(onClose).toHaveBeenCalledOnce();
+  fireEvent.click(within(panel).getByRole("button",{name:"在阅读器中打开整段对话"}));expect(onReader).toHaveBeenCalledOnce();fireEvent.keyDown(panel,{key:"Escape"});expect(onClose).toHaveBeenCalledOnce();
 });
 it("labels unavailable excerpts honestly and never invents a message, role or date",async()=>{
   vi.mocked(readSessionSource).mockResolvedValue([]);const session=projectSession(),ref=session.evidence[0];
   const {container}=render(<div className="focus-workspace"><WorkspaceSourcePanel session={session} reference={ref} zh onSelect={vi.fn()} onClose={vi.fn()} onReader={vi.fn()}/></div>);
   expect(await screen.findByText("来源待定位")).toBeVisible();expect(screen.getByText(/仅为已保存的历史摘录/)).toBeVisible();expect(container.querySelector("time")).toBeNull();
-  expect(screen.queryByText("用户")).toBeNull();expect(screen.getByRole("button",{name:"查看前后文"})).toBeDisabled();
+  expect(screen.queryByText("用户")).toBeNull();expect(screen.getByRole("button",{name:"在阅读器中打开整段对话"})).toBeDisabled();expect(screen.getByRole("button",{name:"前后文"})).toBeDisabled();
 });
 it("does not present an unmatched quote as valid proof",async()=>{
   vi.mocked(readSessionSource).mockResolvedValue([original]);const session=projectSession();
@@ -193,34 +195,36 @@ it("asks one question on a point to confirm, moves on when answered, and records
  expect(screen.queryByRole("button",{name:/原文已看过/})).toBeNull();expect(screen.getByText("待确认 1 / 2")).toBeVisible();
  // One question with two answers; the question says what is wrong, so no kind chip or flag banner above it.
  expect(screen.getByText("这句是你的决定吗？")).toBeVisible();expect(screen.queryByText("AI 建议")).toBeNull();expect(document.querySelector(".workspace-source-attention")).toBeNull();
- expect(screen.getAllByRole("button",{name:/^(是|不是)$/u})).toHaveLength(2);
- fireEvent.click(screen.getByRole("button",{name:"是"}));
+ expect(screen.getAllByRole("button",{name:/^(是我的决定|只是建议)$/u})).toHaveLength(2);
+ fireEvent.click(screen.getByRole("button",{name:"是我的决定"}));
  expect(onHolder).toHaveBeenCalledWith(points[0],"decided");expect(onPoint).toHaveBeenCalledWith(1);
  expect(markEvidenceRead).toHaveBeenLastCalledWith(expect.objectContaining({projectId:session.id,messageId:original.id}),true);
  expect(JSON.stringify(session)).toBe(before);
  view.unmount();
 });
 
-it("asks whether a flagged sentence says what the original says, and keeps its status when it does",async()=>{
+it("asks about a dropped negation with the original's words, and keeps the status when it is right",async()=>{
  const session=projectSession();vi.mocked(readSessionSource).mockResolvedValue([original]);
  const reference={...session.evidence[0],excerpt:"首版支持预览。"},onHolder=vi.fn();
- const points=[{key:"a",claim:"首版支持预览",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"user" as const,attention:{kind:"negation" as const}},{key:"b",claim:"其他",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"open" as const}];
+ const points=[{key:"a",claim:"首版支持预览",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"user" as const,attention:{kind:"negation" as const,cue:"首版先不做预览"}},{key:"b",claim:"其他",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"open" as const}];
  render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文" points={points} pointIndex={0} onPoint={vi.fn()} onHolder={onHolder}/>);
  await waitFor(()=>expect(document.querySelector(".workspace-source-message.is-source-target")).toBeTruthy());
- expect(screen.getByText("这句和原话意思一致吗？")).toBeVisible();expect(screen.getByText("原话里有否定，结论里没有")).toBeVisible();
- fireEvent.click(screen.getByRole("button",{name:"一致"}));expect(onHolder).toHaveBeenCalledWith(points[0],"user");
+ expect(screen.getByText("原话说「首版先不做预览」")).toBeVisible();expect(screen.getByText("这句没有体现这个否定，意思可能反了")).toBeVisible();
+ // Without a way to rewrite here, the other answer marks it open.
+ expect(screen.getByRole("button",{name:"标为未定"})).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"没问题"}));expect(onHolder).toHaveBeenCalledWith(points[0],"user");
 });
 
-it("offers the question behind a link on a point that needs no answer",async()=>{
+it("offers the status behind a quiet link on a point that needs no answer",async()=>{
  const session=projectSession();vi.mocked(readSessionSource).mockResolvedValue([original]);
  const reference={...session.evidence[0],excerpt:"首版支持预览。"},onHolder=vi.fn();
  const points=[{key:"a",claim:"首版支持预览",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"ai" as const}];
  render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文" points={points} pointIndex={0} onPoint={vi.fn()} onHolder={onHolder}/>);
  await waitFor(()=>expect(document.querySelector(".workspace-source-message.is-source-target")).toBeTruthy());
  expect(screen.queryByText("这句是你的决定吗？")).toBeNull();expect(screen.getByText("状态：").textContent).toContain("AI 建议");
- // The link asks the same two-answer question again, the two other statuses beside it; no 4-button status box.
- fireEvent.click(screen.getByRole("button",{name:"改"}));expect(screen.getByText("这句和原话意思一致吗？")).toBeTruthy();expect(screen.queryByText("这句的状态")).toBeNull();
- fireEvent.click(screen.getByRole("button",{name:"不一致"}));expect(onHolder).toHaveBeenCalledWith(points[0],"open");
+ // The link offers the statuses themselves; nothing was flagged, so there is no question about the meaning.
+ fireEvent.click(screen.getByRole("button",{name:"改状态"}));expect(screen.getByText("这句的状态")).toBeTruthy();expect(screen.queryByText("这句和原话意思一致吗？")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"未定"}));expect(onHolder).toHaveBeenCalledWith(points[0],"open");
 });
 
 it("shows an answered point as recorded, without the flag banner or kind chip coming back",async()=>{
@@ -336,8 +340,8 @@ it("marks the sentences that state the claim, a heading included, when its saved
  vi.mocked(readSessionSource).mockResolvedValue([{...original,role:"assistant",content}]);
  const marks=new Map<string,Set<Range>>();vi.stubGlobal("CSS",{...globalThis.CSS,highlights:marks});vi.stubGlobal("Highlight",class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
  render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote} claim="Mem0 擅长持续交互中的记忆召回，但不适合直接照搬至 Atlas，因为 Atlas 需要管理项目现行状态、区分 AI 提议与用户决定。" zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文"/>);
- await waitFor(()=>expect(marks.get("atlas-original-proof")?.size).toBeGreaterThan(0));
- const marked=[...marks.get("atlas-original-proof")!].map(range=>range.toString()).join("|");
+ await waitFor(()=>expect(markedRanges(marks).length).toBeGreaterThan(0));
+ const marked=markedRanges(marks).map(range=>range.toString()).join("|");
  // The heading stating the claim is marked; the example the saved quote points at is not.
  expect(marked).toContain("Mem0 擅长记忆召回，但 Atlas 需要管理项目的「现行状态」");expect(marked).not.toContain("决定第一阶段使用关键词搜索");
 });

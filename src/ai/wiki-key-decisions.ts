@@ -261,8 +261,10 @@ export function withSameAnswer(ledger: WikiKnowledgeLedger, question: WikiSameQu
 const DECISION_QUESTIONS = 2, MAX_QUESTIONS = 6;
 export function wikiDecisionQuestions(ledger: WikiKnowledgeLedger | undefined, zh: boolean, versions = true): { scope: WikiScopeQuestion[]; same: WikiSameQuestion[]; versions: WikiVersionQuestion[]; candidates: WikiDecisionCandidate[] } {
   const scope = versions ? wikiScopeQuestions(ledger, zh) : [], same = versions ? wikiSameQuestions(ledger, zh) : [];
-  const questions = versions ? wikiVersionQuestions(ledger, zh) : [];
-  const asked = new Set(questions.flatMap(question => question.options.flatMap(option => option.unitIds)));
+  const questions = versions ? wikiVersionQuestions(ledger, zh).filter(question => question.answer || !question.options.some(option => option.unitIds.some(id => (ledger?.writingQuestions ?? []).some(asked => asked.unitIds.includes(id))))) : [];
+  // Points the user was asked about before or while writing (answered or skipped) are not asked again here.
+  const before = new Set([...(ledger?.writingQuestions ?? []).flatMap(question => question.unitIds), ...(ledger?.userAnswers ?? []).flatMap(answer => answer.unitIds)]);
+  const asked = new Set([...before, ...questions.flatMap(question => question.options.flatMap(option => option.unitIds))]);
   const left = Math.max(0, MAX_QUESTIONS - scope.length - same.length - questions.length);
   const candidates = wikiDecisionCandidates(ledger).filter(item => !item.unitIds.some(id => asked.has(id)) && (item.verdict || item.unitIds.length > 1 || item.status === "open"));
   return { scope, same, versions: questions, candidates: candidates.slice(0, versions ? Math.min(DECISION_QUESTIONS, left) : 8) };

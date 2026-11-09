@@ -92,6 +92,15 @@ export const isSourceCodeParagraph = (text: string) => /^(?:\*[^*\n]+\*\n\n)?(?:
  * writer's. */
 export const isSourceCaption = (text: string, next: { type: string; text: string } | undefined) => /^\*[^*\n]+\*$/u.test(text.trim()) && !!next && (next.type === "code" || next.type === "table" || /^\s*\|/u.test(next.text));
 
+/** A saved caption over a block, as the reader sees it: "讨论中的原文表格 · AI 建议，未确认" read like a system label
+ * over every table. Shown as whose block it is, in a few words; the later decision that holds over it stays. */
+const ZH_WHOSE: Record<string, (kind: string) => string> = { "你确认的": kind => `你确认的${kind}`, "你提供的": kind => `你提供的${kind}`, "AI 建议，未确认": kind => `AI 建议的${kind}`, "早期版本，已被替换": kind => `早期的${kind}（已被替换）` };
+const EN_WHOSE: Record<string, (kind: string) => string> = { "confirmed by you": kind => `${kind} you confirmed`, "provided by you": kind => `${kind} you provided`, "AI suggestion, not confirmed": kind => `AI-suggested ${kind.toLowerCase()}`, "earlier version, since replaced": kind => `Earlier ${kind.toLowerCase()} (since replaced)` };
+export function readableSourceCaptions(body: string): string {
+  return body.replace(/^\*讨论中的原文(表格|代码) · (你确认的|你提供的|AI\s*建议，未确认|早期版本，已被替换)(?:；你随后的决定优先：([^*\n]+))?\*$/gmu, (_all, kind: string, whose: string, later?: string) => `*${ZH_WHOSE[whose.replace(/^AIs*/u, "AI ")](kind)}${later ? ` · 以你后来的决定为准：${later.trim()}` : ""}*`)
+    .replace(/^\*(Table|Code) from the discussion · (confirmed by you|provided by you|AI suggestion, not confirmed|earlier version, since replaced)(?:; your later decision takes precedence: ([^*\n]+))?\*$/gmu, (_all, kind: string, whose: string, later?: string) => `*${EN_WHOSE[whose](kind)}${later ? ` · your later decision holds: ${later.trim()}` : ""}*`);
+}
+
 /** What a block is, for its caption: a table, a flow drawn with arrows, a list of names, commands or code. */
 function blockKind(code: WikiSourceCode, zh: boolean): string {
   if (code.language === TABLE) return zh ? "对照表" : "table";

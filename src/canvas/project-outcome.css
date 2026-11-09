@@ -1378,3 +1378,30 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .project-source-group > h3 { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 4px; background: var(--surface, var(--bg)); color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
 .project-source-group > h3 span { flex: 0 1 auto; color: var(--text); }
 .project-source-group > h3 small { display: inline; font-weight: 400; }
+
+/* Document tools as a floating vertical rail beside the reading column: check evidence (with what is left to
+   confirm), show sources, edit, and the chapter's history. Icons carry their names as labels and tooltips. */
+.wiki-document > .wiki-tool-rail { position: sticky; top: 12px; z-index: 4; float: right; display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px 16px; padding: 6px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-solid); box-shadow: 0 6px 18px #0f172a12; }
+:root[data-theme="dark"] .wiki-document > .wiki-tool-rail { box-shadow: 0 6px 18px #00000047; }
+:is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted); }
+:is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button:hover { background: var(--surface-muted); color: var(--text); }
+:is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+:is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button.has-attention { color: #b45309; }
+:root[data-theme="dark"] :is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button.has-attention { color: #fbbf24; }
+.wiki-tool-badge { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #d97706; color: #fff; font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+@media (max-width: 860px) {
+  .wiki-document > .wiki-tool-rail { position: static; float: none; flex-direction: row; width: max-content; margin: 0 0 12px auto; box-shadow: none; }
+}
+
+/* A sentence's source: a small round quote mark in its holder's colour, easy to see and to hit, instead of a faint dot. */
+:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet { min-width: 18px; width: 18px; height: 18px; margin: 0 2px 0 3px; padding: 0; border-width: 1px; border-radius: 50%; vertical-align: .08em; opacity: .9; transition: transform .12s ease, opacity .12s ease; }
+:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet::before { content: "\201D"; display: block; font: 700 15px/1 Georgia, "Times New Roman", serif; transform: translateY(3px); }
+:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet:hover { opacity: 1; transform: scale(1.12); }
+:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder.is-holder-ai { --holder: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
+@media (pointer: coarse) { :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet { min-width: 24px; width: 24px; height: 24px; } }
+/* The ledger reads at the width of the overview and the chapters, left-aligned like them. The scrollbar keeps its room,
+   so switching filters (chapters open or close, the page grows or shrinks) does not move the page sideways. */
+.focus-workspace .focus-reading-body { scrollbar-gutter: stable; }
+.focus-workspace .focus-reading-body:has(> .reader-content .knowledge-ledger) > .reader-content { max-width: 820px; }
+.knowledge-ledger { max-width: 720px; padding: 4px 0 32px; }
+.knowledge-ledger-tools [role="tab"] small { min-width: 1.6em; text-align: center; font-variant-numeric: tabular-nums; }

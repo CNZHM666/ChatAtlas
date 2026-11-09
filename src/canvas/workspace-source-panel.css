@@ -262,3 +262,47 @@
 .workspace-source-next-chapter { display: block; width: calc(100% - 32px); margin: 8px 16px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .workspace-source-next-chapter:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .workspace-source-next-chapter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The original as a floating card: a quote/context switch and icon tools on one row, a thin rule naming where this
+   is, the original, and any question at the bottom where it is read after the passage. */
+.workspace-source-panel.is-card:not(.is-embedded) { margin: 12px 12px 12px 4px; height: calc(100% - 24px); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 10px 30px #0f172a14, 0 2px 6px #0f172a0d; overflow: hidden; }
+.workspace-source-panel.is-card.is-overlay { inset: 12px 12px 12px auto; margin: 0; height: auto; width: min(460px, calc(100% - 24px)); box-shadow: 0 16px 40px #0f172a29; }
+:root[data-theme="dark"] .workspace-source-panel.is-card:not(.is-embedded) { box-shadow: 0 10px 30px #00000059; }
+.workspace-source-panel > header.workspace-source-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 10px 6px 14px; border-bottom: 0; }
+.workspace-source-switch { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--surface-muted); }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-switch button,
+.workspace-source-panel .workspace-source-switch button { min-height: 28px; padding: 3px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 13px; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-switch button[aria-pressed="true"],
+.workspace-source-panel .workspace-source-switch button[aria-pressed="true"] { background: var(--surface-solid); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px #0f172a1f; }
+.workspace-source-tools { display: inline-flex; align-items: center; gap: 2px; }
+.workspace-source-tools .workspace-source-points { margin: 0; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-tools button,
+.workspace-source-panel .workspace-source-tools button { width: 32px; min-height: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-tools button:not(:disabled):hover { background: var(--surface-muted); color: var(--text); }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-tools .workspace-source-close:has(span) { width: auto; padding: 0 8px; }
+.workspace-source-rule { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin: 2px 16px 4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.workspace-source-rule::after { content: ""; flex: 1; order: 3; border-top: 1px solid var(--border); }
+.workspace-source-rule > .workspace-source-navigation { order: 4; padding: 0; border: 0; gap: 2px; font-size: 12px; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-rule button { width: 24px; min-width: 24px; min-height: 24px; height: 24px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.workspace-source-rule-role::before { content: "·"; margin-right: 8px; }
+.workspace-source-panel.is-card > .workspace-source-body { padding: 12px 16px 16px; }
+.workspace-source-panel.is-card .workspace-source-message .conversation-answer-markdown,
+.workspace-source-panel.is-card .workspace-source-message .conversation-answer-markdown :is(p,li) { font-size: 15px; line-height: 1.8; }
+.workspace-source-panel.is-card .workspace-source-message-meta { margin-bottom: 8px; font-size: 12px; }
+/* The question sits under the original; a flagged point's question is tinted so it reads as the thing to do. */
+.workspace-source-ask { flex: 0 0 auto; border-top: 1px solid var(--border); background: var(--surface-solid); }
+.workspace-source-ask .workspace-source-holder, .workspace-source-ask .workspace-source-holder-done { border-bottom: 0; }
+.workspace-source-ask.is-asking { background: color-mix(in srgb, #f59e0b 7%, var(--surface-solid)); }
+.workspace-source-ask .workspace-source-holder button.is-primary { border-color: var(--accent); background: var(--accent); color: var(--surface-solid); font-weight: 600; }
+.workspace-source-ask .workspace-source-holder button.is-primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
+.workspace-source-panel > footer.workspace-source-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.workspace-source-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.workspace-source-legend i { display: inline-block; width: 16px; height: 10px; border-radius: 2px; }
+.workspace-source-legend i.is-proof { background: #facc1566; }
+.workspace-source-legend i.is-similar { background: #facc151f; border-bottom: 2px dashed #d4a00a; border-radius: 0; }
+.workspace-source-legend i.is-cue { background: transparent; border-bottom: 2px solid #dc2626; border-radius: 0; }
+.workspace-source-panel.is-card > .workspace-source-next-chapter { width: calc(100% - 32px); margin: 4px 16px 8px; }
+::highlight(atlas-original-proof) { background: #facc1566; }
+::highlight(atlas-original-similar) { background: #facc151f; color: inherit; text-decoration: underline dashed #d4a00a; text-underline-offset: 4px; }
+::highlight(atlas-original-cue) { color: inherit; text-decoration: underline solid #dc2626 2px; text-underline-offset: 4px; }
+.workspace-source-highlight.is-quote { background: #facc1566; }

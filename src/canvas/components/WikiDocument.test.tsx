@@ -85,7 +85,7 @@ it("checks quotes against the originals and reviews only the points that need a 
   {text:"基础搜索不依赖付费模型",quote:"基础搜索不依赖付费模型。",evidenceIds:["p2"],formulations:["基础搜索不依赖付费模型"]},
  ]};
  render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
- fireEvent.click(screen.getByRole("button",{name:"核对依据 · 1 条待看"}));
+ fireEvent.click(screen.getByRole("button",{name:"核对依据 · 1 条待确认"}));
  const options=open.mock.lastCall![1];
  expect(open.mock.lastCall![0]).toBe(missing);
  expect(options.points).toHaveLength(1);
@@ -209,8 +209,8 @@ it("adds a claim whose meaning the originals do not carry to the review, with th
  const session=projectSession(),open=vi.fn(),ref={...session.evidence[0],id:"p1",messageId:"m1",excerpt:"可以考虑用 Orama 做全文索引。"};session.evidence.push(ref);
  const section={...session.sections[0],body:"已确定采用 Orama 做全文索引。",claims:[{text:"已确定采用 Orama 做全文索引",quote:"可以考虑用 Orama 做全文索引。",evidenceIds:["p1"],formulations:["已确定采用 Orama 做全文索引"]}]};
  render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
- fireEvent.click(screen.getByRole("button",{name:"核对依据 · 1 条待看"}));
- expect(open.mock.lastCall![1].points[0].attention).toEqual({kind:"tentative"});
+ fireEvent.click(screen.getByRole("button",{name:"核对依据 · 1 条待确认"}));
+ expect(open.mock.lastCall![1].points[0].attention).toMatchObject({kind:"tentative"});expect(open.mock.lastCall![1].mode).toBe("check");
 });
 it("highlights in the document the claims that cite the original the panel shows",()=>{
  const session=projectSession(),first={...session.evidence[0],id:"p1",messageId:"m1",excerpt:"先在本地检索候选消息。"},second={...session.evidence[0],id:"p2",messageId:"m2",excerpt:"基础搜索不依赖付费模型。"};

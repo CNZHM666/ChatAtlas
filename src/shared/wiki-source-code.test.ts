@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSourceCodeParagraph, messageCode, placedSourceCode, readsAsProse } from "./wiki-source-code";
+import { isSourceCodeParagraph, messageCode, placedSourceCode, readableSourceCaptions, readsAsProse } from "./wiki-source-code";
 import { decidedValuesNotes } from "./wiki-section-status";
 import { withWikiSections } from "./wiki-sections";
 import { wikiReadingCleanup } from "./wiki-reading-cleanup";
@@ -71,7 +71,7 @@ describe("source code blocks", () => {
     const body = `### A\n\nFirst point here.\n\n${caption}\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nSecond point here.\n\n${caption}\n\n| c | d |\n|---|---|\n| 3 | 4 |\n\nThird.\n\n${code}\n\n\`\`\`ts\nx\n\`\`\`\n\nMore.\n\n${code}\n\n\`\`\`ts\ny\n\`\`\``;
     const section = { id: "s", title: "T", body, evidenceIds: ["e"], kind: "finding", transition: "", claims: [] } as unknown as FocusSection;
     const read = wikiReadingFormat(wikiReadingCleanup(body, section), section);
-    expect(read.match(/from the discussion/gu)).toHaveLength(4);
+    expect(read.match(/^\*AI-suggested (?:table|code)\*$/gmu)).toHaveLength(4);
   });
 
   it("gives a unit the block of its stored message", () => {
@@ -134,5 +134,16 @@ describe("examples in a learning record", () => {
     // A project keeps every block, as before.
     const project: WikiDraftChapter[] = [{ ...chapters[0], body: `### 路线与节奏\n\n${text}`, paragraphs: [{ subtopic: "路线与节奏", text, unitIds: ["goal", "next", "ros"], claims: [] }] }];
     expect(placedSourceCode(project, id => units.get(id), () => undefined, true, [...units.values()], false)).toBe(3);
+  });
+});
+
+describe("readableSourceCaptions", () => {
+  it("shows a saved caption as whose block it is, keeping the later decision", () => {
+    expect(readableSourceCaptions("*讨论中的原文表格 · AI建议，未确认*")).toBe("*AI 建议的表格*");
+    expect(readableSourceCaptions("*讨论中的原文代码 · 你确认的；你随后的决定优先：只支持美元*")).toBe("*你确认的代码 · 以你后来的决定为准：只支持美元*");
+    expect(readableSourceCaptions("*讨论中的原文表格 · 早期版本，已被替换*")).toBe("*早期的表格（已被替换）*");
+    expect(readableSourceCaptions("*Table from the discussion · AI suggestion, not confirmed*")).toBe("*AI-suggested table*");
+    // Prose that only mentions the words stays as written.
+    expect(readableSourceCaptions("讨论中的原文表格 · AI 建议，未确认")).toBe("讨论中的原文表格 · AI 建议，未确认");
   });
 });

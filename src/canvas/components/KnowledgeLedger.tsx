@@ -1,6 +1,7 @@
 import { useContext, useMemo, useState } from "react";
 import { BookMarked, Search } from "lucide-react";
 import type { FocusEvidence, FocusSession } from "../../shared/focus-session";
+import type { WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import { type WikiKnowledgeUnit, type WikiUnitStatus, type WikiUserDecision } from "../../shared/wiki-knowledge";
 import { resolveWikiReading } from "../../ai/wiki-knowledge-reading";
 import { roadmaps } from "../../ai/wiki-knowledge-write";
@@ -24,7 +25,7 @@ const PAGE = 40;
 /** Every knowledge point the document was written from, by chapter and subject: what it says, whose it is, and its
  * original one click away. The key decisions sit on top; a verdict here is kept in the ledger and the document is
  * rewritten around it on request. */
-export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions }: { session: FocusSession; zh: boolean; onLocate: (ref: FocusEvidence) => void; onApplyDecisions?: () => void }) {
+export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions }: { session: FocusSession; zh: boolean; onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void; onApplyDecisions?: () => void }) {
   const actions = useContext(ProjectKnowledgeActions);
   const ledger = session.wikiKnowledge;
   const [filter, setFilter] = useState("all"), [query, setQuery] = useState(""), [shown, setShown] = useState<Record<string, number>>({});
@@ -57,7 +58,12 @@ export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions }: { s
   if (!ledger || !data) return null;
   const active = FILTERS.find(item => item.id === filter)!, needle = query.trim().toLocaleLowerCase();
   const visible = (unit: WikiKnowledgeUnit) => (!active.statuses || active.statuses.includes(data.statuses.get(unit.id)!)) && (!needle || `${unit.statement} ${unit.subject}`.toLocaleLowerCase().includes(needle));
-  const open = (unit: WikiKnowledgeUnit) => onLocate(session.evidence.find(ref => ref.conversationId === unit.evidence.conversationId && ref.messageId === unit.evidence.messageId) ?? { id: `unit:${unit.id}`, conversationId: unit.evidence.conversationId, messageId: unit.evidence.messageId, title: unit.subject, excerpt: unit.evidence.quote });
+  // The point's own words are marked, not the excerpt first saved for its message: points of one message each open at
+  // their own place, and clicking another while the panel is open moves the panel to it.
+  const open = (unit: WikiKnowledgeUnit) => {
+    const ref = session.evidence.find(ref => ref.conversationId === unit.evidence.conversationId && ref.messageId === unit.evidence.messageId) ?? { id: `unit:${unit.id}`, conversationId: unit.evidence.conversationId, messageId: unit.evidence.messageId, title: unit.subject, excerpt: unit.evidence.quote };
+    onLocate(ref, { references: [ref], quote: unit.evidence.quote, claim: unit.statement, mode: "view" });
+  };
   const decide = async (unitIds: string[], verdict: WikiUserDecision["verdict"] | undefined) => { if (actions) await actions.save(current => current.wikiKnowledge ? { ...current, wikiKnowledge: withDecision(current.wikiKnowledge, unitIds, verdict) } : current); };
   const count = (statuses: LedgerStatus[]) => statuses.reduce((sum, status) => sum + (data.counts.get(status) ?? 0), 0);
   const pending = ledgerDecisionsPending(ledger);

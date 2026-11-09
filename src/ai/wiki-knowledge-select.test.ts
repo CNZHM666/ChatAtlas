@@ -177,3 +177,26 @@ it("always shows a point naming a function a reader calls by name", () => {
   const book = ledger([...many, redact], { subjects: [subject("s", "安全", [...many, redact])], chapters: [{ id: "c", title: "安全", question: "", group: "", subtopics: [{ title: "密钥", subjectIds: ["s"] }] }] });
   expect(curateWikiUnits(book, wikiUnitStatuses(book.batches.flatMap(batch => batch.units), book.organization!), 3).selected.has(redact.id)).toBe(true);
 });
+
+it("gives a chapter far below the others its best points back, up to half the average chapter", () => {
+  const vision = ["主要用户是第一次接触电子制作的高中生", "套件开箱后十分钟内点亮第一盏灯", "说明书只用图片不用电路术语", "价格控制在两百元以内", "不需要焊接全部用磁吸连接", "每个模块都印有用途图标", "失败时板载蜂鸣器提示原因", "课程按周组织共八周", "老师端能看到全班进度", "家长可以离线打印作业单", "社区分享作品需要审核", "第二年推出进阶扩展包", "电池采用可更换的五号电池", "外壳颜色区分输入与输出模块", "手机应用只负责展示教程", "不收集学生的个人信息", "学校批量采购提供发票", "售后承诺坏件七天内换新", "首批只在三个城市试点", "竞品普遍需要电脑编程环境", "我们的差异是零代码入门", "长期目标是成为课堂标配", "成功标准是九成学生完成第一课"].map((text, index) => unit(index, "产品定位", `${text}。`));
+  const technical = "数据库 缓存层 消息队列 日志采集 鉴权网关 路由表 渲染管线 全文索引 增量同步 冷备份 指标监控 速率限制 重试策略 压缩算法 密钥轮换 分页游标 批量导出 文件导入 推送通知 定时调度".split(" ");
+  const actions = ["选用开源方案并锁定主版本", "部署在独立容器里由运维托管", "接口超时设为三秒后降级返回"];
+  const long = (base: number, area: string) => technical.flatMap((word, index) => actions.map((action, part) => unit(base + index * 3 + part, area, `${area}${word}${action}，编号${base + index * 3 + part}。`)));
+  const tech = long(100, "技术"), ui = long(200, "界面");
+  const subjects = [subject("s:v", "产品定位", vision), ...[0, 1, 2].map(part => subject(`s:t${part}`, `技术${part}`, tech.slice(part * 20, part * 20 + 20))), ...[0, 1, 2].map(part => subject(`s:u${part}`, `界面${part}`, ui.slice(part * 20, part * 20 + 20)))];
+  const book = ledger([...vision, ...tech, ...ui], { subjects, chapters: [
+    { id: "v", title: "产品愿景", question: "?", group: "", subtopics: [{ title: "核心价值", subjectIds: ["s:v"] }] },
+    { id: "t", title: "技术架构", question: "?", group: "", subtopics: [0, 1, 2].map(part => ({ title: `技术${part}`, subjectIds: [`s:t${part}`] })) },
+    { id: "u", title: "界面设计", question: "?", group: "", subtopics: [0, 1, 2].map(part => ({ title: `界面${part}`, subjectIds: [`s:u${part}`] })) },
+  ] });
+  const curated = curate(book), shown = (items: WikiKnowledgeUnit[]) => items.filter(item => curated.selected.has(item.id));
+  const length = (items: WikiKnowledgeUnit[]) => shown(items).reduce((sum, item) => sum + item.statement.length, 0);
+  // Its subject quota kept 7 of 23 (about 90 characters) beside chapters of 533: points come back until it holds half
+  // the average chapter, and no further.
+  expect(shown(vision).length).toBe(16);
+  expect(curated.report.chapter_filled).toBe(9);
+  expect(length(vision)).toBeGreaterThan((length(tech) + length(ui)) / 3 / 2);
+  // The long chapters keep what their caps gave them.
+  expect([shown(tech).length, shown(ui).length]).toEqual([21, 21]);
+});

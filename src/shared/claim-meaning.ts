@@ -16,7 +16,11 @@ function claimSentences(claim: string, quote: string): string {
 }
 
 /** Why a point needs the reader's look, kept as a kind (and the model's own reason) so it reads in the current language. */
-export interface EvidenceAttention { kind: "missing" | "settled" | "negation" | "tentative" | "approximate" | "partial" | "unsupported"; reason?: string }
+export interface EvidenceAttention { kind: "missing" | "settled" | "negation" | "tentative" | "approximate" | "partial" | "unsupported"; reason?: string;
+  /** The words of the original that raised the flag ("先不做", "可以考虑用 Orama"), shown and marked so the reader need not hunt. */
+  cue?: string;
+  /** For a scope claim: the item the original puts out of scope. */
+  subject?: string }
 
 export function evidenceAttentionText(attention: EvidenceAttention, zh: boolean): string {
   const text: Record<EvidenceAttention["kind"], [string, string]> = {
@@ -43,11 +47,56 @@ function statesSomething(claim: string): boolean {
 }
 const LONG_HAN = 10, SHORT_HAN = 4, STATEMENT_WORDS = 6, LIST = /[/／、，,]/u;
 
+/** Character pairs that say nothing about what a clause is about: a shared "第一版" or "功能" ties a "第一版不需要后端"
+ * to every claim about the first version. */
+const GENERIC_PAIRS = new Set(["第一", "一版", "版本", "功能", "用户", "可以", "需要", "我们", "这个", "一个", "进行", "使用", "支持", "目前", "现在", "时候", "以及", "还是", "或者", "如果", "就是", "所以", "因为", "但是", "然后", "项目", "产品", "方案", "页面", "一下", "这些", "那些", "什么", "怎么"]);
+function topicPairs(text: string): Set<string> {
+  const chars = Array.from(text.normalize("NFKC").toLowerCase().replace(NEGATION_ALL, " ").replace(/[\s\p{P}\p{S}]/gu, " "));
+  const pairs = new Set<string>();
+  for (let index = 1; index < chars.length; index++) { const pair = chars[index - 1] + chars[index]; if (!/\s/u.test(pair) && !GENERIC_PAIRS.has(pair)) pairs.add(pair); }
+  return pairs;
+}
+const NEGATION_ALL = new RegExp(NEGATION.source, "giu");
+/** The clause of the quote a cue word sits in, cut at commas, semicolons and line ends. */
+function clauses(quote: string): string[] { return quote.split(/[，,；;。！？!?\n|]+/u).map(item => item.trim()).filter(Boolean); }
+/** A clause is about the claim when it shares a topic pair with it, the cue word and generic words left out. */
+function aboutClaim(clause: string, claim: string): boolean { const own = topicPairs(claim); for (const pair of topicPairs(clause)) if (own.has(pair)) return true; return false; }
+/** "涵盖计时控制、后台运行、到点提醒…" names a scope; its items are checked one by one. */
+const LIST_LEAD = /(?:涵盖|包括|包含|包含了|支持|提供|有|：|:)(?=[^：:]*[、，,])/u;
+export function listItems(claim: string): string[] {
+  const lead = claim.match(LIST_LEAD);
+  if (!lead || lead.index === undefined) return [];
+  const tail = claim.slice(lead.index + lead[0].length).replace(/[。！？!?.；;]+$/u, "");
+  const items = tail.split(/[、，,]|(?:以及|及|和|与)(?=\S)/u).map(item => item.replace(/^(?:以及|及|和|与)/u, "").replace(/(?:等|等等)$/u, "").trim()).filter(item => Array.from(item).length >= 2 && Array.from(item).length <= 16);
+  return items.length >= 3 ? items : [];
+}
+/** A line of the original that puts an item out of this version: a later version, a deferral, a "不做". */
+const DEFERRED = /\bV\s*[2-9]\b|\bv\s*[2-9]\b|以后|后续|下一版|第二版|暂不|先不|不做|不需要|\bP2\b|不在.{0,6}范围/u;
+
+/** The first item of a scope claim its original puts out of scope, with the words saying so. */
+function deferredItem(claim: string, quote: string): EvidenceAttention | undefined {
+  const lines = quote.split(/\n+/u);
+  for (const item of listItems(claim)) {
+    const line = lines.find(text => text.includes(item));
+    const said = line?.match(DEFERRED)?.[0];
+    if (line && said) return { kind: "negation", subject: item, cue: said.trim() };
+  }
+  return undefined;
+}
+
 export function localMeaningProblem(claim: string, fullQuote: string | undefined): EvidenceAttention | undefined {
   if (!fullQuote || !statesSomething(claim)) return undefined;
+  // A list of what a version covers is checked item by item: the "不需要后端" next to it says nothing about its items.
+  if (listItems(claim).length) return deferredItem(claim, fullQuote);
   const quote = claimSentences(claim, fullQuote);
-  if (NEGATION.test(quote) && !NEGATION.test(claim)) return { kind: "negation" };
-  if (TENTATIVE.test(quote) && !FIRM.test(quote) && FIRM.test(claim) && !TENTATIVE.test(claim)) return { kind: "tentative" };
+  if (!NEGATION.test(claim)) {
+    const negated = clauses(quote).find(clause => NEGATION.test(clause) && aboutClaim(clause, claim));
+    if (negated) return { kind: "negation", cue: negated };
+  }
+  if (!FIRM.test(quote) && FIRM.test(claim) && !TENTATIVE.test(claim)) {
+    const tentative = clauses(quote).find(clause => TENTATIVE.test(clause) && aboutClaim(clause, claim));
+    if (tentative) return { kind: "tentative", cue: tentative };
+  }
   return undefined;
 }
 

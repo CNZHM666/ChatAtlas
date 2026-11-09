@@ -53,6 +53,8 @@ export const WIKI_UNIT_BUDGET = 520;
 export const WIKI_LENGTH_BUDGET = 34000;
 /** Characters of material one subtopic explains at most, beyond its must-show points: about 700 characters of prose. */
 export const WIKI_SUBTOPIC_LENGTH = 1000;
+/** A chapter whose material falls below this share of the average chapter gets its best points left out back, up to it. */
+export const WIKI_CHAPTER_FLOOR = .5;
 /** A learning record's subtopic holds a lesson: three times a project's. */
 const LEARNING_SUBTOPIC = 3;
 
@@ -201,6 +203,26 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
     for (const point of own.filter(point => !point.must).sort((a, b) => a.value - b.value || b.order - a.order)) {
       if (size <= (learning ? subtopicLength * LEARNING_SUBTOPIC : subtopicLength)) break;
       picked.delete(point); size -= point.length; length -= point.length; report.subtopic_dropped = (report.subtopic_dropped ?? 0) + 1;
+    }
+  }
+  // A chapter far below the others gets its best points left out back, up to half the average chapter: the subject
+  // quota and subtopic cap left one run's 产品愿景与用户定位 10 of its 23 points (548 characters) beside chapters of 3000,
+  // and doubling the cap for every chapter grew the long ones, not it. Long chapters keep their caps; a lesson shows all.
+  if (!learning && organization.chapters.length > 1) {
+    const chapterOf = (point: Point) => (subtopicOf.get(point.home) ?? "").split(":")[0];
+    const sizes = new Map<string, number>();
+    for (const point of picked) { const key = chapterOf(point); if (key) sizes.set(key, (sizes.get(key) ?? 0) + point.length); }
+    const keys = organization.chapters.map((_, at) => String(at)), floor = keys.reduce((sum, key) => sum + (sizes.get(key) ?? 0), 0) / keys.length * WIKI_CHAPTER_FLOOR;
+    for (const key of keys) {
+      let size = sizes.get(key) ?? 0;
+      if (size >= floor) continue;
+      const chosen = [...picked].filter(point => chapterOf(point) === key);
+      for (const point of points.filter(point => !picked.has(point) && chapterOf(point) === key).sort((a, b) => b.value - a.value || a.order - b.order)) {
+        if (size >= floor) break;
+        // A near-repeat of a point the chapter shows adds nothing to read.
+        if (chosen.some(other => similarStatements(point.text, other.text))) continue;
+        picked.add(point); chosen.push(point); size += point.length; length += point.length; report.chapter_filled = (report.chapter_filled ?? 0) + 1;
+      }
     }
   }
   const selected = new Set<string>(), home = new Map<string, string>();

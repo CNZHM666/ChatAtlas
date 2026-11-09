@@ -180,7 +180,26 @@ export function similarSentenceRanges(root: HTMLElement | null, original: string
 export function derivedSentenceRanges(root: HTMLElement | null, texts: Array<string | undefined>, limit = 2): Range[] {
   const wanted = [...new Set(texts.filter((text): text is string => Boolean(text?.trim())))];
   const strict = similarSentenceRanges(root, wanted, limit, "strict", true);
-  return strict.length ? strict : similarSentenceRanges(root, wanted, limit, "loose", true);
+  // A loose match on headings marks whole sections ("三、完整用户使用流程" and every step under it): sentences only.
+  return strict.length ? strict : similarSentenceRanges(root, wanted, limit, "loose", false);
+}
+
+/** Each named item of a scope claim ("计时控制、后台运行、到点提醒…") where the original names it, the first time:
+ * a table row or a list line per item, so a claim of seven items does not mark only the two closest sentences. */
+export function listItemRanges(root: HTMLElement | null, items: string[]): Range[] {
+  if (!root || !items.length) return [];
+  const locate = evidenceTextLocator(root), block = "p, li, td, th, blockquote, pre";
+  return items.flatMap(item => {
+    for (let occurrence = 0; occurrence < 8; occurrence++) {
+      const range = locate(item, occurrence);
+      if (!range) return [];
+      const parent = range.startContainer.parentElement;
+      if (parent?.closest("h1, h2, h3, h4, h5, h6, summary, button")) continue;
+      if (parent?.closest(block) !== range.endContainer.parentElement?.closest(block)) continue;
+      return [range];
+    }
+    return [];
+  });
 }
 
 /** Scrolls the nearest scrolling ancestor so the range sits a third of the way down, when it is not already in view. */

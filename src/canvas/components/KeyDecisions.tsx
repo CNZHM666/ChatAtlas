@@ -37,8 +37,8 @@ export function KeyDecisions({ ledger, zh, onDecide, onLedger, intro, footer, op
   };
   const holder = (item: WikiDecisionCandidate) => item.status === "relayed" ? zh ? "来自你提供的资料" : "From your material" : item.status === "open" ? zh ? "仍在讨论" : "Still open" : zh ? "AI 建议" : "AI proposal";
   return <details className="key-decisions" open={initiallyOpen}>
-    <summary><strong>{zh ? "关键决定" : "Key decisions"}</strong><small>{open ? zh ? `${open} 条待你确认` : `${open} awaiting you` : zh ? "都已处理" : "All handled"}</small></summary>
-    {intro ?? <p className="key-decisions-intro">{zh ? "确认的写成你的决定，不采用的作为早期方案。" : "Confirmed points become your decisions; set-aside ones, earlier options."}</p>}
+    <summary><strong>{zh ? "可调整的建议" : "Suggestions to adjust"}</strong><small>{open ? zh ? `${open} 条 · 可选` : `${open} · optional` : zh ? "都已处理" : "All handled"}</small></summary>
+    {intro ?? <p className="key-decisions-intro">{zh ? "文档已按讨论写成，这些 AI 反复提到的建议照原样标为「AI 建议」。想把哪条改成你的决定或不采用，在这里改；不改也不影响阅读。" : "The document is written as discussed; these suggestions the AI kept making stay labelled as AI proposals. Change any to your decision or set it aside here; nothing needs doing."}</p>}
     {questions.length ? <ol className="key-decisions-versions">{questions.map(question => { const chosen = answerOf(question); return <li key={question.id} className={chosen ? "is-answered" : undefined}>
       <div><p>{question.question}</p>{question.chapter ? <small>{question.chapter}</small> : null}</div>
       <div className="key-decisions-options" role="radiogroup" aria-label={question.question}>

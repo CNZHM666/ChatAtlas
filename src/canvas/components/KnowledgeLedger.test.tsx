@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { KnowledgeLedger } from "./KnowledgeLedger";
 import { projectSession } from "../../test/project-fixture";
@@ -28,4 +28,18 @@ it("counts only the user's own decisions as theirs, shows plans the AI later rep
   expect(screen.getByRole("tab", { name: /早期方案/u })).toHaveTextContent("早期方案2");
   expect(screen.queryByRole("tab", { name: /仍在讨论/u })).toBeNull();
   expect(screen.getAllByText("早先方案")).toHaveLength(2);
+});
+
+it("opens each point at its own words, so a second point of the same message moves the open panel", () => {
+  const units = [unit(1, "索引放在内存里。"), { ...unit(2, "索引改放 IndexedDB。"), evidence: { ...unit(2, "").evidence, messageId: "m1", quote: "索引改放 IndexedDB。" } }];
+  const session = projectSession();
+  session.wikiKnowledge = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "检索", aliases: [], unitIds: units.map(item => item.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "检索", question: "?", group: "", subtopics: [{ title: "存储", subjectIds: ["s"] }] }] } };
+  const onLocate = vi.fn();
+  render(<KnowledgeLedger session={session} zh onLocate={onLocate} />);
+  fireEvent.click(screen.getByText("检索", { selector: "strong" }));
+  fireEvent.click(screen.getByText("索引放在内存里。"));
+  fireEvent.click(screen.getByText("索引改放 IndexedDB。"));
+  expect(onLocate.mock.calls.map(call => call[1].quote)).toEqual(["索引放在内存里。", "索引改放 IndexedDB。"]);
+  expect(onLocate.mock.calls[1][1]).toMatchObject({ claim: "索引改放 IndexedDB。", mode: "view" });
 });

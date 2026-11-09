@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { wikiHolderTitle, type WikiHolder } from "../../shared/wiki-holder";
-import { ArrowLeft, ArrowUpRight, BookOpen, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, ChevronLeft, ChevronRight, X } from "lucide-react";
 import type { ConversationMessage } from "../../shared/types";
 import type { FocusEvidence, FocusSession } from "../../shared/focus-session";
 import { readSessionSource } from "../../storage/source-versions";
@@ -9,8 +9,8 @@ import { messageTurn } from "../../shared/message-turns";
 import { wikiQuoteRange } from "../../shared/wiki-claims";
 import { sourceQuoteText } from "../../shared/source-quote-text";
 import { pastedMaterial } from "../../shared/source-text-display";
-import { evidenceAttentionText, type EvidenceAttention } from "../../shared/claim-meaning";
-import { derivedSentenceRanges, meaningTerms } from "../claim-highlight";
+import { evidenceAttentionText, listItems } from "../../shared/claim-meaning";
+import { derivedSentenceRanges, listItemRanges, meaningTerms, similarSentenceRanges } from "../claim-highlight";
 import { narrowQuote } from "../narrow-quote";
 import { evidenceConditionDescription, evidenceConditionDescriptionMatches, evidenceConditions, evidenceConditionsMatch } from "../evidence-conditions";
 import { ProjectExampleContext } from "../project-example-context";
@@ -21,7 +21,7 @@ import { invalidateMessageReadCache } from "../../storage/message-read-cache";
 import "../workspace-source-panel.css";
 import { originalEvidenceHighlights, originalEvidenceClaims, evidenceRoleWarnings, type EvidenceHighlight } from "../../shared/original-evidence-highlights";
 import { projectKnowledgeView } from "../../shared/project-knowledge-view";
-import { evidenceTextRange, evidenceSourceRanges } from "../evidence-highlight";
+import { evidenceTextLocator, evidenceTextRange, evidenceSourceRanges } from "../evidence-highlight";
 import { needsConfirmation, type EvidencePoint } from "../workspace-evidence-context";
 import {evidenceReadingIdentity,markEvidenceRead} from "../../storage/evidence-reading";
 const noMessages:ConversationMessage[]=[];
@@ -59,41 +59,43 @@ const QUOTE_FIT=.25,CLAIM_SENTENCE={cover:.6,shared:3};
 /** The status a reader answers about: the user's own words and material count as not decided, like the AI's. */
 const shownHolder = (holder: WikiHolder | undefined): WikiHolder | undefined => holder === "user" || holder === "material" ? "ai" : holder;
 const ANSWERS: Array<[WikiHolder, string, string]> = [["decided", "已定", "Decided"], ["open", "未定", "Open"], ["earlier", "旧方案", "Earlier"], ["ai", "AI 建议", "AI suggestion"]];
-type Question = { ask: [string, string]; why?: [string, string]; answers: Array<[WikiHolder, string, string]> };
-/** Why a point was flagged, in a few words under its question. */
-const WHY: Partial<Record<EvidenceAttention["kind"], [string, string]>> = {
-  missing: ["没找到引用的原话", "The quoted words were not found"],
-  negation: ["原话里有否定，结论里没有", "The quote says not to; the claim does not"],
-  tentative: ["原话只是在考虑，结论写得更肯定", "The quote only considers it; the claim is firmer"],
-  approximate: ["原文是按措辞匹配到的", "Matched to the original by wording"],
-  partial: ["AI 核对：原文只支持一部分", "AI check: the original supports only part"],
-  unsupported: ["AI 核对：原文不支持这句", "AI check: the original does not support it"],
-};
-/** The one question a point is flagged for, with two answers; each answer is the status the sentence keeps. Written
- * as decided with no confirmation: is it your decision? Still open: is it settled now? Any other flag: does the
- * sentence say what the original says? Saying it does not keeps it as it is; saying it does not marks it 未定. */
-function questionOf(point: EvidencePoint): Question {
-  const keep = point.holder ?? "ai";
-  if (point.attention?.kind === "settled") return { ask: ["这句是你的决定吗？", "Is this your decision?"], answers: [["decided", "是", "Yes"], ["ai", "不是", "No"]] };
-  if (!point.attention && point.holder === "open") return { ask: ["这件事定了吗？", "Is this settled now?"], answers: [["decided", "定了", "Settled"], ["open", "还没定", "Not yet"]] };
-  return { ask: ["这句和原话意思一致吗？", "Does this say what the original says?"], ...(point.attention && WHY[point.attention.kind] ? { why: WHY[point.attention.kind] } : {}), answers: [[keep, "一致", "Yes"], ["open", "不一致", "No"]] };
+/** An answer keeps or sets the sentence's status, or takes the reader to rewrite it: a sentence that misstates its
+ * original is fixed in the text, not by marking it 未定. */
+type Answer = [WikiHolder | "edit", string, string];
+type Question = { ask: [string, string]; why?: [string, string]; answers: Answer[] };
+const clip = (text: string, size = 28) => { const chars = Array.from(text.trim()); return chars.length > size ? chars.slice(0, size).join("") + "…" : chars.join(""); };
+/** The one question a point is flagged for, worded after what was found, with the words of the original that raised it. */
+function questionOf(point: EvidencePoint, canEdit: boolean): Question {
+  const keep = point.holder ?? "ai", attention = point.attention, cue = attention?.cue ? clip(attention.cue) : "";
+  const fix: Answer[] = canEdit ? [["edit", "改这句", "Rewrite it"]] : [["open", "标为未定", "Mark open"]];
+  if (attention?.kind === "settled") return { ask: ["这句是你的决定吗？", "Is this your decision?"], why: ["写成了已决定，原文里只有 AI 的建议", "Written as decided; the original only has an AI proposal"], answers: [["decided", "是我的决定", "Yes, mine"], ["ai", "只是建议", "Just a suggestion"]] };
+  if (!attention && point.holder === "open") return { ask: ["这件事定了吗？", "Is this settled now?"], answers: [["decided", "定了", "Settled"], ["open", "还没定", "Not yet"]] };
+  switch (attention?.kind) {
+    case "negation": return attention.subject
+      ? { ask: [`原文把「${attention.subject}」列为 ${cue}`, `The original puts "${attention.subject}" under ${cue}`], why: ["这句把它写进了范围，请确认", "This sentence includes it; check the scope"], answers: [[keep, "没问题", "It's right"], ...fix] }
+      : { ask: [cue ? `原话说「${cue}」` : "原话里有否定", cue ? `The original says "${cue}"` : "The original says not to"], why: ["这句没有体现这个否定，意思可能反了", "This sentence drops it; the meaning may be reversed"], answers: [[keep, "没问题", "It's right"], ...fix] };
+    case "tentative": return { ask: [cue ? `原话只是在考虑：「${cue}」` : "原话只是在考虑或建议", cue ? `The original only considers it: "${cue}"` : "The original only considers it"], why: ["这句写得更肯定", "This sentence states it firmly"], answers: [["ai", "改成建议", "Make it a suggestion"], ["decided", "确实已定", "It is decided"]] };
+    case "missing": return { ask: ["原文里没找到这句的原话", "This sentence's quote isn't in the original"], why: ["请确认它的来源", "Check where it comes from"], answers: [[keep, "来源没问题", "Source is fine"], ...fix] };
+    case "approximate": return { ask: ["下面的原文说的是同一件事吗？", "Does the original below say the same thing?"], why: ["它是按措辞对上的，不是逐字原话", "It was matched by wording, not word for word"], answers: [[keep, "是同一件事", "Same thing"], ...fix] };
+    case "partial": return { ask: ["原文只支持这句的一部分", "The original supports only part of this"], why: attention.reason ? [attention.reason, attention.reason] : undefined, answers: [[keep, "没问题", "It's right"], ...fix] };
+    case "unsupported": return { ask: ["原文没有说这句", "The original doesn't say this"], why: attention.reason ? [attention.reason, attention.reason] : undefined, answers: [[keep, "来源没问题", "Source is fine"], ...fix] };
+    default: return { ask: ["这句和原话意思一致吗？", "Does this say what the original says?"], answers: [[keep, "一致", "Yes"], ...fix] };
+  }
 }
-/** A point to confirm asks its one question. Any other shows the status it keeps (recorded, once answered) behind a
- * link, which asks the same two-answer question again, with the two remaining statuses as quiet extras. */
-function HolderQuestion({ point, zh, asked, onAnswer }: { point: EvidencePoint; zh: boolean; asked: boolean; onAnswer: (holder: WikiHolder) => void }) {
+/** A point to confirm asks its one question. Any other shows the status it keeps (recorded, once answered) as a quiet
+ * line, whose link offers every status. */
+function HolderQuestion({ point, zh, asked, canEdit, onAnswer }: { point: EvidencePoint; zh: boolean; asked: boolean; canEdit: boolean; onAnswer: (answer: WikiHolder | "edit") => void }) {
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [point.key]);
   const l = ([cn, en]: [string, string]) => zh ? cn : en;
   const current = shownHolder(point.holder), named = ANSWERS.find(([holder]) => holder === current);
   if (!asked && !open) return <p className="workspace-source-holder-done">{point.checked ? zh ? "已记录：" : "Recorded: " : zh ? "状态：" : "Status: "}<b>{named ? zh ? named[1] : named[2] : ""}</b>
-    <button type="button" className="workspace-source-holder-change" onClick={() => setOpen(true)}>{zh ? "改" : "Change"}</button></p>;
-  const question = questionOf(point), offered = new Set(question.answers.map(([holder]) => holder));
-  const others = asked ? [] : ANSWERS.filter(([holder]) => !offered.has(holder));
+    <button type="button" className="workspace-source-holder-change" onClick={() => setOpen(true)}>{zh ? "改状态" : "Change"}</button></p>;
+  const question: Question = asked ? questionOf(point, canEdit) : { ask: ["这句的状态", "This sentence's status"], answers: ANSWERS };
   return <div className="workspace-source-holder" role="group" aria-label={l(question.ask)}><span>{l(question.ask)}{question.why ? <small>{l(question.why)}</small> : null}</span>
-    <div>{question.answers.map(([holder, cn, en]) => <button key={cn} type="button" aria-pressed={!asked && current === holder || undefined} className={`is-holder-${holder}`} onClick={() => onAnswer(holder)}>{zh ? cn : en}</button>)}
-      {others.map(([holder, cn, en]) => <button key={holder} type="button" aria-pressed={current === holder} className={`is-holder-${holder} is-quiet`} title={wikiHolderTitle(holder, zh)} onClick={() => onAnswer(holder)}>{zh ? cn : en}</button>)}</div></div>;
+    <div>{question.answers.map(([holder, cn, en], index) => <button key={cn} type="button" aria-pressed={!asked && current === holder || undefined} className={`is-holder-${holder}${asked && index === 0 ? " is-primary" : ""}`} title={holder === "edit" ? undefined : wikiHolderTitle(holder, zh)} onClick={() => onAnswer(holder)}>{zh ? cn : en}</button>)}</div></div>;
 }
-export function WorkspaceSourcePanel({ session, reference, references, onSelect, claim, quote: savedQuote, sectionId, readerError, zh, onClose, onReader, embedded=false, returnLabel, points, pointIndex, onPoint, onHolder, next }: {
+export function WorkspaceSourcePanel({ session, reference, references, onSelect, claim, quote: savedQuote, sectionId, readerError, zh, onClose, onReader, embedded=false, returnLabel, points, pointIndex, onPoint, onHolder, next, mode, onEditClaim }: {
   session: FocusSession; reference: FocusEvidence; references?: FocusEvidence[]; claim?: string; quote?: string; conversationTitle?: string; zh: boolean;
   onSelect: (ref: FocusEvidence) => void; onClose: () => void; onReader?: () => void; embedded?:boolean; returnLabel?:string;
   readerError?: string; sectionId?:string;
@@ -103,6 +105,11 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
   onHolder?: (point: EvidencePoint, holder: WikiHolder) => void;
   /** A workspace check going on past this chapter: shown at its last point, it moves on to the next chapter to check. */
   next?: { label: string; onNext: () => void };
+  /** "check": stepping through the points to confirm; otherwise the reader opened one sentence's source, which shows
+   * the original and asks only when that sentence itself needs an answer. */
+  mode?: "check" | "view";
+  /** Takes the reader to rewrite a sentence that misstates its original. */
+  onEditClaim?: (point: EvidencePoint) => void;
 }) {
   const point = points && pointIndex !== undefined ? points[pointIndex] : undefined;
   const quote = useMemo(() => savedQuote && claim ? narrowQuote(claim, savedQuote) : savedQuote, [claim, savedQuote]);
@@ -208,21 +215,32 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     // cited message first, then the whole turn (a point drawn from the question rather than the reply).
     // A conclusion opened with its own quote never borrows another conclusion's words.
     const derivedFrom=quote?quoteFits?[claim,quote]:[claim]:claim?[claim]:[current.excerpt,...sourceClaims.flatMap(item=>[item.text,item.quote])];
-    const similar=proofs.length?[]:(()=>{const own=derivedSentenceRanges(root,derivedFrom);return own.length||!contentRoot.current?own:derivedSentenceRanges(contentRoot.current,derivedFrom);})();
-    setSimilarShown(similar.length>0);
-    const ranges=[...proofs.map(proof=>proof.range),...similar];
+    // A scope claim ("涵盖计时控制、后台运行…") marks each item where the original names it, in the cited message first.
+    const items=claim?listItems(claim):[];
+    const itemMarks=items.flatMap(item=>listItemRanges(root,[item])[0]??(contentRoot.current?listItemRanges(contentRoot.current,[item])[0]:undefined)??[]);
+    // Items the original does not name word for word (a flow drawn across lines) still get their closest sentences.
+    const similar=proofs.length||items.length&&itemMarks.length===items.length?[]:(()=>{const limit=Math.max(2,items.length),own=derivedSentenceRanges(root,derivedFrom,limit);return own.length||!contentRoot.current?own:derivedSentenceRanges(contentRoot.current,derivedFrom,limit);})();
+    // The rest of the turn can carry the claim too: a question quoted for "帮学生按番茄钟学习" leaves the reply's
+    // "轻量、极简、无需注册" unmarked. Its sentences close to the claim are marked as close in wording.
+    const turnIds=new Set(messageTurn(messages,target).map(message=>message.id));
+    const support=claim?messageRoots.filter(element=>element.dataset.sourceContent!==target.id&&turnIds.has(element.dataset.sourceContent??"")).flatMap(element=>similarSentenceRanges(element,[claim],2,"strict",false)):[];
+    // The words that raised a flag ("先不做", the item a plan lists as V2) are marked on their own.
+    const cueText=point?.attention?.subject??point?.attention?.cue;
+    const cue=cueText&&contentRoot.current?evidenceTextLocator(contentRoot.current)(cueText):undefined;
+    setSimilarShown(similar.length+support.length>0);
+    const ranges=[...(cue?[cue]:[]),...proofs.map(proof=>proof.range),...itemMarks,...similar,...support];
     setConditionMissing(!ranges.length&&evidenceConditions(claim??"").length>0);
     const titles=new Map<HTMLElement,string>();
     for(const proof of proofs){const element=proof.range.startContainer.parentElement?.closest<HTMLElement>("[data-reader-source-start]");if(!element)continue;if(!titles.has(element))titles.set(element,element.title);const record=sourceClaims[proof.highlight.claimIndex??-1];element.title=proof.highlight.kind==="related"?(zh?"相关段落（未核对）":"Related passage (unverified)"):record?`${(proof.highlight.claimIndex??0)+1}. ${record.text}`:claim??"";}
     // A quote that does not state the claim is no place to scroll to.
     const range=quoteFits?evidenceTextRange(root,excerpt):undefined;
-    const focusedRange=proofs.find(proof=>proof.highlight.kind==="quote"&&root.contains(proof.range.startContainer))?.range??ranges.find(item=>root.contains(item.startContainer))??ranges[0];
+    const focusedRange=cue??itemMarks[0]??proofs.find(proof=>proof.highlight.kind==="quote"&&root.contains(proof.range.startContainer))?.range??ranges.find(item=>root.contains(item.startContainer))??ranges[0];
     const positionKey=JSON.stringify([revision,target.id,claim,quote]);
     let interrupted=manualPosition.current===positionKey,frame=0,settling=true;
     const settled=setTimeout(()=>{settling=false;},500);
     const geometry=()=>{
       const bounds=host.getBoundingClientRect();
-      if(ranges.length&&!(typeof Highlight!=="undefined"&&globalThis.CSS?.highlights))setHighlights([...proofs.map(proof=>({range:proof.range,kind:proof.highlight.kind})),...similar.map(range=>({range,kind:"related" as const}))].flatMap(proof=>Array.from(proof.range.getClientRects?.()??[]).map(item=>({top:item.top-bounds.top+host.scrollTop,left:item.left-bounds.left+host.scrollLeft,width:item.width,height:item.height,kind:proof.kind}))));
+      if(ranges.length&&!(typeof Highlight!=="undefined"&&globalThis.CSS?.highlights))setHighlights([...proofs.map(proof=>({range:proof.range,kind:proof.highlight.kind})),...[...itemMarks,...(cue?[cue]:[])].map(range=>({range,kind:"quote" as const})),...[...similar,...support].map(range=>({range,kind:"related" as const}))].flatMap(proof=>Array.from(proof.range.getClientRects?.()??[]).map(item=>({top:item.top-bounds.top+host.scrollTop,left:item.left-bounds.left+host.scrollLeft,width:item.width,height:item.height,kind:proof.kind}))));
     };
     const position=()=>{
       if(interrupted){geometry();return;}
@@ -243,10 +261,13 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     frame=requestAnimationFrame(()=>{if(!interrupted)position();});
     const observer=typeof ResizeObserver!=="undefined"?new ResizeObserver(()=>{if(settling&&!interrupted)position();else geometry();}):undefined;observer?.observe(contentRoot.current??root);observer?.observe(host);
     const registered=new Map<string,Highlight>();
-    if(similar.length&&typeof Highlight!=="undefined"&&globalThis.CSS?.highlights){const highlight=new Highlight(...similar);CSS.highlights.set("atlas-original-proof",highlight);registered.set("atlas-original-proof",highlight);}
-    if(typeof Highlight!=="undefined"&&globalThis.CSS?.highlights)for(const kind of ["quote","context","related"] as const){const selected=proofs.filter(proof=>proof.highlight.kind===kind);if(!selected.length)continue;const name=kind==="quote"?"atlas-original-proof":`atlas-original-${kind}`,highlight=new Highlight(...selected.map(proof=>proof.range));CSS.highlights.set(name,highlight);registered.set(name,highlight);}
+    // Solid: the original's own words (quote, named items). Light with a dashed line: close in wording. Red: what was flagged.
+    if(typeof Highlight!=="undefined"&&globalThis.CSS?.highlights){
+      const groups:Array<[string,Range[]]>=[["atlas-original-proof",[...proofs.filter(proof=>proof.highlight.kind==="quote").map(proof=>proof.range),...itemMarks]],["atlas-original-context",proofs.filter(proof=>proof.highlight.kind==="context").map(proof=>proof.range)],["atlas-original-related",proofs.filter(proof=>proof.highlight.kind==="related").map(proof=>proof.range)],["atlas-original-similar",[...similar,...support]],["atlas-original-cue",cue?[cue]:[]]];
+      for(const [name,selected] of groups){if(!selected.length)continue;const highlight=new Highlight(...selected);CSS.highlights.set(name,highlight);registered.set(name,highlight);}
+    }
     return()=>{cancelAnimationFrame(frame);clearTimeout(settled);for(const event of ["wheel","touchstart","pointerdown","keydown"])host.removeEventListener(event,stop);observer?.disconnect();for(const [name,highlight] of registered)if(CSS.highlights.get(name)===highlight)CSS.highlights.delete(name);for(const [element,title] of titles)element.title=title;};
-  }, [loading, target, excerpt, quote, quoteFits, context, proofKey, shown, sourceClaims, zh, claim, point, current.excerpt, renderRevision, revision]);
+  }, [loading, target, excerpt, quote, quoteFits, context, proofKey, shown, sourceClaims, zh, claim, point, current.excerpt, renderRevision, revision, messages]);
   const originals=new Map<string,ConversationMessage[]>();
   for(const ref of scopedReferences){const resolved=evidenceVersion(session,ref);const key=JSON.stringify([session.id,ref.conversationId,resolved,evidenceSnapshotKey(session,ref),session.sourceSignatures?.[ref.conversationId],session.sourceRoles?.[ref.conversationId],session.sourceMessageOrder?.[ref.conversationId]]);const source=cache.current.get(key);if(source)originals.set(evidenceSnapshotKey(session,ref),source);}
   const groups=evidenceReadingGroups(session,scopedReferences,originals);
@@ -258,38 +279,55 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
   // located counts. A failed save is no reason to stop the check.
   const markSeen=()=>{if(!unavailable&&!stale&&quoteFits&&located&&!example)void markEvidenceRead(reading,true).catch(()=>undefined);};
   const go=(index:number)=>{markSeen();onPoint?.(index);};
-  const answer=(holder:WikiHolder)=>{
+  const answer=(holder:WikiHolder|"edit")=>{
     if(!point||!onHolder)return;
+    // Rewriting is done in the text: the point stays to confirm until the sentence changes.
+    if(holder==="edit"){markSeen();onEditClaim?.(point);return;}
     // Every answer is recorded, the same status included: an answered point is not asked about again.
     onHolder(point,holder);
     // Answered: the next point that needs an answer follows.
     if(points&&pointIndex!==undefined&&pointIndex<points.length-1)go(pointIndex+1);else markSeen();
   };
-  return <aside ref={panel} className={`workspace-source-panel${embedded ? " is-embedded" : overlay ? " is-overlay" : ""}${context ? " is-context" : ""}`} role={embedded ? "region" : overlay ? "dialog" : "complementary"} aria-modal={!embedded&&overlay || undefined} aria-label={zh ? "原文依据" : "Original evidence"} onKeyDown={event => {
+  const checkMode=mode==="check";
+  const roleName=(message:ConversationMessage|undefined)=>!message?"":message.role==="user"?pastedMaterial(message.content)?zh?"你粘贴的资料":"Pasted material":zh?"你的提问":"Your question":message.role==="assistant"?zh?"AI 回复":"AI reply":"";
+  const position=point&&points&&points.length>1?checkMode||points.some(item=>item.attention||item.holder==="open")?zh?`待确认 ${pointIndex!+1} / ${points.length}`:`To confirm ${pointIndex!+1} / ${points.length}`:zh?`第 ${pointIndex!+1} / ${points.length} 处`:`${pointIndex!+1} of ${points.length}`:zh?"出处":"Source";
+  const marksLegend=!loading&&(similarShown||itemsShown(claim));
+  return <aside ref={panel} className={`workspace-source-panel is-card${embedded ? " is-embedded" : overlay ? " is-overlay" : ""}${context ? " is-context" : ""}`} role={embedded ? "region" : overlay ? "dialog" : "complementary"} aria-modal={!embedded&&overlay || undefined} aria-label={zh ? "原文依据" : "Original evidence"} onKeyDown={event => {
     if (event.key === "Escape") { event.stopPropagation(); onClose(); }
     if (!embedded && overlay && event.key === "Tab") { const nodes = Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),select:not(:disabled),[tabindex="0"]') ?? []); const first = nodes[0], last = nodes.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); } }
-  }}><WorkspacePaneResize enabled={!embedded&&!overlay} zh={zh}/><header className={point?"is-point":"is-point is-message"}>{point?<div className="workspace-source-point-head">
-      <div className="workspace-source-point-row">{point.label&&!checking?<span className={`workspace-source-kind is-${point.source}${point.approximate?" is-approximate":""}`}>{point.label}</span>:null}{points&&points.length>1&&onPoint?<nav className="workspace-source-points" aria-label={zh?"结论导航":"Claim navigation"}><button type="button" disabled={pointIndex===0} aria-label={zh?"上一处依据":"Previous claim"} onClick={()=>go(pointIndex!-1)}><ChevronLeft size={16} aria-hidden="true"/></button><span aria-live="polite">{points.some(item=>item.attention||item.holder==="open")?zh?`待确认 ${pointIndex!+1} / ${points.length}`:`To confirm ${pointIndex!+1} / ${points.length}`:zh?`第 ${pointIndex!+1} / ${points.length} 处`:`${pointIndex!+1} of ${points.length}`}</span><button type="button" disabled={pointIndex===points.length-1} aria-label={zh?"下一处依据":"Next claim"} onClick={()=>go(pointIndex!+1)}><ChevronRight size={16} aria-hidden="true"/></button></nav>:null}</div>
-      {!point.placed&&!(similarShown&&!loading)&&!checking?<small className="workspace-source-origin">{zh?"正文中没有逐字对应的位置":"No literal position in the prose"}</small>:null}
-    </div>:<div className="workspace-source-point-head"><div className="workspace-source-point-row">{available.length > 1 && sourceIndex >= 0 ? <nav className="workspace-source-points" aria-label={zh ? "依据消息导航" : "Evidence navigation"}><button type="button" disabled={loading || sourceIndex === 0} aria-label={zh ? "上一条依据" : "Previous evidence"} onClick={() => onSelect(available[sourceIndex - 1])}><ChevronLeft size={16} aria-hidden="true"/></button><span aria-live="polite">{point ? zh ? "原话" : "Original" : zh ? "原文" : "Original"} {sourceIndex + 1} / {available.length}</span><button type="button" disabled={loading || sourceIndex === available.length - 1} aria-label={zh ? "下一条依据" : "Next evidence"} onClick={() => onSelect(available[sourceIndex + 1])}><ChevronRight size={16} aria-hidden="true"/></button></nav> : <span className="workspace-source-single">{zh ? "原文" : "Original"}</span>}</div></div>}<button className="workspace-source-close" type="button" aria-label={returnLabel||(zh ? "关闭原文面板" : "Close original evidence")} onClick={onClose}>{returnLabel?<><ArrowLeft size={16} aria-hidden="true"/><span>{returnLabel}</span></>:<X size={19} aria-hidden="true" />}</button></header>
-    {next&&point&&points&&pointIndex===points.length-1?<button type="button" className="workspace-source-next-chapter" onClick={next.onNext}>{next.label}</button>:null}
+  }}><WorkspacePaneResize enabled={!embedded&&!overlay} zh={zh}/>
+    <header className="workspace-source-card-head">
+      <div className="workspace-source-switch" role="group" aria-label={zh?"原文范围":"How much of the original"}>
+        <button type="button" aria-pressed={!context} onClick={()=>setContext(false)}>{zh?"原话":"Quote"}</button>
+        <button type="button" aria-pressed={context} disabled={unavailable} onClick={()=>setContext(true)}>{zh?"前后文":"Context"}</button>
+      </div>
+      <div className="workspace-source-tools">
+        {point&&points&&points.length>1&&onPoint?<nav className="workspace-source-points" aria-label={zh?"结论导航":"Claim navigation"}><button type="button" disabled={pointIndex===0} aria-label={zh?"上一处依据":"Previous claim"} title={zh?"上一处":"Previous"} onClick={()=>go(pointIndex!-1)}><ChevronLeft size={16} aria-hidden="true"/></button><button type="button" disabled={pointIndex===points.length-1} aria-label={zh?"下一处依据":"Next claim"} title={zh?"下一处":"Next"} onClick={()=>go(pointIndex!+1)}><ChevronRight size={16} aria-hidden="true"/></button></nav>:null}
+        {onReader?<button type="button" className="workspace-source-reader" disabled={unavailable} aria-label={zh?"在阅读器中打开整段对话":"Open the conversation in the reader"} title={zh?"在阅读器中打开整段对话":"Open the conversation in the reader"} onClick={onReader}><ArrowUpRight size={16} aria-hidden="true"/></button>:null}
+        <button className="workspace-source-close" type="button" aria-label={returnLabel||(zh ? "关闭原文面板" : "Close original evidence")} title={returnLabel||(zh?"关闭":"Close")} onClick={onClose}>{returnLabel?<><ArrowLeft size={16} aria-hidden="true"/><span>{returnLabel}</span></>:<X size={17} aria-hidden="true" />}</button>
+      </div>
+    </header>
+    <div className="workspace-source-rule"><span aria-live="polite">{position}</span>{point?.label&&!checking?<span className={`workspace-source-kind is-${point.source}${point.approximate?" is-approximate":""}`}>{point.label}</span>:null}{target&&!loading?<span className="workspace-source-rule-role">{roleName(target)}</span>:null}
+      {available.length > 1 && sourceIndex >= 0 ? <nav className="workspace-source-navigation" aria-label={zh ? "依据消息导航" : "Evidence navigation"}><button type="button" disabled={loading || sourceIndex === 0} aria-label={zh ? "上一条依据" : "Previous evidence"} onClick={() => onSelect(available[sourceIndex - 1])}><ChevronLeft size={14} aria-hidden="true"/></button><span>{point ? zh ? "原话" : "Original" : zh ? "原文" : "Original"} {sourceIndex + 1} / {available.length}</span><button type="button" disabled={loading || sourceIndex === available.length - 1} aria-label={zh ? "下一条依据" : "Next evidence"} onClick={() => onSelect(available[sourceIndex + 1])}><ChevronRight size={14} aria-hidden="true"/></button></nav> : null}
+    </div>
+    {checkMode&&next&&point&&points&&pointIndex===points.length-1?<button type="button" className="workspace-source-next-chapter" onClick={next.onNext}>{next.label}</button>:null}
     {point?.attention&&!checking?<p className="workspace-source-attention">{evidenceAttentionText(point.attention,zh)}</p>:null}
-    {point?.holder&&onHolder?<HolderQuestion point={point} zh={zh} asked={asking} onAnswer={answer}/>:null}
-    {point && available.length > 1 && sourceIndex >= 0 ? <nav className="workspace-source-navigation" aria-label={zh ? "依据消息导航" : "Evidence navigation"}><button type="button" disabled={loading || sourceIndex === 0} aria-label={zh ? "上一条依据" : "Previous evidence"} onClick={() => onSelect(available[sourceIndex - 1])}><ChevronLeft size={16} aria-hidden="true"/></button><span aria-live="polite">{point ? zh ? "原话" : "Original" : zh ? "原文" : "Original"} {sourceIndex + 1} / {available.length}</span><button type="button" disabled={loading || sourceIndex === available.length - 1} aria-label={zh ? "下一条依据" : "Next evidence"} onClick={() => onSelect(available[sourceIndex + 1])}><ChevronRight size={16} aria-hidden="true"/></button></nav> : null}
-    
     {point?.source === "decision" && available.length > 1 ? <p className="workspace-source-point-note">{zh ? "包含 AI 的提议和你的确认，用“原话”箭头切换。" : "Includes the AI proposal and your confirmation; switch with the Original arrows."}</p> : null}
-    
     {!point&&!loading&&!stale&&target?sourceClaims.filter(item=>!explicitQuote||item.quote===explicitQuote).flatMap((item,index)=>evidenceRoleWarnings(item,roleMessages,scopedReferences,acceptedClaims.has(JSON.stringify([item.text,item.quote]))).filter(warning=>warning!=="assistant-decision"||roleSourcesComplete).map(warning=><p key={`${index}-${warning}`} className="workspace-source-notice">{item.text}: {warning==="assistant-decision"?zh?"引文来自助手消息，可能是建议而非用户决定":"The quotation comes from an assistant message; it may be advice rather than a user decision":warning==="pasted-ai"?zh?"引文是用户粘贴的 AI 内容，不能单独证明已采纳":"The user pasted AI content; this alone does not establish adoption":zh?"依据是计划或建议，不能证明已完成":"The evidence is a plan or suggestion; it does not establish completion"}</p>)):null}
     {!point&&!loading&&(JSON.parse(proofKey) as Array<{marks:EvidenceHighlight[]}>).some(proof=>proof.marks.some(mark=>mark.kind==="related"))?<p className="workspace-source-related-label">{zh?"相关段落（未核对）":"Related passages (unverified)"}</p>:null}
-    {/* One line for both sides lacking a literal match: three notices stacked read as three problems. */}
-    {conditionMissing&&!loading?<p className="workspace-source-related-label">{zh?"未找到同时对应数字条件和描述的原文，请结合上下文核对。":"No passage matching both the numeric condition and description was found; check the surrounding context."}</p>:similarShown&&!loading?<p className="workspace-source-related-label">{zh?"按措辞找到的相近原文，请核对对应关系":"Similar wording is highlighted; confirm it matches this claim"}</p>:null}
+    
+    {conditionMissing&&!loading?<p className="workspace-source-related-label">{zh?"未找到同时对应数字条件和描述的原文，请结合上下文核对。":"No passage matching both the numeric condition and description was found; check the surrounding context."}</p>:null}
     <div ref={body} className="workspace-source-body" tabIndex={0} aria-busy={loading}>{highlights.map(({kind,...rect},index)=><span key={index} className={`workspace-source-highlight is-${kind}`} aria-hidden="true" style={rect}/>)}
       <div ref={contentRoot} className="workspace-source-content">{readerError && !loading && !error ? <p className="workspace-source-notice" role="alert">{readerError}</p>:null}
       {loading && !loaded ? <p role="status">{zh ? "读取原始消息…" : "Loading original messages…"}</p> : error ? <div role="alert"><p>{error}</p><button type="button" onClick={()=>{cache.current.delete(revision);setRetry(value=>value+1);}}>{zh?"重新读取":"Retry loading"}</button></div> : !target ? <div className="workspace-source-unavailable"><strong>{zh ? "来源待定位" : "Source unavailable"}</strong><p>{zh ? "当前无法读取对应原始消息。以下仅为已保存的历史摘录。" : "The original message is unavailable. Only the saved historical excerpt follows."}</p><SourceMessageContent content={reference.excerpt} zh={zh} /></div> : <>
         {stale ? <p className="workspace-source-notice">{zh ? "来源版本与引用已有变化，请核对；不视为当前结论的有效证明。" : "Source version differs from this citation; review before relying on it."}</p> : explicitQuote&&!wikiQuoteRange(target.content,explicitQuote)?<p className="workspace-source-notice">{zh?"该来源中未定位到此结论的引文":"This claim’s quotation was not located in this source"}</p>:!located ? <p className="workspace-source-notice">{zh ? "当前原文中未匹配到该引用片段，请核对消息。" : "This quote was not found in the original message."}</p> : null}
         {shown.map(message => { const date = message.createdAt && Number.isFinite(message.createdAt) && message.createdAt > 946684800000 ? message.createdAt : undefined; return <section key={message.id} ref={message.id===messageTurn(messages,target)[0]?.id?turnAnchor:undefined} data-message-id={message.id} className={`workspace-source-message${message.role === "user" ? " is-user-message" : " is-ai-message"}${message.id === target.id ? " is-source-target" : ""}`}><div className="workspace-source-message-meta"><strong>{message.role === "user" ? pastedMaterial(message.content) ? zh ? "你粘贴的资料" : "Pasted material" : zh ? "用户" : "User" : message.role === "assistant" ? zh ? "AI 回复" : "AI reply" : message.role === "system" ? zh ? "系统" : "System" : message.role === "tool" ? zh ? "工具" : "Tool" : message.role}</strong>{date ? <time dateTime={new Date(date).toISOString()}>{new Date(date).toLocaleString(zh ? "zh-CN" : "en")}</time> : null}</div><div data-source-content={message.id} ref={message.id === target.id ? targetBody : undefined}><SourceMessageContent locatable message={message} zh={zh} /></div></section>; })}
       </>}
-    </div><div ref={endSpacer} className="workspace-source-tail" aria-hidden="true"/></div>{loading && loaded ? <p className="workspace-source-pending" role="status">{zh?"正在切换原文…":"Loading next source…"}</p>:null}<footer>{onReader?<button type="button" className="workspace-source-reader" disabled={unavailable} onClick={onReader}><BookOpen size={16} aria-hidden="true"/>{zh?"查看前后文":"See the conversation"}<ArrowUpRight size={15} aria-hidden="true"/></button>:<button type="button" aria-pressed={context} disabled={unavailable} onClick={()=>setContext(!context)}><BookOpen size={16} aria-hidden="true"/>{context?zh?"只看这条":"This message":zh?"查看前后文":"See the conversation"}</button>}</footer>
+    </div><div ref={endSpacer} className="workspace-source-tail" aria-hidden="true"/></div>{loading && loaded ? <p className="workspace-source-pending" role="status">{zh?"正在切换原文…":"Loading next source…"}</p>:null}
+    {point?.holder&&onHolder?<div className={`workspace-source-ask${asking?" is-asking":""}`}><HolderQuestion point={point} zh={zh} asked={asking} canEdit={Boolean(onEditClaim)} onAnswer={answer}/></div>:null}
+    {marksLegend?<footer className="workspace-source-legend"><span><i className="is-proof" aria-hidden="true"/>{zh?"原话":"Quoted"}</span><span><i className="is-similar" aria-hidden="true"/>{zh?"措辞相近":"Close wording"}</span>{point?.attention?.cue||point?.attention?.subject?<span><i className="is-cue" aria-hidden="true"/>{zh?"需要确认的词":"Flagged words"}</span>:null}</footer>:null}
   </aside>;
 }
+/** A scope claim marks its items in the original: the legend then explains the solid marks. */
+function itemsShown(claim:string|undefined){return Boolean(claim&&listItems(claim).length);}
 

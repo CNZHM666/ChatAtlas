@@ -1,5 +1,5 @@
 import {wikiNarration} from "./wiki-narration";
-import {isSourceCaption} from "./wiki-source-code";
+import {isSourceCaption,readableSourceCaptions} from "./wiki-source-code";
 import {unified} from "unified";
 import remarkParse from "remark-parse";
 import type {FocusSection} from "./focus-session";
@@ -104,5 +104,5 @@ function promotePseudoHeadings(body:string):string {
 export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin">):string {
  if(section.userEdited||section.origin)return body;
  // Narration cleanup runs here too, so exports read like the Reader ("AI发现了", not "AI建议发现了"; no "据讨论，" lead-ins).
- return splitLongParagraphs(promotePseudoHeadings(dropRepeatedParagraphs(wikiNarration(aiAdvicePresentation(extractHistoryNotes(body).body)))));
+ return readableSourceCaptions(splitLongParagraphs(promotePseudoHeadings(dropRepeatedParagraphs(wikiNarration(aiAdvicePresentation(extractHistoryNotes(body).body))))));
 }

@@ -119,7 +119,7 @@ it("answers in the task workspace with exact message evidence and streams prose 
   await screen.findByRole("article", { name: "历史回答" });
   expect(callbacks.onStart).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "展开依据 1" }));
-  const reader = await screen.findByRole("button", { name: "查看前后文" });
+  const reader = await screen.findByRole("button", { name: "在阅读器中打开整段对话" });
   await waitFor(() => expect(reader).not.toBeDisabled()); fireEvent.click(reader);
   await waitFor(() => expect(onRead).toHaveBeenCalledWith("one", message));
   await db.put("messages", { ...message, content: "后来修正了学习路线" });
