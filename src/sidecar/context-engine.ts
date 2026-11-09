@@ -17,7 +17,9 @@ import {rankedMessages} from "../search/ranked-messages";
 
 export interface MemoryHit { id: string; conversation: Conversation; message: ConversationMessage; excerpt: string; sourceRange?: MessageSourceRange }
 export function memoryExcerpt(query: string, content: string): string {
-  const plain = readableConversationText(content).replace(/^\s*(?:`{3,}|~{3,})[^\n]*$/gmu, "")
+  // Markup around a message (an attachment's `<file name=… variant="standard">`) is no text: cut mid-tag, the excerpt
+  // opened on '41" variant="standard"># 专注计时器'.
+  const plain = readableConversationText(content).replace(/<\/?[A-Za-z][\w:-]*(?:\s[^<>]*)?\/?>/gu, "\n").replace(/^\s*(?:`{3,}|~{3,})[^\n]*$/gmu, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1").replace(/^[ \t]*(?:#{1,6}\s*|[-*>]+\s*|\d+[.)]\s+)/gmu, "")
     .replace(/[`*]/gu, "").replace(/(^|\s)_([^_\n]+)_(?=\s|[。，,.;:!?]|$)/gu, "$1$2").replace(/^\s*[-=─]{3,}\s*$/gmu, "");
   return searchExcerpt(query, plain);

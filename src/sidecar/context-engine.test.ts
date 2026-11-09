@@ -33,6 +33,12 @@ it("keeps excerpts readable while preserving search identifiers", () => {
   expect(memoryExcerpt("__internal_flag", "调用 `create_index`，再配置 `__internal_flag`。")).toContain("__internal_flag");
   expect(memoryExcerpt("HardwareIR", "## 架构\n\n```ts\ninterface HardwareIR { components: Component[] }\n```\n\n**还未实现** [依据](https://example.com)")).toContain("HardwareIR");
   expect(memoryExcerpt("HardwareIR", "## 架构\n\n**HardwareIR** 尚未实现。")).not.toMatch(/##|\*\*/u);
+  // An attachment's markup around the text is left out, and the heading after it reads as a heading's words.
+  const attached = memoryExcerpt("产品", `<file name="专注计时器.txt" size="${"4".repeat(40)}41" variant="standard"># 专注计时器 Focus Timer — V0.1 产品规划\n我正在规划一款 Chrome 扩展。</file>`);
+  expect(attached).toContain("专注计时器 Focus Timer — V0.1 产品规划");
+  expect(attached).not.toMatch(/variant|<|>|#/u);
+  // A comparison in prose is not markup.
+  expect(memoryExcerpt("电压", "电压 a < 3 且 b > 10 时报警")).toContain("a < 3 且 b > 10");
 });
 it("finds an English paraphrase in a Chinese original without calling a model",async()=>{
  const db=await getDatabase();await db.put("messages",{...q,id:"vision",content:"视觉识别暂缓开发，先完成零件库。"});messageFullTextSearch.invalidate();
