@@ -7,9 +7,21 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/CNZHM666/ChatAtlas?include_prereleases&style=flat-square&label=release&color=1a7f37"></a>
+  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
+  <img alt="Chrome Manifest V3" src="https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white">
+  <a href="https://linux.do"><img alt="LINUX DO 社区" src="https://img.shields.io/badge/LINUX%20DO-%E7%A4%BE%E5%8C%BA-F6A623?style=flat-square"></a>
+</p>
+
+<p align="center">
+  👋 欢迎来自 <a href="https://linux.do"><b>LINUX DO</b></a> 的佬友！试用后欢迎回帖交流，或在 <a href="https://github.com/CNZHM666/ChatAtlas/issues">Issues</a> 提建议。
+</p>
+
+<p align="center">
   <a href="https://github.com/CNZHM666/ChatAtlas/releases/latest"><b>下载最新版</b></a>
   &nbsp;·&nbsp; <a href="#安装约-2-分钟">安装</a>
   &nbsp;·&nbsp; <a href="#第一次使用">第一次使用</a>
+  &nbsp;·&nbsp; <a href="#架构概览">架构</a>
   &nbsp;·&nbsp; <a href="CHANGELOG.md">更新记录</a>
   &nbsp;·&nbsp; <a href="https://github.com/CNZHM666/ChatAtlas/issues">反馈</a>
 </p>
@@ -68,22 +80,6 @@
 
 网页保存在浏览器授予网站权限后默认自动运行，可在「设置 → 采集与数据 → 网页自动采集」按平台暂停或恢复。除 ChatGPT 外，仅保存当前已加载的消息，不保证完整历史；长对话需要先在原网页加载更早的消息。新增平台尚未逐一在登录状态下验收，网站改版可能影响兼容性，届时可改用文件导入。保存对话不调用模型。
 
-## Wiki 怎样整理
-
-1. **选择材料**：勾选来源对话（一次最多 24 条，可跨平台），写下你想整理的目标。
-2. **写作前确认**：列出材料里提到的其他项目和产品，你可以直接勾选不写入 Wiki 的项目，不需要模型判断；模型再就少数会影响结论的地方提问，比如两份路线图哪份算数、某条限制属于哪个阶段。你的回答优先于 AI 的推断。
-3. **边写边问**：写作中发现说不清的地方会即时补问，回答后只改相关段落，不重写整章。
-4. **核对与保存**：先预览，再保存。之后可以单章重写或按新材料更新，你的个人修改受保护。
-
-生成的文档包括：
-
-- **项目总览**：一页速览、**当前基线**（现在做／暂不做／完成标准）、已定的关键决定和来源范围。
-- **Wiki 章节**：按主题组织，同一点只解释一次；保留原文中的数字、代码和适用条件。
-- **句末标记**：〔已定〕你确认的决定，〔未定〕仍在讨论，〔此前〕已被取代的方案，〔你〕你的看法或报告，〔资料〕你粘贴的资料。没有标记的是 AI 的建议或分析。“已完成”只代表你的报告，不代表代码已核验。
-- **文档信息与核对说明**：列出来源范围、自动检查结果和未抽出知识点的消息。自动检查可能误报，也可能漏报。
-
-引用用于回到原文核对，不证明建议已被采纳。整理长材料需要较多时间和 Token；成功的阅读和写作结果会按输入复用，失败时保留已完成的部分。
-
 ## 安装（约 2 分钟）
 
 ChatAtlas 还没有上架 Chrome 应用商店，需要以「开发者模式」加载。Edge 等基于 Chromium 的浏览器步骤相同（地址换成 `edge://extensions`）。也可以把[一段提示词](#让-ai-帮你安装)交给 AI，让它帮你完成。
@@ -121,6 +117,70 @@ Chrome 启动时可能提示「停用开发者模式扩展程序」，选择保�
 
 不要把私人备份或导出文件提交到 GitHub。
 
+## Wiki 怎样整理
+
+1. **选择材料**：勾选来源对话（一次最多 24 条，可跨平台），写下你想整理的目标。
+2. **写作前确认**：列出材料里提到的其他项目和产品，你可以直接勾选不写入 Wiki 的项目，不需要模型判断；模型再就少数会影响结论的地方提问，比如两份路线图哪份算数、某条限制属于哪个阶段。你的回答优先于 AI 的推断。
+3. **边写边问**：写作中发现说不清的地方会即时补问，回答后只改相关段落，不重写整章。
+4. **核对与保存**：先预览，再保存。之后可以单章重写或按新材料更新，你的个人修改受保护。
+
+生成的文档包括：
+
+- **项目总览**：一页速览、**当前基线**（现在做／暂不做／完成标准）、已定的关键决定和来源范围。
+- **Wiki 章节**：按主题组织，同一点只解释一次；保留原文中的数字、代码和适用条件。
+- **句末标记**：〔已定〕你确认的决定，〔未定〕仍在讨论，〔此前〕已被取代的方案，〔你〕你的看法或报告，〔资料〕你粘贴的资料。没有标记的是 AI 的建议或分析。“已完成”只代表你的报告，不代表代码已核验。
+- **文档信息与核对说明**：列出来源范围、自动检查结果和未抽出知识点的消息。自动检查可能误报，也可能漏报。
+
+引用用于回到原文核对，不证明建议已被采纳。整理长材料需要较多时间和 Token；成功的阅读和写作结果会按输入复用，失败时保留已完成的部分。
+
+## 架构概览
+
+ChatAtlas 是一个纯前端的 Manifest V3 扩展：所有数据都在你的浏览器里流转，只有你主动整理文档或提问时，所选材料才会直接发往你自己配置的 AI 服务商。
+
+```mermaid
+flowchart LR
+  subgraph SRC["对话来源"]
+    WEB["AI 网页<br/>ChatGPT · Claude · Gemini · DeepSeek 等"]
+    FILE["官方导出文件<br/>ZIP · JSON · Markdown"]
+  end
+  subgraph EXT["浏览器内的 ChatAtlas"]
+    CAP["网页适配<br/>读取已加载的消息"]
+    SYNC["导入与同步<br/>来源版本 · 去重"]
+    DB[("IndexedDB<br/>对话 · 项目 · Wiki")]
+    FIND["本地搜索与阅读<br/>不调用模型"]
+    ORG["整理引擎<br/>初读 → 目录 → 写作 → 核对"]
+    UI["工作台 与 侧栏"]
+  end
+  LLM["你的 AI 服务商<br/>BYOK"]
+  OUT["导出<br/>Markdown · HTML · JSON"]
+
+  WEB --> CAP --> SYNC
+  FILE --> SYNC
+  SYNC --> DB
+  DB --> FIND --> UI
+  DB --> ORG --> DB
+  ORG <-->|仅在你主动整理或提问时| LLM
+  UI --> OUT
+```
+
+| 模块 | 职责 |
+| --- | --- |
+| `src/content/` | 适配各 AI 网页：保存已加载的对话、原文定位、把内容填入输入框 |
+| `src/background/` | 扩展入口、网站权限、同步调度 |
+| `src/sync/` · `src/storage/` | 导入官方导出与网页历史，存入 IndexedDB，保留来源版本 |
+| `src/search/` | 标题与正文的本地全文搜索和排序 |
+| `src/ai/` | BYOK 服务商连接，Wiki 的初读、目录规划、写作与来源校验 |
+| `src/canvas/` · `src/sidecar/` | 工作台、阅读器、项目文档界面，以及 AI 网页旁的侧栏 |
+| `src/export/` | 把总览与章节导出为 Markdown、纯文本、HTML、JSON |
+
+设计上的几条约束：
+
+- **原文优先**：生成的解释、原始对话和你的个人修改分开保存；结论附带来源，可以回到原文核对。
+- **AI 提建议，你做决定**：保存文档不会把 AI 的建议升级成你的决定；你改过的章节在更新时受保护。
+- **不越界**：不自动发送消息，不覆盖输入框里的草稿，不在后台调用模型。
+
+更多细节见[架构说明](ARCHITECTURE.md)和[AI 工作流](AI_WORKFLOWS.md)。
+
 ## 数据与隐私
 
 - 对话、项目、收藏和 AI 设置保存在当前浏览器，没有云同步，也没有 ChatAtlas 服务器。
@@ -137,7 +197,6 @@ Chrome 启动时可能提示「停用开发者模式扩展程序」，选择保�
 - 网页自动保存依赖各网站的页面结构，平台改版可能导致暂时失效。
 - 整理所需时间取决于材料长度、模型和服务商限流，长材料可能需要较长时间；目前没有可公布的基准数据。查找与阅读不需要生成。
 - **学习模式（测试中）**：在整理类型中手动选择「学习（测试中）」，可把学习类对话整理为按章节编号的知识卡片、练习、易错点和回忆题。排版和抽取规则仍在调整，「自动」目前只会按项目整理。
-
 
 ## 从源码运行
 
@@ -164,6 +223,10 @@ npm run eval:wiki -- <cases.json> <export.md>
 英文文档见 [English documentation](docs/en/README.md)。
 
 欢迎通过 Issues 提交可复现的问题：注明扩展与浏览器版本、导入方式、模型、步骤和预期结果，并删除 API Key 和私人对话内容。功能想法请用「功能建议」模板提交。
+
+## 社区
+
+欢迎在 [LINUX DO](https://linux.do) 社区交流使用体验、分享整理出的 Wiki 或提出建议，也可以在 [GitHub Discussions](https://github.com/CNZHM666/ChatAtlas/discussions) 讨论。感谢 LINUX DO 社区的支持。
 
 ## 许可证
 

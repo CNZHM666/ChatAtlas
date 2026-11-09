@@ -7,9 +7,17 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/CNZHM666/ChatAtlas?include_prereleases&style=flat-square&label=release&color=1a7f37"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
+  <img alt="Chrome Manifest V3" src="https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white">
+  <a href="https://linux.do"><img alt="LINUX DO community" src="https://img.shields.io/badge/LINUX%20DO-Community-F6A623?style=flat-square"></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/CNZHM666/ChatAtlas/releases/latest"><b>Download</b></a>
   &nbsp;·&nbsp; <a href="#install-about-2-minutes">Install</a>
   &nbsp;·&nbsp; <a href="#first-use">First use</a>
+  &nbsp;·&nbsp; <a href="#architecture-overview">Architecture</a>
   &nbsp;·&nbsp; <a href="docs/en/CHANGELOG.md">Changelog</a>
   &nbsp;·&nbsp; <a href="https://github.com/CNZHM666/ChatAtlas/issues">Feedback</a>
 </p>
@@ -68,22 +76,6 @@ The usual path: **search or ask → read the original conversation → organize 
 
 Website adapters run automatically after browser website permission; pause or resume each platform in **Settings → Capture & data → Automatic page capture**. Except on ChatGPT, website saving saves currently loaded messages, not guaranteed full history; for a long conversation, load earlier messages on the website first. The newer platforms have not each been accepted while signed in, and a website redesign can break saving; file import is the fallback. Saving makes no model call.
 
-## How a Wiki is organized
-
-1. **Choose material**: select source conversations (up to 24, across platforms) and write what you want organized.
-2. **Before writing**: other projects and products named in the material are listed, and you tick the ones to leave out of the Wiki, with no model involved. The model then asks about the few points that change the conclusions, such as which of two roadmaps counts or which stage a limit belongs to. Your answers outrank the AI's inferences.
-3. **While writing**: a point it cannot state faithfully is asked about at once; your answer revises only the paragraphs concerned, not the whole chapter.
-4. **Review and save**: preview, then save. Later you can rewrite a chapter or update from new material; your own edits are protected.
-
-The document contains:
-
-- **Project overview**: at a glance, the **current baseline** (doing now / not now / done when), key decisions and source scope.
-- **Wiki chapters**: organized by subject, each point explained once, with the source's numbers, code and conditions kept.
-- **Sentence marks**: 〔已定〕 decided by you, 〔未定〕 still open, 〔此前〕 replaced by a later plan, 〔你〕 your own view or report, 〔资料〕 material you pasted. Unmarked text is the AI's suggestion or analysis. "Done" means you reported it, not that the code was verified.
-- **Document information and evidence notes**: source scope, automatic check results and messages no point was extracted from. Automatic checks can miss problems and can report false ones.
-
-Citations take you back to the original to check; they do not prove a suggestion was adopted. Long material takes substantial time and tokens; successful reading and writing are reused for the same input, and a failure keeps the finished parts.
-
 ## Install (about 2 minutes)
 
 ChatAtlas is not on the Chrome Web Store yet, so it is loaded in Developer mode. Edge and other Chromium browsers work the same way (use `edge://extensions`). You can also hand [a ready-made prompt](#let-an-ai-install-it-for-you) to an AI and let it do this for you.
@@ -121,6 +113,70 @@ If you cannot use my computer directly, write out each step for me to follow, an
 
 Never commit private backups or exports to GitHub.
 
+## How a Wiki is organized
+
+1. **Choose material**: select source conversations (up to 24, across platforms) and write what you want organized.
+2. **Before writing**: other projects and products named in the material are listed, and you tick the ones to leave out of the Wiki, with no model involved. The model then asks about the few points that change the conclusions, such as which of two roadmaps counts or which stage a limit belongs to. Your answers outrank the AI's inferences.
+3. **While writing**: a point it cannot state faithfully is asked about at once; your answer revises only the paragraphs concerned, not the whole chapter.
+4. **Review and save**: preview, then save. Later you can rewrite a chapter or update from new material; your own edits are protected.
+
+The document contains:
+
+- **Project overview**: at a glance, the **current baseline** (doing now / not now / done when), key decisions and source scope.
+- **Wiki chapters**: organized by subject, each point explained once, with the source's numbers, code and conditions kept.
+- **Sentence marks**: 〔已定〕 decided by you, 〔未定〕 still open, 〔此前〕 replaced by a later plan, 〔你〕 your own view or report, 〔资料〕 material you pasted. Unmarked text is the AI's suggestion or analysis. "Done" means you reported it, not that the code was verified.
+- **Document information and evidence notes**: source scope, automatic check results and messages no point was extracted from. Automatic checks can miss problems and can report false ones.
+
+Citations take you back to the original to check; they do not prove a suggestion was adopted. Long material takes substantial time and tokens; successful reading and writing are reused for the same input, and a failure keeps the finished parts.
+
+## Architecture overview
+
+ChatAtlas is a frontend-only Manifest V3 extension. Your data moves only inside your browser; selected material goes directly to the AI provider you configured only when you organize a document or ask a question.
+
+```mermaid
+flowchart LR
+  subgraph SRC["Conversation sources"]
+    WEB["AI websites<br/>ChatGPT · Claude · Gemini · DeepSeek and more"]
+    FILE["Official exports<br/>ZIP · JSON · Markdown"]
+  end
+  subgraph EXT["ChatAtlas, inside your browser"]
+    CAP["Site adapters<br/>read loaded messages"]
+    SYNC["Import and sync<br/>source versions · dedupe"]
+    DB[("IndexedDB<br/>conversations · projects · Wiki")]
+    FIND["Local search and reading<br/>no model calls"]
+    ORG["Organizer<br/>first read → outline → writing → checks"]
+    UI["Workbench and side panel"]
+  end
+  LLM["Your AI provider<br/>BYOK"]
+  OUT["Export<br/>Markdown · HTML · JSON"]
+
+  WEB --> CAP --> SYNC
+  FILE --> SYNC
+  SYNC --> DB
+  DB --> FIND --> UI
+  DB --> ORG --> DB
+  ORG <-->|only when you organize or ask| LLM
+  UI --> OUT
+```
+
+| Module | Responsibility |
+| --- | --- |
+| `src/content/` | Site adapters: save loaded conversations, locate original messages, fill the input box |
+| `src/background/` | Extension entry points, site permissions, sync scheduling |
+| `src/sync/` · `src/storage/` | Import official exports and web history into IndexedDB, keeping source versions |
+| `src/search/` | Local full-text search and ranking over titles and text |
+| `src/ai/` | BYOK provider connections; the Wiki's first read, outline planning, writing and source checks |
+| `src/canvas/` · `src/sidecar/` | Workbench, reader and project document views, and the side panel next to AI websites |
+| `src/export/` | Export the overview and chapters as Markdown, plain text, HTML or JSON |
+
+A few design constraints:
+
+- **Sources first**: generated explanations, original conversations and your own edits are stored separately, and conclusions cite the sources they came from.
+- **AI suggests, you decide**: saving a document never turns an AI suggestion into your decision, and chapters you edited are protected during updates.
+- **Stays in its lane**: it never sends messages for you, never overwrites a draft in the input box, and never calls a model in the background.
+
+See the [architecture notes](docs/en/ARCHITECTURE.md) and [AI workflows](docs/en/AI_WORKFLOWS.md) for details.
+
 ## Data and privacy
 
 - Conversations, projects, saved items and AI settings stay in the current browser. There is no cloud sync and no ChatAtlas server.
@@ -137,7 +193,6 @@ See the [privacy notes](docs/en/PRIVACY.md). Report security problems privately 
 - Automatic website saving depends on each site's page structure and can stop working after a redesign.
 - Organizing time depends on material length, the model and provider rate limits; long material can take a while. No benchmark is published yet. Search and reading need no generation.
 - **Learning mode (beta)**: choose **Learning (beta)** as the document type to organize study conversations into numbered knowledge cards, exercises, mistakes and recall questions. Its layout and extraction are still changing; **Auto** organizes as a project for now.
-
 
 ## Build from source
 
@@ -162,6 +217,10 @@ npm run eval:wiki -- <cases.json> <export.md>
 [Getting started](docs/en/GETTING_STARTED.md) · [Documentation](docs/en/README.md) · [Export guide](docs/en/CONTEXT.md) · [Architecture](docs/en/ARCHITECTURE.md) · [AI workflows](docs/en/AI_WORKFLOWS.md) · [Contributing](docs/en/CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](docs/en/CHANGELOG.md)
 
 Report reproducible problems in Issues with the extension and browser version, import method, model, steps and expected result. Remove API keys and private conversation text. Use the feature request template for ideas.
+
+## Community
+
+Come talk about ChatAtlas on [LINUX DO](https://linux.do) or in [GitHub Discussions](https://github.com/CNZHM666/ChatAtlas/discussions): share how you use it, the Wikis you organize, or ideas. Thanks to the LINUX DO community for its support.
 
 ## License
 
