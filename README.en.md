@@ -29,6 +29,7 @@
 - **Works right after install**: Basic search needs no AI key. Import or save conversations, then search titles and text locally and read the original discussions.
 - **Your data stays local**: Conversations are saved in your browser, and there is no ChatAtlas server. Organizing documents uses your own API key (BYOK): material goes directly to the provider you choose.
 - **Organize when you need to**: Turn selected discussions into a project overview and Wiki that trace back to their sources.
+- **Hand it to your agent**: Export the project document as Markdown that tells your decisions apart from the AI's suggestions, as project context for coding agents such as Claude Code and Codex.
 
 > [!NOTE]
 > ChatAtlas is an early preview (0.1.2 Early Preview). Features, interactions and data structures will still change. Wiki organization is experimental: check what it writes against the sources. Back up local data before upgrading.
@@ -52,7 +53,7 @@
 - **Side panel for the current conversation**: search local records, link a project, and fill the composer (never sent automatically, never overwriting a draft you typed).
 - **Organize into a Wiki**: choose conversations and a goal to generate a project overview and Wiki. It asks you where your judgment is needed, before and while writing; you preview before saving.
 - **Learning record (beta)**: when you choose the Learning type, it organizes what you learned by point, with your exercises, your mistakes and recall questions.
-- **Hand off to another AI**: export the overview and selected chapters as Markdown, plain text, HTML (printable to PDF) or JSON, and attach the file elsewhere. Export makes no model call.
+- **Hand off to another AI**: export the overview and selected chapters as Markdown, plain text, HTML (printable to PDF) or JSON, and attach the file elsewhere, or give it to a coding agent as project background. Export makes no model call.
 
 What each part is for:
 
@@ -66,6 +67,18 @@ What each part is for:
 | Side panel | Beside an AI website | Local search for the current conversation, project links, and filling the composer |
 
 The usual path: **search or ask → read the original conversation → organize a project document → read along chapters and sources → export to another AI**. Searching, reading and exporting need no AI key. Product decisions follow the [product principles](docs/en/PRODUCT_PRINCIPLES.md).
+
+## How it differs from asking an AI for a summary
+
+Asking an AI to summarize a chat into Markdown suits a short conversation and a one-off need: it is faster and uses fewer tokens. Once one project spans many conversations over weeks, ChatAtlas handles what a summary tends to get wrong:
+
+- **Who decided what**: decisions you confirmed are marked apart from the AI's suggestions, so a suggestion is never written up as "the project uses".
+- **Replaced decisions marked**: when A was chosen and later changed to B, the document goes by B and notes that A was replaced, instead of listing both.
+- **Every sentence leads back to the source**: citations point to the place in the original conversation, read in its original order in the reader.
+- **Across conversations and platforms**: one project is organized from many conversations and AI platforms, not limited by one chat's context length.
+- **Kept up to date**: new discussions update the document, and your own edits are protected.
+
+A coding agent given such a document gets the constraints you actually settled, not a summary that blurs suggestions and decisions.
 
 ## Supported platforms
 
