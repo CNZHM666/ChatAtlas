@@ -1,16 +1,31 @@
-# ChatAtlas
+<p align="center">
+  <img src="docs/images/social-preview-zh.png" alt="ChatAtlas：让过去的 AI 对话持续产生价值" width="840">
+</p>
 
-![ChatAtlas：让过去的 AI 对话继续有用](docs/images/social-preview.png)
+<p align="center">
+  <b>简体中文</b> · <a href="README.en.md">English</a>
+</p>
 
-**简体中文** · [English](README.en.md)
+<p align="center">
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/latest"><b>下载最新版</b></a>
+  &nbsp;·&nbsp; <a href="#安装约-2-分钟">安装</a>
+  &nbsp;·&nbsp; <a href="#第一次使用">第一次使用</a>
+  &nbsp;·&nbsp; <a href="CHANGELOG.md">更新记录</a>
+  &nbsp;·&nbsp; <a href="https://github.com/CNZHM666/ChatAtlas/issues">反馈</a>
+</p>
+
+<br>
 
 **聊过的不再沉底，学过的随时能复习。**
 
-**基础搜索不需要 AI Key，安装后马上可用。** 导入或保存对话后，就能用本地关键词查找标题与正文，并阅读原始讨论。整理文档使用你自己的 API（BYOK），材料直接发往你选择的服务商，没有 ChatAtlas 服务器。
+- **装好就能用**：基础搜索不需要 AI Key。导入或保存对话后，在本地按关键词查找标题与正文，阅读原始讨论。
+- **数据留在本地**：对话保存在你的浏览器里，没有 ChatAtlas 服务器。整理文档使用你自己的 API（BYOK），材料直接发往你选择的服务商。
+- **需要时再整理**：把选定的讨论整理成可追溯来源的项目总览和 Wiki。
 
-ChatAtlas 是本地优先的 Chrome 扩展：把你在各个 AI 网站上的对话保存到浏览器里，随时找回原话、连续阅读；需要时再把选定的讨论整理成可追溯来源的项目总览和 Wiki。
+> [!NOTE]
+> ChatAtlas 是早期预览版（0.1.2 Early Preview）。功能、交互和数据结构仍会调整；Wiki 整理属于实验功能，生成结果需要你对照来源核对。升级前请先备份本地数据。
 
-> **早期预览（0.1.2 Early Preview）。** 功能、交互和数据结构仍会调整；Wiki 整理属于实验功能，生成结果需要你对照来源核对。升级前请先备份本地数据。
+## 界面预览
 
 ![在 ChatGPT 旁打开 ChatAtlas 侧栏：查找已整理的知识和相关对话](docs/images/sidecar-chatgpt-light.png)
 

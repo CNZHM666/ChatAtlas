@@ -1,16 +1,31 @@
-# ChatAtlas
+<p align="center">
+  <img src="docs/images/social-preview.png" alt="ChatAtlas: keep past AI conversations useful" width="840">
+</p>
 
-![ChatAtlas: keep past AI conversations useful](docs/images/social-preview.png)
+<p align="center">
+  <a href="README.md">简体中文</a> · <b>English</b>
+</p>
 
-[简体中文](README.md) · **English**
+<p align="center">
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/latest"><b>Download</b></a>
+  &nbsp;·&nbsp; <a href="#install-about-2-minutes">Install</a>
+  &nbsp;·&nbsp; <a href="#first-use">First use</a>
+  &nbsp;·&nbsp; <a href="docs/en/CHANGELOG.md">Changelog</a>
+  &nbsp;·&nbsp; <a href="https://github.com/CNZHM666/ChatAtlas/issues">Feedback</a>
+</p>
+
+<br>
 
 **Keep past conversations useful. Revisit what you have learned.**
 
-**Basic search needs no AI key and is ready as soon as you install.** Import or save conversations, then search titles and text locally and read the original discussions. Organizing documents uses your own API key (BYOK): material goes directly to the provider you choose, and there is no ChatAtlas server.
+- **Works right after install**: Basic search needs no AI key. Import or save conversations, then search titles and text locally and read the original discussions.
+- **Your data stays local**: Conversations are saved in your browser, and there is no ChatAtlas server. Organizing documents uses your own API key (BYOK): material goes directly to the provider you choose.
+- **Organize when you need to**: Turn selected discussions into a project overview and Wiki that trace back to their sources.
 
-ChatAtlas is a local-first Chrome extension. It saves your conversations from AI websites in your browser so you can find what was said and read it in order again. When you need to, it organizes selected discussions into a project overview and Wiki that trace back to their sources.
+> [!NOTE]
+> ChatAtlas is an early preview (0.1.2 Early Preview). Features, interactions and data structures will still change. Wiki organization is experimental: check what it writes against the sources. Back up local data before upgrading.
 
-> **Early preview (0.1.2 Early Preview).** Features, interactions and data structures will still change. Wiki organization is experimental: check what it writes against the sources. Back up local data before upgrading.
+## A quick look
 
 ![The ChatAtlas side panel next to ChatGPT: organized knowledge and related conversations](docs/images/sidecar-chatgpt-light.png)
 
