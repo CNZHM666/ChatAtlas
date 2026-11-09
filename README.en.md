@@ -134,29 +134,16 @@ Citations take you back to the original to check; they do not prove a suggestion
 ChatAtlas is a frontend-only Manifest V3 extension. Your data moves only inside your browser; selected material goes directly to the AI provider you configured only when you organize a document or ask a question.
 
 ```mermaid
-flowchart LR
-  subgraph SRC["Conversation sources"]
-    WEB["AI websites<br/>ChatGPT · Claude · Gemini · DeepSeek and more"]
-    FILE["Official exports<br/>ZIP · JSON · Markdown"]
-  end
-  subgraph EXT["ChatAtlas, inside your browser"]
-    CAP["Site adapters<br/>read loaded messages"]
-    SYNC["Import and sync<br/>source versions · dedupe"]
-    DB[("IndexedDB<br/>conversations · projects · Wiki")]
-    FIND["Local search and reading<br/>no model calls"]
-    ORG["Organizer<br/>first read → outline → writing → checks"]
-    UI["Workbench and side panel"]
-  end
-  LLM["Your AI provider<br/>BYOK"]
-  OUT["Export<br/>Markdown · HTML · JSON"]
-
-  WEB --> CAP --> SYNC
-  FILE --> SYNC
-  SYNC --> DB
-  DB --> FIND --> UI
-  DB --> ORG --> DB
-  ORG <-->|only when you organize or ask| LLM
-  UI --> OUT
+flowchart TB
+  WEB["AI websites<br/>ChatGPT · Claude · Gemini · DeepSeek and more"] --> CAP["Site adapters<br/>read loaded messages"]
+  FILE["Official exports<br/>ZIP · JSON · Markdown"] --> SYNC
+  CAP --> SYNC["Import and sync"]
+  SYNC --> DB[("Local IndexedDB in your browser<br/>conversations · projects · Wiki")]
+  DB --> FIND["Local search and reading<br/>no model calls"]
+  DB <--> ORG["Organizer<br/>builds the overview and Wiki"]
+  ORG <-.->|only when you organize or ask| LLM["Your AI provider<br/>BYOK"]
+  FIND --> UI["Workbench · side panel · export"]
+  ORG --> UI
 ```
 
 | Module | Responsibility |

@@ -138,29 +138,16 @@ Chrome 启动时可能提示「停用开发者模式扩展程序」，选择保�
 ChatAtlas 是一个纯前端的 Manifest V3 扩展：所有数据都在你的浏览器里流转，只有你主动整理文档或提问时，所选材料才会直接发往你自己配置的 AI 服务商。
 
 ```mermaid
-flowchart LR
-  subgraph SRC["对话来源"]
-    WEB["AI 网页<br/>ChatGPT · Claude · Gemini · DeepSeek 等"]
-    FILE["官方导出文件<br/>ZIP · JSON · Markdown"]
-  end
-  subgraph EXT["浏览器内的 ChatAtlas"]
-    CAP["网页适配<br/>读取已加载的消息"]
-    SYNC["导入与同步<br/>来源版本 · 去重"]
-    DB[("IndexedDB<br/>对话 · 项目 · Wiki")]
-    FIND["本地搜索与阅读<br/>不调用模型"]
-    ORG["整理引擎<br/>初读 → 目录 → 写作 → 核对"]
-    UI["工作台 与 侧栏"]
-  end
-  LLM["你的 AI 服务商<br/>BYOK"]
-  OUT["导出<br/>Markdown · HTML · JSON"]
-
-  WEB --> CAP --> SYNC
-  FILE --> SYNC
-  SYNC --> DB
-  DB --> FIND --> UI
-  DB --> ORG --> DB
-  ORG <-->|仅在你主动整理或提问时| LLM
-  UI --> OUT
+flowchart TB
+  WEB["AI 网页<br/>ChatGPT · Claude · Gemini · DeepSeek 等"] --> CAP["网页适配<br/>读取已加载的消息"]
+  FILE["官方导出文件<br/>ZIP · JSON · Markdown"] --> SYNC
+  CAP --> SYNC["导入与同步"]
+  SYNC --> DB[("浏览器本地 IndexedDB<br/>对话 · 项目 · Wiki")]
+  DB --> FIND["本地搜索与阅读<br/>不调用模型"]
+  DB <--> ORG["整理引擎<br/>生成总览与 Wiki"]
+  ORG <-.->|仅在你主动整理或提问时| LLM["你的 AI 服务商<br/>BYOK"]
+  FIND --> UI["工作台 · 侧栏 · 导出"]
+  ORG --> UI
 ```
 
 | 模块 | 职责 |
