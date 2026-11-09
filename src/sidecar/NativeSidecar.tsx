@@ -7,6 +7,8 @@ import {chatGPTConversationId} from "../shared/native-discussion";
 import {isNativePanelSite} from "../shared/sidecar-scope";
 import {webConversation,webCaptureSite} from "../shared/web-capture";
 import {platformName} from "../shared/platforms";
+import {preferredTheme} from "../shared/appearance";
+import type {AtlasMessage} from "../shared/messages";
 
 export function NativeSidecar({zh:initialChinese,tabId}:{zh:boolean;tabId?:number}) {
  const [zh,toggleLanguage]=useSidecarLocale(initialChinese);
@@ -21,6 +23,17 @@ export function NativeSidecar({zh:initialChinese,tabId}:{zh:boolean;tabId?:numbe
   chrome.tabs.onActivated.addListener(activated);chrome.tabs.onUpdated.addListener(updated);
   return()=>{live=false;revision++;setNativeSidecarTab(undefined);chrome.tabs.onActivated.removeListener(activated);chrome.tabs.onUpdated.removeListener(updated);};
  },[tabId]);
+ // Light or dark as the AI site shows it, following it as it changes; elsewhere ChatAtlas's own setting.
+ useEffect(()=>{
+  const id=tab?.id,fallback=preferredTheme();
+  const apply=(theme:unknown)=>{document.documentElement.dataset.theme=theme==="dark"||theme==="light"?theme:fallback;};
+  if(id===undefined||!isNativePanelSite(tab?.url)){apply(undefined);return;}
+  let live=true;
+  void Promise.resolve(chrome.tabs.sendMessage?.(id,{type:"ATLAS_PAGE_THEME"} satisfies AtlasMessage)).then((reply:{theme?:unknown}|undefined)=>{if(live)apply(reply?.theme);}).catch(()=>{if(live)apply(undefined);});
+  const changed=(message:AtlasMessage,sender:chrome.runtime.MessageSender)=>{if(message.type==="ATLAS_PAGE_THEME_CHANGED"&&sender.tab?.id===id)apply(message.theme);return false;};
+  chrome.runtime.onMessage?.addListener(changed);
+  return()=>{live=false;chrome.runtime.onMessage?.removeListener(changed);};
+ },[tab?.id,tab?.url]);
  if(tabId!==undefined&&tab&&!isNativePanelSite(tab.url))return null;
  if(tabId!==undefined&&tab?.id!==tabId)return <SidecarHeader zh={zh} onToggleLanguage={toggleLanguage} showBrand={false}/>;
  let conversation="",canInsert=false,platformLabel="";

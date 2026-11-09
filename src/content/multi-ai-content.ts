@@ -7,6 +7,7 @@ import {locateDiscussion} from "./locate-discussion";
 import {fillProjectComposer} from "./project-handoff";
 import {webChatEntry} from "./web-chat-entry";
 import {readWebChatHistory} from "./web-chat-history";
+import {pageTheme,watchPageTheme} from "./page-theme";
 
 const site = webCaptureSite(location.href);
 if (site) {
@@ -35,6 +36,7 @@ if (site) {
   };
   const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => { if (area === "local" && changes[WEB_CAPTURE_KEY]) { settingsRevision++; apply(changes[WEB_CAPTURE_KEY].newValue); } };
   const message = (value: AtlasMessage, _sender: chrome.runtime.MessageSender, reply: (response: unknown) => void) => {
+    if(value.type==="ATLAS_PAGE_THEME"){reply({theme:pageTheme()});return false;}
     if(value.type==="ATLAS_PING"){reply({ready:enabled,conversation:adapter.detectConversation()});return false;}
     if(value.type==="ATLAS_WEB_HISTORY_PAGE"){reply(enabled?readWebChatHistory():{entries:[],scope:"loaded"});return false;}
     if(value.type==="ATLAS_FILL_COMPOSER"){if(!enabled){reply({ok:false,reason:"unavailable"});return false;}void fillProjectComposer(value.text,value.conversationId,location.href,()=>adapter.composer()).then(reply).catch(()=>reply({ok:false,reason:"failed"}));return true;}
@@ -51,9 +53,11 @@ if (site) {
   const hidden = () => capture.pause(), restored = () => { if (enabled) { capture.resume(); schedule(); } };
   window.addEventListener("pagehide", hidden); window.addEventListener("pageshow", restored);
   chrome.storage.onChanged.addListener(changed); chrome.runtime.onMessage.addListener(message);
+  // The side panel matches the site's light or dark theme as it changes.
+  const unwatchTheme = watchPageTheme(theme => { void chrome.runtime.sendMessage({ type: "ATLAS_PAGE_THEME_CHANGED", theme } satisfies AtlasMessage).catch(() => undefined); });
   void chrome.storage.local.get(WEB_CAPTURE_KEY).then(value => { if(settingsRevision===0)apply(value[WEB_CAPTURE_KEY]); }).catch(() => {if(settingsRevision===0)capture.pause();});
   host.__chatAtlasWebCaptureDispose = () => {
-    disposed = true; enabled = false; observer.disconnect(); capture.pause();entry.remove(); clearInterval(navigation);
+    disposed = true; enabled = false; observer.disconnect(); unwatchTheme(); capture.pause();entry.remove(); clearInterval(navigation);
     chrome.storage.onChanged.removeListener(changed); chrome.runtime.onMessage.removeListener(message);
     window.removeEventListener("pagehide", hidden); window.removeEventListener("pageshow", restored);
   };

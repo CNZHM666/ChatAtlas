@@ -15,6 +15,8 @@
 - Exports open with the document status and what the marks mean, list key decisions and open questions as tables, show source code as written, and keep table rows, lists and marks intact.
 - Multi-conversation organizing names source conversations, orders them by platform time and keeps different AIs' proposals apart; English conversations keep English sentences and punctuation.
 - Workbench: a project is titled after its conversations, selected conversations can be reread on demand, DeepSeek messages that are only a file are read, and the empty-trash button stays when the bin is reopened.
+- Side panel: follows the AI site's light or dark theme as it changes; search excerpts leave out attachment markup; a project's sources and **Add conversations** are grouped by AI.
+- Reader: question search needs every word, ranks questions that say them first and shows the answer line for answer-only matches; pasted tables or Markdown questions read as plain text.
 - Two public samples, Pocket Ledger and Focus Timer (exported Wiki, ledger, run record and bilingual report), in `samples/`.
 - **Learning mode (beta)**: choose **Learning (beta)** as the document type to organize study conversations into numbered cards (1.1, 1.2 …) with exercises, AI reviews, mistakes and recall questions at each chapter's end. While in beta, **Auto** always organizes as a project, and learning documents and exports say they are in beta.
 

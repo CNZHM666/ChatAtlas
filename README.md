@@ -1,5 +1,7 @@
 # ChatAtlas
 
+![ChatAtlas：让过去的 AI 对话继续有用](docs/images/social-preview.png)
+
 **简体中文** · [English](README.en.md)
 
 **聊过的不再沉底，学过的随时能复习。**

@@ -52,6 +52,9 @@ export type AtlasMessage =
   | { type: "ATLAS_SIDECAR_DATA"; conversationId: string }
   | { type: "ATLAS_NAVIGATOR_DATA"; conversationId: string }
   | { type: "ATLAS_PING" }
+  /** Asks an AI page for its light or dark theme; the page also announces a change, for the side panel to match. */
+  | { type: "ATLAS_PAGE_THEME" }
+  | { type: "ATLAS_PAGE_THEME_CHANGED"; theme: "light" | "dark" }
   | { type: "ATLAS_CONTENT_READY"; url: string }
   | { type: "ATLAS_CAPTURE_BATCH"; capture: ConversationCapture }
   | { type: "ATLAS_CAPTURE_NOW"; conversationId?: string }

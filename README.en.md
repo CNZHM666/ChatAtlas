@@ -1,5 +1,7 @@
 # ChatAtlas
 
+![ChatAtlas: keep past AI conversations useful](docs/images/social-preview.png)
+
 [简体中文](README.md) · **English**
 
 **Keep past conversations useful. Revisit what you have learned.**

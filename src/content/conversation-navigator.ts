@@ -5,13 +5,9 @@ import { chatGPTEntryAnchor, chatGPTEntryVisible } from "./chatgpt-adapter";
 import { sidecarStyle } from "./sidecar-style";
 import { brandLogos } from "../shared/brand-assets";
 import { ATLAS_TRIGGER_STYLE } from "./atlas-trigger-style";
+import { pageTheme } from "./page-theme";
 
 const WIDTH_KEY = "atlas-navigator-width";
-function darkBackground(element: Element): boolean {
-  const match = getComputedStyle(element).backgroundColor.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,/\s]+([\d.]+))?\)/u);
-  if (!match || Number(match[4] ?? 1) === 0) return false;
-  const [r, g, b] = match.slice(1, 4).map(Number); return r * .2126 + g * .7152 + b * .0722 < 128;
-}
 
 /** Host shell only. Project text and notes stay in the extension-origin frame. */
 export class ConversationNavigator {
@@ -130,8 +126,7 @@ export class ConversationNavigator {
     frame.src = `${chrome.runtime.getURL("sidecar.html")}?${params}`; frame.addEventListener("load", () => this.syncTheme()); this.frame = frame; panel.append(frame);
   }
   private syncTheme(): void {
-    const declared = document.documentElement.getAttribute("data-theme") ?? document.body?.getAttribute("data-theme");
-    const dark = declared === "dark" || declared !== "light" && (document.documentElement.classList.contains("dark") || document.body?.classList.contains("dark") || darkBackground(document.body) || darkBackground(document.documentElement));
+    const dark = pageTheme() === "dark";
     this.dark = dark;
     const logo = chrome.runtime.getURL(brandLogos[dark ? "dark" : "light"].replace(/^\//u, ""));
     for (const image of [this.trigger?.querySelector<HTMLImageElement>("img"), this.host?.shadowRoot?.querySelector<HTMLImageElement>(".brand img")]) if (image && image.getAttribute("src") !== logo) image.src = logo;

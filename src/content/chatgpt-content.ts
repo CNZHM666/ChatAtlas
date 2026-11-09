@@ -7,6 +7,7 @@ import { PageCapture } from "./page-capture";
 import { DOMChatGPTAdapter, usesCurrentChatGPTMarkup } from "./chatgpt-adapter";
 import { ChatGPTSyncAdapter, ChatGPTSyncError } from "../sync/chatgpt-sync-adapter";
 import { ConversationNavigator } from "./conversation-navigator";
+import { pageTheme, watchPageTheme } from "./page-theme";
 import { locateDiscussion } from "./locate-discussion";
 import { fillProjectComposer } from "./project-handoff";
 
@@ -29,6 +30,7 @@ chrome.runtime.onMessage.addListener((message: AtlasMessage, _sender, sendRespon
 ${error.stack ?? ""}` : String(error)); sendResponse({ ok: false, error: "本次自动定位未完成，请重试。" }); });
     return true;
   }
+  if (message.type === "ATLAS_PAGE_THEME") { sendResponse({ theme: pageTheme() }); return false; }
   if (message.type === "ATLAS_PING") {
     onExecute();
     sendResponse({ ready: true, conversation: adapter.detectConversation() });
@@ -116,4 +118,5 @@ function locateDiagnostics(conversationId: string, identity: { messageId?: strin
     turnAttributes: turn ? turn.getAttributeNames().filter(name => name.startsWith("data-")) : [],
   };
 }
-
+// The side panel, when opened as Chrome's side panel here, matches ChatGPT's light or dark theme as it changes.
+watchPageTheme(theme => { void chrome.runtime.sendMessage({ type: "ATLAS_PAGE_THEME_CHANGED", theme } satisfies AtlasMessage).catch(() => undefined); });

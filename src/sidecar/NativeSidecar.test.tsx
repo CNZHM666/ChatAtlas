@@ -61,3 +61,16 @@ it("keeps a tab-specific instance on its own conversation when another tab becom
  updated.addListener.mock.calls[0][0](42,{url:"https://chatgpt.com/c/back"},{id:42});
  await waitFor(()=>expect(screen.getByTestId("panel-props")).toHaveTextContent('"conversationId":"back"'));
 });
+it("matches the AI site's light or dark theme and follows it as it changes, only for its own tab",async()=>{
+ const listeners:Array<(message:unknown,sender:{tab?:{id?:number}})=>void>=[];
+ const tabMessage=vi.fn().mockResolvedValue({theme:"dark"});
+ vi.stubGlobal("chrome",{windows:{getCurrent:async()=>({id:7})},tabs:{query:async()=>[{id:43,windowId:7,active:true,url:"https://claude.ai/chat/1",title:"Claude"}],sendMessage:tabMessage,onActivated:{addListener:vi.fn(),removeListener:vi.fn()},onUpdated:{addListener:vi.fn(),removeListener:vi.fn()}},runtime:{sendMessage:vi.fn(),onMessage:{addListener:(listener:(typeof listeners)[number])=>listeners.push(listener),removeListener:vi.fn()}}});
+ document.documentElement.dataset.theme="light";
+ render(<NativeSidecar zh/>);
+ await waitFor(()=>expect(document.documentElement.dataset.theme).toBe("dark"));
+ expect(tabMessage).toHaveBeenCalledWith(43,{type:"ATLAS_PAGE_THEME"});
+ listeners.forEach(listener=>listener({type:"ATLAS_PAGE_THEME_CHANGED",theme:"light"},{tab:{id:99}}));
+ expect(document.documentElement.dataset.theme).toBe("dark");
+ listeners.forEach(listener=>listener({type:"ATLAS_PAGE_THEME_CHANGED",theme:"light"},{tab:{id:43}}));
+ expect(document.documentElement.dataset.theme).toBe("light");
+});
