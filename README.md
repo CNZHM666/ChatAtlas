@@ -19,6 +19,10 @@ ChatAtlas 是本地优先的 Chrome 扩展：把你在各个 AI 网站上的对�
 
 ![Wiki 章节阅读：按主题整理的决定与细节](docs/images/wiki-chapter-light.png)
 
+![原文阅读：按原来的问答顺序连续阅读，左侧可搜索问题或回答](docs/images/reader-dark.png)
+
+<p align="center"><img src="docs/images/sidecar-search-light.png" width="300" alt="AI 网页旁的侧栏：查找已整理的知识和相关对话"><br><sub>AI 网页旁的侧栏：查找已整理的知识和相关对话</sub></p>
+
 ## 能做什么
 
 - **保存对话**：导入官方导出文件，或在支持的 AI 网页上自动保存已加载的对话。全部保存在当前浏览器。

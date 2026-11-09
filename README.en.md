@@ -19,6 +19,10 @@ ChatAtlas is a local-first Chrome extension. It saves your conversations from AI
 
 ![Reading a Wiki chapter: decisions and details organized by topic](docs/images/wiki-chapter-light.png)
 
+![Reading the original conversation in order, with question search on the left](docs/images/reader-dark.png)
+
+<p align="center"><img src="docs/images/sidecar-search-light.png" width="300" alt="The side panel next to an AI website: organized knowledge and related conversations"><br><sub>The side panel next to an AI website: organized knowledge and related conversations</sub></p>
+
 ## What it does
 
 - **Save conversations**: import official export files, or let supported AI websites save loaded conversations automatically. Everything stays in the current browser.
