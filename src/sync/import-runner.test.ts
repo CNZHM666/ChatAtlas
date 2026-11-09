@@ -62,6 +62,20 @@ describe("history import states", () => {
     expect((await listConversations()).find((item) => item.id === second.id)?.importState).toBe("discovered");
   });
 
+  it("reads a synced ChatGPT conversation again only when asked to sync it again", async () => {
+    const first = { ...conversation, id: "again-a", title: "First", url: "https://chatgpt.com/c/again-a" };
+    const list = vi.fn(async (_offset: number, _limit: number, archived: boolean) => ({ conversations: archived ? [] : [first], hasMore: false }));
+    const getConversation = vi.fn(async () => ({ conversation: first, messages: [], capturedAt: 1000 }));
+    const adapter: HistoryAdapter = { isAvailable: async () => true, list, getConversation };
+    await startHistoryImport(adapter, "titles"); await waitForHistoryImportIdle();
+    await startHistoryImport(adapter, "selected", [first.id]); await waitForHistoryImportIdle();
+    expect(getConversation).toHaveBeenCalledOnce();
+    await startHistoryImport(adapter, "selected", [first.id]); await waitForHistoryImportIdle();
+    expect(getConversation).toHaveBeenCalledOnce();
+    await startHistoryImport(adapter, "selected", [first.id], { force: [first.id] }); await waitForHistoryImportIdle();
+    expect(getConversation).toHaveBeenCalledTimes(2);
+  });
+
   it("does not call a zero-conversation history import complete", async () => {
     const adapter: HistoryAdapter = { isAvailable: async () => true, list: async () => ({ conversations: [], hasMore: false }), getConversation: async () => { throw new Error("Not expected"); } };
     await startHistoryImport(adapter);

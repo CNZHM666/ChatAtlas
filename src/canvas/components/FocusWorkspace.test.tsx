@@ -230,13 +230,10 @@ describe("goal reading workflow", () => {
  expect(screen.getByRole("article",{name:"Document overview"})).toBeVisible();
  expect(screen.queryByRole("button",{name:"Use new plan"})).toBeNull();expect(screen.queryByRole("button",{name:"Organize project matters"})).toBeNull();
 });
-  it("adds a personal Wiki chapter from the visible directory footer and persists it without new sources or model work",async()=>{
+  it("offers no add-chapter button in the Wiki directory: chapters come from the conversations",()=>{
     const work:FocusSession={...structuredClone(session),mode:"work"};
     render(<PreferencesProvider><FocusWorkspace initialSession={work} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
-    fireEvent.click(screen.getByRole("button",{name:"Add chapter"}));fireEvent.change(screen.getByLabelText("Chapter title"),{target:{value:"Personal validation"}});fireEvent.change(screen.getByLabelText("Chapter content (optional)"),{target:{value:"Preview checked; physical tests pending."}});fireEvent.click(screen.getByRole("button",{name:"Create"}));
-    await waitFor(()=>expect(screen.getByRole("article",{name:"Wiki document"})).toHaveTextContent("Preview checked; physical tests pending."));
-    const stored=await(await getDatabase()).get("focusSessions","s");expect(stored?.sections).toHaveLength(2);expect(stored?.sections[1]).toMatchObject({title:"Personal validation",body:"Preview checked; physical tests pending.",origin:"user",userEdited:true,evidenceIds:[],wikiGroupEdited:true});
-    expect(stored?.sections[0]).toEqual(work.sections[0]);expect(stored?.evidence).toEqual(work.evidence);expect(generateFocusSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button",{name:"Add chapter"})).toBeNull();
   });
   it("opens the existing project exporter from the primary toolbar without context entry points or AI calls", async () => {
     const knowledge=contextKnowledge(),db=await getDatabase();

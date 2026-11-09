@@ -59,7 +59,7 @@ const unit = (values: Float32Array) => { let size = 0; for (const value of value
  * Each subject goes to the chapter whose other subjects its statements are closest to, when that is clearly closer
  * than its own (PLACE_MARGIN), into that chapter's closest subtopic. A chapter or subtopic is never emptied, and a
  * subject with no vectors stays. Returns how many subjects moved. */
-export function placeByContent(chapters: Chapter[], subjects: Array<{ id: string; unitIds: string[] }>, vectors: UnitVectors): number {
+export function placeByContent(chapters: Chapter[], subjects: Array<{ id: string; unitIds: string[] }>, vectors: UnitVectors, allowed: (id: string, from: Chapter, to: Chapter) => boolean = () => true): number {
   const dimension = [...vectors.values()][0]?.length ?? 0;
   if (!dimension || chapters.length < 2) return 0;
   // Sum of unit vectors per subject: chapter and subtopic centres are sums of their subjects, weighted by size.
@@ -76,7 +76,7 @@ export function placeByContent(chapters: Chapter[], subjects: Array<{ id: string
     if (!sums.has(id) || idsOf(chapter).length < 2 || topic.subjectIds.length < 2 && chapter.subtopics.length < 2) continue;
     const own = unit(sums.get(id)!), scores = chapters.map((other, index) => { const middle = centre(idsOf(other), index === from ? id : undefined); return middle ? dot(own, middle) : -1; });
     const best = scores.indexOf(Math.max(...scores));
-    if (best === from || scores[best] - scores[from] < PLACE_MARGIN) continue;
+    if (best === from || scores[best] - scores[from] < PLACE_MARGIN || !allowed(id, chapter, chapters[best])) continue;
     const target = chapters[best], into = target.subtopics.map(item => { const middle = centre(item.subjectIds); return middle ? dot(own, middle) : -1; });
     topic.subjectIds = topic.subjectIds.filter(other => other !== id);
     if (!topic.subjectIds.length) chapter.subtopics = chapter.subtopics.filter(item => item !== topic);

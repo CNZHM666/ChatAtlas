@@ -495,8 +495,6 @@
 .wiki-review-panel details[open] summary svg { transform: rotate(180deg); }
 .wiki-review-panel p { margin: 0; padding: 0 20px 16px; line-height: 1.7; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .wiki-review-panel header { align-items: flex-start; flex-direction: column; } }
-.reader-code-example { margin: 14px 0; border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
-.reader-code-example > summary { cursor: pointer; color: var(--muted); padding: 10px 14px; font-size: var(--text-sm); }
 .project-query-interrupted { max-height: 280px; overflow: auto; padding: 16px; border: 1px solid var(--border); border-radius: 10px; }
 .wiki-review-warning button { min-height: 36px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); font-size: inherit; }
 .focus-reader-progress { margin: 22px 8px 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid); }
@@ -1321,7 +1319,7 @@
    Source wrappers stay intact for citations, paging and reading-position tracking. */
 .reader-conversation { row-gap: 0; }
 .reader-conversation > .reader-reply-part.is-reply-end { margin-bottom: 24px; }
-.reader-conversation > .reader-load-more { margin-bottom: 24px; }
+.reader-conversation > .reader-load-more { margin-bottom: 24px; overflow-anchor: none; }
 :is(.focus-context-panel, .question-reader) .reader-reply-part.is-highlighted-reply > .knowledge-reader-message:not(.is-user) { box-shadow: inset 2px 0 var(--accent); padding-left: 16px; }
 
 /* Keep the reading surface quiet: one main line, optional detail, compact controls. */
@@ -1559,6 +1557,10 @@
 .project-context-export > div { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 1; min-width: 170px; padding: 6px; display: grid; gap: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid); box-shadow: 0 8px 24px #0002; }
 .focus-workspace .project-context-export > div button { text-align: left; width: 100%; margin: 0; font-size: 13px; height: 36px; padding: 0 10px; border: 0; background: transparent; }
 .chapter-source-conversations > section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.chapter-source-conversations > .chapter-source-platform { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 0; padding: 0 0 6px; border-bottom: 1px solid var(--border); color: var(--text); font-size: var(--text-sm); font-weight: 600; }
+.chapter-source-conversations > .chapter-source-platform:first-child { margin-top: 0; }
+.chapter-source-conversations > .chapter-source-platform small { color: var(--muted); font-size: var(--text-xs); font-weight: 400; }
+.focus-workspace .chapter-source-conversations > .chapter-source-platform + section { padding-top: 12px; }
 .focus-workspace .chapter-source-open { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; margin: 0; padding: 0; border: 0; background: transparent; text-align: left; }
 .chapter-source-open strong { display: block; color: var(--text); font-size: 15px; line-height: 1.6; }
 .chapter-source-open small { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
@@ -1979,7 +1981,10 @@
 .focus-workspace .is-chapter-view .reader-understanding-map { border-bottom: 0; padding-bottom: 0; }
 .focus-preview .project-outcome { padding-bottom: 0; margin-bottom: 24px; }
 /* Unified navigation and readable relationship cards. */
+/* The general rule giving every button in these areas a border (".focus-workspace button") outranked ".reader-back-button":
+   the recall workspace, inside .focus-workspace, showed its back button boxed while every other screen showed it plain. */
 .reader-back-button,
+:is(.review-home, .space-contents, .focus-workspace, .focus-preview, .focus-wait, .original-reading, .focus-error) button.reader-back-button,
 .reading-outline > .reader-back-button:first-child:not(.outline-item),
 .source-reader-header .reader-back-button,
 .focus-context-header .reader-back-button {
@@ -1988,7 +1993,8 @@
   border: 0; border-radius: 6px; background: transparent; color: var(--muted);
   font-size: var(--text-base); font-weight: 500; line-height: 20px;
 }
-.reader-back-button:hover { color: var(--text); background: var(--surface-muted); }
+.reader-back-button:hover,
+:is(.review-home, .space-contents, .focus-workspace, .focus-preview, .focus-wait, .original-reading, .focus-error) button.reader-back-button:hover { color: var(--text); background: var(--surface-muted); border-color: transparent; }
 .reader-back-button svg { flex: none; }
 .original-reading > .conversation-sidebar.is-collapsed {
   display: flex; flex-direction: column; align-items: center; padding: 14px 0;
@@ -2950,7 +2956,9 @@
 /* The home source list also reads originals, shows project membership and joins a project. */
 .workbench-sync-item .workbench-sync-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .workbench-sync-item .workbench-sync-match { font-size: var(--text-xs); font-weight: 400; color: var(--muted); }
-.workbench-sync-item .workbench-source-projects { flex: none; width: 64px; text-align: right; padding: 3px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: var(--text-xs); cursor: pointer; }
+.workbench-sync-item .workbench-source-projects { flex: none; box-sizing: border-box; min-width: 6em; white-space: nowrap; text-align: right; padding: 3px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: var(--text-xs); cursor: pointer; }
+/* Platform names and sync states differ in length; fixed slots keep every row's columns on the same line. */
+.workbench-sync-item .workbench-source-state { box-sizing: border-box; min-width: 5.2em; text-align: center; }
 .workbench-sync-item .workbench-source-projects:hover:not(:disabled) { color: var(--text); background: var(--surface-muted); }
 .workbench-sync-item .workbench-source-read { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .workbench-sync-item .workbench-source-read:hover { color: var(--text); background: var(--surface-muted); }
@@ -3004,6 +3012,8 @@
 .reader-message-actions { gap: 2px; margin-top: 6px; opacity: 0; transition: opacity .12s; }
 .reader-message-actions button, .original-reading .reader-message-actions button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); }
 .reader-message-actions button:hover, .original-reading .reader-message-actions button:hover { color: var(--text); background: var(--surface-muted); border: 0; }
+/* The actions show only on hover. Inside the bubble their row left an empty band under the text, so they sit beside it. */
+.reader-conversation .knowledge-reader-message.is-user .reader-message-actions { position: absolute; right: 100%; bottom: 0; flex-wrap: nowrap; margin: 0 4px 0 0; }
 .knowledge-reader-message.is-user .reader-message-actions { justify-content: flex-end; }
 @media (hover: none) { .reader-message-actions { opacity: 1; } }
 .reader-citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -3064,3 +3074,20 @@
 .focus-preview .wiki-chapter-preview > .wiki-chapter-preview-heading { margin-bottom: 16px; }
 .focus-preview.is-project-preview .focus-update-preview > ol > li { padding: 28px 0 8px; }
 .focus-preview.is-project-preview .focus-update-preview > ol > li:first-child { padding-top: 8px; }
+
+/* Model picker: the list and a separate button to manage connections, the button the list's own height and frame so
+   the two read as one control. */
+.ai-quick-select { display: inline-flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
+.ai-quick-select > label { display: flex; }
+.ai-quick-select .ai-quick-error { flex-basis: 100%; }
+.ai-quick-select .ai-quick-manage { display: inline-flex; align-items: center; justify-content: center; flex: none; box-sizing: border-box; width: 36px; height: auto; min-height: 34px; padding: 0; margin: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--muted); line-height: 0; cursor: pointer; }
+.ai-quick-select .ai-quick-manage svg { display: block; flex: none; }
+.ai-quick-select .ai-quick-manage:hover, .ai-quick-select .ai-quick-manage:focus-visible { border-color: var(--border-strong); background: var(--surface-muted); color: var(--text); }
+.review-home .goal-composer-actions .ai-quick-select .ai-quick-manage { min-height: 36px; width: 36px; }
+/* Where an answer matched the search: the line under the question, so the match says why it is listed. */
+.conversation-message-item .message-search-snippet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: var(--text-xs); line-height: 1.5; font-weight: 400; }
+/* A project's sources from several AIs, under each AI's name. */
+.outline-source-group + .outline-source-group { margin-top: 10px; }
+.outline-source-group > h3 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 12px 4px; color: var(--muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: .02em; }
+.outline-source-group > h3 .ai-platform-icon, .outline-source-group > h3 .ai-platform-icon > img, .outline-source-group > h3 .ai-platform-icon-mask { flex-basis: 16px; width: 16px; height: 16px; }
+.outline-source-group > h3 small { margin-left: auto; font-weight: 400; }

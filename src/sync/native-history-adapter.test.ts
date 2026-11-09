@@ -80,6 +80,29 @@ describe("native history protocols", () => {
     expect(capture.messages.map(message => message.content)).toEqual(["Original question", "Final answer"]);
     expect(capture.conversation.historyCoverage).toBe("complete");
   });
+  it("reads a DeepSeek message that is only an attached file as that attachment", async () => {
+    const s = { ...source("deepseek"), account: "account-a" };
+    const adapter = new NativeHistoryAdapter(s, async () => reply({ data: { biz_data: { chat_messages: [{ message_id: 1, role: "USER", fragments: [{ type: "REQUEST", content: "" }], files: [{ id: "f", file_name: "专注计时器V0.1.md" }] }, { message_id: 2, role: "ASSISTANT", fragments: [{ type: "RESPONSE", content: "Review" }] }] } } }));
+    const capture = await adapter.detail({ id: "deepseek:a", platform: "deepseek", title: "A", url: "", updatedAt: 1, messageCount: null });
+    expect(capture.messages.map(message => message.content)).toEqual(["【附件 专注计时器V0.1.md】", "Review"]);
+  });
+  it("reads a DeepSeek user message from an unnamed file or an unknown fragment type", async () => {
+    const s = { ...source("deepseek"), account: "account-a" };
+    const adapter = new NativeHistoryAdapter(s, async () => reply({ data: { biz_data: { chat_messages: [{ message_id: 1, role: "USER", fragments: [], files: [{ id: "f" }] }, { message_id: 2, role: "USER", fragments: [{ type: "THINK", content: "Hidden" }, { type: "QUOTE", content: "Quoted question" }] }] } } }));
+    const capture = await adapter.detail({ id: "deepseek:a", platform: "deepseek", title: "A", url: "", updatedAt: 1, messageCount: null });
+    expect(capture.messages.map(message => message.content)).toEqual(["【附件】", "Quoted question"]);
+  });
+  it("names the fields of a DeepSeek message it cannot read, without its text", async () => {
+    const s = { ...source("deepseek"), account: "account-a" };
+    const adapter = new NativeHistoryAdapter(s, async () => reply({ data: { biz_data: { chat_messages: [{ message_id: 1, role: "USER", fragments: [{ type: "THINK", content: "Secret" }], extra: 1 }] } } }));
+    await expect(adapter.detail({ id: "deepseek:a", platform: "deepseek", title: "A", url: "", updatedAt: 1, messageCount: null })).rejects.toThrow("字段 extra,fragments,message_id,role; fragments THINK");
+  });
+  it("dates a DeepSeek conversation that its list gave no start time by its first message", async () => {
+    const s = { ...source("deepseek"), account: "account-a" };
+    const adapter = new NativeHistoryAdapter(s, async () => reply({ data: { biz_data: { chat_messages: [{ message_id: 1, role: "USER", fragments: [{ type: "REQUEST", content: "Q" }], inserted_at: 1762494000.5 }, { message_id: 2, role: "ASSISTANT", fragments: [{ type: "RESPONSE", content: "A" }], inserted_at: 1762494060 }] } } }));
+    const capture = await adapter.detail({ id: "deepseek:a", platform: "deepseek", title: "A", url: "", updatedAt: 1, messageCount: null, sourceUpdatedAt: 1762497568000 });
+    expect(capture.conversation.sourceCreatedAt).toBe(1762494000500);
+  });
   it("prefers completed response fragments over the fallback body", async () => {
     const s = { ...source("deepseek"), account: "account-a" };
     const adapter = new NativeHistoryAdapter(s, async () => reply({ data: { biz_data: { chat_messages: [{ message_id: "a", role: "ASSISTANT", fragments: [{ type: "THINK", content: "Reasoning" }, { type: "RESPONSE", content: "Final answer" }], content: "Fallback" }] } } }));

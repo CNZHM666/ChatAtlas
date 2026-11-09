@@ -16,3 +16,12 @@ it("gives the questions before writing room for six questions", () => {
 it("gives one paragraph written again with the user's answers a small allowance", () => {
   expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_paragraph_revise", version: 1 }) })).toMatchObject({ maxInputTokens: 6000, maxOutputTokens: 1500 });
 });
+
+// A learning record's roles and card titles were cut off at 520 tokens: the titles stayed "第1课内容" and the roles fell
+// back to guesses that made plans into cards.
+it("gives a learning record's roles and card titles room for every point in the batch", () => {
+  const budget = (presentation: string, key: string, count: number) => requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation, version: 1, [key]: Array.from({ length: count }, (_, index) => ({ id: index })) }) }).maxOutputTokens;
+  expect(budget("wiki_learning_roles", "units", 80)).toBe(3200);
+  expect(budget("wiki_learning_card_titles", "cards", 30)).toBe(2600);
+  expect(budget("wiki_learning_card_titles", "cards", 2)).toBe(800);
+});

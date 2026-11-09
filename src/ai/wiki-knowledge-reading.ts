@@ -1,12 +1,16 @@
 import { preserveMergedWikiDecisions } from "./wiki-decision-coverage";
 import { retitleMisnamedChapters, routeOutOfReferences, routeWikiUnits } from "./wiki-unit-routing";
 import { withDiscussedProjects } from "./wiki-knowledge-units";
-import { scopedWikiDraft, statementsConflict, withUserAnswers, withUserRelations, wikiLedgerUnits, type WikiKnowledgeLedger } from "../shared/wiki-knowledge";
+import { withAnswerScope, withAnsweredOpenPoints, withSettledByAnswer, withAnsweredChoices, withDeclinedProposals, withSoundAnswers } from "./wiki-question-parse";
+import { stageMoveReplacements, withQuotedMoves } from "./wiki-stage-moves";
+import { scopedWikiDraft, statementsConflict, withoutOwnProjectAnswers, withUserAnswers, withUserRelations, wikiLedgerUnits, type WikiKnowledgeLedger } from "../shared/wiki-knowledge";
 import { explicitSwitches, gatherAcrossStages, gatherNamedItems, gatherPositioning, gatherTwins, gatherVersions, placeUnitsByKind } from "./wiki-knowledge-organize";
 import { scopedWishes, wikiUnitStatuses } from "./wiki-knowledge-state";
+import { laterSettings } from "./wiki-later-settings";
 import { chooseGroupHomes } from "./wiki-knowledge-groups";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
 import { wikiUserChooses } from "../shared/wiki-user-choice";
+import { wikiSaidLater } from "../shared/wiki-sources";
 
 /** One reversible interpretation for writing, reading and export. The source ledger and
  * the user's answers remain untouched; never store these deductions as user verdicts. */
@@ -16,8 +20,15 @@ function opposedSides(first: string, second: string) {
   return OPPOSITES.some(([a, b]) => first.includes(a) && !first.includes(b) && second.includes(b) && !second.includes(a) || first.includes(b) && !first.includes(a) && second.includes(a) && !second.includes(b));
 }
 
-export function resolveWikiReading(source: WikiKnowledgeLedger) {
-  const answered = withUserAnswers(withUserRelations(withDiscussedProjects(source))), report: Record<string, number> = {};
+export function resolveWikiReading(stored: WikiKnowledgeLedger) {
+  // Answers a question should not have offered (the project named as another, a label against its point) are not taken.
+  // What a chosen option set aside as still open is settled by it (withSettledByAnswer), and the points elsewhere saying
+  // an answered choice is still open are settled with it (withAnsweredOpenPoints).
+  // An answer confirming only an account of facts is the user's choice in its own words (withAnsweredChoices).
+  // And a move the user's decision quotes, which extraction left out, is a decision of its own (withQuotedMoves).
+  const report: Record<string, number> = {};
+  const source = withQuotedMoves(withAnsweredOpenPoints(withSettledByAnswer(withDeclinedProposals(withAnsweredChoices(withAnswerScope(withoutOwnProjectAnswers(withSoundAnswers(stored))))))), report);
+  const answered = withUserAnswers(withUserRelations(withDiscussedProjects(source)));
   const units = wikiLedgerUnits(answered), known = new Map(units.map(unit => [unit.id, unit]));
   const answeredIds = new Set((source.userAnswers ?? []).flatMap(answer => answer.unitIds));
   const checked = answered.organization ? { ...answered.organization, relations: answered.organization.relations.map(relation => {
@@ -25,7 +36,7 @@ export function resolveWikiReading(source: WikiKnowledgeLedger) {
     // A later point that contradicts an earlier decision (保留深色风格 after 采用浅色风格) still loses to it.
     // Otherwise a point said later in the same conversation is never replaced by an earlier one: "默认仅保存在当前浏览器会话中"
     // (message 50) did not replace "默认仅保存在运行时内存……可选 sessionStorage" (message 53), which says how. It adds to it.
-    if (relation.kind === "replaces" && older && newer && !answeredIds.has(older.id) && !answeredIds.has(newer.id) && older.evidence.conversationId === newer.evidence.conversationId && older.evidence.messageIndex > newer.evidence.messageIndex && !statementsConflict(older.statement, newer.statement) && !opposedSides(older.statement, newer.statement)) {
+    if (relation.kind === "replaces" && older && newer && !answeredIds.has(older.id) && !answeredIds.has(newer.id) && wikiSaidLater(older, newer) && !statementsConflict(older.statement, newer.statement) && !opposedSides(older.statement, newer.statement)) {
       report.backward_replacements = (report.backward_replacements ?? 0) + 1;
       return { ...relation, kind: "supplements" as const, older: newer.id, newer: older.id, status: "resolved" as const };
     }
@@ -37,9 +48,15 @@ export function resolveWikiReading(source: WikiKnowledgeLedger) {
   }) } : undefined;
   let organization = checked ? explicitSwitches(scopedWishes(gatherPositioning(gatherNamedItems(gatherVersions(gatherTwins(gatherAcrossStages(placeUnitsByKind(checked, known, report), known, report), known, report), known, report), known, report), known, report), known, report), known, report) : undefined;
   if (organization) {
+    // A setting given again later with another value: the earlier value is the earlier version (600～720px → 760~800px).
+    // Not one the user answered about or decided.
+    organization = laterSettings(organization, known, report, id => answeredIds.has(id) || Boolean(source.decisions?.[id]));
+    // What a later move took out of a stage leaves that stage's earlier line naming it (stageMoveReplacements).
+    organization = stageMoveReplacements(organization, known, report);
     organization = preserveMergedWikiDecisions(organization, wikiUnitStatuses(units, organization, source.decisions), report);
     // Named for what it holds first, so the plans routed next find the plan chapter.
-    organization = retitleMisnamedChapters(organization, known, report);
+    // A learning record's 学习路线 chapter is what it is about, not a project's misnamed plan.
+    if (source.documentType !== "learning") organization = retitleMisnamedChapters(organization, known, report);
     organization = routeWikiUnits(organization, known, report);
     organization = routeOutOfReferences(organization, known, report);
   }

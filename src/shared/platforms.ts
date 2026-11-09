@@ -37,3 +37,10 @@ export function platformFromLabel(label: unknown): string | undefined {
   if (/chatglm|智谱|zhipu|(?:^|[^a-z])glm(?:[-_.\d]|$)/u.test(value)) return "zhipu";
   return undefined;
 }
+
+/** Items grouped by their AI, in the order each AI first appears; one group when they all come from one AI. */
+export function platformGroups<T extends { platform: string }>(items: readonly T[]): Array<{ platform: string; items: T[] }> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) { const key = conversationPlatformGroup(item.platform); groups.set(key, [...groups.get(key) ?? [], item]); }
+  return [...groups].map(([platform, members]) => ({ platform, items: members }));
+}

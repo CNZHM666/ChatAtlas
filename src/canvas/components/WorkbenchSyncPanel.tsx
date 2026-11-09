@@ -80,7 +80,7 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
   onSelectedIds: (ids: Set<string>) => void;
   onPrioritize: (id: string) => void | Promise<boolean>;
   onScan: () => void;
-  onHydrate: (ids: string[]) => void | Promise<boolean>;
+  onHydrate: (ids: string[], force?: boolean) => void | Promise<boolean>;
   onZip: (file: File) => void;
   onPause: () => void;
   onResume?: () => void;
@@ -100,11 +100,11 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
   const [visibleCount, setVisibleCount] = useState(8);
   const [submitting, setSubmitting] = useState(false);
   const [commandError, setCommandError] = useState("");
-  const requestSync = async (ids: string[]) => {
+  const requestSync = async (ids: string[], force = false) => {
     if (submitting) return;
     setSubmitting(true); setCommandError("");
     try {
-      if (await onHydrate(ids) === false) setCommandError(zh ? "同步未启动，请检查连接后重试。" : "Sync did not start. Check the connection and retry.");
+      if (await (force ? onHydrate(ids, true) : onHydrate(ids)) === false) setCommandError(zh ? "同步未启动，请检查连接后重试。" : "Sync did not start. Check the connection and retry.");
     } catch { setCommandError(zh ? "同步未启动，请重试。" : "Sync did not start. Try again."); }
     finally { setSubmitting(false); }
   };
@@ -127,6 +127,8 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
   const activeIds = useMemo(() => new Set<string>(JSON.parse(activeKey)), [activeKey]);
   const retryingIds = useMemo(() => new Set<string>(JSON.parse(retryingKey)), [retryingKey]);
   const selectedPendingIds = useMemo(() => conversations.filter((item) => (item.platform === "chatgpt" || item.nativeHistorySourceId) && selectedIds.has(item.id) && !readyIds.has(item.id)).map((item) => item.id), [conversations, selectedIds, readyIds]);
+  // Already synced rows can be read again: a failed read keeps the saved copy and the row still reads as synced.
+  const selectedSyncedIds = useMemo(() => conversations.filter((item) => (item.platform === "chatgpt" || item.nativeHistorySourceId) && selectedIds.has(item.id) && readyIds.has(item.id)).map((item) => item.id), [conversations, selectedIds, readyIds]);
   const selectedCount = useMemo(() => conversations.filter((item) => selectedIds.has(item.id)).length, [conversations, selectedIds]);
   const selectedActive = selectedPendingIds.filter(id => importJob?.activeIds?.includes(id)).length;
   const selectedWaiting = selectedPendingIds.filter(id => importJob?.retryingIds?.includes(id)).length;
@@ -242,6 +244,7 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
           {selectedCount > 0 && projects.length > 0 && onLinkProject && !joining ? <button className="workbench-footer-icon" type="button" aria-label={zh ? "加入项目" : "Add to project"} title={zh ? "加入项目" : "Add to project"} onClick={() => { setJoining(true); setJoined(undefined); setCommandError(""); }}><FolderPlus size={16} aria-hidden="true" /></button> : null}
           {selectedCount > 0 && onUseSources ? <button className="workbench-use-sources" type="button" aria-label={zh ? `用于本次整理 ${selectedCount} 条` : `Use ${selectedCount} for this task`} onClick={() => onUseSources(conversations.filter(item => selectedIds.has(item.id)).map(item => item.id))}>{zh ? "用于本次整理" : "Use for this task"}</button> : null}
           {matchingPendingIds.length > 0 && !selectedCount ? <button type="button" disabled={Boolean(active) || searchPending || submitting} onClick={() => void requestSync(matchingPendingIds)}>{submitting ? zh ? "正在提交同步…" : "Requesting sync…" : query.trim() || filter !== "all" || platform ? zh ? `同步当前结果 ${matchingPendingIds.length} 条` : `Sync ${matchingPendingIds.length} matching` : zh ? `同步全部 ${matchingPendingIds.length} 条` : `Sync all ${matchingPendingIds.length}`}</button> : null}
+          {selectedSyncedIds.length > 0 && !selectedPendingIds.length && !active ? <button type="button" disabled={scanning || importingFile || submitting} title={zh ? "从 AI 平台重新读取所选对话的正文，替换已保存的内容" : "Read the selected conversations again from their AI and replace the saved copy"} onClick={() => void requestSync(selectedSyncedIds, true)}><RefreshCw size={14} aria-hidden="true" />{submitting ? zh ? "提交中…" : "Requesting…" : zh ? `重新同步 ${selectedSyncedIds.length} 条` : `Sync ${selectedSyncedIds.length} again`}</button> : null}
           {selectedPendingIds.length > 0 && !(active && selectedAccepted) ? <button type="button" className="primary" disabled={scanning || importingFile || submitting} aria-label={submitting ? zh ? "正在提交同步…" : "Requesting sync…" : active ? zh ? `优先同步所选 ${selectedPendingIds.length} 条` : `Prioritize ${selectedPendingIds.length} selected` : zh ? `同步所选 ${selectedPendingIds.length} 条` : `Sync ${selectedPendingIds.length} selected`} onClick={() => void requestSync(selectedPendingIds)}>{submitting ? zh ? "提交中…" : "Requesting…" : active ? zh ? "优先同步" : "Sync first" : zh ? "同步所选" : "Sync selected"}</button> : null}
         </div>
       </div>

@@ -39,7 +39,7 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
   goal: string; poolIds: string[]; conversations: Conversation[]; sessions: FocusSession[]; projectsReady?: boolean; zh: boolean;
   onStart: (goal: string, mode: FocusMode, ids: string[], scope?: FocusScope) => void;
   onContinue?: (session: FocusSession, goal: string, poolIds: string[]) => void;
-  onBack: (goal: string) => void; onHydrate: (ids: string[]) => void; onConfigureAI?: () => void;
+  onBack: (goal: string) => void; onHydrate: (ids: string[], force?: boolean) => void; onConfigureAI?: () => void;
 }) {
   const [localMatches, setLocalMatches] = useState<HistoryMatch[]>([]);
   const [localOnly, setLocalOnly] = useState(localSearch && !initialRecord);

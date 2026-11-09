@@ -11,7 +11,6 @@ import { workspaceLayoutExample, exampleSourceMessage, exampleProjectKnowledge, 
 import { ProjectExampleContext } from "../project-example-context";
 import { WikiDocument } from "./WikiDocument";
 import { ProjectWikiNavigation } from "./ProjectWikiNavigation";
-import { saveRouteCard } from "../focus-route";
 import { ProjectExportDialog } from "./ProjectExportDialog";
 import { ReaderBackButton } from "./ReaderBackButton";
 import { ReaderMarkdown } from "./ReaderConversation";
@@ -49,7 +48,7 @@ export function WorkspaceLayoutExample({ zh, onClose, overlay = false }: { zh: b
         <h2>{session.title}</h2>
         {navItems.map(([id, label, Icon]) => <button type="button" key={id} className="outline-item" disabled={Boolean(wikiEdit)} aria-current={view === id && !(source && fullSource) ? "page" : undefined} onClick={() => navigate(id)}><Icon size={18} aria-hidden="true" /><strong>{label}</strong></button>)}
         <h3>Wiki</h3>
-        <ProjectWikiNavigation session={session} activeId={view === "wiki" ? sectionId : undefined} zh={zh} onRead={id => { if (!wikiEdit) read(id); }} disabled={Boolean(wikiEdit)} onCreatePage={async(title,body,group)=>{const current=sessionRef.current,id="example-wiki:"+crypto.randomUUID();const sections=saveRouteCard(current.sections,{id,title,body,transition:""}).map(item=>item.id===id?{...item,wikiGroup:group||undefined,wikiGroupEdited:true}:item);const next={...current,sections,wikiOrder:[...(current.wikiOrder??current.sections.map(item=>item.id)),id],updatedAt:Date.now()};sessionRef.current=next;setSession(next);return id;}} onCollapse={(group, collapsed) => setSession(value => ({ ...value, wikiCollapsedGroups: { ...value.wikiCollapsedGroups, [group]: collapsed } }))} />
+        <ProjectWikiNavigation session={session} activeId={view === "wiki" ? sectionId : undefined} zh={zh} onRead={id => { if (!wikiEdit) read(id); }} disabled={Boolean(wikiEdit)} onCollapse={(group, collapsed) => setSession(value => ({ ...value, wikiCollapsedGroups: { ...value.wikiCollapsedGroups, [group]: collapsed } }))} />
         <button type="button" className="outline-item" disabled={Boolean(wikiEdit)} aria-current={view === "sources" && !(source && fullSource) ? "page" : undefined} onClick={() => navigate("sources")}><FileText size={18} aria-hidden="true" /><strong>{zh ? "来源与讨论" : "Sources and discussions"}</strong></button>
       </nav>
       <div className="focus-reader-main">

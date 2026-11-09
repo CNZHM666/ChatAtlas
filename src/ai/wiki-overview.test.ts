@@ -38,6 +38,7 @@ it.each([
  [{overview:"Atlas 帮助用户找回 3 个平台的旧讨论。它整理历史对话。",factIds:["f0"]},"adds a number"],
  [{overview:"Atlas 帮助用户找回旧讨论。这些均为 AI建议，材料未显示用户已确认采用。",factIds:["f0"]},"adds a disclaimer"],
  [{overview:good.overview,factIds:[]},"cites nothing"],
+ [{overview:"Atlas 是帮助经常使用多个 AI 的用户重新找回旧讨论的工具。建议优先阅读第一章，以明确第一版禁止云同步、不含团队协作的范围约束。",factIds:["f0"]},"lists exclusions in its reading advice"],
 ])("keeps the local projection when the overview %#",async(value)=>{
  const {ai:model}=ai(value),before=session();
  const result=await generateWikiOverview(before,model,signal);

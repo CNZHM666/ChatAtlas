@@ -65,7 +65,7 @@ function withoutAdoption(fact:ProjectKnowledgeFact,text:string,zh:boolean){
  return (zh?"所选来源中未发现用户明确确认：":"No explicit user confirmation found in the selected sources: ")+core;
 }
 
-export function knowledgeFactText(fact:ProjectKnowledgeFact,zh=true,formulation=fact.claim.text){
+export function knowledgeFactText(fact:ProjectKnowledgeFact,zh=true,formulation=fact.claim.text,learning=false){
  const text=knowledgeBodyPresentation(formulation,[fact.claim],zh,()=>({reported:fact.implementation==="reported"}));
  // A sentence with a holder mark already says whose it is: no holder label goes before it, and decided wording it
  // cannot support is only taken out. What changes its meaning (replaced, unreconciled, source changed) is still said.
@@ -75,6 +75,9 @@ export function knowledgeFactText(fact:ProjectKnowledgeFact,zh=true,formulation=
  if(fact.scopeConflict)return (zh?"版本范围尚待核对：":"Version scope requires review: ")+text;
  if(fact.sourceChanged)return (zh?"原记录（来源已变化）：":"Earlier record (source changed): ")+text;
  if(fact.contested)return (zh?"尚待统一的记录：":"Unreconciled record: ")+text;
+ // A learning record's points are lessons, not a project's decisions: "已选择的方案：" before a Git acceptance standard
+ // and "讨论建议：" before an explanation told nothing.
+ if(learning)return text;
  if(fact.status==="reported"&&!/用户(?:报告|反馈|表示)|\b(?:user reported|reported by the user)/iu.test(text))return (zh?"用户报告：":"User reported: ")+text;
  if(fact.adoption==="accepted"&&!/已(?:经)?(?:决定|选择|确认|采用)|决定|确认采用|\b(?:decided|confirmed|adopted|chosen)\b/iu.test(text))return (zh?"已选择的方案：":"Chosen approach: ")+text;
  if(fact.status==="proposal"&&!/建议|提议|拟|\b(?:suggest|propos|recommend)/iu.test(text))return (zh?"讨论建议：":"Discussion proposal: ")+text;
@@ -116,15 +119,15 @@ export function projectKnowledgeIntroduction(session:FocusSession){return projec
  * remain intact. A chosen plan is never evidence that its code was delivered. */
 export function projectKnowledgeSection(section:FocusSection,session:FocusSession,view=projectKnowledgeView(session)):FocusSection {
  if(section.origin||section.userEdited)return section;
- const facts=view.facts.filter(fact=>fact.sectionId===section.id);
+ const facts=view.facts.filter(fact=>fact.sectionId===section.id),learning=session.wikiKnowledge?.documentType==="learning";
  const replacements=new Map<string,string>();
  for(const fact of facts){
-  if(fact.historical||fact.contested||fact.sourceChanged||fact.scopeConflict||fact.adoption==="accepted"||fact.status==="reported"||unsupportedAdoption(fact)||(fact.claim.formulations??[]).some(text=>unsupportedAdoption(fact,text)))replacements.set(factTextKey(fact.claim.text),knowledgeFactText(fact,session.locale!=="en"));
+  if(fact.historical||fact.contested||fact.sourceChanged||fact.scopeConflict||fact.adoption==="accepted"||fact.status==="reported"||unsupportedAdoption(fact)||(fact.claim.formulations??[]).some(text=>unsupportedAdoption(fact,text)))replacements.set(factTextKey(fact.claim.text),knowledgeFactText(fact,session.locale!=="en",fact.claim.text,learning));
  }
  // A multi-line formula is fixed first, before any step parses its "=" line as a heading.
  const body=knowledgeBodyPresentation(wikiDisplayMath(section.body),section.claims??[],session.locale!=="en",(claim,formulation)=>{
   const fact=facts.find(fact=>factTextKey(fact.claim.text)===factTextKey(claim.text));
-  return fact?{reported:fact.implementation==="reported",text:replacements.has(factTextKey(claim.text))?knowledgeFactText(fact,session.locale!=="en",formulation):undefined}:undefined;
+  return fact?{reported:fact.implementation==="reported",text:replacements.has(factTextKey(claim.text))?knowledgeFactText(fact,session.locale!=="en",formulation,learning):undefined}:undefined;
  });
  // The chapter status line states "mostly unconfirmed AI proposals" once; prose need not repeat it.
  // Batch-written chapters also repeat introductions and near-identical paragraphs.

@@ -8,7 +8,7 @@
 
 ChatAtlas is a local-first Chrome extension. It saves your conversations from AI websites in your browser so you can find what was said and read it in order again. When you need to, it organizes selected discussions into a project overview and Wiki that trace back to their sources.
 
-> **Early preview (0.1.1 Early Preview).** Features, interactions and data structures will still change. Wiki organization is experimental: check what it writes against the sources. Back up local data before upgrading.
+> **Early preview (0.1.2 Early Preview).** Features, interactions and data structures will still change. Wiki organization is experimental: check what it writes against the sources. Back up local data before upgrading.
 
 > Demo GIF placeholder: recording pending (install → import → search without a key → read originals → organize a Wiki).
 <!-- demo-gif-placeholder: Recording pending; no demo file yet. -->
@@ -19,6 +19,7 @@ ChatAtlas is a local-first Chrome extension. It saves your conversations from AI
 - **Find what was said**: keyword search covers titles and text; open a result to read the discussion in its original order, or locate it on the original website.
 - **Side panel for the current conversation**: search local records, link a project, and fill the composer (never sent automatically, never overwriting a draft you typed).
 - **Organize into a Wiki**: choose conversations and a goal to generate a project overview and Wiki. It asks you where your judgment is needed, before and while writing; you preview before saving.
+- **Learning record (beta)**: when you choose the Learning type, it organizes what you learned by point, with your exercises, your mistakes and recall questions.
 - **Hand off to another AI**: export the overview and selected chapters as Markdown, plain text, HTML (printable to PDF) or JSON, and attach the file elsewhere. Export makes no model call.
 
 What each part is for:
@@ -59,17 +60,28 @@ The document contains:
 
 Citations take you back to the original to check; they do not prove a suggestion was adopted. Long material takes substantial time and tokens; successful reading and writing are reused for the same input, and a failure keeps the finished parts.
 
-## Install and try
+## Install (about 2 minutes)
 
-If a maintainer has published a Release, download and extract `ChatAtlas-extension-v0.1.1.zip`; otherwise build it as described under "Build from source".
+ChatAtlas is not on the Chrome Web Store yet, so it is loaded in Developer mode. Edge and other Chromium browsers work the same way (use `edge://extensions`).
 
-1. Open `chrome://extensions` in Chrome and turn on Developer mode.
-2. Choose **Load unpacked** and select the folder containing `manifest.json` (`dist/` for a source build).
-3. Open the workbench from the extension icon, then import an export file or open a supported AI website to save conversations automatically.
-4. Searching and reading need no API key. To organize documents, choose a provider in **Settings → AI connection**, enter your key, pick a model and test the connection.
-5. Create a knowledge space: choose sources, write a goal, answer the questions before writing, then review and save the result.
+1. **Download**: open the [latest Release](https://github.com/CNZHM666/ChatAtlas/releases/latest) and, under Assets, download `ChatAtlas-extension-v0.1.2.zip`. Not `Source code`: that cannot be loaded directly.
+2. **Extract**: unzip it into a folder you will keep, such as `Documents/ChatAtlas`. The folder should contain `manifest.json` directly. Do not delete or move it after loading, or the extension stops working.
+3. **Open the extensions page**: type `chrome://extensions` in the address bar.
+4. **Turn on Developer mode** with the switch at the top right.
+5. **Load it**: click **Load unpacked** at the top left and choose the folder from step 2 (the level that contains `manifest.json`).
+6. **Pin the icon**: click the puzzle icon in the toolbar and pin ChatAtlas. Click the icon to open the workbench.
 
-Before upgrading, download a backup from **Settings → Capture & data** (backups contain no API key). Never commit private backups or exports to GitHub.
+Chrome may ask on startup whether to disable developer-mode extensions; keep it. If loading says the manifest is missing or unreadable, you chose the wrong level: pick the folder that directly contains `manifest.json`.
+
+**Upgrading**: first download a backup from **Settings → Capture & data** (it contains no API key). Then replace the folder's contents with the new ZIP and click the reload button on the ChatAtlas card in `chrome://extensions`. Your data lives in the browser and survives this; do not click **Remove**, which deletes local data.
+
+## First use
+
+1. Click the extension icon to open the workbench, then import an export file or open a supported AI website to save conversations automatically.
+2. Searching and reading need no API key. To organize documents, choose a provider in **Settings → AI connection**, enter your key, pick a model and test the connection.
+3. Organize a project document: choose sources, write a goal, answer the questions before writing, then review and save the result.
+
+Never commit private backups or exports to GitHub.
 
 ## Data and privacy
 
@@ -85,15 +97,9 @@ See the [privacy notes](docs/en/PRIVACY.md). Report security problems privately 
 - Wiki quality varies with the material and the model, and repeated runs on the same material can differ; check key conclusions against the originals.
 - Automated tests use a mocked provider; they do not establish completeness, cost or success rates on real long conversations or every model.
 - Automatic website saving depends on each site's page structure and can stop working after a redesign.
+- Organizing time depends on material length, the model and provider rate limits; long material can take a while. No benchmark is published yet. Search and reading need no generation.
+- **Learning mode (beta)**: choose **Learning (beta)** as the document type to organize study conversations into numbered knowledge cards, exercises, mistakes and recall questions. Its layout and extraction are still changing; **Auto** organizes as a project for now.
 
-## Generation time
-
-Pending benchmark measurements. Time to the first readable chapter, time to completion and model are intentionally blank below; no measured results are available to publish yet. Search and reading need no generation.
-
-| Conversation size | First readable chapter | Fully complete | Model |
-| --- | --- | --- | --- |
-| Single conversation |  |  |  |
-| Multiple conversations |  |  |  |
 
 ## Build from source
 
@@ -117,7 +123,7 @@ npm run eval:wiki -- <cases.json> <export.md>
 
 [Getting started](docs/en/GETTING_STARTED.md) · [Documentation](docs/en/README.md) · [Export guide](docs/en/CONTEXT.md) · [Architecture](docs/en/ARCHITECTURE.md) · [AI workflows](docs/en/AI_WORKFLOWS.md) · [Contributing](docs/en/CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](docs/en/CHANGELOG.md)
 
-Report reproducible problems in Issues with the extension and browser version, import method, model, steps and expected result. Remove API keys and private conversation text.
+Report reproducible problems in Issues with the extension and browser version, import method, model, steps and expected result. Remove API keys and private conversation text. Use the feature request template for ideas.
 
 ## License
 

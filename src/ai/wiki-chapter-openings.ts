@@ -42,7 +42,7 @@ function splitOpening(body:string){
  const lead=nodes.slice(1,first).every(node=>node.type==="paragraph")?body.slice(end,headingStart).trim():"";
  return {opening:body.slice(0,end).trim(),rest:body.slice(end),lead,fromHeading:body.slice(headingStart),subtopics};
 }
-const sentences=(text:string)=>text.split(/(?<=[。！？!?])\s*/u).filter(Boolean);
+const sentences=(text:string)=>text.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))\s*/u).filter(Boolean);
 const formulations=(section:FocusSection)=>(section.claims??[]).map(claim=>[claim.text,...claim.formulations??[]]);
 // A claim written only in the opening would lose its place in the article.
 const ownsClaim=(section:FocusSection,opening:string,rest:string)=>formulations(section).some(texts=>texts.some(text=>opening.includes(text))&&!texts.some(text=>rest.includes(text)));

@@ -10,7 +10,9 @@ $dist = Join-Path $workspace 'dist'
 $manifest = Get-Content -LiteralPath (Join-Path $dist 'manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.version -ne $version) { throw 'Build version differs from package version. Run npm run check first.' }
 if ($manifest.name -ne 'ChatAtlas') { throw 'Unexpected extension name. Build ChatAtlas first.' }
-if (@($manifest.host_permissions).Count -ne 1 -or $manifest.host_permissions[0] -ne 'https://chatgpt.com/*') { throw 'Unexpected fixed host permissions.' }
+# Fixed permissions name the supported AI sites one by one; any other site is asked for at run time (optional).
+$hosts = @($manifest.host_permissions)
+if ($hosts -notcontains 'https://chatgpt.com/*' -or @($hosts | Where-Object { $_ -notmatch '^https://[a-z0-9-]+(\.[a-z0-9-]+)+/\*$' }).Count) { throw 'Unexpected fixed host permissions.' }
 foreach ($entryPoint in @('atlas.html','sidecar.html')) {
   if ((Get-Content -LiteralPath (Join-Path $dist $entryPoint) -Raw) -match 'localhost|127\.0\.0\.1|@vite/client') { throw 'Development loader found. Build production first.' }
 }
@@ -29,11 +31,18 @@ $extensionFiles = @(Get-ChildItem -LiteralPath $dist -File -Recurse | Where-Obje
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Directory]::CreateDirectory($destination) | Out-Null
+# Windows PowerShell 5.1 has neither [IO.Path]::GetRelativePath nor [Convert]::ToHexString.
+function Get-RelativePath([string]$BaseDirectory, [string]$Path) {
+  $base = [IO.Path]::GetFullPath($BaseDirectory).TrimEnd('\') + '\'
+  $full = [IO.Path]::GetFullPath($Path)
+  if (-not $full.StartsWith($base, [StringComparison]::OrdinalIgnoreCase)) { return '../' }
+  return $full.Substring($base.Length).Replace('\','/')
+}
 function Write-VerifiedZip([string]$Path, [string]$BaseDirectory, [object[]]$Files) {
   $archive = [IO.Compression.ZipFile]::Open($Path, [IO.Compression.ZipArchiveMode]::Create)
   try {
     foreach ($file in ($Files | Sort-Object FullName -Unique)) {
-      $relative = [IO.Path]::GetRelativePath($BaseDirectory, $file.FullName).Replace('\','/')
+      $relative = Get-RelativePath $BaseDirectory $file.FullName
       if ($relative.StartsWith('../')) { throw 'File is outside package root.' }
       [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, $relative, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
     }
@@ -43,7 +52,7 @@ function Write-VerifiedZip([string]$Path, [string]$BaseDirectory, [object[]]$Fil
     foreach ($entry in $archive.Entries) {
       $stream = $entry.Open()
       $sha = [Security.Cryptography.SHA256]::Create()
-      try { $actual = [Convert]::ToHexString($sha.ComputeHash($stream)) } finally { $stream.Dispose(); $sha.Dispose() }
+      try { $actual = ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','') } finally { $stream.Dispose(); $sha.Dispose() }
       $expected = (Get-FileHash -LiteralPath (Join-Path $BaseDirectory $entry.FullName) -Algorithm SHA256).Hash
       if ($actual -ne $expected) { throw "Archive mismatch: $($entry.FullName)" }
     }
@@ -54,5 +63,5 @@ $extensionZip = Join-Path $destination "ChatAtlas-extension-v$version.zip"
 Write-VerifiedZip $sourceZip $workspace $sourceFiles
 Write-VerifiedZip $extensionZip $dist $extensionFiles
 @($sourceZip,$extensionZip) | ForEach-Object { $hash = Get-FileHash -LiteralPath $_ -Algorithm SHA256; "$($hash.Hash)  $([IO.Path]::GetFileName($_))" } | Set-Content -LiteralPath (Join-Path $destination 'SHA256.txt') -Encoding utf8
-$sourceFiles | Sort-Object FullName -Unique | ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\','/') } | Set-Content -LiteralPath (Join-Path $destination 'SOURCE_FILES.txt') -Encoding utf8
+$sourceFiles | Sort-Object FullName -Unique | ForEach-Object { Get-RelativePath $workspace $_.FullName } | Set-Content -LiteralPath (Join-Path $destination 'SOURCE_FILES.txt') -Encoding utf8
 Write-Output "Created and hash-verified source and extension archives: $destination"

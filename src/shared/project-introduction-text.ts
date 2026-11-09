@@ -40,7 +40,7 @@ export function introductionPriority(text: string): number {
  * shorten a condition, alter the saved claim or strip its adoption status. */
 export function projectPurposeText(text:string):string {
   if(/[`\n]/u.test(text))return text;
-  const sentences=text.split(/(?<=[。！？!?])\s*|(?<=\.)\s+(?=[A-Z])/u).filter(Boolean);
+  const sentences=text.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))\s*|(?<=\.)\s+(?=[A-Z])/u).filter(Boolean);
   const advice=(sentence:string)=>/^(?:助手|AI|人工智能|the assistant)\s*(?:建议|推荐|提出|suggests?\b|recommends?\b|proposes?\b)/iu.test(sourceQuoteText(sentence).trim())
     && /页面|模块|组件|技术栈|按钮|独立入口|\b(?:page|module|component|stack|button|tab)\b/iu.test(sentence);
   const kept=sentences.filter(sentence=>!advice(sentence));

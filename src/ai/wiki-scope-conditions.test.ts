@@ -10,8 +10,9 @@ it("keeps a direction and its phase restriction together with independent citati
   const conditions = wikiScopeConditions(organization, [direction, scope]);
   const chapter: WikiDraftChapter = { id: "ch", title: "同步", question: "", group: "", body: direction.statement, paragraphs: [{ subtopic: "同步", text: direction.statement, unitIds: [direction.id], claims: [{ text: direction.statement, unitIds: [direction.id] }] }], problems: [] };
   expect(applyWikiScopeConditions([chapter], conditions)).toBe(1);
-  expect(chapter.body).toContain(scope.statement);
-  expect(chapter.paragraphs[0].claims).toContainEqual({ text: scope.statement, unitIds: [scope.id] });
+  // The limit joins the sentence naming what it limits, not a "阶段范围：" line of its own.
+  expect(chapter.body).toBe("提供云端同步功能；第一版暂不提供云端同步，仅保留本地存储。");
+  expect(chapter.paragraphs[0].claims).toContainEqual({ text: "第一版暂不提供云端同步，仅保留本地存储", unitIds: [scope.id] });
   expect(applyWikiScopeConditions([chapter], conditions)).toBe(0);
   expect(direction.statement).toBe("提供云端同步功能。");
 });
@@ -51,11 +52,31 @@ it("adds no restriction a paragraph already states, scopes the opening, and read
   const said = "针对小白用户，提供比价推荐及链接，但本轮禁止比价。";
   const chapter: WikiDraftChapter = { id: "ch", title: "定位", question: "", group: "", openingUnitIds: [wish.id], body: `已确认提供比价推荐功能。\n\n### 用户\n\n${said}`, paragraphs: [{ subtopic: "用户", text: said, unitIds: [wish.id] }], problems: [] };
   expect(applyWikiScopeConditions([chapter], conditions)).toBe(1);
-  expect(chapter.body).toBe(`已确认提供比价推荐功能。\n\n阶段范围：本轮禁止比价。\n\n### 用户\n\n${said}`);
+  expect(chapter.body).toBe(`已确认提供比价推荐功能；本轮禁止比价。\n\n### 用户\n\n${said}`);
   expect(chapter.openingUnitIds).toEqual([wish.id, round.id]);
 });
 
 it("reads an identifier however it is joined, and skip or 绕过 as 跳过", () => {
   expect(keepsDetail("引入 VERIFIED、NEEDS_REVIEW 四种状态。", "Needs Review")).toBe(true);
   expect(conditionKept("不得跳过测试", "全部通过，不得用 skip 绕过失败测试。")).toBe(true);
+});
+
+it("reads what a limit leaves out up to the clause about what stays", () => {
+  const local = unit("local", "第一版采用本地优先策略，不引入服务器、云数据库或 API，所有数据仅存储在本地。", 1), noAccount = unit("account", "V0.1不做账号系统，所有数据仅存储在本地。", 2);
+  const relations = { relations: [{ older: local.id, newer: noAccount.id, kind: "narrows", status: "resolved" }] } as WikiKnowledgeOrganization;
+  // The account system has nothing to do with local storage: no 「阶段范围：V0.1不做所有数据仅存储在本地。」.
+  expect(wikiScopeConditions(relations, [local, noAccount])).toEqual([]);
+});
+
+it("adds a limit no sentence names as a sentence of its own, with no 阶段范围 label", () => {
+  const scope = { direction: direction.id, scope: unit("account", "V0.1 确定不做账号系统，所有数据仅存储在本地。", 2) };
+  const text = "使用 chrome.storage.local 保存数据。";
+  const chapter: WikiDraftChapter = { id: "ch", title: "数据存储", question: "", group: "", body: `### 存储\n\n${text}`, paragraphs: [{ subtopic: "存储", text, unitIds: [direction.id], claims: [] }], problems: [] };
+  expect(applyWikiScopeConditions([chapter], [scope])).toBe(1);
+  expect(chapter.paragraphs[0].text).toBe("使用 chrome.storage.local 保存数据。V0.1 确定不做账号系统，所有数据仅存储在本地。");
+  expect(chapter.body).not.toContain("阶段范围");
+  const table = "| 方式 | 用途 |\n|---|---|\n| local | 设置 |";
+  const listed: WikiDraftChapter = { ...chapter, body: `### 存储\n\n${table}`, paragraphs: [{ subtopic: "存储", text: table, unitIds: [direction.id], claims: [] }] };
+  applyWikiScopeConditions([listed], [scope]);
+  expect(listed.paragraphs[0].text).toBe(`${table}\n\nV0.1 确定不做账号系统，所有数据仅存储在本地。`);
 });

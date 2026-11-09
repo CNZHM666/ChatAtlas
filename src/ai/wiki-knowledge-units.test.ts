@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { comparedProducts, discussedProjects, droppedExceptions, movedCodes, extractWikiKnowledge, fittingQuote, ownNamesTaggedAsOthers, wikiUnitBatches, wikiUnitRequest, droppedFigures } from "./wiki-knowledge-units";
+import { comparedProducts, discussedProjects, droppedExceptions, movedCodes, extractWikiKnowledge, fittingQuote, ownNamesTaggedAsOthers, wikiUnitBatches, wikiUnitRequest, droppedFigures, uncoveredSentences } from "./wiki-knowledge-units";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
 import { pastedUserText, quotedDetails, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import type { CoverageMaterial } from "./focus-coverage";
@@ -433,4 +433,67 @@ it("moves a code given on the wrong point of its message to the point its line i
   expect(moved.units.map(unit => unit.details)).toEqual([[], ["LOAD_REQUIRES_DRIVER ERROR"]]);
   // Already on its point, or a code the message does not give: unchanged.
   expect(movedCodes([load, { ...gate, details: [] }], () => message).count).toBe(0);
+});
+
+it("asks again for a choice told beside another in one English sentence, clause by clause", () => {
+  const batch = [material(29, "user", "★ Revise the roadmap: move CSV export into milestone 2, and drop the \"shared budgets\" milestone entirely.")];
+  const drop = { id: "u", subject: "Roadmap", statement: "Shared budgets are dropped entirely from the roadmap and v1 scope.", kind: "decision", details: [], adoption: { status: "user_decision" }, delivery: "unknown", evidence: { evidenceId: batch[0].id, conversationId: "c1", messageId: "m29", messageIndex: 29, role: "user", pasted: false, quote: "" } } as unknown as WikiKnowledgeUnit;
+  expect(uncoveredSentences(batch, [drop], () => false)).toEqual([{ id: batch[0].id, sentences: ["★ Revise the roadmap: move CSV export into milestone 2"] }]);
+  const move = { ...drop, id: "v", statement: "CSV export moves into Milestone 2." } as WikiKnowledgeUnit;
+  expect(uncoveredSentences(batch, [drop, move], () => false)).toEqual([]);
+  // A question about another product is no choice.
+  expect(uncoveredSentences([material(3, "user", "How does this compare with YNAB and Mint?")], [], () => false)).toEqual([]);
+});
+
+it("credits a user with a decision only when their words say it, and reads their 「确定：」 as one", async () => {
+  const all = [
+    material(0, "user", "帮我把到目前为止的决定和待定事项总结成一段，我要拿去问另一个 AI。"),
+    material(1, "user", "可以，同时★ 确定：第一版不做账号系统，所有数据只存在本地。"),
+  ];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => request.validate({ units: [
+    // A summary request: its "我要" is no choice, and it never states the point.
+    unit({ quoteKey: "p1:1", kind: "decision", adoption: "user_decision", details: [], statement: "第一版采用本地优先策略，不引入服务器、云数据库或API，后续规划不再将云同步纳入开发范围。" }),
+    // The user's own declaration, typed a fact with no adoption.
+    unit({ quoteKey: "p2:1", kind: "fact", adoption: "unknown", details: [], statement: "V0.1 确定不做账号系统，所有数据只存在本地。" }),
+  ] }) };
+  const { ledger } = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
+  const units = ledger.batches.flatMap(batch => batch.units);
+  // The summary request states nothing of it, and no reply is there to say it: it is left out.
+  expect(units.map(item => [item.kind, item.adoption.status])).toEqual([["decision", "user_decision"]]);
+});
+
+it("cites a point of the reply to the reply, reads a choice the user leaves open as open, and an attached file as material", async () => {
+  const all = [
+    material(0, "user", "★ 弹出窗口宽度你会选多少像素？请给一个你自己的数字，不必和摘要里一致。"),
+    material(1, "assistant", "我会选 380px，阅读更宽松。\n\n存储方面，维持 chrome.storage.local 作为唯一存储层，按分片键结构实现，每条记录单独一个键。"),
+    material(2, "user", "可以，★ 存储方案和弹窗宽度我先不定，两个方案都留着。"),
+  ];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => request.validate({ units: [
+    unit({ quoteKey: "p1:1", kind: "decision", adoption: "unknown", details: [], subject: "存储层", statement: "维持 chrome.storage.local 作为唯一存储层，按分片键结构实现。" }),
+    unit({ quoteKey: "p3:1", kind: "history", adoption: "unknown", details: [], subject: "待选方案", statement: "用户明确表示存储方案和弹窗宽度的最终选择暂不决定，两个备选方案均保留。" }),
+  ] }) };
+  const { ledger } = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
+  const units = ledger.batches.flatMap(batch => batch.units);
+  expect(units.map(item => [item.kind, item.evidence.role, item.evidence.messageId])).toEqual([["decision", "assistant", "m1"], ["question", "user", "m2"]]);
+  expect(units[0].evidence.quote).toContain("分片键结构");
+  expect(pastedUserText("【附件 专注计时器 Focus Timer — V0.1 产品规划与完整用户流程.txt】")).toBe(true);
+  expect(pastedUserText("【附件 a.txt】\n帮我看看这份规划里第一版要不要做账号系统")).toBe(false);
+});
+
+it("cites a point to the reply of its conversation that states it, and leaves out one no message says", async () => {
+  const all = [
+    material(0, "user", "★ 确定：默认专注 25 分钟、休息 5 分钟。"),
+    material(1, "assistant", "好的，默认 25/5。\n\n完成专注或休息后仅提醒用户，由用户手动开始下一阶段，避免自动计入未实际完成的学习时间。"),
+    material(2, "user", "学习时长的统计数据存在哪里比较好？给我你的建议。"),
+    material(3, "assistant", "建议用 chrome.storage.local 保存每次专注的原始记录。"),
+    material(4, "user", "帮我把到目前为止的决定和待定事项总结成一段，我要拿去问另一个 AI。"),
+  ];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => request.validate({ units: [
+    unit({ quoteKey: "p3:1", kind: "mechanism", adoption: "unknown", details: [], subject: "阶段切换", statement: "完成专注或休息后仅提醒用户，由用户手动开始下一阶段，避免自动计入未实际完成的学习时间。" }),
+    unit({ quoteKey: "p5:1", kind: "decision", adoption: "user_decision", details: [], subject: "云同步", statement: "第一版采用本地优先策略，不引入服务器、云数据库或API，后续规划不再将云同步纳入开发范围。" }),
+  ] }) };
+  const { ledger, report } = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
+  const units = ledger.batches.flatMap(batch => batch.units);
+  expect(units.map(item => [item.subject, item.evidence.role, item.evidence.messageId])).toEqual([["阶段切换", "assistant", "m1"]]);
+  expect(report).toMatchObject({ pointsUnsaid: 1 });
 });

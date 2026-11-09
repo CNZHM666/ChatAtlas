@@ -102,7 +102,7 @@ describe("conversation entry", () => {
     localStorage.setItem("atlas-workbench-project-sources", JSON.stringify(["entry-one"]));
     vi.mocked(planHomeTask).mockResolvedValueOnce({ action: "continue", queries: [], projectId: project.id });
     render(<PreferencesProvider><App /></PreferencesProvider>);
-    await screen.findByText("1 selected");
+    await screen.findByRole("button", { name: /^Remove material:/ });
     fireEvent.change(await screen.findByRole("textbox", { name: "Search or organize past conversations" }), { target: { value: "Continue my hardware project" } });
     fireEvent.click(screen.getByRole("button", { name:/^(Organize project|Search history|Continue project|Review)$/ }));
     const workspace = await screen.findByTestId("submitted-focus");
@@ -166,7 +166,7 @@ describe("conversation entry", () => {
   it("starts a full-content generation directly from checked Workbench sources", async () => {
     localStorage.setItem("atlas-workbench-project-sources", JSON.stringify(["entry-one"]));
     render(<PreferencesProvider><App /></PreferencesProvider>);
-    await screen.findByText("1 selected");
+    await screen.findByRole("button", { name: /^Remove material:/ });
     fireEvent.change(await screen.findByRole("textbox", { name: "Search or organize past conversations" }), { target: { value: "Organize all selected conversations" } });
     fireEvent.click(screen.getByRole("button", { name:/^(Organize project|Search history|Continue project|Review)$/ }));
     const submitted = JSON.parse((await screen.findByTestId("submitted-focus")).textContent!);

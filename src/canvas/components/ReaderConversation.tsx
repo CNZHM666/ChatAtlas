@@ -5,7 +5,7 @@ import { GFM_OPTIONS } from "../../shared/markdown-gfm";
 import { readerEmphasis } from "../reader-emphasis";
 import {readerIndentedProse} from "../reader-indented-prose";
 import remarkMath from "remark-math";
-import { createElement, memo, useEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
+import { createElement, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type HTMLAttributes } from "react";
 import type { ConversationMessage } from "../../shared/types";
 import { isInternalSearchQueryMessage, readableConversationText, renderableConversationText } from "../../shared/conversation-text";
 import { READER_PAGE_MESSAGES, readerPageEnd, readerWindow } from "../reader-window";
@@ -25,6 +25,7 @@ import {readerQuoteHighlights,type QuoteHighlightRange} from "../reader-quote-hi
 import type {PluggableList} from "unified";
 import { BookOpen, CircleCheck, Copy, Flag } from "lucide-react";
 import type { ReaderCitation } from "../reader-citations";
+import { readerScrollContainer } from "../reader-scroll";
 
 export const ReaderMarkdown = memo(function ReaderMarkdown({ content, zh, literalWidgets = false, sourceStart = 0, hideImages = false, literalCode = false, quoteHighlights }: { content: string; zh: boolean; literalWidgets?: boolean; sourceStart?: number; hideImages?: boolean; literalCode?: boolean; quoteHighlights?:QuoteHighlightRange[] }) {
   const text = useMemo(() => renderableConversationText(content, literalWidgets), [content, literalWidgets]);
@@ -150,20 +151,52 @@ export const ReaderConversation = memo(function ReaderConversation({ messages, z
     };
     // Markdown, math and native UI snapshots change preceding message heights.
     // Stabilize this jump briefly; any deliberate navigation immediately stops it.
-    let stopped = false, frame = 0;
-    const refresh = () => { if (!stopped && !frame) frame = window.requestAnimationFrame(() => { frame = 0; if (!stopped) locate(); }); };
+    // Messages render one after another, so it holds until the page has been still for a moment, not a fixed time.
+    let stopped = false, frame = 0, settle = 0;
+    const stop = () => { stopped = true; resize?.disconnect(); mutation.disconnect(); window.cancelAnimationFrame(frame); window.clearTimeout(settle); window.clearTimeout(limit); };
+    const quiet = () => { window.clearTimeout(settle); settle = window.setTimeout(stop, 800); };
+    const refresh = () => { if (stopped) return; quiet(); if (!frame) frame = window.requestAnimationFrame(() => { frame = 0; if (!stopped) locate(); }); };
     const resize = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(refresh);
     resize?.observe(container);
     const mutation = new MutationObserver(refresh);
     mutation.observe(container, { childList: true, subtree: true, characterData: true });
-    const stop = () => { stopped = true; resize?.disconnect(); mutation.disconnect(); window.cancelAnimationFrame(frame); };
     const events = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
     events.forEach(event => container.ownerDocument.addEventListener(event, stop, { passive: true, capture: true }));
-    const settle = window.setTimeout(stop, 2000);
+    const limit = window.setTimeout(stop, 6000);
+    quiet();
     // Run after the focus window commits, rather than scrolling the previous page.
     const timer = window.setTimeout(locate, 0);
-    return () => { stop(); window.clearTimeout(timer); window.clearTimeout(settle); events.forEach(event => container.ownerDocument.removeEventListener(event, stop, true)); };
+    return () => { stop(); window.clearTimeout(timer); events.forEach(event => container.ownerDocument.removeEventListener(event, stop, true)); };
   }, [focusMessageId, focusExcerpt, focusRange, focusNonce, range.start, range.end, readableMessages, focusOnly, focusPlacement, windowFocus, hidden]);
+  // Reading earlier messages adds them above the one being read. That message stays where it is on screen while
+  // the new ones render (their heights are only estimated until then), so the page does not jump.
+  const pinned = useRef<{ id: string; top: number }>();
+  const readEarlier = () => {
+    const visible = [...root.current?.querySelectorAll<HTMLElement>("[data-reader-message-id]") ?? []].find(item => item.getBoundingClientRect().bottom > 0);
+    if (visible?.dataset.readerMessageId) pinned.current = { id: visible.dataset.readerMessageId, top: visible.getBoundingClientRect().top };
+    setRange(current => ({ ...current, start: Math.max(0, current.start - READER_PAGE_MESSAGES) }));
+  };
+  useLayoutEffect(() => {
+    const pin = pinned.current, container = root.current;
+    pinned.current = undefined;
+    const scroller = pin && container ? readerScrollContainer(container) : null;
+    if (!pin || !container || !scroller) return;
+    const hold = () => {
+      const element = [...container.querySelectorAll<HTMLElement>("[data-reader-message-id]")].find(item => item.dataset.readerMessageId === pin.id);
+      const shift = element ? element.getBoundingClientRect().top - pin.top : 0;
+      if (Math.abs(shift) >= 1) scroller.scrollTop += shift;
+    };
+    hold();
+    let stopped = false, frame = 0;
+    const refresh = () => { if (!stopped && !frame) frame = window.requestAnimationFrame(() => { frame = 0; if (!stopped) hold(); }); };
+    const resize = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(refresh);
+    resize?.observe(container);
+    const stop = () => { stopped = true; resize?.disconnect(); window.cancelAnimationFrame(frame); };
+    const events = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    events.forEach(event => container.ownerDocument.addEventListener(event, stop, { passive: true, capture: true }));
+    const settle = window.setTimeout(stop, 4000);
+    return () => { stop(); window.clearTimeout(settle); events.forEach(event => container.ownerDocument.removeEventListener(event, stop, true)); };
+  }, [range.start]);
   const shown = focusOnly ? focusedMessages : readableMessages.slice(range.start, range.end);
   // Native chats scroll continuously: approaching the end loads the next page; the button stays as a fallback.
   const more = useRef<HTMLButtonElement>(null);
@@ -179,7 +212,7 @@ export const ReaderConversation = memo(function ReaderConversation({ messages, z
   }, [hasMore, range.end, readableMessages]);
   if (hidden) return null;
   return <div className="reader-proof-host" ref={proofHost}><ReaderEvidenceHighlight range={proofRange} host={proofHost}/><div className="reader-conversation" ref={root}>
-    {!focusOnly && range.start > 0 ? <button type="button" className="reader-load-more" onClick={() => setRange((current) => ({ ...current, start: Math.max(0, current.start - READER_PAGE_MESSAGES) }))}>{zh ? `阅读更早的内容（前面 ${range.start} 条）` : `Read earlier (${range.start} messages)`}</button> : null}
+    {!focusOnly && range.start > 0 ? <button type="button" className="reader-load-more" onClick={readEarlier}>{zh ? `阅读更早的内容（前面 ${range.start} 条）` : `Read earlier (${range.start} messages)`}</button> : null}
     {shown.map((message, index) => {
       const group = replyGroups.get(message.id);
       const start = index === 0 || replyGroups.get(shown[index - 1].id) !== group;

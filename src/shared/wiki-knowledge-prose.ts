@@ -57,7 +57,7 @@ export function knowledgeBodyPresentation(body:string,claims:WikiClaim[]=[],zh=t
   if(whole?.text)return whole.text;
   const literals:string[]=[];
   let output=raw.replace(/(`+)[^\n]*?\1|\$[^$\n]+\$/gu,match=>{literals.push(match);return `\uE000LITERAL${literals.length-1}\uE001`;});
-  output=output.split(/(?<=[。！？!?])\s*|(?<=\.)\s+(?=[A-Z])/u).map(sentence=>{
+  output=output.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))\s*|(?<=\.)\s+(?=[A-Z])/u).map(sentence=>{
    const text=sentence.trim();if(!text)return "";
    const readable=text.replace(/\uE000LITERAL(\d+)\uE001/gu,(_,index)=>literals[Number(index)]);
    const unprefixed=readable.replace(/^(?:用户报告|User reported)[：:]\s*/iu, "");

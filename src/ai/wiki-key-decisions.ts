@@ -1,6 +1,7 @@
 import { DECIDING_KINDS, aboutNameKey, wikiLedgerUnits, type WikiScopeAnswer, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus, type WikiUserDecision } from "../shared/wiki-knowledge";
 import { roadmaps, wikiUnitStatuses } from "./wiki-knowledge-write";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
+import { wikiByDiscussion } from "../shared/wiki-sources";
 
 /** A key point the user can confirm as a decision or set aside: one point however often it was restated. */
 export interface WikiDecisionCandidate {
@@ -27,7 +28,7 @@ function decisionClusters(ledger: WikiKnowledgeLedger): DecisionCluster[] {
   const subjectById = new Map(organization.subjects.map(subject => [subject.id, subject]));
   for (const chapter of organization.chapters) for (const topic of chapter.subtopics) for (const subjectId of topic.subjectIds) for (const id of subjectById.get(subjectId)?.unitIds ?? []) chapterOf.set(id, chapter.title);
   // Judged by what the conversation shows, before any verdict: a judged point stays listed so it can be undone.
-  const open = units.filter(unit => !unit.about && DECIDING_KINDS.includes(unit.kind) && ["proposal", "relayed", "open"].includes(plain.get(unit.id)!)).sort((a, b) => b.evidence.messageIndex - a.evidence.messageIndex);
+  const open = units.filter(unit => !unit.about && DECIDING_KINDS.includes(unit.kind) && ["proposal", "relayed", "open"].includes(plain.get(unit.id)!)).sort((a, b) => wikiByDiscussion(b, a));
   const pairs = new Map(open.map(unit => [unit.id, bigramsOf(unit.statement)])), names = new Map(open.map(unit => [unit.id, namesOf(unit.statement)]));
   // One restates the other: most of its character pairs are there, and every number or Latin name too.
   const restates = (a: WikiKnowledgeUnit, b: WikiKnowledgeUnit) => {
@@ -137,7 +138,7 @@ export function wikiVersionQuestions(ledger: WikiKnowledgeLedger | undefined, zh
     const asked = new Set<string>();
     const pairs = organization.relations.filter(relation => (relation.kind === "replaces" || relation.kind === "rejects") && relation.status === "unresolved")
       .flatMap(relation => { const older = byId.get(relation.older), newer = byId.get(relation.newer); return older && newer && exclusiveWikiVersions(older, newer) && !planned.has(older.id) && !planned.has(newer.id) && older.kind !== "question" && newer.kind !== "question" ? [{ older, newer }] : []; })
-      .sort((a, b) => b.newer.evidence.messageIndex - a.newer.evidence.messageIndex);
+      .sort((a, b) => wikiByDiscussion(b.newer, a.newer));
     for (const { older, newer } of pairs) {
       if (asked.has(older.id) || asked.has(newer.id)) continue;
       asked.add(older.id); asked.add(newer.id);

@@ -26,6 +26,8 @@ import { BackgroundSyncStatus } from "./components/BackgroundSyncStatus";
 import { ReaderToolbarProvider } from "./components/ReaderToolbar";
 import { MapSidebar } from "./components/MapSidebar";
 import { ProposalActionBar } from "./components/ProposalActionBar";
+import { PanelBoundary } from "./components/PanelBoundary";
+import { chosenDocumentType } from "../shared/wiki-document-type";
 import { useOrganizationTasks } from "./hooks/useOrganizationTasks";
 import { useCanvasHistory } from "./hooks/useCanvasHistory";
 import { attachConversationToTopic, createTopicFromConversation } from "./global-attachments";
@@ -754,9 +756,9 @@ function AtlasApp() {
   const selectWorkbenchSources = (ids: Set<string>) => {
     setWorkbenchSelectedIds(ids);
   };
-  const hydrateWorkbenchSources = async (ids: string[]) => {
+  const hydrateWorkbenchSources = async (ids: string[], force = false) => {
     // Syncing content must not silently remove the source scope chosen by the user.
-    return commandHydrate(ids);
+    return commandHydrate(ids, force);
   };
   const prioritizeWorkbenchSource = (id: string) => {
     setSyncSelectedIds(current => new Set([...current, id]));
@@ -771,7 +773,9 @@ function AtlasApp() {
     }
     workbenchDraft.current = { goal, mode };
     workbenchResumeTask.current = undefined;
-    setGoalRequest({ id: resume?.id ?? crypto.randomUUID(), ...(resume ? { runId: resume.runId } : {}), goal, mode, sourceIds: [...sourceIds], sourcePoolIds, scopeCanvasId, scope: scope ?? { kind: "all", sourceConversationIds: [...sourceIds] } }); setFocusSessionId(undefined);
+    // The document type chosen in the input area goes with the request, kept with the task when it is resumed.
+    const chosenType = chosenDocumentType(), requestScope: FocusScope = scope ?? { kind: "all", sourceConversationIds: [...sourceIds] };
+    setGoalRequest({ id: resume?.id ?? crypto.randomUUID(), ...(resume ? { runId: resume.runId } : {}), goal, mode, sourceIds: [...sourceIds], sourcePoolIds, scopeCanvasId, scope: requestScope.documentType || chosenType === "auto" ? requestScope : { ...requestScope, documentType: chosenType } }); setFocusSessionId(undefined);
     setView("canvas"); setKnowledgeCreateRequest(null); setTaskWorkspaceId(null); setTaskHistoryOpen(false); setSelectedCardId(null); setGlobalMode("browse");
   };
   const [contextHandoff,setContextHandoff]=useState<ContextHandoff>();
@@ -989,7 +993,7 @@ function AtlasApp() {
       {contextHandoff?<ContextHandoffDialog request={contextHandoff} zh={locale==="zh-CN"} onClose={closeContextHandoff} onSync={commandHydrate} onStart={(goal,sources)=>{const scope=contextHandoff.scope;const ids=scope.blocks!.map(block=>block.conversationId);setCapturedConversations(current=>[...current.filter(item=>!ids.includes(item.id)),...sources]);closeContextHandoff();startGoal(goal,"work",ids,undefined,scope,undefined,undefined,sources);}}/>:null}
       {importChoices ? <NativeImportDialog sources={importChoices} zh={locale === "zh-CN"} onChoose={sources => void chooseImportSources(sources)} onClose={closeImportChoices}/> : null}
       {newCardOpen ? <NewCardDialog onClose={() => setNewCardOpen(false)} onCreate={createCard} /> : null}
-      {settingsOpen ? <Suspense fallback={null}><SettingsPanel initialTab={settingsInitialTab} onClose={() => { setSettingsOpen(false); setAISettingsRevision((revision) => revision + 1); }} /></Suspense> : null}
+      {settingsOpen ? <PanelBoundary zh={locale === "zh-CN"} onClose={() => setSettingsOpen(false)}><Suspense fallback={null}><SettingsPanel initialTab={settingsInitialTab} onClose={() => { setSettingsOpen(false); setAISettingsRevision((revision) => revision + 1); }} /></Suspense></PanelBoundary> : null}
     </div>
   );
 }

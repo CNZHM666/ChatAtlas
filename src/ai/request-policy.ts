@@ -46,6 +46,9 @@ export function requestBudget(request: Pick<StructuredAIRequest<unknown>, "promp
   // single-item `other` policy's 520-token allowance.
   const policy = request.taskType === "other" && data?.presentation === "wiki_directory_names"
     ? {maxInputTokens:14000,maxOutputTokens:2400}
+    // A learning record's roles and card titles: one short answer per point, a title and a recall question per card.
+    : request.taskType === "other" && (data?.presentation === "wiki_learning_roles" || data?.presentation === "wiki_learning_card_titles")
+    ? {maxInputTokens:14000,maxOutputTokens:Math.min(3200,Math.max(800,200+(Array.isArray(data.units)?data.units.length*40:Array.isArray(data.cards)?data.cards.length*80:0)))}
     : request.taskType === "other" && data?.presentation === "wiki_title_edit"
     ? {maxInputTokens:14000,maxOutputTokens:Math.min(2400,Math.max(600,300+(Array.isArray(data.titles)?data.titles.length:0)*60))}
     : request.taskType === "other" && data?.presentation === "wiki_chapter_merge"
@@ -67,6 +70,9 @@ export function requestBudget(request: Pick<StructuredAIRequest<unknown>, "promp
     // One paragraph written again with the user's answers: the paragraph and its points in, the paragraph out.
     : request.taskType === "other" && data?.presentation === "wiki_paragraph_revise"
     ? { maxInputTokens: 6000, maxOutputTokens: 1500 }
+    // A chapter's missing opening: its question, subtopic first sentences and decisions in, 1-3 sentences out.
+    : request.taskType === "other" && data?.presentation === "wiki_chapter_opening"
+    ? { maxInputTokens: 4000, maxOutputTokens: 600 }
     : request.taskType === "other" && data?.presentation === "wiki_writing_questions"
     ? { maxInputTokens: 16000, maxOutputTokens: 2600 }
     : request.taskType === "other" && data?.presentation === "wiki_claim_repair"

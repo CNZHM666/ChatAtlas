@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Dices, Download, FilePen, LayoutList, Network, Play, Plus, RefreshCw, ScanText, Trash2 } from "lucide-react";
 import { ledgerPipelineEnabled, WIKI_LEGACY_PIPELINE_FLAG } from "../../ai/wiki-ledger-document";
-import { reextractSessionKnowledge, updateSessionKnowledge } from "../../ai/wiki-knowledge-session";
+import { reextractSessionKnowledge, updateSessionKnowledge, withStoredSections } from "../../ai/wiki-knowledge-session";
 import { organizeLedger } from "../../ai/wiki-knowledge-organize";
 import { writeLedgerDraft } from "../../ai/wiki-knowledge-write";
 import { embeddingsFor } from "../../ai/embedding-provider";
@@ -92,7 +92,7 @@ export function DeveloperKnowledgeUnits({ zh }: { zh: boolean }) {
         failing = "organize"; ledger = await organizeLedger(ledger, { ...common, conversations: session.sourceConversationIds.length, names, directory });
         if (!ledger.organization || ledger.lastFailure?.step === "organize") throw new Error("organization failed");
         await saveFocusSession({ ...session, wikiKnowledge: ledger }); await load();
-        failing = "write"; ledger = await writeLedgerDraft(ledger, { ...common, project: session.wikiProjectBoundary?.name });
+        failing = "write"; ledger = await writeLedgerDraft(await withStoredSections(ledger), { ...common, project: session.wikiProjectBoundary?.name });
         if (!ledger.draft) throw new Error("writing failed");
       } else if (step === "update") ledger = await updateSessionKnowledge(session, common.ai, controller.signal, { names, project: session.wikiProjectBoundary?.name, progress: common.progress });
       else if (step === "extract") ledger = await reextractSessionKnowledge(session, common.ai, controller.signal, undefined, common.progress);
@@ -100,7 +100,7 @@ export function DeveloperKnowledgeUnits({ zh }: { zh: boolean }) {
         ledger = await organizeLedger(session.wikiKnowledge!, { ...common, conversations: session.sourceConversationIds.length, names, ...(step === "organize" ? { directory } : { fresh: true }) });
         if (!ledger.organization) throw new Error("organization failed");
       } else {
-        ledger = await writeLedgerDraft(session.wikiKnowledge!, { ...common, project: session.wikiProjectBoundary?.name, fresh: step === "rewrite" });
+        ledger = await writeLedgerDraft(await withStoredSections(session.wikiKnowledge!), { ...common, project: session.wikiProjectBoundary?.name, fresh: step === "rewrite" });
         if (!ledger.draft) throw new Error("writing failed");
       }
       // A step that produced nothing usable kept the earlier result; it is saved with the mark and named.

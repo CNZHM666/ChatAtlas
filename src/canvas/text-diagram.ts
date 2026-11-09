@@ -21,45 +21,78 @@ export function diagramCells(line: string): DiagramCell[] {
 
 const columns = (line: string) => diagramCells(line).reduce((total, cell) => total + cell.width, 0);
 
+const text = (cells: DiagramCell[]) => cells.map(cell => cell.text).join("");
+
+/** A frame line and the side note written after its right border ("│ 25:00 │  ← big countdown"). Notes hold no borders. */
+function withNote(line: string): { frame: string; note: string } {
+  const cells = diagramCells(line.trimEnd());
+  let end = -1;
+  cells.forEach((cell, index) => { if (/[│┤┐┘]/u.test(cell.text)) end = index; });
+  return end < 0 ? { frame: line.trimEnd(), note: "" } : { frame: text(cells.slice(0, end + 1)), note: text(cells.slice(end + 1)).trim() };
+}
+
+/** Moves the bar nearest a column onto it by padding the space before it; never deletes content. */
+function padBarTo(line: string, column: number, skipLast: boolean): string {
+  const cells = diagramCells(line);
+  const candidates = cells.flatMap((cell, index) => cell.text === "│" && index > 0 && (!skipLast || index < cells.length - 1) && Math.abs(cell.column - column) <= 4 ? [index] : []);
+  if (candidates.length !== 1) return line;
+  const left = text(cells.slice(0, candidates[0])).trimEnd(), padding = column - columns(left);
+  return padding >= 0 ? left + " ".repeat(padding) + text(cells.slice(candidates[0])) : line;
+}
+
 /** Only normalize unambiguous whitespace next to a complete outer frame.
- * Never delete content, guess missing borders or alter the stored/copyable source. */
+ * Never delete content, guess missing borders or alter the stored/copyable source.
+ * Writers often count Chinese or emoji as one column, so bars drift; side notes after the frame are kept and lined up. */
 function framedRows(lines: string[]): string[] {
   const first = lines.findIndex(line => line.trim());
   const last = lines.length - 1 - [...lines].reverse().findIndex(line => line.trim());
-  const top = /^(\s*)┌[─┬]+┐\s*$/u.exec(lines[first] ?? "");
-  if (!top || !/^\s*└[─┴]+┘\s*$/u.test(lines[last] ?? "")) return lines;
-  const width = columns(lines[first].trimEnd());
-  if (columns(lines[last].trimEnd()) !== width) return lines;
-  const inner = lines.slice(first + 1, last);
-  if (!inner.every(line => /^\s*[│├].*[│┤]\s*$/u.test(line))) return lines;
-  const dividers=[lines[first],...inner,lines[last]].filter(line=>/^\s*[┌├└][─┬┴┼]+[┐┤┘]\s*$/u.test(line));
+  const parts = lines.map(withNote);
+  if (!/^\s*┌[─┬]+┐$/u.test(parts[first]?.frame ?? "") || !/^\s*└[─┴]+┘$/u.test(parts[last]?.frame ?? "")) return lines;
+  const width = columns(parts[first].frame);
+  if (columns(parts[last].frame) !== width) return lines;
+  const inner = parts.slice(first + 1, last).map(part => part.frame);
+  if (!inner.every(line => /^\s*[│├].*[│┤]$/u.test(line))) return lines;
+  // Boxes nested inside the frame (a button, a card): their right bars follow their own top corner.
+  for (let row = 0; row < inner.length; row++) {
+    const cells = diagramCells(inner[row]);
+    const open = cells.find((cell, index) => index > 0 && cell.text === "┌"), close = open && cells.find(cell => cell.column > open.column && cell.text === "┐");
+    if (!open || !close) continue;
+    const end = inner.findIndex((line, index) => index > row && diagramCells(line).some(cell => cell.text === "└" && cell.column === open.column));
+    if (end < 0 || !diagramCells(inner[end]).some(cell => cell.text === "┘" && cell.column === close.column)) continue;
+    for (let between = row + 1; between < end; between++) {
+      if (diagramCells(inner[between]).some(cell => cell.text === "│" && cell.column === open.column)) inner[between] = padBarTo(inner[between], close.column, true);
+    }
+  }
+  const dividers=[parts[first].frame,...inner,parts[last].frame].filter(line=>/^\s*[┌├└][─┬┴┼]+[┐┤┘]$/u.test(line));
   const divider=dividers.find(line=>/[┬┼]/u.test(line));
   const lowerJunctions=dividers.flatMap(line=>diagramCells(line).filter(cell=>/[┴┼]/u.test(cell.text)).map(cell=>cell.column));
   const junctions=divider?diagramCells(divider).filter(cell=>/[┬┼]/u.test(cell.text)&&lowerJunctions.includes(cell.column)):[];
   // A matching header/footer defines the main column boundary. Nearby vertical
   // bars can be aligned by padding; nested boxes and overflowing labels stay intact.
   const normalized = inner.map(line => {
-    let text = line.trimEnd();
-    if (junctions.length && text.trimStart().startsWith("│")) {
+    let current = line;
+    if (junctions.length && current.trimStart().startsWith("│")) {
       for(const junction of junctions){
-        const cells=diagramCells(text);
+        const cells=diagramCells(current);
         const matches=cells.flatMap((cell,index)=>index>0&&index<cells.length-1&&cell.text==="│"&&Math.abs(cell.column-junction.column)<=3?[index]:[]);
         // A nested box with two nearby candidates is ambiguous; leave it alone.
         const position=matches.length===1?matches[0]:-1;
         if(position>0){
-        const left = cells.slice(0, position).map(cell => cell.text).join("").trimEnd();
+        const left = text(cells.slice(0, position)).trimEnd();
         const padding = junction.column - columns(left);
-        if (padding >= 0) text = left + " ".repeat(padding) + "│" + cells.slice(position + 1).map(cell => cell.text).join("");
+        if (padding >= 0) current = left + " ".repeat(padding) + "│" + text(cells.slice(position + 1));
         }
       }
     }
-    const right = text.slice(-1), body = text.slice(0, -1).trimEnd();
+    const cells = diagramCells(current), right = cells.at(-1)!.text, body = text(cells.slice(0, -1)).trimEnd();
     const padding = width - 1 - columns(body);
     return padding >= 0 && padding <= 120 ? body + " ".repeat(padding) + right : undefined;
   });
   // Long content cannot be squeezed into a smaller frame.
   if (normalized.some(line => line === undefined)) return lines;
-  return [...lines.slice(0, first + 1), ...normalized as string[], ...lines.slice(last)];
+  const frames = [parts[first].frame, ...normalized as string[], parts[last].frame];
+  const noted = frames.map((frame, index) => parts[first + index].note ? `${frame}  ${parts[first + index].note}` : frame);
+  return [...lines.slice(0, first), ...noted, ...lines.slice(last + 1)];
 }
 
 export function textDiagram(text: string, language = ""): TextDiagram | undefined {

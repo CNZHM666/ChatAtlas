@@ -1,3 +1,4 @@
+import type { LearningRole, WikiDocumentType } from "./wiki-document-type";
 import { knowledgeTerms } from "./knowledge-subject";
 /** Knowledge-unit ledger (redesign P1). Produced next to the Wiki behind a
  * developer switch; nothing reads it into the document yet. */
@@ -16,7 +17,8 @@ export interface WikiKnowledgeUnit {
   kind: WikiUnitKind;
   /** Numbers, versions, modes, identifiers and exceptions copied from the original. */
   details: string[];
-  evidence: { evidenceId: string; conversationId: string; messageId: string; messageIndex: number; role: "user" | "assistant"; pasted: boolean; quote: string };
+  /** conversationSpan: when its conversation was held, by the platform's own times (wikiSaidLater reads it). */
+  evidence: { evidenceId: string; conversationId: string; messageId: string; messageIndex: number; role: "user" | "assistant"; pasted: boolean; quote: string; conversationSpan?: WikiConversationSpan; /** The heading its quote stands under in its message (首页 Header), when the statement does not name it. */ section?: string; /** The code block its quote stands in or introduces (a file tree, a schema), as written. */ code?: { language: string; text: string }; /** A learning record's exercise: code the learner wrote, in their message or quoted back by the AI marking it. */ learnerCode?: true; /** The AI's review of that exercise, from the message quoting it: what it said of the code, and the code it gave instead. */ review?: { said: string; code?: { language: string; text: string }; /** A block the AI's words lead into ("这样不行，因为："). */ shows?: { language: string; text: string } }; /** The task the exercise answers, as the AI set it: its rule, and the data it gave. */ task?: { said: string; code?: { language: string; text: string } } };
   adoption: { status: WikiUnitAdoption; approval?: { evidenceId: string; messageId: string; quote: string } };
   delivery: "unknown" | "planned" | "user_reported";
   relation?: { kind: "replaces" | "narrows" | "supplements" | "coexists" | "rejects"; hint: string };
@@ -96,7 +98,19 @@ export interface WikiKnowledgeLedger {
   userAnswers?: WikiUserAnswer[];
   /** Points the user said belong to another project (unit id → its name): tagged as that project wherever it is read. */
   userOwners?: Record<string, string>;
+  /** The conversations the units come from, by id, as their platform gives them: what the document names each source
+   * by. Absent on older ledgers. */
+  sources?: Record<string, WikiSourceConversation>;
+  /** What the document organizes; absent is a project. by: the user chose it, or the run read it from the material. */
+  documentType?: WikiDocumentType;
+  documentTypeBy?: "user" | "auto";
+  /** For a learning document: what each unit is to the learner, by unit id. */
+  learningRoles?: Record<string, LearningRole>;
 }
+/** When a conversation was held, by the platform's own times; an import time is never one. */
+export interface WikiConversationSpan { start?: number; end?: number }
+/** A source conversation: its platform id (chatgpt, claude, ...), title and span. */
+export interface WikiSourceConversation extends WikiConversationSpan { platform: string; title: string }
 /** One action an answer takes on the ledger: a verdict on points, two versions that both hold, or the project points
  * belong to. */
 export type WikiAnswerAction = { do: "confirm" | "reject" | "open"; units: string[] } | { do: "both"; units: [string, string] } | { do: "owner"; units: string[]; name: string; answer: WikiScopeAnswer };
@@ -110,11 +124,25 @@ export interface WikiUserAnswer { questionId: string; unitIds: string[]; questio
  * reference: an outside product, beside the competitors; exclude: left out of the Wiki. */
 export type WikiScopeAnswer = "project" | "related" | "reference" | "exclude";
 export const aboutNameKey = (name: string) => name.normalize("NFKC").toLocaleLowerCase().replace(/\s+/gu, "");
+/** The ledger without answers that make the project itself another project: a writing question offered "exclude" for
+ * two outside suggestions with Pocket Ledger as their owner, and the whole project left its own Wiki. Read-time only:
+ * the stored answers stay. */
+export function withoutOwnProjectAnswers(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  const own = ledger.organization?.projectName ? aboutNameKey(ledger.organization.projectName) : "";
+  if (!own || !ledger.scopeAnswers?.[own] && !Object.values(ledger.userOwners ?? {}).some(name => aboutNameKey(name) === own)) return ledger;
+  const scopeAnswers = { ...ledger.scopeAnswers }, userOwners = Object.fromEntries(Object.entries(ledger.userOwners ?? {}).filter(([, name]) => aboutNameKey(name) !== own));
+  delete scopeAnswers[own];
+  const next: WikiKnowledgeLedger = { ...ledger, scopeAnswers, userOwners };
+  if (!Object.keys(scopeAnswers).length) delete next.scopeAnswers;
+  if (!Object.keys(userOwners).length) delete next.userOwners;
+  return next;
+}
 /** The organization with the user's scope and same-point answers applied, for writing: the stored organization
  * stays as planned, so an answer can be changed or withdrawn. Units of an excluded project leave every subject;
  * subjects mostly about a related project or a reference move to a chapter for it; a group told as one point
  * gathers in its home subject. Emptied subjects, subtopics and chapters go. */
-export function withUserAnswers(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+export function withUserAnswers(source: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  const ledger = withoutOwnProjectAnswers(source);
   const organization = ledger.organization, scope = ledger.scopeAnswers ?? {}, same = new Set(ledger.sameGroups ?? []);
   if (!organization || !Object.keys(scope).length && !same.size) return ledger;
   const units = new Map(wikiLedgerUnits(ledger).map(unit => [unit.id, unit]));
@@ -197,6 +225,8 @@ export const assistantRequest = (statement: string) => /^(?:用户)?(?:要求|�
 const WORKING_STEPS = /\b(?:tell|ask|instruct|remind) (?:codex|claude|chatgpt|cursor|copilot|the ai|the model|the assistant)\b|\breport back\b|\bwrite (?:a|the) prompt\b|(?:最后|并|然后|完成后|之后)(?:需|需要|应|要|请)?(?:向我)?(?:汇报|报告)(?:新|修改|实现|结果|以下|下一)|向\s*(?:Codex|Claude|ChatGPT|Cursor|Copilot|AI|模型|助手)[^。]{0,8}(?:传达|交代|说明|下达|转达)|(?:生成|写|输出|给出)一[份个篇段][^。]{0,40}(?:提示词|prompt)|说明修改结果|(?:只)?汇报测试|运行(?:现有的?)?(?:代码)?(?:检查|测试|lint|typecheck|build)[^。]{0,12}(?:说明|汇报|报告)|列出(?:发现的)?问题及|画出[^。]{0,6}数据流|请提供[^。]{0,20}(?:对照|证明|报告)|给\s*(?:Codex|Claude|ChatGPT|Cursor|Copilot|AI|Agent|模型|助手)\s*的(?:指令|提示词|prompt|任务说明|说明)|最终(?:输出|综述|文档|报告)(?:中|里)?应|综述(?:中|里)?(?:应|需)(?:优先|明确|先)?(?:展示|显示|标记|区分|写)/iu;
 export interface WikiDraftChapter {
   id: string; title: string; question: string; group: string;
+  /** Left out on purpose, not lost: a learning record's planning chapter, told in its overview instead. */
+  leftOut?: "plan";
   /** Markdown: the opening, then "### subtopic" sections. */
   body: string;
   /** claims: the paragraph's high-impact sentences (decided, done, numbers, changes), each with the units it states. */
@@ -226,13 +256,18 @@ export interface WikiUnitDraft { version: 1; generatedAt: number; status: "compl
 export function wikiDraftCompleteness(ledger: WikiKnowledgeLedger | undefined) {
   const draft = ledger && scopedWikiDraft(ledger), plans = (ledger && withUserAnswers(ledger).organization?.chapters) ?? draft?.chapters ?? [];
   const written = new Set(draft?.chapters.filter(chapter => chapter.paragraphs.length && chapter.body.trim()).map(chapter => chapter.id));
-  const missing = plans.filter(chapter => !written.has(chapter.id)).map(chapter => ({ id: chapter.id, title: chapter.title }));
-  return { planned: plans.length, written: plans.length - missing.length, missing };
+  // A chapter left out on purpose was not planned to be written: "写作未完成：缺少「个人方向与学习路线」" read a learning
+  // record's route, told in its overview, as lost.
+  const leftOut = new Set(draft?.chapters.filter(chapter => chapter.leftOut).map(chapter => chapter.id));
+  const planned = plans.filter(chapter => !leftOut.has(chapter.id));
+  const missing = planned.filter(chapter => !written.has(chapter.id)).map(chapter => ({ id: chapter.id, title: chapter.title }));
+  return { planned: planned.length, written: planned.length - missing.length, missing };
 }
 
 /** A failed rewrite may retain an older draft. Respect today's exclusions when
  * reading it too, without deleting that saved draft or changing source material. */
-export function scopedWikiDraft(ledger: WikiKnowledgeLedger): WikiUnitDraft | undefined {
+export function scopedWikiDraft(source: WikiKnowledgeLedger): WikiUnitDraft | undefined {
+  const ledger = withoutOwnProjectAnswers(source);
   const draft = ledger.draft, keys = Object.entries(ledger.scopeAnswers ?? {}).filter(([, answer]) => answer === "exclude").map(([key]) => key);
   if (!draft || !keys.length) return draft;
   const answered = withUserAnswers(ledger), active = new Set(answered.organization?.subjects.flatMap(subject => subject.unitIds));
@@ -340,7 +375,7 @@ export function wikiDraftMarkdown(ledger: WikiKnowledgeLedger, title: string, lo
     const source = unit.evidence;
     const quote = plainText(source.quote), full = messages[source.messageId] ? plainText(messages[source.messageId]) : "";
     const plain = full && full.includes(quote.slice(0, 40)) ? full : quote;
-    const sentences = plain.split(/(?<=[。！？!?；;])/u).filter(sentence => sentence.trim() && !code(sentence)), terms = knowledgeTerms(unit.statement);
+    const sentences = plain.split(/(?:(?<=[。！？!?；;])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))/u).filter(sentence => sentence.trim() && !code(sentence)), terms = knowledgeTerms(unit.statement);
     const score = (sentence: string) => [...knowledgeTerms(sentence)].filter(term => terms.has(term)).length;
     // Ties go to the sentence nearest the stored quote.
     const at = plain.indexOf(quote.slice(0, 40)), offsets = sentences.map(sentence => plain.indexOf(sentence));
@@ -453,6 +488,9 @@ export function pastedUserText(text: string): boolean {
   const body = text.trim();
   // Report and reference markers decide at any length; people paste short reviews too.
   if (/```|以下是(?:历史)?参考资料|审查发现/u.test(body)) return true;
+  // A message that is only attached files ("【附件 专注计时器 Focus Timer — V0.1 产品规划与完整用户流程.txt】") carries a
+  // document, not the user's words: a point read from its name was marked 〔你〕.
+  if (/^(?:【附件[^】\n]*】\s*)+$/u.test(body)) return true;
   if (body.length < 40) return false;
   const lines = body.split("\n");
   const structured = lines.filter(line => /^\s*(?:#{1,6}\s|>|[-*]\s|\d+[.)]\s|\|)/u.test(line)).length;
@@ -476,7 +514,16 @@ export function quotedDetails(quote: string, own: string, identifiers = false, c
 }
 /** A unit's details for writing: what extraction copied, and the identifiers and counts its
  * own statement states. A quote's other code and numbers may belong to a different point. */
-export const wikiUnitDetails = (unit: WikiKnowledgeUnit) => [...new Map([...unit.details.filter(detail => !foreignDetail(unit, detail)), ...quotedDetails(unit.statement, unit.details.join(" "), true)].map(value => [detailKey(value), value])).values()].slice(0, 8);
+export const wikiUnitDetails = (unit: WikiKnowledgeUnit) => [...new Map([...unit.details.filter(detail => !foreignDetail(unit, detail)), ...quotedDetails(unit.statement, unit.details.join(" "), true), ...quoteCodes(unit)].map(value => [detailKey(value), value])).values()].slice(0, 8);
+/** Codes a short quote about this one point gives in plain text ("应该：error: LOAD_REQUIRES_DRIVER", "两个设备声明 0x3C"):
+ * the error code or address a reader looks up, which the statement summed up as 负载驱动 or 地址冲突. Only from the quote's
+ * own section, at most two. A long quote spans other points and gives none. */
+const QUOTE_CODE = /\b[A-Z][A-Z0-9]*_[A-Z0-9_]{3,}\b|\b0x[0-9A-Fa-f]{2,}\b/gu, QUOTE_CODE_REACH = 600, QUOTE_CODES = 2;
+function quoteCodes(unit: WikiKnowledgeUnit): string[] {
+  const section = ownSection(unit.evidence.quote, unit.statement);
+  if (section.length > QUOTE_CODE_REACH) return [];
+  return [...new Set(section.match(QUOTE_CODE) ?? [])].filter(code => !unit.statement.includes(code)).slice(0, QUOTE_CODES);
+}
 /** A quote running over a section break (---, ===, a heading) carries the end of the section before: a code there
  * ("> `LOAD_REQUIRES_DRIVER ERROR` 技术 code 可以内部保留。--- # 第九阶段……仿真") is that section's, not this unit's. */
 const SECTION_BREAK = /\n\s*(?:-{3,}|={3,}|#{1,6}\s)/u;
@@ -579,8 +626,16 @@ const SWAP_MARGIN = .2;
 const bareText = (text: string) => text.replace(/[\s，,。．.；;：:！!？?、“”"'‘’（）()]/gu, "");
 export const groupMemberConditions = (member: WikiExplanationGroup["members"][number], unit: WikiKnowledgeUnit) => member.role === "restates" ? [] : member.adds.length ? member.adds.filter(add => bareText(unit.statement).includes(bareText(add))) : [member.support || unit.statement];
 /** A sentence stating most of a core: the core's explanation, wherever it appears. */
+/** English terms read alike in their forms: trailing punctuation off, plurals folded, a hyphened word also read by its
+ * parts ("apps" = "app", "web-only" = "web" and "only"). Without it "v1 is web only, with no native mobile app" did
+ * not state itself in "… a web-only application with no native iOS or Android apps", and was restored again. */
+function foldedTerms(text: string, whole: boolean): Set<string> {
+  const fold = (term: string) => { const bare = term.replace(/[.,;:!?]+$/u, ""); return /^[a-z]{4,}$/u.test(bare) ? bare.replace(/ies$/u, "y").replace(/(?<=[^s])s$/u, "") : bare; };
+  // The core counts a hyphened word by its parts; the sentence reads it both ways.
+  return new Set([...knowledgeTerms(text)].flatMap(term => /^[a-z]+(?:-[a-z]+)+$/u.test(term) ? [...whole ? [term] : [], ...term.split("-").map(fold)] : [fold(term)]));
+}
 export function statesCore(core: string, sentence: string) {
-  const terms = knowledgeTerms(core), own = knowledgeTerms(sentence);
+  const terms = foldedTerms(core, false), own = foldedTerms(sentence, true);
   return terms.size >= 4 && [...terms].filter(term => own.has(term)).length / terms.size >= .6;
 }
 /** A condition written in a text: half of its terms (or its words, when short) and every number it gives. */
@@ -600,7 +655,7 @@ export function wikiGroupMetrics(ledger: WikiKnowledgeLedger) {
     const members = new Set(group.members.map(member => member.unitId)), citing = paragraphs.filter(paragraph => paragraph.unitIds.some(id => members.has(id)));
     if (!citing.length) continue;
     cited++;
-    if (citing.filter(paragraph => paragraph.text.split(/(?<=[。！？!?])/u).some(sentence => statesCore(group.core, sentence))).length > 1) twice++;
+    if (citing.filter(paragraph => paragraph.text.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))/u).some(sentence => statesCore(group.core, sentence))).length > 1) twice++;
     for (const member of group.members) {
       const unit = units.get(member.unitId), where = paragraphs.filter(paragraph => paragraph.unitIds.includes(member.unitId)).map(paragraph => paragraph.text).join(" ");
       if (!unit || !where) continue;

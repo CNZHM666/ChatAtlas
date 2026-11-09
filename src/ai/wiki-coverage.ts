@@ -24,7 +24,7 @@ export function importantWikiStatements(section: FocusSection): string[] {
     if (fence || /^\s*#{1,6}\s/u.test(line) || /^\s*\|?\s*:?-{3}/u.test(line)) continue;
     lines.push(line.replace(/^\s*(?:>\s*|[-*+]\s+|\d+[.)]\s+)/u, "").trim());
   }
-  return [...new Set(lines.flatMap(line => line.split(/(?<=[。！？!?])\s*|(?<=\.)\s+(?=[A-Z])/u)).map(text => text.trim()).filter(text => important.test(text)))];
+  return [...new Set(lines.flatMap(line => line.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))\s*|(?<=\.)\s+(?=[A-Z])/u)).map(text => text.trim()).filter(text => important.test(text)))];
 }
 
 export function uncoveredWikiStatements(section: FocusSection): string[] {

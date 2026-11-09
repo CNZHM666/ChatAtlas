@@ -67,13 +67,14 @@ export function useImportCommands({ flash, refreshConversations }: { flash: (mes
     else setImportChoices(sources);
   };
 
-  const commandHydrate = async (conversationIds: string[]) => {
+  /** force: sync again conversations already synced, after a failed or partial read kept the saved copy. */
+  const commandHydrate = async (conversationIds: string[], force = false) => {
     const ids = [...new Set(conversationIds)].filter(id => !selecting.current.has(id));
     if (!ids.length || fileImporting.current) return false;
     if (typeof chrome === "undefined" || !chrome.runtime?.id) { flash(t("extensionOnly")); return false; }
     ids.forEach(id => selecting.current.add(id));
     try {
-      const response = await chrome.runtime.sendMessage({ type: "ATLAS_IMPORT_SELECT", conversationIds: ids } satisfies AtlasMessage) as ImportJob | { error: string };
+      const response = await chrome.runtime.sendMessage({ type: "ATLAS_IMPORT_SELECT", conversationIds: ids, ...(force ? { force: true } : {}) } satisfies AtlasMessage) as ImportJob | { error: string };
       if ("error" in response) { flash(response.error); return false; }
       setImportSource("web");
       setImportJob(current => current && current.sessionId === response.sessionId && current.updatedAt > response.updatedAt ? current : response);

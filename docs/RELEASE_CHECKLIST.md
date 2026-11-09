@@ -2,7 +2,7 @@
 
 **简体中文** · [English](en/RELEASE_CHECKLIST.md)
 
-目标：0.1.1 Early Preview 的公开前端源码和可加载 Chrome 扩展。无需共享后端。本清单本身不表示已完成线上验收。
+目标：0.1.2 Early Preview 的公开前端源码和可加载 Chrome 扩展。无需共享后端。本清单本身不表示已完成线上验收。
 
 发布范围区分多平台文件导入、ChatGPT 批量历史同步与原生侧栏、Claude/Gemini/DeepSeek 可选网页采集试用。中文和英文说明应一致；手动上下文复用和 BYOK 服务商选择不算网页适配。
 
@@ -57,7 +57,7 @@ pwsh -File scripts/package-demo.ps1
 1. 仅将公开源码清单中的内容提交到仓库；MIT 与第三方通知一并保留。不要直接上传整个本机工作目录。
 2. 首次推送前运行 `npm run check:public`，检查 staging；`.gitignore` 不能移除已经跟踪的文件。
 3. 等待 GitHub Actions 实际通过后，为匹配源码创建对应版本 Release。
-4. 附 `ChatAtlas-extension-v0.1.1.zip`、可选源码 ZIP、SHA256 和本次验证说明。
+4. 附 `ChatAtlas-extension-v0.1.2.zip`、可选源码 ZIP、SHA256 和本次验证说明。
 5. 明确标注 Early Preview、BYOK、数据存本机以及已知限制。
 
 上传、推送、线上工作流执行和真实付费评测不包含在本地准备完成的结论中。

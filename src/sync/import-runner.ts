@@ -373,7 +373,7 @@ async function processInventoryJob(job: ImportJob, adapter: HistoryAdapter): Pro
   await publish(job);
 }
 
-export async function startHistoryImport(adapter: HistoryAdapter, mode: "full" | "incremental" | "failed" | "titles" | "selected" = "full", selectedIds: string[] = [], options: { resumeTitles?: boolean } = {}): Promise<ImportJob> {
+export async function startHistoryImport(adapter: HistoryAdapter, mode: "full" | "incremental" | "failed" | "titles" | "selected" = "full", selectedIds: string[] = [], options: { resumeTitles?: boolean; force?: string[] } = {}): Promise<ImportJob> {
   if (running) {
     if (mode === "selected" && (pauseRequested || activeJob?.retryScope === "titles" || activeJob?.phase === "reconciling")) {
       if (activeJob?.retryScope === "titles") await pauseHistoryImport();
@@ -391,7 +391,9 @@ export async function startHistoryImport(adapter: HistoryAdapter, mode: "full" |
     const requested = candidates.filter((_, index) => Boolean(records[index]));
     job.discoveredIds = [...new Set([...(job.discoveredIds ?? []), ...requested])];
     job.discovered = job.discoveredIds.length;
-    const pending = candidates.filter((_, index) => records[index] && !isCurrentHydrationComplete(records[index]!));
+    // Asked to sync again: read even an already synced conversation, whose saved copy a failed read kept.
+    const forced = new Set(options.force ?? []);
+    const pending = candidates.filter((id, index) => records[index] && (forced.has(id) || !isCurrentHydrationComplete(records[index]!)));
     if (!pending.length) return job;
     job.pendingIds = pending; job.priorityIds = [...new Set([...pending, ...(job.priorityIds ?? [])])];
     job.status = "syncing"; job.phase = "syncing"; job.retryScope = "selected";

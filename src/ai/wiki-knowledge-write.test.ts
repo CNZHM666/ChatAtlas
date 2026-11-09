@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { citedFigures, countedEcho, isCommentary, qualifyVerification, withoutRepeatedClauses, refusalReason, toldEarlier, lostNegation, restatesSentence, rewriteReason, sameSentence, wikiUnitStatuses, writeLedgerDraft, writeWikiDraft, parallelAsList, withoutRepeatedItems, clausesOutsideBrackets, currentBaseline, scopedWishes, laterTakenUp, pastStageWords, sharedFigures, addedGuarantees, withoutRepeatedSegments, coveringRun, versionSources, namedListItems, bareLabels, restoreProhibitions } from "./wiki-knowledge-write";
+import { citedFigures, countedEcho, isCommentary, qualifyVerification, withoutRepeatedClauses, refusalReason, toldEarlier, lostNegation, restatesSentence, rewriteReason, sameSentence, wikiUnitStatuses, writeLedgerDraft, writeWikiDraft, parallelAsList, withoutRepeatedItems, clausesOutsideBrackets, currentBaseline, scopedWishes, laterTakenUp, pastStageWords, sharedFigures, addedGuarantees, rehomedSubtopics, withoutRepeatedSegments, coveringRun, versionSources, namedListItems, bareLabels, restoreProhibitions, repeatedValues, labelledSteps, restoredCodes, misplacedCodes, chapterRepeatedClauses, sideLabels, reusedChapterProblems, removedLiftedLimits, openingRepeatsTrimmed, correctedSideLabels } from "./wiki-knowledge-write";
 import { curateWikiUnits } from "./wiki-knowledge-select";
 import { selectWikiUnits, wikiSubjectQuota } from "./wiki-knowledge-select";
 import { exportChapters } from "../test/wiki-eval";
@@ -694,7 +694,7 @@ it("cites a restating member where its core is, and supplements an important uni
   const { ai, calls } = model((data, system) => {
     if (system.includes("SUPPLEMENT")) return { opening: "", subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "已决定在对话旁加上书签，支持手动标注。", unitIds: topic.units.map(item => item.id), claims: [{ text: "已决定在对话旁加上书签，支持手动标注。", unitIds: topic.units.map(item => item.id) }] }] })) };
     const ids = data.subtopics[0].units.map(item => item.id);
-    return { opening: "导出以 Markdown 文件提供。", openingUnitIds: [], subtopics: [{ title: "全文索引", paragraphs: [{ text: "AI 建议导出提供 Markdown 文件。", unitIds: [ids[1]] }] }] };
+    return { opening: "本章说明导出方式。", openingUnitIds: [], subtopics: [{ title: "全文索引", paragraphs: [{ text: "AI 建议导出提供 Markdown 文件。", unitIds: [ids[1]] }] }] };
   });
   const draft = await writeWikiDraft({ ledger: ledger([decided, core, echo], { groups: [exported] }), ai, locale: "zh-CN", signal });
   const supplement = calls.find(call => call.system.includes("SUPPLEMENT"))!;
@@ -1479,6 +1479,11 @@ it("names an unlabelled list item for the product it is about, and flags a label
   const paragraph = { text: "- **FlowCode**：拖拽节点生成代码。\n- 展示了“自然语言 → KiCad”的路线。\n- **Fritzing**：面包板视图。", claims: [{ text: "展示了“自然语言 → KiCad”的路线。", unitIds: [schgen.id] }] };
   expect(namedListItems(paragraph, new Map([[schgen.id, schgen]]))).toBe(true);
   expect(paragraph.text.split("\n")[1]).toBe("- **Microsoft SchGen**：展示了“自然语言 → KiCad”的路线。");
+  // The part its unit names before what the item says it does.
+  const roles = unit(2, "Canvas 负责表达系统结构，Right Inspector 解释选中元件，AI 修改项目，Bottom Validation 发现问题。");
+  const lost = { text: "- **Canvas**：负责表达系统结构。\n- 解释选中元件的细节信息。\n- **AI 修改**：根据用户意图修改项目内容。\n- 发现并提示潜在问题。", claims: ["负责表达系统结构。", "解释选中元件的细节信息。", "根据用户意图修改项目内容。", "发现并提示潜在问题。"].map(text => ({ text, unitIds: [roles.id] })) };
+  expect(namedListItems(lost, new Map([[roles.id, roles]]))).toBe(true);
+  expect(lost.text.split("\n")).toEqual(["- **Canvas**：负责表达系统结构。", "- **Right Inspector**：解释选中元件的细节信息。", "- **AI 修改**：根据用户意图修改项目内容。", "- **Bottom Validation**：发现并提示潜在问题。"]);
   expect(bareLabels("| 事项 | 第一版 |\n| --- | --- |\n| 实时全网比价 | 不做 |\n| API 对接 | 不实现 |")).toEqual(["API 对接"]);
   expect(bareLabels("| 事项 | 第一版 |\n| --- | --- |\n| 比价 API 对接 | 不实现 |")).toEqual([]);
 });
@@ -1501,4 +1506,271 @@ it("adds back a group's prohibition the line weakened, citing its unit", () => {
   expect(chapter.body).toBe(chapter.paragraphs[0].text);
   expect(chapter.problems).toEqual([]);
   expect(chapter.paragraphs[0].claims).toEqual([{ text: "绝不写入localStorage或项目文件", unitIds: [strict.id] }]);
+});
+
+it("tells a line giving one value twice from lines giving several values once", () => {
+  const animation = "- **动画限制**：必须克制，允许150~220ms的fade/translate及hover效果；严禁大型loading。各页面保持相同的header，允许150~220ms的fade和小幅translateY。";
+  const radius = "- **全局圆角**：统一控制在6px~8px，禁止使用16px以上的大圆角；统一推荐6px～8px，禁止20px/30px超大圆角。";
+  expect(repeatedValues(`${animation}\n${radius}`).map(([, value]) => value)).toEqual(["150~220ms", "6px～8px"]);
+  expect(repeatedValues("- **CTA按钮**：高度40~44px，圆角8~10px，内边距14~16px。\n| 高度 | 40~44px | 40~44px |")).toEqual([]);
+});
+
+it("writes a chapter's missing opening from the chapter in one short request", async () => {
+  const rule = unit(1, "检索在本地完成，不调用模型。", { kind: "decision" });
+  const prompts: string[] = [];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt) as Payload & { presentation?: string };
+    prompts.push(String(data.presentation ?? "write"));
+    if (data.presentation === "wiki_unit_propositions") return request.validate({ same: [] });
+    if (data.presentation === "wiki_chapter_opening") return request.validate({ opening: "检索在本地完成，不调用模型。" });
+    return request.validate(claimed({ opening: "", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "检索在本地完成，不调用模型。", unitIds: [topic.units[0].id] }] })) }));
+  } };
+  const draft = await writeWikiDraft({ ledger: ledger([rule]), ai, locale: "zh-CN", signal });
+  expect(prompts).toContain("wiki_chapter_opening");
+  expect(draft.chapters[0].body.startsWith("检索在本地完成，不调用模型。")).toBe(true);
+  expect(draft.chapters[0].problems).not.toContain("the opening is missing");
+});
+
+it("labels a step by the stage its unit names, and puts a dropped code where it reads as one", () => {
+  const stage = unit(1, "在 Milestone 3.2 和 3.3 阶段，明确禁止开发 PCB、仿真、固件生成。", { kind: "plan" });
+  const steps = { text: "3. **当时阶段**：禁止扩展至 30 个元件。\n4. 明确禁止开发 PCB、仿真、固件生成。", claims: [{ text: "明确禁止开发 PCB、仿真、固件生成。", unitIds: [stage.id] }] };
+  expect(labelledSteps(steps, new Map([[stage.id, stage]]))).toBe(true);
+  expect(steps.text.split("\n")[1]).toBe("4. **Milestone 3.2 和 3.3**：明确禁止开发 PCB、仿真、固件生成。");
+  const i2c = unit(2, "检查SDA/SCL类型及同一Bus下的设备地址冲突，未知地址仅给info提示。", { kind: "constraint" });
+  i2c.evidence = { ...i2c.evidence, quote: "同一 bus 地址冲突\n\n如果两个设备声明：\n\n0x3C\n\n产生：\n\nI2C_ADDRESS_CONFLICT" };
+  const terms = unit(3, "内部保留 GPIO_CONFLICT 等工程 code。", { kind: "constraint", details: ["LOAD_REQUIRES_DRIVER"] });
+  const list = { text: "- **I²C 地址**：检查设备地址冲突（I2C_ADDRESS_CONFLICT），未知地址仅给 info 提示。\n- **术语**：内部保留GPIO_CONFLICT等工程code。\n- **门禁**：完成后必须通过 lint。", claims: [{ text: "检查设备地址冲突（I2C_ADDRESS_CONFLICT），未知地址仅给 info 提示。", unitIds: [i2c.id] }, { text: "内部保留GPIO_CONFLICT等工程code。", unitIds: [terms.id] }] };
+  expect(restoredCodes(list, new Map([[i2c.id, i2c], [terms.id, terms]]))).toEqual(["0x3C", "LOAD_REQUIRES_DRIVER"]);
+  expect(list.text.split("\n")).toEqual(["- **I²C 地址**：检查设备地址冲突（I2C_ADDRESS_CONFLICT，例如地址 0x3C），未知地址仅给 info 提示。", "- **术语**：内部保留GPIO_CONFLICT、LOAD_REQUIRES_DRIVER等工程code。", "- **门禁**：完成后必须通过 lint。"]);
+});
+
+it("puts back a code the writer bracketed where its point is not", () => {
+  const status = unit(1, "在 Planner 之前增加需求完整性检查，仅返回 READY、NEEDS_CLARIFICATION 或 UNSUPPORTED 三种状态。");
+  const button = unit(2, "从方案草稿进入 Canvas 的按钮文案定为“生成硬件方案”，而非 Commit Design。");
+  const entry = unit(3, "仿真入口仅在 Canvas 设计通过（VERIFIED 或 NEEDS_REVIEW 允许继续）后才出现。");
+  const driver = unit(4, "GPIO 不能直接驱动 DC Fan 等负载，必须通过驱动器模块（LOAD_REQUIRES_DRIVER）。");
+  const units = new Map([status, button, entry, driver].map(item => [item.id, item]));
+  const paragraph = { text: [
+    "- **按钮文案**：从方案草稿进入 Canvas 的按钮文案应为“生成硬件方案”，而非 Commit Design（NEEDS_CLARIFICATION）。",
+    "- **仿真入口**：仅在 Canvas 设计通过（VERIFIED 或允许继续）后才出现（NEEDS_REVIEW）。",
+    "- **负载驱动**：GPIO 不能直接驱动 DC Fan 等负载，必须通过驱动器模块（LOAD_REQUIRES_DRIVER）。",
+  ].join("\n"), unitIds: [status.id, button.id, entry.id, driver.id] };
+  expect(misplacedCodes(paragraph, units)).toBe(2);
+  expect(paragraph.text.split("\n")).toEqual([
+    "- **按钮文案**：从方案草稿进入 Canvas 的按钮文案应为“生成硬件方案”，而非 Commit Design。",
+    "- **仿真入口**：仅在 Canvas 设计通过（VERIFIED 或 NEEDS_REVIEW 允许继续）后才出现。",
+    "- **负载驱动**：GPIO 不能直接驱动 DC Fan 等负载，必须通过驱动器模块（LOAD_REQUIRES_DRIVER）。",
+  ]);
+});
+
+it("drops a property given the same value earlier on the same screen size, however short", () => {
+  const first = "- **移动端适配**：优先支持移动端；Mobile padding 16px，Composer width 100% min-height 100~120px，标题 24~28px，Chips 允许换行；Canvas Workspace 仍桌面优先。";
+  const again = "Mobile 优先可读，padding 16px，title 24~28px，Component row 在移动端改为垂直排列，禁止横向滚动。";
+  const desktop = "Desktop 布局，padding 16px，侧栏保持展开。";
+  const chapter: WikiDraftChapter = { id: "c", title: "界面", question: "", group: "", problems: [], body: [first, again, desktop].join("\n\n"),
+    paragraphs: [first, again, desktop].map(text => ({ subtopic: "s", text, unitIds: ["u1"], claims: [{ text, unitIds: ["u1"] }] })) };
+  expect(chapterRepeatedClauses(chapter)).toBe(2);
+  expect(chapter.paragraphs[1].text).toBe("Mobile 优先可读，Component row 在移动端改为垂直排列，禁止横向滚动。");
+  expect(chapter.paragraphs[2].text).toBe(desktop);
+  expect(chapter.body).toContain(chapter.paragraphs[1].text);
+});
+
+it("drops a clause one part of a chapter says again after another, but never inside brackets", () => {
+  const first = "构建知识库用于检查电气冲突；当前 Validator 不检查电压、GPIO 冲突、I²C 地址或电源安全，计划补充。";
+  const second = "当前画布仅为架构预览，不能直接照图接线；Validator 不检查电压、GPIO 冲突、I²C 地址或电源安全，无结构错误不等于硬件安全。";
+  const third = "- **全局圆角**：统一推荐6px～8px（以下组件另有取值：Welcome Screen border-radius 20~26px；是组件例外还是后来的规范，讨论中未明确）。";
+  const chapter: WikiDraftChapter = { id: "c", title: "验证", question: "", group: "", problems: [], body: [first, second, "- **输入框**：border-radius 20~26px。", third].join("\n\n"),
+    paragraphs: [first, second, "- **输入框**：border-radius 20~26px。", third].map(text => ({ subtopic: "s", text, unitIds: ["u1"], claims: [{ text, unitIds: ["u1"] }] })) };
+  expect(chapterRepeatedClauses(chapter)).toBe(1);
+  expect(chapter.paragraphs[1].text).toBe("当前画布仅为架构预览，不能直接照图接线；无结构错误不等于硬件安全。");
+  expect(chapter.paragraphs[3].text).toBe(third);
+  expect(chapter.body).toContain(chapter.paragraphs[1].text);
+  expect(chapter.paragraphs[1].claims![0].text.length).toBeGreaterThan(6);
+});
+
+it("keeps every point of a subtopic the writer and its supplement both left out, and does not keep the chapter as written", async () => {
+  const index = unit(1, "检索按消息维护全文索引。", { kind: "mechanism" }), gpio = unit(2, "Validator 区分独占 GPIO 与共享总线，仅对独占资源重复连接报错。", { kind: "constraint" });
+  const book = ledger([index, gpio], { subjects: [{ id: "s:a", name: "索引", aliases: [], unitIds: [index.id] }, { id: "s:b", name: "规则", aliases: [], unitIds: [gpio.id] }],
+    chapters: [{ id: "chapter:search", title: "检索", question: "如何找回历史？", group: "", subtopics: [{ title: "全文索引", subjectIds: ["s:a"] }, { title: "规则引擎", subjectIds: ["s:b"] }] }] });
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt) as Payload & { presentation?: string; written?: unknown };
+    if (data.presentation === "wiki_unit_propositions") return request.validate({ same: [] });
+    if (data.presentation === "wiki_chapter_opening") return request.validate({ opening: "检索按消息维护全文索引。" });
+    // The supplement for what it left out fails.
+    if (request.system.includes("SUPPLEMENT:")) throw new Error("STRUCTURE_OR_PROVIDER_ERROR");
+    // The writer answers the first subtopic only.
+    return request.validate(claimed({ opening: "检索按消息维护全文索引。", openingUnitIds: [], subtopics: [{ title: data.subtopics[0].title, paragraphs: [{ text: "检索按消息维护全文索引。", unitIds: [data.subtopics[0].units[0].id] }] }] }));
+  } };
+  const draft = await writeWikiDraft({ ledger: book, ai, locale: "zh-CN", signal });
+  const chapter = draft.chapters[0];
+  expect(chapter.body).toContain("### 规则引擎");
+  expect(chapter.body).toContain(gpio.statement);
+  expect(chapter.problems.some(problem => problem.endsWith("points kept as their units state them"))).toBe(true);
+  expect(chapter.signature).toBeUndefined();
+});
+
+it("asks for a refused opening once more with the reason", async () => {
+  const rule = unit(1, "检索在本地完成，不调用模型。", { kind: "decision" });
+  const systems: string[] = [];
+  let openings = 0;
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt) as Payload & { presentation?: string };
+    if (data.presentation === "wiki_unit_propositions") return request.validate({ same: [] });
+    if (data.presentation === "wiki_chapter_opening") { systems.push(request.system); return request.validate({ opening: openings++ ? "检索在本地完成，不调用模型。" : "检索确保硬件方案的正确性与可执行性。" }); }
+    return request.validate(claimed({ opening: "", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "检索在本地完成，不调用模型。", unitIds: [topic.units[0].id] }] })) }));
+  } };
+  const draft = await writeWikiDraft({ ledger: ledger([rule]), ai, locale: "zh-CN", signal });
+  expect(systems).toHaveLength(2);
+  expect(systems[1]).toContain("SECOND ATTEMPT");
+  expect(systems[1]).toContain("确保硬件方案的正确性");
+  expect(draft.chapters[0].body.startsWith("检索在本地完成，不调用模型。")).toBe(true);
+});
+
+it("does not take a guarantee the chapter's question asks about as one the chapter gives", async () => {
+  const rule = unit(1, "检索在本地完成，不调用模型。", { kind: "decision" });
+  const systems: string[] = [];
+  let openings = 0;
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt) as Payload & { presentation?: string };
+    if (data.presentation === "wiki_unit_propositions") return request.validate({ same: [] });
+    if (data.presentation === "wiki_chapter_opening") { systems.push(request.system); return request.validate({ opening: openings++ ? "检索在本地完成，不调用模型。" : "检索在本地完成来确保方案正确可执行。" }); }
+    return request.validate(claimed({ opening: "", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "检索在本地完成，不调用模型。", unitIds: [topic.units[0].id] }] })) }));
+  } };
+  const base = ledger([rule]);
+  const asked = ledger([rule], { chapters: base.organization!.chapters.map(chapter => ({ ...chapter, question: "系统如何确保生成的方案是正确且可执行的？" })) });
+  const draft = await writeWikiDraft({ ledger: asked, ai, locale: "zh-CN", signal });
+  expect(systems[1]).toContain("确保方案正确可执行");
+  expect(draft.chapters[0].body).not.toContain("确保");
+});
+
+it("puts a subtopic of the writer's own title under the planned subtopic of its units", () => {
+  const a = unit(1, "定位为面向大学生的硬件工作台。"), b = unit(2, "首页采用极简 Hero。");
+  const alias = new Map([["k1", a], ["k2", b]]);
+  const part = [{ title: "目标用户", units: [a] }, { title: "首页引导", units: [b] }];
+  const result = { subtopics: [
+    { title: "首页引导", paragraphs: [{ text: "首页采用极简 Hero。", unitIds: ["k2"], claims: [] }] },
+    { title: "产品定位", paragraphs: [{ text: "定位为面向大学生的硬件工作台。", unitIds: ["k1"], claims: [] }] },
+    { title: "其他", paragraphs: [{ text: "无归属。", unitIds: ["k9"], claims: [] }] },
+  ] };
+  expect(rehomedSubtopics(result, part, alias)).toBe(true);
+  expect(result.subtopics.map(topic => topic.title)).toEqual(["目标用户", "首页引导", "其他"]);
+  expect(rehomedSubtopics(result, part, alias)).toBe(false);
+});
+
+it("tells a guarantee sharing one character pair with another from one the units give", () => {
+  const precise = unit(1, "当前保持 6 个基础元件以确保数据可靠性和 Validator 准确性。");
+  expect(addedGuarantees("系统确保硬件方案的正确性与可执行性。", [precise])).toHaveLength(1);
+  expect(addedGuarantees("保持基础元件以确保数据可靠性。", [precise])).toEqual([]);
+});
+
+it("asks again for a label naming a side no unit gives", async () => {
+  const panel = unit(1, "宽度约280～340px，默认显示项目概览；选择节点时切换Component Inspector。", { kind: "decision" });
+  const { ai, calls } = model(data => ({ opening: "面板显示项目概览。", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "- **左侧栏**：宽度约280～340px，默认显示项目概览。\n- **详情**：选择节点时切换Component Inspector。", unitIds: [topic.units[0].id] }] })) }));
+  const draft = await writeWikiDraft({ ledger: ledger([panel]), ai, locale: "zh-CN", signal });
+  expect(calls.length).toBe(2);
+  expect(draft.chapters[0].problems.some(problem => problem.includes("names a side no unit gives"))).toBe(true);
+});
+
+it("reads a label's side against the units its own line cites, and finds it on a saved chapter", () => {
+  const inspector = { ...unit(1, "宽度约280～340px，默认显示项目概览。", { kind: "decision" }), subject: "Right Inspector" };
+  const toolbar = unit(2, "顶部工具栏左侧显示项目名，右侧显示保存状态。", { kind: "decision" });
+  const units = new Map([[inspector.id, inspector], [toolbar.id, toolbar]]);
+  const text = "- **左侧栏**：宽度约 280～340px，默认显示项目概览。\n- **顶部工具栏**：左侧显示项目名，右侧显示保存状态。";
+  const paragraph = { text, unitIds: [inspector.id, toolbar.id], claims: [{ text: "宽度约 280～340px，默认显示项目概览。", unitIds: [inspector.id] }, { text: "左侧显示项目名，右侧显示保存状态。", unitIds: [toolbar.id] }] };
+  expect(sideLabels(paragraph, id => units.get(id))).toEqual(["左侧栏"]);
+  const chapter: WikiDraftChapter = { id: "c", title: "界面", question: "", group: "", problems: [], body: `系统确保硬件方案的正确性与可执行性。\n\n### 布局\n\n${text}`, paragraphs: [{ subtopic: "布局", ...paragraph }] };
+  expect(reusedChapterProblems(chapter, units)).toEqual(["the opening says \"确保硬件方案的正确性与可执行\", which no unit says", "\"**左侧栏**\" names a side no unit gives"]);
+});
+
+it("turns a list label to the side its own line's units give, and leaves one whose units give no side", () => {
+  const inspector = { ...unit(1, "宽度约280～340px，默认显示项目概览。", { kind: "decision" }), subject: "Right Inspector" };
+  const toolbar = unit(2, "顶部工具栏左侧显示项目名，右侧显示保存状态。", { kind: "decision" });
+  const drawer = unit(3, "默认折叠为 36-40px 的 Bottom Bar。", { kind: "decision" });
+  const units = new Map([[inspector.id, inspector], [toolbar.id, toolbar], [drawer.id, drawer]]);
+  const text = "- **顶部工具栏**：左侧显示项目名，右侧显示保存状态。\n- **左侧面板**：宽度约 280～340px，默认显示项目概览。\n- **左侧抽屉**：默认折叠为 36-40px 的 Bottom Bar。";
+  const chapter: WikiDraftChapter = { id: "c", title: "界面", question: "", group: "", problems: ["\"**左侧面板**\" names a side no unit gives; name the part"], body: `开头。\n\n### 布局\n\n${text}`, paragraphs: [{ subtopic: "布局", text, unitIds: [toolbar.id, inspector.id, drawer.id], claims: [{ text: "左侧显示项目名，右侧显示保存状态。", unitIds: [toolbar.id] }, { text: "宽度约 280～340px，默认显示项目概览。", unitIds: [inspector.id] }, { text: "默认折叠为 36-40px 的 Bottom Bar。", unitIds: [drawer.id] }] }] };
+  expect(correctedSideLabels([chapter], id => units.get(id))).toBe(1);
+  expect(chapter.body).toContain("- **右侧面板**：宽度约 280～340px");
+  // The drawer's units give no side: not guessed the other way.
+  expect(chapter.body).toContain("- **左侧抽屉**");
+  expect(chapter.paragraphs[0].text).toContain("**右侧面板**");
+  expect(chapter.problems).toEqual([]);
+});
+
+it("removes a lifted limit opening its sentence with the comma and the 仅 after it, and a line that was the limit alone", () => {
+  const first = "前期不做实时全网比价，仅提供Procurement Spec和中英文搜索词，引导用户自行购买缺失零件。", second = "第一版（V0.1）不实现实时全网比价和API对接，仅输出缺件清单及中英文搜索关键词。";
+  const text = `${first}${second}`, alone = "本阶段不包含商城、比价或价格信息。";
+  const chapter: WikiDraftChapter = { id: "c", title: "选型", question: "", group: "", body: `${text}\n\n${alone}`, problems: [], paragraphs: [
+    { subtopic: "采购", text, unitIds: ["a", "b"], claims: [{ text: first, unitIds: ["a"] }, { text: second, unitIds: ["b"] }] },
+    { subtopic: "采购", text: alone, unitIds: ["c"], claims: [{ text: alone, unitIds: ["c"] }] },
+  ] };
+  const lifted = new Map([["a", "前期不做实时全网比价"], ["b", "第一版（V0.1）不实现实时全网比价和API对接"], ["c", "本阶段不包含商城、比价或价格信息"]]);
+  expect(removedLiftedLimits([chapter], lifted)).toBe(3);
+  expect(chapter.paragraphs.map(paragraph => paragraph.text)).toEqual(["提供Procurement Spec和中英文搜索词，引导用户自行购买缺失零件。输出缺件清单及中英文搜索关键词。"]);
+  expect(chapter.paragraphs[0].claims?.map(claim => claim.text)).toEqual(["提供Procurement Spec和中英文搜索词，引导用户自行购买缺失零件。", "输出缺件清单及中英文搜索关键词。"]);
+  // A limit closing its sentence leaves the "仅" before it.
+  const tail: WikiDraftChapter = { id: "d", title: "存储", question: "", group: "", body: "仅保留本地存储，本阶段不做云同步。", problems: [], paragraphs: [{ subtopic: "存储", text: "仅保留本地存储，本阶段不做云同步。", unitIds: ["e"], claims: [{ text: "仅保留本地存储，本阶段不做云同步。", unitIds: ["e"] }] }] };
+  expect(removedLiftedLimits([tail], new Map([["e", "本阶段不做云同步"]]))).toBe(1);
+  expect(tail.body).toBe("仅保留本地存储。");
+});
+
+it("removes a lifted limit that was a whole sentence with its full stop, and table rows leaving out what the answer put in", () => {
+  const limit = "本阶段不包含商城、比价或价格信息", kept = "明确区分已有和缺少元件，提供复制采购清单功能。";
+  const text = `${limit}功能。${kept}`, table = "| 事项 | 第一版 |\n| --- | --- |\n| 实时全网比价 | 不做 |\n| API对接 | 不做 |";
+  const chapter: WikiDraftChapter = { id: "c", title: "采购", question: "", group: "", body: `${text}\n\n${table}`, problems: [], paragraphs: [
+    { subtopic: "采购", text, unitIds: ["a"], claims: [{ text: kept, unitIds: ["a"] }] },
+    { subtopic: "采购", text: table, unitIds: ["b"], claims: [{ text: "实时全网比价", unitIds: ["b"] }, { text: "API对接", unitIds: ["b"] }] },
+  ] };
+  const lifted = new Map([["a", limit], ["b", "第一版（V0.1）不实现实时全网比价和API对接"]]);
+  expect(removedLiftedLimits([chapter], lifted)).toBe(2);
+  expect(chapter.paragraphs.map(paragraph => paragraph.text)).toEqual([kept]);
+  expect(chapter.body).toBe(kept);
+  // A row the answer did not put in stays.
+  const other = "| 事项 | 第一版 |\n| --- | --- |\n| 实时全网比价 | 不做 |\n| 数据库 | 不引入 |";
+  const kept2: WikiDraftChapter = { id: "d", title: "采购", question: "", group: "", body: other, problems: [], paragraphs: [{ subtopic: "采购", text: other, unitIds: ["b"], claims: [{ text: "数据库", unitIds: ["b"] }] }] };
+  removedLiftedLimits([kept2], lifted);
+  expect(kept2.body).toBe("| 事项 | 第一版 |\n| --- | --- |\n| 数据库 | 不引入 |");
+  // The writer added 阶段 after the version the unit names.
+  const bom = "BOM 必须从 Hardware IR 派生；V0.1 阶段不需要实时价格或电商链接。";
+  const staged: WikiDraftChapter = { id: "e", title: "BOM", question: "", group: "", body: bom, problems: [], paragraphs: [{ subtopic: "BOM", text: bom, unitIds: ["c"], claims: [{ text: bom, unitIds: ["c"] }] }] };
+  expect(removedLiftedLimits([staged], new Map([["c", "V0.1 不需要实时价格或电商链接"]]))).toBe(1);
+  expect(staged.body).toBe("BOM 必须从 Hardware IR 派生。");
+});
+
+it("trims opening sentences after the answer that the chapter's sections tell in full, values and all", () => {
+  const answer = "界面采用极简浅色主题，主背景为 #FAFAFA，文字色为 #18181B。";
+  const palette = "视觉规范禁止大面积渐变及玻璃拟态，App Background 定为 #FAFAFA，Panel 为 #FFFFFF，Border 为 #E8E8E8。";
+  const flow = "首屏采用 ChatGPT 式简洁欢迎页，输入需求后进入对话层确定清单。";
+  const section = "界面采用浅色主题，禁止大面积渐变及玻璃拟态，App Background #FAFAFA，Panel #FFFFFF，Border #E8E8E8。";
+  const chapter: WikiDraftChapter = { id: "c", title: "界面", question: "", group: "", body: `${answer}${palette}${flow}\n\n### 视觉\n\n${section}`, problems: [], paragraphs: [{ subtopic: "视觉", text: section, unitIds: ["a"] }] };
+  expect(openingRepeatsTrimmed([chapter])).toBe(1);
+  // The answer stays, and a sentence no section tells.
+  expect(chapter.body).toBe(`${answer}${flow}\n\n### 视觉\n\n${section}`);
+});
+
+it("tells the writer which AI proposed each unit, and the rule for two AIs' different proposals, only when there are several", async () => {
+  const chat = unit(1, "底部栏高 40px。", { details: ["40px"] }), claude = { ...unit(2, "底部栏高 48px。", { details: ["48px"] }), evidence: { ...unit(2, "").evidence, conversationId: "c2", quote: "底部栏高 48px。" } };
+  const own = { ...unit(3, "我想要底部栏。", { role: "user" }), evidence: { ...unit(3, "").evidence, role: "user" as const, quote: "我想要底部栏。" } };
+  const sources = { c: { platform: "chatgpt", title: "A" }, c2: { platform: "claude", title: "B" } };
+  const { ai, calls } = model(faithful);
+  await writeWikiDraft({ ledger: { ...ledger([chat, claude, own]), sources }, ai, locale: "zh-CN", signal });
+  const sent = (calls[0].data.subtopics[0].units as Array<{ statement: string; platform?: string }>);
+  expect(sent.find(item => item.statement === chat.statement)?.platform).toBe("ChatGPT");
+  expect(sent.find(item => item.statement === claude.statement)?.platform).toBe("Claude");
+  expect(sent.find(item => item.statement === own.statement)?.platform).toBeUndefined();
+  expect(calls[0].system).toContain("each with its platform");
+  // One AI: no platform is given.
+  const single = model(faithful);
+  await writeWikiDraft({ ledger: { ...ledger([chat, own]), sources }, ai: single.ai, locale: "zh-CN", signal });
+  expect((single.calls[0].data.subtopics[0].units as Array<{ platform?: string }>).every(item => !item.platform)).toBe(true);
+});
+
+it("drops the clause leaning on a sentence opening that went as a repeat", () => {
+  const first = "避免依赖 Service Worker 内存中的 setInterval，必须使用结束时间戳计算剩余时间，并利用 chrome.alarms 安排结束事件。";
+  const second = "使用结束时间戳计算剩余时间，而非依靠持续运行的 setInterval，Service Worker 不要求一直运行。";
+  const chapter: WikiDraftChapter = { id: "c", title: "技术", question: "", group: "", problems: [], body: [first, second].join("\n\n"),
+    paragraphs: [first, second].map(text => ({ subtopic: "s", text, unitIds: ["u1"], claims: [{ text, unitIds: ["u1"] }] })) };
+  chapterRepeatedClauses(chapter);
+  expect(chapter.paragraphs[1].text).not.toMatch(/^而非/u);
+  expect(chapter.paragraphs[1].text).toContain("Service Worker 不要求一直运行。");
 });

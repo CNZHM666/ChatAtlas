@@ -1,4 +1,5 @@
 import {wikiNarration} from "./wiki-narration";
+import {isSourceCaption} from "./wiki-source-code";
 import {unified} from "unified";
 import remarkParse from "remark-parse";
 import type {FocusSection} from "./focus-session";
@@ -51,7 +52,10 @@ const removeRanges=(body:string,ranges:Array<[number,number]>)=>{for(const [star
  * repeats of an earlier paragraph go. Lists, quotes, code and tables are kept. */
 function dropRepeatedParagraphs(body:string):string {
  const nodes=parser.parse(body).children;
- const items=nodes.map((node,index)=>node.type==="paragraph"?{index,start:node.position!.start.offset!,end:node.position!.end.offset!,grams:grams(body.slice(node.position!.start.offset!,node.position!.end.offset!))}:undefined);
+ // A source block's caption is no paragraph to compare: every block of a chapter has the same one.
+ const slice=(index:number)=>body.slice(nodes[index].position!.start.offset!,nodes[index].position!.end.offset!);
+ const caption=(index:number)=>isSourceCaption(slice(index),nodes[index+1]&&{type:nodes[index+1].type,text:slice(index+1)});
+ const items=nodes.map((node,index)=>node.type==="paragraph"&&!caption(index)?{index,start:node.position!.start.offset!,end:node.position!.end.offset!,grams:grams(body.slice(node.position!.start.offset!,node.position!.end.offset!))}:undefined);
  const dropped=new Set<number>();
  // The opening is the first two paragraphs before any heading; a status quote may precede them.
  const heading=nodes.findIndex(node=>node.type==="heading");

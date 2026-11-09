@@ -10,6 +10,7 @@ import { usePreferences } from "../preferences";
 import { TaskSidebarSection } from "./TaskSidebarSection";
 import { readerQuestionIndex } from "../reader-position";
 import { isInternalSearchQueryMessage } from "../../shared/conversation-text";
+import { matchesTerms, questionSearchTerms, rankQuestionMatches, type QuestionText } from "../question-search";
 
 interface ConversationSidebarProps {
   hidden?: boolean;
@@ -89,16 +90,22 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
   const assignedQuestionIds = useMemo(() => new Set(chapters.flatMap((chapter) => chapter.questionIds)), [chapters]);
   const visibleMessages = useMemo(() => chapters.length ? questions.filter((message) => !assignedQuestionIds.has(`conversation-message-${message.id}`)) : questions, [chapters, questions, assignedQuestionIds]);
   const normalizedQuery = deferredQuestionQuery.trim().toLocaleLowerCase().normalize("NFKC");
-  const matchesQuery = (value: string) => value.toLocaleLowerCase().normalize("NFKC").includes(normalizedQuery);
+  const searchTerms = useMemo(() => questionSearchTerms(deferredQuestionQuery), [deferredQuestionQuery]);
+  const matchesQuery = (value: string) => matchesTerms(value, searchTerms);
   const listedMessages = allQuestions ? questions : visibleMessages;
+  // What a question says (its title and its own words) apart from what its answers say: a question naming the words
+  // ranks before an answer that only mentions them.
   const searchByMessageId = useMemo(() => {
     const readable = props.messages.filter(message => !isInternalSearchQueryMessage(message));
     const index = readerQuestionIndex(readable);
-    const parts = new Map(questions.map(message => [message.id, [props.questionTitles?.get(message.id) ?? "", message.preview]]));
-    for (const message of readable) { const id = index.get(message.id); if (id) parts.get(id)?.push(message.content); }
-    return new Map([...parts].map(([id, texts]) => [id, texts.join(" ").toLocaleLowerCase().normalize("NFKC")]));
+    const parts = new Map(questions.map(message => [message.id, { head: [props.questionTitles?.get(message.id) ?? "", message.content || message.preview], body: [] as string[] }]));
+    for (const message of readable) { const id = index.get(message.id); if (id && id !== message.id) parts.get(id)?.body.push(message.content); }
+    return new Map<string, QuestionText>([...parts].map(([id, text]) => [id, { head: text.head.join(" "), body: text.body.join(" ") }]));
   }, [questions, props.messages, props.questionTitles]);
-  const filteredMessages = useMemo(() => normalizedQuery ? listedMessages.filter((message) => searchByMessageId.get(message.id)?.includes(normalizedQuery)) : listedMessages, [normalizedQuery, listedMessages, searchByMessageId]);
+  const questionMatches = useMemo(() => normalizedQuery ? rankQuestionMatches(listedMessages.map(message => message.id), searchByMessageId, deferredQuestionQuery) : [], [normalizedQuery, deferredQuestionQuery, listedMessages, searchByMessageId]);
+  const snippetById = useMemo(() => new Map(questionMatches.flatMap(match => match.snippet ? [[match.id, match.snippet] as const] : [])), [questionMatches]);
+  const filteredMessages = useMemo(() => normalizedQuery ? questionMatches.flatMap(match => { const message = questionByMessageId.get(match.id); return message ? [message] : []; }) : listedMessages, [normalizedQuery, questionMatches, listedMessages, questionByMessageId]);
+  const textOf = (id: string) => { const text = searchByMessageId.get(id); return text ? `${text.head} ${text.body}` : ""; };
   const matchingConversations = useMemo(() => props.conversations.filter((conversation) => conversation.title.toLocaleLowerCase().normalize("NFKC").includes(conversationQuery.trim().toLocaleLowerCase().normalize("NFKC"))), [props.conversations, conversationQuery]);
   useEffect(() => setConversationLimit(80), [conversationQuery]);
   useEffect(() => { setQuestionLimit(80); setChapterLimits({}); }, [deferredQuestionQuery, props.conversation?.id]);
@@ -134,7 +141,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
 
   if (!props.conversation) return null;
   const activeConversation = props.conversation;
-  const renderQuestion = (message: ConversationMessage, index: number, nested = false, displayTitle?: string, episodeIds?: string[]) => <button
+  const renderQuestion = (message: ConversationMessage, index: number, nested = false, displayTitle?: string, episodeIds?: string[], snippet?: string) => <button
     key={message.id}
     ref={(element) => { if (element) itemRefs.current.set(message.id, element); else itemRefs.current.delete(message.id); }}
     className={`conversation-message-item ${nested ? "is-nested" : ""} ${props.selectedMessageId === message.id || episodeIds?.includes(props.selectedMessageId ?? "") ? "is-current" : ""} ${props.editable ? "is-draggable" : ""}`}
@@ -146,7 +153,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
     title={props.editable ? locale === "zh-CN" ? "拖到上方章节，或点击阅读" : "Drag into a chapter or click to read" : message.content.trim() || message.preview.trim()}
   >
     <span className="message-number">{nested ? "├" : String(index + 1).padStart(2, "0")}</span>
-    <span className="message-list-copy"><small>{displayTitle?.trim() || props.questionTitles?.get(message.id)?.trim() || (props.questionNavigation ? message.content.trim() || message.preview.trim() : questionDisplayTitle(message.content.trim() || message.preview.trim()))}</small></span>
+    <span className="message-list-copy"><small>{displayTitle?.trim() || props.questionTitles?.get(message.id)?.trim() || (props.questionNavigation ? message.content.trim() || message.preview.trim() : questionDisplayTitle(message.content.trim() || message.preview.trim()))}</small>{snippet ? <span className="message-search-snippet">{locale === "zh-CN" ? "回答中：" : "In the answer: "}{snippet}</span> : null}</span>
     {props.editable ? <GripVertical className="message-grip" size={14} /> : null}
   </button>;
   const currentChapterId = props.selectedChapterId ?? chapters.find((chapter) => chapter.questionIds.includes(`conversation-message-${props.selectedMessageId}`))?.id;
@@ -155,7 +162,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
     setExpandedChapterIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   };
   const chapterItems = (chapter: ConversationChapter) => entriesByChapter.get(chapter.id) ?? [];
-  const matchesEntry = (entry: ReturnType<typeof chapterItems>[number]) => matchesQuery(`${entry.title ?? ""} ${entry.ids.map((id) => { const message = questionByMessageId.get(id); return searchByMessageId.get(message?.id ?? id) ?? ""; }).join(" ")}`);
+  const matchesEntry = (entry: ReturnType<typeof chapterItems>[number]) => matchesQuery(`${entry.title ?? ""} ${entry.ids.map((id) => { const message = questionByMessageId.get(id); return textOf(message?.id ?? id); }).join(" ")}`);
   const searchedChapters = normalizedQuery ? chapters.filter((chapter) => matchesQuery(chapter.title) || chapterItems(chapter).some(matchesEntry)) : chapters;
 
   const renderChapter = (chapter: ConversationChapter) => {
@@ -164,7 +171,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
           return <div key={chapter.id} className={`conversation-outline-chapter ${dropChapterId === chapter.id ? "is-drop-target" : ""}`} onDragOver={props.editable ? (event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropChapterId(chapter.id); } : undefined} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropChapterId((current) => current === chapter.id ? null : current); }} onDrop={props.editable ? (event) => { event.preventDefault(); event.stopPropagation(); setDropChapterId(null); const payload = parseConversationDragPayload(event.dataTransfer.getData(conversationDragType)); if (payload?.kind === "question" && payload.conversationId === activeConversation.id && payload.messageId) { props.onAssignQuestion?.(chapter.id, payload.messageId); setExpandedChapterIds((current) => { const next = new Set(current); if (props.manual) next.delete(chapter.id); else next.add(chapter.id); return next; }); } } : undefined}>
             <div className="conversation-outline-chapter-heading"><button type="button" className={!props.overviewSelected && currentChapterId === chapter.id ? "is-current" : ""} aria-expanded={expanded} draggable={props.editable} onDragStart={props.editable ? (event) => setDrag(event, { kind: "chapter", conversationId: activeConversation.id, chapterId: chapter.id }) : undefined} onClick={() => { if (props.onSelectChapter) props.onSelectChapter(chapter.id); else toggleChapter(chapter.id); }}><span className="chapter-nav-order">{String(chapter.order + 1).padStart(2, "0")}</span><span className="chapter-nav-title">{chapter.title}</span><small>{chapter.questionIds.length}</small>{props.editable ? <GripVertical size={13} aria-hidden="true" /> : null}</button>{entries.length ? <button type="button" className="conversation-outline-expand" aria-label={expanded ? locale === "zh-CN" ? "收起问题" : "Collapse questions" : locale === "zh-CN" ? "展开问题" : "Expand questions"} aria-expanded={expanded} onClick={() => toggleChapter(chapter.id)}>{expanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}</button> : null}</div>
             {dropChapterId === chapter.id ? <span className="conversation-drop-label">{locale === "zh-CN" ? "松开，移入此章节" : "Release to move into this chapter"}</span> : null}
-            {expanded ? <div className="conversation-outline-questions">{entries.map((entry, index) => index < (chapterLimits[chapter.id] ?? 80) || entry.ids.includes(props.selectedMessageId ?? "") ? renderQuestion(normalizedQuery ? questionByMessageId.get(entry.ids.find(id => searchByMessageId.get(id)?.includes(normalizedQuery)) ?? "") ?? entry.message : entry.message, index, true, normalizedQuery ? undefined : entry.title, entry.ids) : null)}{entries.length > (chapterLimits[chapter.id] ?? 80) ? <button type="button" className="conversation-picker-more" onClick={() => setChapterLimits((current) => ({ ...current, [chapter.id]: (current[chapter.id] ?? 80) + 80 }))}>{locale === "zh-CN" ? "显示更多问题" : "Show more questions"}</button> : null}{!entries.length && props.editable ? <p className="conversation-outline-drop-hint">{locale === "zh-CN" ? "把问题拖到这里" : "Drop questions here"}</p> : null}</div> : null}
+            {expanded ? <div className="conversation-outline-questions">{entries.map((entry, index) => index < (chapterLimits[chapter.id] ?? 80) || entry.ids.includes(props.selectedMessageId ?? "") ? renderQuestion(normalizedQuery ? questionByMessageId.get(entry.ids.find(id => matchesQuery(textOf(id))) ?? "") ?? entry.message : entry.message, index, true, normalizedQuery ? undefined : entry.title, entry.ids) : null)}{entries.length > (chapterLimits[chapter.id] ?? 80) ? <button type="button" className="conversation-picker-more" onClick={() => setChapterLimits((current) => ({ ...current, [chapter.id]: (current[chapter.id] ?? 80) + 80 }))}>{locale === "zh-CN" ? "显示更多问题" : "Show more questions"}</button> : null}{!entries.length && props.editable ? <p className="conversation-outline-drop-hint">{locale === "zh-CN" ? "把问题拖到这里" : "Drop questions here"}</p> : null}</div> : null}
           </div>;
         };
 
@@ -183,7 +190,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
         {!props.chapters?.length ? <p className="conversation-chapter-empty">{locale === "zh-CN" ? "新建章节，再把下方问题拖到章节中。" : "Create a chapter, then drop questions into it."}</p> : null}
         {props.editable || searchedChapters.length <= 8 ? searchedChapters.map(renderChapter) : chronologicalGroups(searchedChapters, locale === "zh-CN").map((group) => <ChapterPhase key={group.id} title={group.title} count={group.items.length} active={group.items.some((item) => item.id === currentChapterId) && !props.overviewSelected} searching={Boolean(normalizedQuery)}>{group.items.map(renderChapter)}</ChapterPhase>)}
       </div> : null}
-      {!props.outlineLoading && listedMessages.length && (allQuestions || !chapters.length || visibleMessages.length) ? <div className="conversation-message-list" aria-label={t("conversationMessages")}><div className="conversation-question-heading">{!allQuestions && props.chapters?.length && props.onSelectUnassigned ? <button type="button" className="conversation-unassigned-open" onClick={props.onSelectUnassigned}>{locale === "zh-CN" ? "未归入章节" : "Unassigned questions"}<span>{visibleMessages.length}</span></button> : <><span>{allQuestions ? locale === "zh-CN" ? "全部问题" : "All questions" : props.chapters?.length ? locale === "zh-CN" ? "未归入章节" : "Unassigned questions" : props.manual ? locale === "zh-CN" ? "待整理的问题" : "Questions to organize" : t("questionsOnly")}</span><span className="conversation-question-count">{normalizedQuery ? filteredMessages.length : listedMessages.length}</span></>}</div>{props.editable && props.chapters?.length && !allQuestions ? <p className="conversation-sidebar-drop-instruction">{locale === "zh-CN" ? "拖动问题到上方章节" : "Drag a question into a chapter above"}</p> : null}{filteredMessages.map((message, index) => index < questionLimit || message.id === props.selectedMessageId ? renderQuestion(message, questionPositions.get(message.id) ?? index) : null)}{filteredMessages.length > questionLimit ? <button type="button" className="conversation-picker-more" onClick={() => setQuestionLimit((limit) => limit + 80)}>{locale === "zh-CN" ? `显示更多问题（还有 ${filteredMessages.length - questionLimit} 条）` : `Show more questions (${filteredMessages.length - questionLimit} remaining)`}</button> : null}{questionQuery && !filteredMessages.length ? <p className="conversation-question-empty">{locale === "zh-CN" ? "没有匹配的问题" : "No matching questions"}</p> : null}</div> : null}
+      {!props.outlineLoading && listedMessages.length && (allQuestions || !chapters.length || visibleMessages.length) ? <div className="conversation-message-list" aria-label={t("conversationMessages")}><div className="conversation-question-heading">{!allQuestions && props.chapters?.length && props.onSelectUnassigned ? <button type="button" className="conversation-unassigned-open" onClick={props.onSelectUnassigned}>{locale === "zh-CN" ? "未归入章节" : "Unassigned questions"}<span>{visibleMessages.length}</span></button> : <><span>{allQuestions ? locale === "zh-CN" ? "全部问题" : "All questions" : props.chapters?.length ? locale === "zh-CN" ? "未归入章节" : "Unassigned questions" : props.manual ? locale === "zh-CN" ? "待整理的问题" : "Questions to organize" : t("questionsOnly")}</span><span className="conversation-question-count">{normalizedQuery ? filteredMessages.length : listedMessages.length}</span></>}</div>{props.editable && props.chapters?.length && !allQuestions ? <p className="conversation-sidebar-drop-instruction">{locale === "zh-CN" ? "拖动问题到上方章节" : "Drag a question into a chapter above"}</p> : null}{filteredMessages.map((message, index) => index < questionLimit || message.id === props.selectedMessageId ? renderQuestion(message, questionPositions.get(message.id) ?? index, false, undefined, undefined, snippetById.get(message.id)) : null)}{filteredMessages.length > questionLimit ? <button type="button" className="conversation-picker-more" onClick={() => setQuestionLimit((limit) => limit + 80)}>{locale === "zh-CN" ? `显示更多问题（还有 ${filteredMessages.length - questionLimit} 条）` : `Show more questions (${filteredMessages.length - questionLimit} remaining)`}</button> : null}{questionQuery && !filteredMessages.length ? <p className="conversation-question-empty">{locale === "zh-CN" ? "没有匹配的问题" : "No matching questions"}</p> : null}</div> : null}
       </div>
       {props.onSelectTask ? <TaskSidebarSection runs={props.tasks ?? []} activeId={null} onSelect={props.onSelectTask} /> : null}
     </aside>

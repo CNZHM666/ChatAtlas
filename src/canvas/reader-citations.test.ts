@@ -21,6 +21,12 @@ describe("reader citations", () => {
     expect(result.get("m2")?.map(item => item.section)).toEqual(["Chapter one", "Chapter two"]);
   });
 
+  it("lists each chapter once, from the newest version of the project only", () => {
+    const sections = [{ id: "a", title: "Chapter one", evidenceIds: ["e1"] }, { id: "b", title: "Chapter one", evidenceIds: ["e1"] }] as unknown as FocusSession["sections"];
+    const result = readerCitations("c1", [message("m2", "p2")], [session({ id: "old", updatedAt: 1, sections }), session({ id: "new", updatedAt: 2, sections }), session({ id: "other", title: "Other", updatedAt: 1 })]);
+    expect(result.get("m2")?.map(item => `${item.sessionId}:${item.section}`)).toEqual(["new:Chapter one", "other:Chapter one", "other:Chapter two"]);
+  });
+
   it("ignores deleted, preview and developer ledger sessions", () => {
     const messages = [message("m2", "p2")];
     for (const patch of [{ deletedAt: 1 }, { status: "preview" as const }, { ledgerTest: true as const }]) expect(readerCitations("c1", messages, [session(patch)]).size).toBe(0);

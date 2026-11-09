@@ -2,7 +2,7 @@
 
 **简体中文** · [English](en/FIRST_RELEASE_OVERVIEW.md)
 
-版本：0.1.1 Early Preview。以下为可用入口和实际限制，不是全模型实测承诺。
+版本：0.1.2 Early Preview。以下为可用入口和实际限制，不是全模型实测承诺。
 
 ## 支持平台
 

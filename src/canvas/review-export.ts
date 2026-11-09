@@ -1,10 +1,11 @@
 import type { CanvasCard, Conversation, ConversationMessage } from "../shared/types";
 import type { ReviewMark } from "../storage/review-marks";
+import { platformName } from "../shared/platforms";
 
 function sourceLine(conversation?: Conversation): string {
   if (!conversation) return "Source unavailable in ChatAtlas";
   const date = new Date(conversation.sourceCreatedAt ?? conversation.createdAt ?? conversation.updatedAt).toISOString().slice(0, 10);
-  return `${conversation.title} · ${date} · ${conversation.platform}`;
+  return `${conversation.title} · ${date} · ${platformName(conversation.platform, "en")}`;
 }
 
 export function messageWithSource(message: ConversationMessage, card: CanvasCard, conversation?: Conversation): string {

@@ -28,6 +28,23 @@ describe("text diagrams", () => {
     expect(diagram.rows[2].filter(cell => cell.text === "│").map(cell => cell.column)).toEqual([0, 8, 17]);
     expect(diagram.rows[3].filter(cell => cell.text === "│").map(cell => cell.column)).toEqual([0, 8, 17]);
   });
+  it("lines up a frame, its nested button and the notes beside it when Chinese was counted as one column", () => {
+    const source = [
+      "┌──────────────────────┐",
+      "│ 25:00                │  ← 大号倒计时",
+      "│ 准备开始专注            │   ← 状态文字",
+      "│  ┌──────────────┐    │",
+      "│  │ 开始专注        │    │ ← 主按钮",
+      "│  └──────────────┘    │",
+      "└──────────────────────┘",
+    ].join("\n");
+    const diagram = textDiagram(source)!;
+    const bars = (row: number) => diagram.rows[row].filter(cell => cell.text === "│").map(cell => cell.column);
+    expect(bars(2)).toEqual([0, 23]);
+    expect(bars(4)).toEqual([0, 3, 18, 23]);
+    expect([1, 2, 4].map(row => diagram.rows[row].find(cell => cell.text === "←")?.column)).toEqual([26, 26, 26]);
+    expect(source).toContain("│ 准备开始专注            │   ← 状态文字");
+  });
   it("keeps type definitions and actual program examples as code", () => {
     expect(textDiagram('interface Message {\n  role: "user";\n}', "typescript")).toBeUndefined();
     expect(textDiagram('const box = `┌──┐\n│ A│\n└──┘`;', "javascript")).toBeUndefined();

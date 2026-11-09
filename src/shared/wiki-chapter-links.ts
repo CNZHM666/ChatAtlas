@@ -31,6 +31,10 @@ export function wikiChapterLinks(body:string,section:Pick<FocusSection,"id"|"cla
   if(node.type!=="paragraph")return;
   const value=text(node);
   if(value.length<MIN_REPEAT||!wikiExplanatorySentenceCount(value))return;
+  // The line over a table or code block says whose it is: one run's "…; your later decision takes precedence: USD only"
+  // read as told in an earlier chapter, and the AI's milestone table stood without it.
+  const next=nodes[at+1];
+  if(node.children.length===1&&node.children[0].type==="emphasis"&&(next?.type==="table"||next?.type==="code"||next?.type==="paragraph"&&text(next).startsWith("|")))return;
   const match=earlier.find(item=>item.covers(value)===1);
   // A claim stated only here is protected unless the explaining chapter already
   // carries the same claim (same original quote and evidence): then the pointer

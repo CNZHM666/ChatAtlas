@@ -29,7 +29,9 @@ it("fills a full-selection task on selection without starting until the user act
   fireEvent.click(screen.getByRole("checkbox", { name: sources[0].title }));
   expect(input()).toHaveValue(projectGoal); expect(request).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("checkbox", { name: sources[1].title }));
-  expect(screen.getByRole("button", { name: "已选 2 条" })).toBeVisible();
+  // The chosen materials show as chips above the input; no separate count below it.
+  expect(screen.getAllByRole("button", { name: /^移除材料/ })).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: /已选 \d+ 条/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /开始整理|搜索历史/ }));
   expect(request).toHaveBeenCalledOnce(); expect(request).toHaveBeenCalledWith(projectGoal, undefined, "project");
   expect(screen.getByRole("checkbox", { name: sources[1].title })).toBeChecked();

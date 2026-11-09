@@ -252,3 +252,13 @@ it("shows an arrowed run of steps as a strip and sets a long paragraph's first s
   // Layers read as stage cards.
   expect(container.querySelectorAll(".reading-stage-flow.is-labelled li")).toHaveLength(3);
 });
+
+it("folds a knowledge card's recall question, its answer a click away",()=>{
+ const content="### 条件判断 · 已会\n\nif/elif/else 从上往下判断。\n\n> **回忆**：多个条件都为 True 时，执行哪一个？\n>\n> if/elif/else 从上往下判断，遇到第一个 True 即停止。";
+ const {container}=render(<ReaderGuide content={content} zh complete hideCitationAnnotations/>);
+ const recall=container.querySelector("details.wiki-recall") as HTMLDetailsElement;
+ expect(recall.open).toBe(false);
+ expect(recall.querySelector(".wiki-recall-question")?.textContent).toBe("多个条件都为 True 时，执行哪一个？");
+ expect(recall.querySelector(".wiki-recall-answer")?.textContent).toContain("遇到第一个 True 即停止");
+ expect(container.querySelector("blockquote")).toBeNull();
+});

@@ -1934,12 +1934,15 @@ input::placeholder, textarea::placeholder { color: var(--faint); opacity: 1; }
 .project-trash button { display: flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .project-trash button:hover { color: var(--accent); background: var(--surface-solid); }
 .project-trash button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.project-trash-clear { margin: 0 0 8px; padding: 6px 0 10px; border-bottom: 1px solid var(--border); }
+.project-trash-clear { margin: 0 0 8px; padding: 0 0 8px; border-bottom: 1px solid var(--border); }
 .project-trash .project-trash-clear p { margin: 0 0 8px; font-size: 12px; line-height: 1.6; }
 .project-trash-clear > div { display: flex; justify-content: flex-end; gap: 8px; }
 .project-trash .project-trash-clear button { width: auto; height: auto; min-height: 28px; padding: 3px 6px; font-size: 12px; }
-.project-trash .project-trash-clear > button { margin-left: auto; }
-.project-trash .project-trash-clear > button, .project-trash .project-trash-clear > div > button:last-child { color: var(--danger,#c93d4f); }
+/* The clear action sits on the 回收站 row, at its right end, as the row's own action. */
+.project-trash summary > span { flex: 1; min-width: 0; }
+.project-trash summary > button.project-trash-empty { width: auto; height: auto; min-height: 22px; padding: 0 2px; color: var(--danger,#c93d4f); font-size: 12px; }
+.project-trash summary > button.project-trash-empty:hover { background: transparent; color: var(--danger,#c93d4f); text-decoration: underline; }
+.project-trash .project-trash-clear > div > button:last-child { color: var(--danger,#c93d4f); }
 .project-trash button:disabled { opacity: .5; cursor: default; }
 .reading-list .resume-action { display: flex; align-items: center; justify-content: flex-end; align-self: flex-start; flex: none; gap: 12px; padding-top: 2px; }
 .reading-list .resume-action small { margin: 0; font-size: 13px; font-weight: 500; line-height: 20px; color: var(--text); }
@@ -1980,6 +1983,11 @@ input::placeholder, textarea::placeholder { color: var(--faint); opacity: 1; }
 .reading-stage-flow:has(> li:nth-child(4):last-child) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
 @supports selector(:has(a)) { @container (min-width: 560px) { .reading-stage-flow:has(> li:nth-child(4):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); } } }
 .reading-stage-flow-frame { container-type: inline-size; }
+/* Sentence-length steps: one numbered column joined by a thin line, no card per step. */
+.reading-stage-flow-frame > ol.reading-stage-flow.reading-flow.is-steps { --stage-card-padding: 0 0 0 36px; grid-template-columns: minmax(0, 1fr); gap: 12px; max-width: none; }
+.reading-stage-flow-frame > ol.reading-stage-flow.reading-flow.is-steps > li { border: 0; border-radius: 0; background: transparent; }
+.reading-stage-flow-frame > ol.reading-stage-flow.reading-flow.is-steps > li::before { top: 1px; left: 0; }
+.reading-stage-flow-frame > ol.reading-stage-flow.reading-flow.is-steps > li:not(:last-child)::after { content: ""; position: absolute; left: 11px; top: 28px; bottom: -9px; width: 1px; background: var(--border); }
 /* A labelled stage names itself ("第一阶段", "P0"): no number beside it; the name is a small accent title over the
    text. A tight list puts the text straight in the item, a loose one in a paragraph: both read the same. */
 .conversation-answer-markdown .reading-stage-flow.is-labelled > li,
@@ -2023,3 +2031,8 @@ input::placeholder, textarea::placeholder { color: var(--faint); opacity: 1; }
 .reader-dil > details > summary { width: fit-content; color: var(--muted); font-size: var(--text-xs); cursor: pointer; }
 .reader-dil > details > summary:hover { color: var(--text); }
 .reader-dil > details > pre { max-height: 320px; margin: 8px 0 0; padding: 10px 12px; overflow: auto; border-radius: 8px; background: var(--surface-muted); font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Shown instead of a blank page when a part of it fails. */
+.panel-boundary { position: fixed; top: 64px; right: 16px; z-index: 60; display: grid; gap: 8px; width: min(380px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-solid); color: var(--text); box-shadow: var(--shadow); }
+.panel-boundary small { color: var(--muted); overflow-wrap: anywhere; }
+.panel-boundary > div { display: flex; gap: 8px; }

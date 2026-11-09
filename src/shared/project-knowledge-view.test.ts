@@ -1,7 +1,7 @@
 import {expect,it,vi} from "vitest";
 import {projectSession} from "../test/project-fixture";
 import {prepareManualWikiReview} from "../ai/wiki-manual-review";
-import {projectKnowledgeIntroduction,projectKnowledgeSection,projectKnowledgeView,relatedProjectFacts} from "./project-knowledge-view";
+import {knowledgeFactText,projectKnowledgeIntroduction,projectKnowledgeSection,projectKnowledgeView,relatedProjectFacts,type ProjectKnowledgeFact} from "./project-knowledge-view";
 import {projectSnapshot} from "./project-snapshot";
 import {projectOverviewText} from "../canvas/project-overview";
 import {sourceMessageSignature} from "./source-signature";
@@ -100,4 +100,11 @@ it("does not let prose claim a user confirmation that the sources read as an AI 
  expect(body).toContain("讨论建议（未发现用户确认）：采用 Orama 作为搜索引擎。");
  // A described rule mentioning confirmation is not a claimed decision.
  expect(body).toContain(rule); expect(body).not.toContain(`：${rule}`);
+});
+
+it("labels a project's chosen approach and proposal, and leaves a learning record's points as they are",()=>{
+ const fact=(adoption:string,status:string,text:string)=>({claim:{text,quote:text,evidenceIds:[]},adoption,status,implementation:"unknown"}) as unknown as ProjectKnowledgeFact;
+ expect(knowledgeFactText(fact("accepted","confirmed","能独立完成新建分支并创建 Pull Request。"))).toBe("已选择的方案：能独立完成新建分支并创建 Pull Request。");
+ expect(knowledgeFactText(fact("accepted","confirmed","能独立完成新建分支并创建 Pull Request。"),true,undefined,true)).toBe("能独立完成新建分支并创建 Pull Request。");
+ expect(knowledgeFactText(fact("unknown","proposal","Git 是本地版本控制工具。"),true,undefined,true)).toBe("Git 是本地版本控制工具。");
 });

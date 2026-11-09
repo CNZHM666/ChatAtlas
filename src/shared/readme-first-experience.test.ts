@@ -9,11 +9,10 @@ it("makes no-key basic search and pending demo visible before the product introd
  expect(zh).toContain("演示 GIF 占位：待录制");expect(en).toContain("Demo GIF placeholder: recording pending");
  for(const text of [zh,en])expect(text).toContain("<!-- demo-gif-placeholder:");
 });
-it("keeps the same four-column unmeasured timing table in Chinese and English",()=>{
- const tables=[zh,en].map(text=>text.split(/## 生成耗时|## Generation time/u)[1].split(/\n## /u)[0]);
- expect(tables[0]).toContain("待基准实测");expect(tables[1]).toContain("Pending benchmark measurements");
- expect(tables[0]).toContain("| 对话规模 | 首章可读 | 全部完成 | 模型 |");expect(tables[1]).toContain("| Conversation size | First readable chapter | Fully complete | Model |");
- for(const table of tables){const rows=table.split("\n").filter(line=>/^\| (?:单个|多个|Single|Multiple)/u.test(line));expect(rows).toHaveLength(2);for(const row of rows)expect(row.split("|").slice(2,5).map(cell=>cell.trim())).toEqual(["","",""]);}
+it("publishes no empty timing table and walks through installing the release ZIP in both languages",()=>{
+ expect(zh).not.toContain("## 生成耗时");expect(en).not.toContain("## Generation time");
+ for(const text of [zh,en]){expect(text).toContain("releases/latest");expect(text).toContain("ChatAtlas-extension-v");expect(text).toContain("chrome://extensions");expect(text).toContain("manifest.json");}
+ expect(zh).toContain("加载已解压的扩展程序");expect(en).toContain("Load unpacked");
 });
 it("retains the product principles' import and native-integration boundaries in both editions",()=>{
  const scope=principles.split("\n")[6];

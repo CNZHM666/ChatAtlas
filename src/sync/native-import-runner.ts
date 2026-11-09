@@ -195,7 +195,7 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
       const job: ImportJob = { id: "chatgpt-history", sessionId, status: "discovering", phase: "discovering", retryScope: "titles", offset: 0, discovered: 0, discoveredIds: [], persisted: 0, persistedIds: [], hydrated: 0, completed: 0, failed: 0, pendingIds: [], failedIds: [], startedAt: now, updatedAt: now, checkpoint: { sessionId, discoveredIds: [], persistedIds: [], failedIds: [], pendingIds: [], lastCursor: "", startedAt: now, updatedAt: now }, native: { version: 1, sources: sources.map(source => ({ id: source.id, platform: source.platform, origin: source.origin, tabId: source.tabId, label: source.label })), inventoryComplete: false } };
       return launch(job);
     }),
-    select: (ids: string[], available: NativeImportSource[] = []) => serialize(async () => {
+    select: (ids: string[], available: NativeImportSource[] = [], force = false) => serialize(async () => {
       if (flight) {
         if (current?.retryScope === "titles") { paused = true; await flight; }
         else {
@@ -229,7 +229,8 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
         await saveConversation({ ...item, nativeHistorySourceId: source.id });
       }
       job.retryScope = "selected"; job.status = "syncing";
-      const requested = valid.filter(item => job.pendingIds.includes(item.id) || !isCurrentHydrationComplete(item) || item.historyCoverage !== "complete" || !item.sourceUpdatedAt || !item.hydratedSourceUpdatedAt || item.sourceUpdatedAt > item.hydratedSourceUpdatedAt).map(item => item.id);
+      // Asked to sync again: every selected conversation is read, synced or not.
+      const requested = valid.filter(item => force || job.pendingIds.includes(item.id) || !isCurrentHydrationComplete(item) || item.historyCoverage !== "complete" || !item.sourceUpdatedAt || !item.hydratedSourceUpdatedAt || item.sourceUpdatedAt > item.hydratedSourceUpdatedAt).map(item => item.id);
       job.pendingIds = [...new Set([...job.pendingIds.filter(id => ids.includes(id)), ...requested])];
       prioritize(job, requested);
       return launch(job);

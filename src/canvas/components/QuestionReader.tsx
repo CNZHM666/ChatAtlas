@@ -6,13 +6,7 @@ import type { ConversationMessage } from "../../shared/types";
 import { isInternalSearchQueryMessage } from "../../shared/conversation-text";
 import { readerPosition, readerQuestionIndex } from "../reader-position";
 import { ReaderConversation } from "./ReaderConversation";
-
-function scrollContainer(element: HTMLElement | null): HTMLElement | null {
-  for (let parent = element?.parentElement; parent; parent = parent.parentElement) {
-    if (/(auto|scroll)/u.test(getComputedStyle(parent).overflowY)) return parent;
-  }
-  return element?.closest<HTMLElement>("main, aside") ?? null;
-}
+import { readerScrollContainer as scrollContainer } from "../reader-scroll";
 
 /** One reading control for original conversations, chapters and cited discussions.
  * The normal reader stays mounted while focused, preserving its loaded range. */

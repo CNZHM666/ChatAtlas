@@ -14,6 +14,13 @@ export function wikiReadingRouteOverview(session:FocusSession){
  if(!titles.length)return undefined;
  const zh=session.locale!=="en",quote=(text:string)=>zh?`「${text}」`:`“${text}”`;
  const route=titles.slice(0,3).map(quote);
+ // A learning record is read in the order it was learned, not consulted by subject.
+ if(session.wikiKnowledge?.documentType==="learning"){
+  const rest=titles.length>3?zh?` 等 ${titles.length} 章`:`, ${titles.length} chapters in all`:"";
+  const text=zh?`这份学习记录按学习顺序整理${quote(session.title)}的讨论：从${route[0]}开始${route.length>1?`，接着是${route.slice(1).join("、")}`:""}${rest}。复习时可先看下面的学习进度和常见错误。`
+   :`This learning record follows ${quote(session.title)} in the order it was learned: it starts with ${route[0]}${route.length>1?`, then ${route.slice(1).join(" and ")}`:""}${rest}. To review, start with where you stand and the common mistakes below.`;
+  return {version:1 as const,text,signature:wikiOverviewSignature(session),evidenceIds:[] as string[]};
+ }
  const text=zh?`这份文档按主题整理${quote(session.title)}的已有讨论。可先读${route[0]}${route.length>1?`，再看${route.slice(1).join("、")}`:""}${titles.length>3?"，其余章节按需查阅":""}。`
   :`This document organizes the existing discussions about ${quote(session.title)} by subject. Start with ${route[0]}${route.length>1?`, then read ${route.slice(1).join(" and ")}`:""}${titles.length>3?"; consult the remaining chapters as needed":""}.`;
  return {version:1 as const,text,signature:wikiOverviewSignature(session),evidenceIds:[] as string[]};

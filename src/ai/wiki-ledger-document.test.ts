@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { ledgerDocument } from "./wiki-ledger-document";
+import { earlierValuesHold, ledgerDocument } from "./wiki-ledger-document";
 import type { WikiKnowledgeLedger, WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 
 const unit = (index: number, statement: string, adoption: WikiKnowledgeUnit["adoption"]["status"] = "proposal", role: "user" | "assistant" = "assistant"): WikiKnowledgeUnit =>
@@ -123,4 +123,185 @@ it("marks an opening sentence saying two confirmed units once", () => {
   const claims = (ledgerDocument(ledger, {}).sections[0].claims ?? []).filter(claim => claim.text === opening);
   expect(claims).toHaveLength(1);
   expect(claims[0].unitIds).toEqual([first.id, second.id]);
+});
+
+it("keeps a stage limit no decision states out of the decided claim", () => {
+  const wanted = unit(1, "增加直接询问购买清单、提供比价推荐及链接的功能。", "user_decision", "user");
+  const units = [{ ...wanted, evidence: { ...wanted.evidence, quote: "我想让小白直接问购买清单，给比价推荐和链接" } }, unit(2, "本阶段不包含比价。")];
+  const text = "系统需增加直接询问购买清单、提供比价推荐及链接的功能；本阶段不包含比价。";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "检索", aliases: [], unitIds: units.map(item => item.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "检索", question: "?", group: "", subtopics: [{ title: "购买", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "检索", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "购买", text, unitIds: ["unit:1"], claims: [{ text, unitIds: ["unit:1"] }] }] }] } };
+  const claims = ledgerDocument(ledger, {}).sections[0].claims ?? [];
+  const decided = claims.filter(claim => claim.holder === "decided");
+  expect(decided.map(claim => claim.text)).toEqual(["系统需增加直接询问购买清单、提供比价推荐及链接的功能"]);
+});
+
+it("marks a table cell earlier only when no current unit it cites gives it", () => {
+  const units = [unit(1, "App Background #FAFAFA，Panel #FFFFFF。"), unit(2, "Dark 主背景 #0F0F10，Panel #151516。"), unit(3, "Dark 背景色 #101011，Panel #151516。")];
+  const text = "| 区域 | Light | Dark |\n| --- | --- | --- |\n| App Background | #FAFAFA | #0F0F10 |\n| Panel | #FFFFFF | #151516 |";
+  const cells = ["App Background", "#FAFAFA", "#0F0F10", "Panel", "#FFFFFF", "#151516"];
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 3, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "检索", aliases: [], unitIds: units.map(item => item.id) }], merged: [], relations: [{ older: "unit:2", newer: "unit:3", kind: "replaces", status: "resolved" }], report: {}, chapters: [{ id: "ch", title: "检索", question: "?", group: "", subtopics: [{ title: "配色", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "检索", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "配色", text, unitIds: ["unit:1", "unit:2", "unit:3"], claims: cells.map(cell => ({ text: cell, unitIds: /#151516|Panel/.test(cell) ? ["unit:1", "unit:2", "unit:3"] : ["unit:1", "unit:2"] })) }] }] } };
+  const claims = ledgerDocument(ledger, {}).sections[0].claims ?? [];
+  expect(claims.filter(claim => claim.holder === "earlier").map(claim => claim.text)).toEqual(["#0F0F10"]);
+});
+
+it("marks an opening sentence as decided only when most of it is the decision", () => {
+  const rule = unit(1, "禁止改变“Hardware IR作为唯一事实源”和“V0.1只支持ESP32模块化硬件”这两个核心原则。", "user_decision", "user");
+  const units = [{ ...rule, evidence: { ...rule.evidence, quote: "我想保持这两个核心原则不变：Hardware IR 唯一事实源，V0.1 只支持 ESP32 模块化硬件" } }];
+  const wide = "系统采用以 Hardware IR 为唯一事实源的架构，通过 Zod 定义可版本化的 JSON Schema，并遵循“AI负责推进，人负责确认”的原则。";
+  const close = "核心原则是不改变 Hardware IR 作为唯一事实源，V0.1 只支持 ESP32 模块化硬件。";
+  const ledgerOf = (opening: string): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: 1, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "检索", aliases: [], unitIds: ["unit:1"] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "检索", question: "?", group: "", subtopics: [{ title: "原则", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "检索", question: "?", group: "", body: `${opening}\n\n### 原则\n\n${rule.statement}`, problems: [], openingUnitIds: ["unit:1"],
+      paragraphs: [{ subtopic: "原则", text: rule.statement, unitIds: ["unit:1"], claims: [{ text: rule.statement, unitIds: ["unit:1"] }] }] }] } });
+  const openingMarks = (opening: string) => (ledgerDocument(ledgerOf(opening), {}).sections[0].claims ?? []).filter(claim => claim.markOnly).map(claim => claim.text);
+  expect(openingMarks(wide)).toEqual([]);
+  expect(openingMarks(close)).toEqual([close]);
+});
+
+it("keeps a sentence listing more than the decision it cites unmarked, and a replaced value earlier by its head noun", () => {
+  const decided = { ...unit(1, "Bank syncing and receipt OCR are excluded from v1 scope.", "user_decision", "user"), subject: "Scope" };
+  decided.evidence.quote = "Decided: for v1, do not include bank syncing or receipt OCR.";
+  const text = "Bank syncing, receipt OCR, AI coaching, native mobile apps, complex reports, and multi-device cloud synchronization are excluded from v1 scope.";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 1, batches: [{ sourceIds: [], status: "ok", units: [decided], rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "Scope", aliases: [], unitIds: [decided.id] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "Scope", question: "?", group: "", subtopics: [{ title: "Exclusions", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "Scope", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "Exclusions", text, unitIds: [decided.id], claims: [{ text, unitIds: [decided.id] }] }] }] } };
+  expect(ledgerDocument(ledger, {}).sections[0].claims?.find(claim => claim.text === text)?.holder).not.toBe("decided");
+  const earlier = unit(2, "Default card radius is 16px, dialog radius is 24px, border thickness is 1px.");
+  const current = unit(3, "Standard UI components use a global corner radius of 8px.", "user_decision", "user");
+  expect(earlierValuesHold("16px", [current], [earlier])).toBe(false);
+  expect(earlierValuesHold("Panel #151516", [unit(4, "Background #0F0F10, surface #111112.")], [unit(5, "Dark palette: Panel #151516, Background #000000.")])).toBe(true);
+});
+
+it("keeps a sentence saying its decision with a few words more decided", () => {
+  const decided = { ...unit(1, "The frontend stack is React + Vite + TypeScript.", "user_decision", "user"), subject: "Stack" };
+  decided.evidence.quote = "Decided: the stack is React + Vite + TypeScript.";
+  const text = "The confirmed frontend stack is React + Vite + TypeScript, operating as a web-only application.";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 1, batches: [{ sourceIds: [], status: "ok", units: [decided], rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "Stack", aliases: [], unitIds: [decided.id] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "Stack", question: "?", group: "", subtopics: [{ title: "Tech Stack", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "Stack", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "Tech Stack", text, unitIds: [decided.id], claims: [{ text, unitIds: [decided.id] }] }] }] } };
+  expect(ledgerDocument(ledger, {}).sections[0].claims?.find(claim => claim.text === text)?.holder).toBe("decided");
+});
+
+it("marks a current value and the earlier ones it says were replaced apart, reading a list item's label", () => {
+  const current = { ...unit(1, "Standard UI components use a global corner radius of 8px.", "user_decision", "user"), subject: "UI" };
+  current.evidence.quote = "Confirmed: the global corner radius is 8px.";
+  const earlier = { ...unit(2, "Default card radius is 16px, dialog radius is 24px."), subject: "UI" };
+  const claim = "Global standard is 8px; earlier proposals of 16px/24px were replaced.", text = `- **Dashboard top bar**: 48px.\n- **Global corner radius**: ${claim}`;
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units: [current, earlier], rejected: {} }],
+    decisions: { [earlier.id]: { verdict: "rejected", at: 0 } },
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "UI", aliases: [], unitIds: [current.id, earlier.id] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "UI", question: "?", group: "", subtopics: [{ title: "UI Specification", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "UI", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "UI Specification", text, unitIds: [current.id, earlier.id], claims: [{ text: claim, unitIds: [current.id, earlier.id] }] }] }] } };
+  const claims = ledgerDocument(ledger, {}).sections[0].claims ?? [];
+  expect(claims.map(item => [item.text, item.holder])).toEqual([["Global standard is 8px", "decided"], ["earlier proposals of 16px/24px were replaced.", "earlier"]]);
+  // Told as set aside rather than replaced: one run's answer "earlier specifications … are ignored" read the 8px as earlier.
+  const ignored = "Global standard is 8px; earlier specifications for 16px/24px radii are ignored.", told = text.replace(claim, ignored);
+  const chapter = ledger.draft!.chapters[0];
+  const next = { ...ledger, draft: { ...ledger.draft!, chapters: [{ ...chapter, body: told, paragraphs: [{ ...chapter.paragraphs[0], text: told, claims: [{ text: ignored, unitIds: [current.id, earlier.id] }] }] }] } };
+  expect((ledgerDocument(next, {}).sections[0].claims ?? []).map(item => [item.text, item.holder])).toEqual([["Global standard is 8px", "decided"], ["earlier specifications for 16px/24px radii are ignored.", "earlier"]]);
+});
+
+it("marks a Chinese decision apart from the earlier plan it names in parentheses", () => {
+  const current = { ...unit(1, "默认专注时长改为 50 分钟，休息时长改为 10 分钟。", "user_decision", "user"), subject: "计时" };
+  current.evidence.quote = "默认专注时长改为 50 分钟，休息时长改为 10 分钟。";
+  const earlier = { ...unit(2, "默认专注时间为 25 分钟，休息时间为 5 分钟。"), subject: "计时" };
+  const claim = "默认专注时长改为 50 分钟，休息时长改为 10 分钟（取代早期讨论的 25/5 分钟方案）。";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units: [current, earlier], rejected: {} }],
+    decisions: { [earlier.id]: { verdict: "rejected", at: 0 } },
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "计时", aliases: [], unitIds: [current.id, earlier.id] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "计时", question: "?", group: "", subtopics: [{ title: "计时规则", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "计时", question: "?", group: "", body: claim, problems: [],
+      paragraphs: [{ subtopic: "计时规则", text: claim, unitIds: [current.id, earlier.id], claims: [{ text: claim, unitIds: [current.id, earlier.id] }] }] }] } };
+  const claims = ledgerDocument(ledger, {}).sections[0].claims ?? [];
+  expect(claims.map(item => [item.text, item.holder])).toEqual([["默认专注时长改为 50 分钟，休息时长改为 10 分钟", "decided"], ["取代早期讨论的 25/5 分钟方案）。", "earlier"]]);
+});
+
+it("marks a value apart from the earlier ones it says it replaces", () => {
+  const current = { ...unit(1, "Standard UI components use a global corner radius of 8px.", "user_decision", "user"), subject: "UI" };
+  current.evidence.quote = "Confirmed: the global corner radius is 8px.";
+  const earlier = { ...unit(2, "Default card radius is 16px, dialog radius is 24px."), subject: "UI" };
+  const claim = "Standard UI components use a global corner radius of 8px, replacing earlier suggestions of 16px or 24px.", text = `- ${claim}`;
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units: [current, earlier], rejected: {} }],
+    decisions: { [earlier.id]: { verdict: "rejected", at: 0 } },
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "UI", aliases: [], unitIds: [current.id, earlier.id] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "UI", question: "?", group: "", subtopics: [{ title: "UI Specification", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "UI", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "UI Specification", text, unitIds: [current.id, earlier.id], claims: [{ text: claim, unitIds: [current.id, earlier.id] }] }] }] } };
+  expect((ledgerDocument(ledger, {}).sections[0].claims ?? []).map(item => [item.text, item.holder])).toEqual([["Standard UI components use a global corner radius of 8px", "decided"], ["replacing earlier suggestions of 16px or 24px.", "earlier"]]);
+});
+
+it("keeps a sentence decided when the analysis it also cites only repeats the decision", () => {
+  const decided = { ...unit(1, "The frontend stack is React + Vite + TypeScript.", "user_decision", "user"), subject: "Stack" };
+  decided.evidence.quote = "Decided: the stack is React + Vite + TypeScript.";
+  const analysis = { ...unit(2, "The frontend stack is React + Vite + TypeScript, web-only."), subject: "Stack", kind: "fact" as const };
+  const text = "The confirmed frontend stack is React + Vite + TypeScript, operating as a web-only application.";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units: [decided, analysis], rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "Stack", aliases: [], unitIds: [decided.id, analysis.id] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "Stack", question: "?", group: "", subtopics: [{ title: "Tech Stack", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "Stack", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "Tech Stack", text, unitIds: [decided.id, analysis.id], claims: [{ text, unitIds: [decided.id, analysis.id] }] }] }] } };
+  expect(ledgerDocument(ledger, {}).sections[0].claims?.find(claim => claim.text === text)?.holder).toBe("decided");
+});
+
+it("marks a decision before the long addition the writer gave it, the addition left unmarked", () => {
+  const decided = { ...unit(1, "The frontend stack is React + Vite + TypeScript.", "user_decision", "user"), subject: "Stack" };
+  decided.evidence.quote = "Decided: the stack is React + Vite + TypeScript.";
+  const text = "The frontend stack is React + Vite + TypeScript, designed for a responsive web layout that prioritizes mobile-browser usability while avoiding unnecessary infrastructure until core product validation.";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 1, batches: [{ sourceIds: [], status: "ok", units: [decided], rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "Stack", aliases: [], unitIds: [decided.id] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "Stack", question: "?", group: "", subtopics: [{ title: "Tech Stack", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "Stack", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "Tech Stack", text, unitIds: [decided.id], claims: [{ text, unitIds: [decided.id] }] }] }] } };
+  expect((ledgerDocument(ledger, {}).sections[0].claims ?? []).map(claim => [claim.text, claim.holder])).toEqual([["The frontend stack is React + Vite + TypeScript", "decided"]]);
+});
+
+it("reads a decision told in the words of a suggestion only restating it as decided", () => {
+  const decided = { ...unit(1, "v1 is web only, with no native mobile app.", "user_decision", "user"), subject: "Scope" };
+  decided.evidence.quote = "Decided: v1 is web only, no native mobile app.";
+  const restating = { ...unit(2, "V1 is Web only; no native iOS or Android apps."), subject: "Scope" };
+  const text = "The platform is strictly Web only; there are no native iOS or Android apps.";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units: [decided, restating], rejected: {} }],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "Scope", aliases: [], unitIds: [decided.id, restating.id] }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "Scope", question: "?", group: "", subtopics: [{ title: "V1 Scope", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "Scope", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "V1 Scope", text, unitIds: [decided.id, restating.id], claims: [{ text, unitIds: [decided.id] }] }] }] } };
+  expect(ledgerDocument(ledger, {}).sections[0].claims?.find(claim => claim.text === text)?.holder).toBe("decided");
+});
+
+it("marks a learning record's mistakes as corrected and the user's own choice as theirs, with no decision marks", () => {
+  const units = [unit(1, "只学 Python 基础。", "user_decision", "user"), unit(2, "注意区分赋值 = 与比较 ==。"), unit(3, "排序按时间。")];
+  const text = "只学 Python 基础。注意区分赋值 = 与比较 ==。排序按时间。";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 3, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], documentType: "learning", learningRoles: { "unit:1": "goal", "unit:2": "mistake", "unit:3": "concept" },
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "检索", aliases: [], unitIds: units.map(item => item.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "基础", question: "?", group: "", subtopics: [{ title: "语法", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "基础", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "语法", text, unitIds: units.map(item => item.id), claims: [{ text: "只学 Python 基础。", unitIds: ["unit:1"] }, { text: "注意区分赋值 = 与比较 ==。", unitIds: ["unit:2"] }, { text: "排序按时间。", unitIds: ["unit:3"] }] }] }] } };
+  const claims = ledgerDocument(ledger, {}).sections[0].claims ?? [];
+  expect(claims.map(claim => [claim.text, claim.holder])).toEqual([["只学 Python 基础。", "user"], ["注意区分赋值 = 与比较 ==。", "corrected"], ["排序按时间。", undefined]]);
+});
+
+it("puts no mark after a code block shown under a mistake", () => {
+  const units = [unit(1, "注意区分赋值 = 与比较 ==。"), unit(2, "注意区分赋值 = 与比较 ==，代码见下。")];
+  const text = "注意区分赋值 = 与比较 ==。", code = "*「语法」的清单*\n\n```text\n今天学会：\nif x == 3\n```";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], documentType: "learning", learningRoles: { "unit:1": "mistake", "unit:2": "mistake" },
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "检索", aliases: [], unitIds: units.map(item => item.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "基础", question: "?", group: "", subtopics: [{ title: "语法", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "基础", question: "?", group: "", body: `${text}\n\n${code}`, problems: [],
+      paragraphs: [{ subtopic: "语法", text, unitIds: ["unit:1"], claims: [{ text, unitIds: ["unit:1"] }] }, { subtopic: "语法", text: code, unitIds: ["unit:2"] }] }] } };
+  const claims = ledgerDocument(ledger, {}).sections[0].claims ?? [];
+  expect(claims.map(claim => [claim.text, claim.holder])).toEqual([[text, "corrected"]]);
+});
+
+it("leaves the AI's answer to the learner's question unmarked in a learning record", () => {
+  const asked = { ...unit(1, "建议在同一个对话中继续学习。", "user_decision", "user") };
+  asked.evidence = { ...asked.evidence, quote: "我是新开个对话还是在这个对话里面继续" };
+  const units = [asked, unit(2, "列表索引从 0 开始。")];
+  const text = "建议在同一个对话中继续学习。列表索引从 0 开始。";
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: 0, status: "complete", materials: 2, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], documentType: "learning", learningRoles: { "unit:1": "method", "unit:2": "concept" },
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "检索", aliases: [], unitIds: units.map(item => item.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "基础", question: "?", group: "", subtopics: [{ title: "语法", subjectIds: ["s"] }] }] },
+    draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "基础", question: "?", group: "", body: text, problems: [],
+      paragraphs: [{ subtopic: "语法", text, unitIds: units.map(item => item.id), claims: [{ text: "建议在同一个对话中继续学习。", unitIds: ["unit:1"] }, { text: "列表索引从 0 开始。", unitIds: ["unit:2"] }] }] }] } };
+  const claims = ledgerDocument(ledger, {}).sections[0].claims ?? [];
+  expect(claims.map(claim => claim.holder)).toEqual([undefined, undefined]);
 });

@@ -5,7 +5,7 @@ body:
     id: environment
     attributes:
       label: 版本与环境
-      placeholder: ChatAtlas 0.1.1 / Chrome 版本 / 服务商与模型（如适用）
+      placeholder: ChatAtlas 0.1.2 / Chrome 版本 / 服务商与模型（如适用）
     validations:
       required: true
   - type: textarea

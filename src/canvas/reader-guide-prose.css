@@ -71,3 +71,14 @@
 .reading-inline-flow-arrow { font-size: 0; }
 .reading-inline-flow-arrow::after { content: "→"; padding: 0 5px; color: var(--muted); font-size: 13px; }
 .reading-lead { color: var(--text); font-weight: 600; }
+
+/* A knowledge card's recall question: asked first, the answer a click away. */
+.reader-guide-prose .wiki-recall { margin: 12px 0; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface-muted); }
+.reader-guide-prose .wiki-recall > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 8px 12px; cursor: pointer; list-style: none; color: var(--text); }
+.reader-guide-prose .wiki-recall > summary::-webkit-details-marker { display: none; }
+.reader-guide-prose .wiki-recall-label { font-weight: 600; color: var(--accent); }
+.reader-guide-prose .wiki-recall-question { flex: 1 1 16em; }
+.reader-guide-prose .wiki-recall > summary small { color: var(--muted); font-size: 12px; }
+.reader-guide-prose .wiki-recall[open] > summary small { visibility: hidden; }
+.reader-guide-prose .wiki-recall-answer { padding: 0 12px 8px; border-top: 1px solid var(--border); }
+.reader-guide-prose .wiki-recall-answer > p { margin: 8px 0 0; }

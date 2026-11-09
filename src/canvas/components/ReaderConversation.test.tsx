@@ -32,6 +32,13 @@ it("uses the same horizontal stage presentation for original discussions", () =>
   expect(container.querySelectorAll(".reading-stage-flow li")).toHaveLength(5);
   expect(container.querySelector(".reading-stage-flow")).toHaveTextContent("欢迎页 对话确认 方案草稿 验证 调试");
   expect(content).toContain("5. 调试");
+  expect(container.querySelector(".reading-stage-flow.is-steps")).toBeNull();
+});
+
+it("reads sentence-length steps as a numbered column, not cards", () => {
+  const content = "阶段1：首次安装与启动\n\n1. 用户从 Chrome Web Store 安装「专注计时器」，或通过开发者模式加载扩展。\n2. 用户点击浏览器右上角的扩展图标。\n3. 首次打开后直接进入计时首页，不要求注册、登录或完成引导问卷。";
+  const { container } = render(<ReaderConversation messages={[message(0, content)]} zh />);
+  expect(container.querySelector(".reading-stage-flow")).toHaveClass("is-steps");
 });
 
 it("renders retained UI between its original paragraphs and offers source for native-only components", () => {

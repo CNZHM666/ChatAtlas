@@ -12,7 +12,7 @@ const DISCLAIMER=WIKI_STATUS_DISCLAIMER;
  * since detection covers only cited passages. The status line states this instead. */
 const PROGRESS_ABSENCE=/尚未有用户(?:确认|报告|决定)|(?:未见|没有|尚无)用户(?:确认|报告|决定)|尚无(?:用户)?(?:确认|报告)的(?:实际)?进展|no user[- ](?:confirmed|reported|confirmation|report)/iu;
 export function withoutProgressDisclaimer(text:string):string {
- const sentences=text.split(/(?<=[。！？!?])\s*/u).filter(Boolean),kept=sentences.filter(sentence=>!PROGRESS_ABSENCE.test(sentence));
+ const sentences=text.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))\s*/u).filter(Boolean),kept=sentences.filter(sentence=>!PROGRESS_ABSENCE.test(sentence));
  return kept.length&&kept.length<sentences.length?kept.join(/[一-鿿]/u.test(text)?"":" "):text;
 }
 
@@ -28,7 +28,7 @@ const prose=memo(proseOf);
 function proseOf(body:string):string[]{
  // Code, tables, quotations and headings are literal or navigational, not explanations.
  const text=body.replace(/^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[^\n]*$/gmu,"").split("\n").filter(line=>!/^\s*(?:#{1,6}\s|\||>)/u.test(line)).join("\n");
- return text.split(/(?<=[。！？!?])|\n+/u).filter(sentence=>!DISCLAIMER.test(sentence)).map(normalize).filter(sentence=>sentence.length>=MIN_CHARACTERS);
+ return text.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))|\n+/u).filter(sentence=>!DISCLAIMER.test(sentence)).map(normalize).filter(sentence=>sentence.length>=MIN_CHARACTERS);
 }
 // Callers only read the returned sets; a shared cached set is never mutated.
 const trigrams=memo((sentence:string)=>{const grams=new Set<string>();for(let i=0;i+3<=sentence.length;i++)grams.add(sentence.slice(i,i+3));return grams;});

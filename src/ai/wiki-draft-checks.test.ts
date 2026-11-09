@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { mergeOverlappingRows, scopeDisagreements, scopeTables, statusClashes, stageOf, versionDisagreements } from "./wiki-draft-checks";
+import { mergeOverlappingRows, pendingDisagreements, scopeDisagreements, scopeTables, staleValueNotes, statusClashes, stageOf, versionDisagreements } from "./wiki-draft-checks";
 import type { WikiDraftChapter } from "../shared/wiki-knowledge";
 
 const chapter = (id: string, title: string, texts: string[]): WikiDraftChapter => ({ id, title, question: "", group: "", problems: [], body: texts.join("\n\n"), paragraphs: texts.map(text => ({ subtopic: "s", text, unitIds: [] })) });
@@ -93,13 +93,17 @@ it("merges lines leaving items out of each stage into one table, each row adding
     "- 严禁大量 hardcode UI、使用 any。", "",
     "| 阶段 | 不做 | 只做 |", "| --- | --- | --- |",
     "| 当前阶段 | PCB、KiCad、Wokwi、代码生成、数据库 | 仅聚焦 AI 理解层和 Undo |",
-    "| 本阶段 | 另加 拍照识别、数据库开发 | — |",
+    "| 本阶段 | 同上，另加 拍照识别、数据库开发 | — |",
     "| Milestone 3.2 和 3.3 阶段 | 同上 | — |",
   ].join("\n"));
   expect(plan.body).toBe(plan.paragraphs[0].text);
-  expect(plan.paragraphs[0].claims).toEqual([{ text: "另加 拍照识别、数据库开发", unitIds: ["u2"] }, { text: "Milestone 3.2 和 3.3 阶段", unitIds: ["u3"] }]);
+  expect(plan.paragraphs[0].claims).toEqual([{ text: "同上，另加 拍照识别、数据库开发", unitIds: ["u2"] }, { text: "Milestone 3.2 和 3.3 阶段", unitIds: ["u3"] }]);
   // One such line is a list item, not a table.
   expect(scopeTables([chapter("b", "规划", ["- 本阶段不做 PCB、KiCad、Wokwi。\n- 先做导入。"])])).toBe(0);
+  // What a line keeps to, told before its limit, goes under 只做, not 阶段.
+  const kept = chapter("c", "规划", [["- **第一版**：严格限定为 ESP32 DevKit V1 + 常见模块，禁止加入 PCB设计、STM32、FPGA。", "- **当前阶段禁令**：禁止扩展 PCB、KiCad、Wokwi。"].join("\n")]);
+  scopeTables([kept]);
+  expect(kept.paragraphs[0].text).toContain("| 第一版 | PCB设计、STM32、FPGA | ESP32 DevKit V1 + 常见模块 |");
 });
 
 it("compares scope only within one stage", () => {
@@ -165,4 +169,65 @@ it("matches a name as a whole word, reads a negated priority as none, and leaves
   // Without that, it would be read as this project's proposal: the check still catches a use of this project's own.
   const ours = chapter("d", "架构", ["使用 LangGraph 进行 Agent 编排。"]);
   expect(scopeDisagreements([scope(), ours])).toBe(1);
+});
+
+it("reads a scope line after its label, names a stageless row by its label, and drops an empty column", () => {
+  const lines = [
+    "- **当前阶段禁止项**：禁止扩展30个元件、PCB、KiCad、Wokwi、代码生成、数据库。",
+    "- **阶段禁令**：明确禁止开发 PCB、仿真、固件生成、高压设计。",
+  ];
+  const plan = chapter("a", "开发规划", [lines.join("\n")]);
+  expect(scopeTables([plan])).toBe(2);
+  expect(plan.paragraphs[0].text).toBe([
+    "| 阶段 | 不做 |", "| --- | --- |",
+    "| 当前阶段禁止项 | 扩展30个元件、PCB、KiCad、Wokwi、代码生成、数据库 |",
+    "| 阶段禁令 | 同上，另加 仿真、固件生成、高压设计 |",
+  ].join("\n"));
+});
+
+it("notes a value the user changed that a paragraph citing neither version still gives", () => {
+  const statements: Record<string, string> = { old: "默认 25 分钟专注、5 分钟休息（25/5）。", now: "默认专注时长改为 50 分钟，休息 10 分钟（50/10）。" };
+  const relations = [{ older: "old", newer: "now", kind: "replaces", status: "resolved" }];
+  const flow = chapter("a", "核心流程", ["首次打开默认显示 25:00，点击开始。", "专注结束后进入 5 分钟休息。", "此前为 25/5，后改为 50/10。", "当前默认 50 分钟。"]);
+  expect(staleValueNotes([flow], relations, id => statements[id], id => id === "now", "zh-CN")).toBe(1);
+  expect(flow.body).toContain("首次打开默认显示 25:00，点击开始。\n\n> 数值已更新：这里的「25:00」是较早的数值；你后来决定默认专注时长改为 50 分钟，休息 10 分钟（50/10）。");
+  // A lone one-digit value says too little; the change told, or the new value given, is left alone.
+  expect(flow.body.match(/数值已更新/gu)).toHaveLength(1);
+  // A change the user did not make is not noted.
+  const other = chapter("b", "流程", ["首次打开默认显示 25:00。"]);
+  expect(staleValueNotes([other], relations, id => statements[id], () => false, "zh-CN")).toBe(0);
+});
+
+it("notes a first-version item that a list of pending items names", () => {
+  const scope = chapter("a", "产品定位", ["第一版包含学习任务名称（如“高等数学”）。", "第一版支持暂停与继续。"]);
+  const plan = chapter("b", "规划路线", ["其他待定事项还包括任务名称、7天统计、提前结束统计、跨午夜归属等。"]);
+  expect(pendingDisagreements([scope, plan])).toBe(1);
+  expect(scope.body).toContain("第一版包含学习任务名称（如“高等数学”）。\n\n> 范围有分歧：这里写「第一版包含学习任务名称（如“高等数学”）」，「规划路线」中又把「任务名称」列为待定事项。第一版是否包含，需要你确认。");
+  expect(pendingDisagreements([chapter("c", "范围", ["第一版支持暂停与继续。"]), plan])).toBe(0);
+});
+
+it("pairs old and new values in order, reads two minute values as a pair, and puts the note before a code block", () => {
+  const statements: Record<string, string> = { old: "第一版默认专注时长为25分钟，短休息时长为5分钟，每4轮后休息15分钟。", now: "用户决定将默认专注时长改为 50 分钟，休息时长改为 10 分钟。" };
+  const relations = [{ older: "old", newer: "now", kind: "replaces", status: "resolved" }];
+  const scope = chapter("a", "产品定位", ["第一版仅保留固定25/5交替计时与通知。", "是否加入每 4 个番茄钟一次的 15 分钟长休息尚未确定。", "标准流程为：25分钟专注 -> 提醒。\n\n```\nidle — 准备开始\n\nfocusing — 专注中\n```"]);
+  expect(staleValueNotes([scope], relations, id => statements[id], id => id === "now", "zh-CN")).toBe(2);
+  expect(scope.body).toContain("第一版仅保留固定25/5交替计时与通知。\n\n> 数值已更新：这里的「25/5」是较早的数值；你后来决定默认专注时长改为 50 分钟，休息时长改为 10 分钟。");
+  // The long break was not decided again.
+  expect(scope.body).toContain("15 分钟长休息尚未确定。\n\n标准流程");
+  expect(scope.body).toContain("标准流程为：25分钟专注 -> 提醒。\n\n> 数值已更新：这里的「25分钟」");
+  expect(scope.body.endsWith("```")).toBe(true);
+});
+
+it("keeps apart rows that give different values in one column", () => {
+  const table = "| 阶段 | 时长 | 界面/行为特征 |\n| --- | --- | --- |\n| 专注 | 50 分钟 | 显示暖棕色剩余分钟；完成后发送通知，等待用户手动开始休息 |\n| 休息 | 10 分钟 | 显示绿色剩余分钟；完成后发送通知，等待用户手动开始下一轮 |\n| 暂停 | - | 显示灰色标识；暂停时间不计入实际学习时长 |";
+  expect(mergeOverlappingRows(table)).toEqual({ text: table, merged: 0 });
+});
+
+it("reads a decided table cell with its row: an item the user decided to leave out is no disagreement", () => {
+  const decided = "| 事项 | 第一版 |\n| --- | --- |\n| 账号系统 | 不做，所有数据仅存储在本地 |";
+  const data = { ...chapter("a", "数据模型存储", [decided]) };
+  data.paragraphs[0].claims = [{ text: "账号系统", unitIds: ["u"] }];
+  const stages = chapter("b", "阶段安排", ["第一版暂不开发 AI 助手、网站屏蔽、复杂任务管理、社交排行榜及账号系统，以避免 MVP 过于复杂。"]);
+  expect(scopeDisagreements([data, stages], new Set(["账号系统"]))).toBe(0);
+  expect(stages.body).not.toContain("范围有分歧");
 });

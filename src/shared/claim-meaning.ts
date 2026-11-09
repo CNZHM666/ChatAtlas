@@ -7,7 +7,7 @@ const FIRM = /必须|一定要|已决定|已确定|确定采用|决定采用|已
 /** The sentences of a quote that state the claim: a long quote (a pasted document) also holds sentences about other
  * things, whose "不要" or "考虑" says nothing about this claim. Matched by shared character pairs. */
 function claimSentences(claim: string, quote: string): string {
-  const sentences = quote.split(/(?<=[。！？!?；;\n])/u).map(item => item.trim()).filter(Boolean);
+  const sentences = quote.split(/(?:(?<=[。！？!?；;\n])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))/u).map(item => item.trim()).filter(Boolean);
   if (sentences.length < 2) return quote;
   const pairs = (text: string) => { const chars = Array.from(text.normalize("NFKC").replace(/[\s\p{P}]/gu, "")); return new Set(chars.slice(1).map((char, index) => chars[index] + char)); };
   const own = pairs(claim), score = (text: string) => { const theirs = pairs(text); let shared = 0; for (const pair of own) if (theirs.has(pair)) shared++; return own.size ? shared / own.size : 0; };

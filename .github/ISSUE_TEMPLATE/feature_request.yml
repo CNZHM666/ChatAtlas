@@ -1,0 +1,35 @@
+name: 功能建议 / Feature request
+description: 说明你想解决的问题和使用场景，勿提交密钥或私人聊天内容。
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么问题 / Problem
+      description: 你在什么场景下遇到了困难？例如「找不到三周前讨论过的方案」。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望怎样改进 / Proposal
+      description: 描述你期望的做法；不确定也没关系。
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 相关功能 / Area
+      options:
+        - 导入与保存对话 / Import and capture
+        - 查找与阅读 / Search and reading
+        - 项目文档整理 / Project documents
+        - 学习模式（测试中）/ Learning mode (beta)
+        - 导出 / Export
+        - 侧栏 / Side panel
+        - 其他 / Other
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息 / Context
+      description: 截图或示例请先删除 API Key、身份信息和私人对话。

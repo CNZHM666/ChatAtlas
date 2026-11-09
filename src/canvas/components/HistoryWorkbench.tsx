@@ -1,9 +1,10 @@
 import { homeEntryIntent } from "../../shared/home-entry-intent";
 import {experimentalHomeGoal} from "../../shared/home-experiments";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Compass, FileText, FolderGit2, Info, MessageSquare, Plus, Search, X } from "lucide-react";
+import { Compass, FileText, FolderGit2, Info, MessageSquare, Plus, Search, X } from "lucide-react";
 import type { Conversation, ConversationMessage } from "../../shared/types";
 import { AIQuickSelect } from "./AIQuickSelect";
+import { DocumentTypePicker } from "./DocumentTypePicker";
 import type { HomeTaskPlan } from "../../ai/home-task";
 import { usePreferences } from "../preferences";
 import type { MessageSourceRange } from "../../shared/message-location";
@@ -18,7 +19,7 @@ export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSou
   conversations: Conversation[]; goal: string; onGoal: (goal: string) => void;
   onRequest: (goal: string, ids?: string[], action?: HomeTaskPlan["action"], localSearch?: boolean) => void; onSources: () => void;
   onRead?: (id: string, message?: ConversationMessage, sourceRange?: MessageSourceRange) => void;
-  onHydrate: (ids: string[]) => void; onDiscover: () => void; onConfigureAI?: () => void; selectedIds?: Set<string>; onSelectedIds?: (ids: Set<string>) => void; discovery?: boolean; onDiscoverGoal?: (goal:string,poolIds:string[])=>void; experimentalActions?:boolean;
+  onHydrate: (ids: string[], force?: boolean) => void; onDiscover: () => void; onConfigureAI?: () => void; selectedIds?: Set<string>; onSelectedIds?: (ids: Set<string>) => void; discovery?: boolean; onDiscoverGoal?: (goal:string,poolIds:string[])=>void; experimentalActions?:boolean;
 }) {
   const { locale } = usePreferences(), zh = locale === "zh-CN";
   const projectGoal=defaultGoals.project[locale],summaryGoal=defaultGoals.summary[locale];
@@ -117,7 +118,7 @@ export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSou
       </label>
       <div className="goal-composer-footer">
         {!materials.length ? <button type="button" className="history-selection-summary" onClick={onSources}><Plus size={14}/>{zh ? "添加材料" : "Add materials"}</button> : null}
-        {selectedIds?.size ? <button type="button" className="history-selection-summary" onClick={onSources}>{zh ? `已选 ${selectedIds.size} 条` : `${selectedIds.size} selected`}<ChevronDown size={14} /></button> : null}
+        {currentAction === "project" ? <DocumentTypePicker zh={zh} /> : null}
         <div className="goal-composer-actions"><AIQuickSelect zh={zh} configureLabel={zh ? "配置模型" : "Configure model"} onConfigure={onConfigureAI} onBusy={setSwitchingAI} /><button className="primary" title="Ctrl / ⌘ + Enter" disabled={!goal.trim() || switchingAI}><Search size={15} />{shortcut===3?zh?"发现主题":"Discover topics":currentAction === "project" ? zh ? "开始整理" : "Organize project" : currentAction === "continue" ? zh ? "继续项目" : "Continue project" : summary ? zh ? "总结讨论" : "Summarize" : currentAction==="clarify"?zh?"选择操作":"Choose action":zh ? "搜索历史" : "Search history"}</button></div>
       </div>
     </form>

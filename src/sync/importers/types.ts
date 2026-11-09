@@ -42,7 +42,11 @@ export async function captureFromDrafts(conversation: Conversation, drafts: Draf
     if (draft.role === "user") lastUserId = id;
     messages.push({ id, conversationId: conversation.id, platformMessageId, replyToMessageId: draft.role === "assistant" ? lastUserId : undefined, messageIndex: messages.length, role: draft.role, content, preview: previewMessage(content), contentHash, sourceCreatedAt: draft.createdAt, createdAt: draft.createdAt ?? capturedAt, updatedAt: capturedAt });
   }
-  return { conversation: { ...conversation, messageCount: messages.length, importState: "complete", hydrationState: "hydrated" }, messages, capturedAt };
+  // A platform whose list gives only the last update (DeepSeek) still dates its messages: the first one is when the
+  // conversation began, which is what tells two conversations' order apart.
+  const firstSaid = drafts.map(draft => draft.createdAt).filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= Date.UTC(2000, 0, 1) && value <= capturedAt + 86_400_000).reduce<number | undefined>((first, value) => first === undefined || value < first ? value : first, undefined);
+  const began = conversation.sourceCreatedAt ?? firstSaid;
+  return { conversation: { ...conversation, ...(began !== undefined ? { sourceCreatedAt: began } : {}), messageCount: messages.length, importState: "complete", hydrationState: "hydrated" }, messages, capturedAt };
 }
 
 export function baseConversation(fields: { id: string; platform: string; source: string; title: string; url?: string; createdAt?: number; updatedAt?: number }): Conversation {

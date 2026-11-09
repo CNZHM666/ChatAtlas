@@ -1,3 +1,4 @@
+import { LEAVES_OUT } from "../shared/negation";
 /** Wiki quality evaluation over an exported Markdown document. Deterministic text
  * rules only: the labelled cases carry the judgement, scoring never calls a model.
  * Used by `npm run eval:wiki` and by the synthetic regression test. */
@@ -53,7 +54,7 @@ const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { assistantRequest, wikiGroupMetrics } from "../shared/wiki-knowledge";
 import { statusClashes } from "../ai/wiki-draft-checks";
-const sentencesOf = (text: string) => text.split(/(?<=[。！？!?])/u).map(sentence => sentence.trim()).filter(sentence => sentence.length >= 20);
+const sentencesOf = (text: string) => text.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))/u).map(sentence => sentence.trim()).filter(sentence => sentence.length >= 20);
 const sameSentence = (first: string, second: string) => {
   const a = knowledgeTerms(first), b = knowledgeTerms(second);
   return a.size >= 6 && b.size >= 6 && [...a].filter(term => b.has(term)).length / Math.min(a.size, b.size) >= .8;
@@ -112,7 +113,7 @@ const EARLIER = /此前|早期|早先|曾(?:提出|建议|计划|考虑)|后(?:�
 // Status or holder wording in the prose: status has one expression, the mark after the sentence.
 const QUALIFIER = /AI\s?建议|讨论建议|AI\s?推荐|AI\s?认为|未发现用户确认|(?:提供的)?资料(?:还|也)?提出|分析(?:还)?指出|据(?:资料|讨论|用户提供)|用户(?:还)?提出[：:]/gu;
 /** A status mark after a sentence ("。〔已定〕"), moved inside it so the sentence carries its own mark when split. */
-const MARK_AFTER = /([。！？])(〔(?:已定|未定|此前|你|资料)〕)/gu;
+const MARK_AFTER = /([。！？])(〔(?:已定|未定|此前|你|资料)(?: · [^〕]+)?〕)/gu;
 const withMarksInside = (text: string) => text.replace(MARK_AFTER, "$2$1");
 // Plain 决定/确定 is how a decision is written ("决定优先实现…"); 未决定, 不确定, 决定性 are not decisions.
 const DECISION = /当前决定|用户决定|用户采纳|已确定|(?:决定|确定)采用|用户(?:已|明确)?(?:确认|决定)采用|(?<![未不待尚难无设])(?:决定|确定|定为|选定)(?![性因])/u;
@@ -152,7 +153,7 @@ function ledgerAdoption(units: Unit[], item: Extract<WikiEvalCase, { type: "adop
 
 type Reading = "decision" | "reported" | "proposal" | "unlabelled";
 // A mark says the status first; prose wording is read only where no mark is.
-const reading = (label: string): Reading => /〔已定〕/u.test(label) ? "decision" : /〔(?:资料|你)〕/u.test(label) ? "reported" : /〔(?:未定|此前)〕/u.test(label) ? "proposal"
+const reading = (label: string): Reading => /〔已定(?: · [^〕]+)?〕/u.test(label) ? "decision" : /〔(?:资料|你)(?: · [^〕]+)?〕/u.test(label) ? "reported" : /〔(?:未定|此前)(?: · [^〕]+)?〕/u.test(label) ? "proposal"
   : DECISION.test(label) ? "decision" : REPORTED.test(label) ? "reported" : PROPOSAL.test(label) ? "proposal" : "unlabelled";
 // What contradicts each expectation. An unlabelled mention never does, and a reported point
 // may also be discussed as a proposal elsewhere.
@@ -189,7 +190,7 @@ function structure(item: Extract<WikiEvalCase, { type: "structure" }>, chapters:
 /** What a reader continuing the work checks, without labelling: the passed cases alone gave an incomplete run (six of 36
  * batches unread) 8.1 against a reviewer's 6.5. */
 const INCOMPLETE = /整理不完整|整理完整性部分完成|关键检查未通过\s*[1-9]/u, INCOMPLETE_CAP = 6;
-const LEAVES = /(?:排除(?:了)?|不包括|不做|不提供|不包含|不开发|不实现|不进行|不引入|暂不(?:做|提供|开发|实现)?|暂缓(?:开发)?|禁止(?:开发|扩展|加入|涉及)?)[：:]?\s*([^。；;，,\n|]+)/gu;
+const LEAVES = new RegExp(String.raw`${LEAVES_OUT}[：:]?\s*([^。；;，,\n|]+)`, "gu");
 const GENERIC_ITEM = /^(?:场景|扩展|功能|系统|模型|服务|管理|数据|工具|平台|设计|开发|生成|识别|社区|代码|项目)$/u;
 // "不做：不修改核心 IndexedDB、搜索" keeps code as it is; it leaves out no feature. A qualifier stays: "大型知识图谱" left out is
 // not "知识图谱".
@@ -209,7 +210,7 @@ function readerChecks(markdown: string, chapters: Chapter[]): WikiEvalResult[] {
   const sentences = chapters.flatMap(chapter => chapter.paragraphs.flatMap(part => part.split(/(?<=[。！？](?:〔[^〕]+〕)?)(?!〔)|\n/u))).map(sentence => sentence.trim()).filter(Boolean);
   const leftOut = [...new Set(sentences.flatMap(itemsLeftOut))];
   // A decided point putting in what another sentence leaves out: the reader cannot tell which holds now.
-  const decided = sentences.filter(sentence => /〔已定〕/u.test(sentence)).map(sentence => sentence.replace(/〔[^〕]+〕/gu, ""));
+  const decided = sentences.filter(sentence => /〔已定(?: · [^〕]+)?〕/u.test(sentence)).map(sentence => sentence.replace(/〔[^〕]+〕/gu, ""));
   const clashes = decided.flatMap(sentence => leftOut.filter(item => putsIn(sentence, item)).map(item => `${item}: ${sentence.slice(0, 30)}`));
   const status = chapters.map(chapter => ({ id: chapter.title, title: chapter.title, question: "", group: "", body: chapter.paragraphs.join("\n\n"), problems: [] as string[], paragraphs: chapter.paragraphs.map(text => ({ subtopic: "", text, unitIds: [] })) }));
   const told = statusClashes(status);

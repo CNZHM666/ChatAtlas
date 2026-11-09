@@ -60,7 +60,7 @@
 .home-materials-actions .workbench-sync-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .home-materials-actions .workbench-sync-controls > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 8px 12px; font-size: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--text); cursor: pointer; }
 .review-home .workbench-sync-top:has(.workbench-sync-heading:empty):not(:has(.workbench-sync-controls)) { display: none; }
-.review-home .workbench-source-platform { background: transparent; padding: 0; min-width: 64px; text-align: right; }
+.review-home .workbench-source-platform { background: transparent; padding: 0; min-width: 6.2em; text-align: right; }
 /* First visit: one centered, compact introduction and a balanced import surface. */
 .review-home.is-import-first .review-home-inner { padding-top: clamp(24px,5vh,44px); }
 .review-home.is-import-first :is(.review-home-fixed,.review-home-content-inner) { width: min(1200px,calc(100% - 80px)); }

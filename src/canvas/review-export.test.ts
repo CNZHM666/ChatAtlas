@@ -11,6 +11,6 @@ describe("knowledge Markdown export", () => {
     const output = knowledgeMarkdown(card, [mark], [source]);
     expect(output).toContain("> Choose method A");
     expect(output).toContain("My later update: Use B for the new project");
-    expect(output).toContain("Control theory · 2026-01-01 · chatgpt");
+    expect(output).toContain("Control theory · 2026-01-01 · ChatGPT");
   });
 });

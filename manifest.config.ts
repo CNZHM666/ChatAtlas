@@ -7,7 +7,7 @@ export function createManifest(_apiBaseUrl = "") {
   manifest_version: 3,
   name: "ChatAtlas",
   short_name: "ChatAtlas",
-  version: "0.1.1",
+  version: "0.1.2",
   description: "Review past AI conversations in context and build a personal knowledge reading path.",
   icons: {
     16: "src/assets/brand/icon-16.png",

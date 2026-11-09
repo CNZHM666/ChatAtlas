@@ -12,8 +12,6 @@ import { platformName } from "../../shared/platforms";
 import { QuestionReader } from "./QuestionReader";
 import { ConversationSidebar } from "./ConversationSidebar";
 import { usePreferences } from "../preferences";
-import { sourceChange } from "../source-freshness";
-import { SourceUpdateNotice } from "./SourceUpdateNotice";
 import { ReaderSidebarResize } from "./ReaderSidebarResize";
 import { readerPosition, readerQuestionIndex } from "../reader-position";
 import type { FocusSession } from "../../shared/focus-session";
@@ -57,8 +55,6 @@ export function OriginalReader({ conversation, conversations, messages, loading,
   const questionByMessage = useMemo(() => readerQuestionIndex(readable), [readable]);
   const citations = useMemo(() => onOpenChapter ? readerCitations(conversation.id, messages, reviews) : undefined, [onOpenChapter, conversation.id, messages, reviews]);
   const openCitation = useCallback((citation: ReaderCitation) => onOpenChapter?.(citation.sessionId, citation.sectionId), [onOpenChapter]);
-  const sourceReview = [...reviews].sort((a, b) => b.createdAt - a.createdAt).find((review) => review.sourceConversationIds.includes(conversation.id));
-  const changes = sourceReview ? [sourceChange(sourceReview, conversation.id, messages)] : [];
   const questionTitles = useMemo(() => {
     const titles = new Map(snapshots.map((snapshot) => [snapshot.questionId, snapshot.displayTitle]));
     for (const node of graph?.nodes ?? []) if (node.kind === "question" && node.sourceMessageId) titles.set(node.sourceMessageId, node.displayTitleSource !== "fallback" && node.displayTitle || titles.get(node.sourceMessageId) || node.displayTitle || node.title);
@@ -152,7 +148,6 @@ export function OriginalReader({ conversation, conversations, messages, loading,
     <main ref={readingBody} className="original-reading-body" onScroll={updateReadingPosition}>
       {conversation.source===`${conversation.platform}_dom`?<p className="muted">{zh?"网页采集：这里保留的是网页已加载过的消息，可能不包含整段历史。可在原平台加载更早消息后补充。":"Page capture: these are messages loaded on the website; earlier history may be missing. Load earlier messages on the original platform to add them."}</p>:null}
       {nativeNotice ? <p role="status" className="muted">{nativeNotice}</p> : null}
-      {!loading && sourceReview && onOpenReview ? <SourceUpdateNotice changes={changes} conversations={[conversation]} zh={zh} updateLabel={zh ? "查看待更新回顾" : "Review changes"} onUpdate={() => onOpenReview(sourceReview.id)} /> : null}
       {loading ? <p role="status">{zh ? "读取正文…" : "Loading discussion…"}</p> : error ? <div role="alert"><p>{zh ? "读取本地正文时出错。" : "Could not load the local discussion."} {error}</p>{onRetry ? <button type="button" onClick={onRetry}>{zh ? "重试" : "Retry"}</button> : null}</div> : readable.length ? <>
         {targetMessageId && !messageById.has(targetMessageId) ? <p role="status" className="muted">{zh ? "引用位置已变化，可在原文中继续查阅。" : "The cited message has changed. You can continue reading the original discussion."}</p> : null}<QuestionReader key={conversation.id} messages={messages} zh={zh} initialFocused={Boolean(targetMessageId && questionByMessage.has(targetMessageId))} focusMessageId={focusId} focusPlacement={searchContext ? "evidence" : "question"} highlightTurn={false} focusExcerpt={activeHit?.excerpt ?? (focusId === targetMessageId ? targetExcerpt : undefined)} focusRange={activeHit?.sourceRange ?? (focusId === targetMessageId ? targetRange : undefined)} focusNonce={focusVersion} selectedQuestionId={selectedQuestion} onQuestionChange={rememberQuestion} citations={citations} onCitation={onOpenChapter ? openCitation : undefined} />
       </> : <div><p>{zh ? "本地正文尚未就绪，请同步后重试。" : "Local text is not ready. Sync and retry."}</p>{emptyContent}{onOrganize ? <button type="button" onClick={onOrganize}>{zh ? "去工作台同步" : "Sync on Workbench"}</button> : onRetry ? <button type="button" onClick={onRetry}>{zh ? "重新读取" : "Reload"}</button> : null}</div>}

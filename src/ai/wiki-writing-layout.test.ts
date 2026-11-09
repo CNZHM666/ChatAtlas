@@ -23,9 +23,12 @@ it("retains literal pipes, negations and separate evidence bindings in table cel
  expect(result.claims.find(claim=>claim.text==="仅在用户授权后调用")?.unitIds).toEqual(["k2"]);
  // A table that cannot be read as one is written as a list of its rows, each row bound to its own units.
  const listed=readWikiWritingBlock({...block,rows:[block.rows[0],{cells:["C"],unitIds:["k2"]}]},new Set(["k1","k2"]));
- expect(listed.text).toBe("- A | B / 不得自动发送\n- C");
- expect(listed.claims.map(claim=>claim.unitIds)).toEqual([["k1"],["k2"]]);
- expect(readWikiWritingBlock({type:"comparison",columns:["方案","说明"],rows:[{cells:["React Flow","节点拖拽"],unitIds:["k1"]}]},new Set(["k1"])).text).toBe("- React Flow / 节点拖拽");
+ // A row keeping its cells is labelled by its first; each cell is a claim of that row's units.
+ expect(listed.text).toBe("- **A | B**：不得自动发送\n- C");
+ expect(listed.claims.map(claim=>claim.unitIds)).toEqual([["k1"],["k1"],["k2"]]);
+ expect(readWikiWritingBlock({type:"comparison",columns:["方案","说明"],rows:[{cells:["React Flow","节点拖拽"],unitIds:["k1"]}]},new Set(["k1"])).text).toBe("- **React Flow**：节点拖拽");
+ // With three columns, each cell after the first keeps its column's name.
+ expect(readWikiWritingBlock({type:"comparison",columns:["Area","Include","Leave out"],rows:[{cells:["Core","10-second logging","Bank integrations"],unitIds:["k1"]}]},new Set(["k1"])).text).toBe("- **Core**：Include: 10-second logging; Leave out: Bank integrations");
 });
 
 it("does not allow a line break to create unbound list items or comparison rows",()=>{
@@ -127,4 +130,24 @@ it("retains one-stage and long plans, chunking every evidenced stage without dro
  expect(new Set(blocks.flatMap(block=>block.unitIds)).size).toBe(19);
  expect(JSON.stringify(items)).toBe(before);
  expect(()=>readWikiWritingBlocks({type:"stages",items:[...items,{stage:"bad",text:"没有来源。",unitIds:["missing"]}]},known)).toThrow("invalid_writing_item");
+});
+
+it("shortens a long stage label instead of leaving the stage unlabelled",()=>{
+ const block={type:"stages",items:[{stage:"Phase A (Pipeline Hardening)",text:"实现三入口统一与 Completeness Gate。",unitIds:["k1"]},{stage:"Phase B",text:"在 Phase A 测试通过后开始视觉库存。",unitIds:["k2"]}]};
+ expect(readWikiWritingBlock(block,new Set(["k1","k2"])).text).toBe("1. **Phase A**：实现三入口统一与 Completeness Gate。\n2. **Phase B**：在 Phase A 测试通过后开始视觉库存。");
+});
+
+it("halves a list or table past the size limit instead of refusing the answer", () => {
+ const known=new Set(["k1","k2"]);
+ const items=Array.from({length:6},(_,index)=>({text:`第${index+1}条规则必须保留完整条件。`.repeat(20),unitIds:[index%2?"k2":"k1"]}));
+ const lists=readWikiWritingBlocks({type:"list",items},known);
+ expect(lists.length).toBeGreaterThan(1);
+ expect(lists.every(block=>block.text.length<=1600)).toBe(true);
+ expect(lists.flatMap(block=>block.claims).length).toBe(6);
+ const rows=Array.from({length:6},(_,index)=>({cells:[`事项${index+1}`,"不实现，仅保留接口。".repeat(28)],unitIds:["k1"]}));
+ const tables=readWikiWritingBlocks({type:"comparison",columns:["事项","第一版"],rows},known);
+ expect(tables.length).toBeGreaterThan(1);
+ expect(tables.every(block=>block.text.startsWith("| 事项 | 第一版 |"))).toBe(true);
+ // One item too large on its own is still refused.
+ expect(()=>readWikiWritingBlocks({type:"list",items:[{text:"必须保留完整条件。".repeat(200),unitIds:["k1"]},{text:"短。",unitIds:["k1"]}]},known)).toThrow("writing_block_too_large");
 });

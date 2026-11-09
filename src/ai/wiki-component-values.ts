@@ -1,4 +1,5 @@
 import type { WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { replaceParagraph } from "../shared/wiki-body-text";
 
 /** A global rule for one visual property (全局圆角 6–8px) and the parts that give that property a value outside it
  * (Composer border-radius 20–26px). Told apart, they read as two rules contradicting each other; the writer states the
@@ -91,4 +92,22 @@ export function componentParts(units: WikiKnowledgeUnit[]): Map<string, WikiPart
 /** Global rule unit id → the parts outside it, as "part：value". */
 export function componentExceptions(units: WikiKnowledgeUnit[]): Map<string, string[]> {
   return new Map([...componentParts(units)].map(([id, parts]) => [id, parts.map(part => part.text)]));
+}
+
+/** A sentence saying the parts' values were left open ("这些差异是组件例外还是后来的规范，讨论中未明确。") in a paragraph
+ * that no longer names any part's value: the sentence listing them was dropped by a later check, and one run kept only
+ * "全局圆角统一控制在6px~8px……。这些差异是组件例外还是后来的规范，讨论中未明确。". Returns how many went. */
+const OPEN_NOTE = /(?:这些|上述|以上|这类)(?:差异|取值|不同取值|例外)[^。！？\n]*(?:未明确|未定|待确认)[^。！？\n]*[。！？]?/gu;
+const NAMES_PARTS = /另有取值|以下组件|例外|除外|以外/u;
+export function droppedOrphanPartNotes(chapters: Array<{ body: string; paragraphs: Array<{ text: string }> }>): number {
+  let dropped = 0;
+  for (const chapter of chapters) for (const paragraph of chapter.paragraphs) {
+    const before = paragraph.text;
+    const text = before.replace(OPEN_NOTE, (note, at: number) => NAMES_PARTS.test(before.slice(0, at)) ? note : "").replace(/[ \t]+$/gmu, "").trim();
+    if (text === before.trim() || !text) continue;
+    chapter.body = replaceParagraph(chapter.body, before, text);
+    paragraph.text = text;
+    dropped++;
+  }
+  return dropped;
 }

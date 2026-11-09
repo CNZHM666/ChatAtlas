@@ -22,6 +22,8 @@ export interface FocusScope {
   blocks?: FocusScopeBlock[];
   /** Source-grounded interpretation of the user's task, not a new instruction or user confirmation. */
   taskUnderstanding?: string;
+  /** The document type chosen in the input area; absent lets the run decide. */
+  documentType?: import("./wiki-document-type").WikiDocumentType;
 }
 
 export interface FocusEvidence {

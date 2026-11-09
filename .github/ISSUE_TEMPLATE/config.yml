@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题 / Security issue
+    url: https://github.com/CNZHM666/ChatAtlas/security/policy
+    about: 请私下报告安全问题，不要公开提交 Issue。Report security problems privately.

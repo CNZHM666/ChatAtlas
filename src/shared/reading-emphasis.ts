@@ -94,7 +94,8 @@ export function readingEmphasisMarkdown(body:string,options:ReaderHighlights):st
     // label ("**记忆层借鉴**。…") stays bold; stripping it leaves a bare pseudo-heading.
     // A bolded sentence, with or without inline code, is emphasis and is re-chosen below.
     const after=node.children[index+1],label=child.children.map(item=>"value" in item?item.value:"").join("");
-    if(label.length<=24&&(node.children.length===1||index===0&&after?.type==="text"&&/^[。：:]/u.test(after.value)))continue;
+    // So does a label line with only a note in brackets after it ("**你写的**（第 42 条消息）" over the learner's code).
+    if(label.length<=24&&(node.children.length===1||index===0&&after?.type==="text"&&(/^[。：:]/u.test(after.value)||node.children.length===2&&/^\s*[（(][^（()）\n]{1,30}[）)]\s*$/u.test(after.value))))continue;
     const start=child.position.start.offset!,end=child.position.end.offset!;
     if(quoted.some(range=>start>=range.start&&end<=range.end))continue;
     const raw=body.slice(start,end),text=raw.slice(2,-2);preferred.push(sourceQuoteText(text));changes.push({start,end,text});
@@ -117,7 +118,9 @@ function highlightSections(tree:Root,file:VFile|undefined,phrases:string[],onHig
  const textOf=(node:{type:string;value?:string;children?:unknown[]}):string=>node.value??(node.children??[]).map(child=>textOf(child as typeof node)).join("");
  // A clause cut at a comma inside brackets or quotes would bold half a parenthesis.
  const balanced=(text:string)=>[["（","）"],["(",")"],["“","”"],["《","》"],["【","】"],["「","」"]].every(([open,close])=>text.split(open).length===text.split(close).length);
- const short=(text:string)=>{const size=compact(text).length;return size>=8&&size<=(/\p{Script=Han}/u.test(text)?30:60)&&balanced(text);};
+ // An English clause of one or two words is an item of a list ("receipt OCR") or a lone word ("category",
+ // "currency"), not a conclusion: bold on it read as a stray mark mid-sentence.
+ const short=(text:string)=>{const size=compact(text).length,han=/\p{Script=Han}/u.test(text);return size>=8&&size<=(han?30:60)&&(han||text.trim().split(/\s+/u).length>=3)&&balanced(text);};
  const clauses=(text:string)=>text.split(/[，,；;：:。！？!?\n]/u).map(text=>text.trim()).filter(short);
  // Who said it is not the point: "据用户提供的材料", "AI 分析认为" are cut off a clause, never bolded alone.
  const unattributed=(text:string)=>text.replace(ATTRIBUTION_LEAD,"").trim();
@@ -136,7 +139,8 @@ function highlightSections(tree:Root,file:VFile|undefined,phrases:string[],onHig
  const unsafe=(text:string)=>/(?:已|尚未|仍未)(?:实现|完成|上线|验证|确认|测试|交付|采用|部署)|材料未显示|本章|这些均为|这些属于|讨论记录提及|据讨论|未核实|据称|The discussion describes|According to the discussion|unverified|AI建议|AI认为|助手建议|用户(?:报告|反馈)|只有|仅在|仅当|如果|若|除非|当.+时|前提|(?:失败|成功|变化|失效).{0,6}(?:时|后)|\b(?:only if|unless|if|when|proposed|planned)\b/iu.test(text)||/^(?:状态[：:]|目前|当前|现阶段|截至|已完成|已实现|已上线|尚未|暂未|暂不|待确认|待实现|Status[：:]|Currently|Not yet)/iu.test(text.trim());
  for(const paragraphs of sections){
   if(paragraphs.reduce((sum,paragraph)=>sum+compact(textOf(paragraph)).length,0)<200)continue;
-  const choices=paragraphs.flatMap((paragraph,order)=>paragraph.children.flatMap((node,index)=>{
+  // A line opening on a bold label ("**Unfinished**: CSV export …") has its cue: bold after it read as two marks.
+  const choices=paragraphs.flatMap((paragraph,order)=>paragraph.children.some(node=>node.type==="strong")?[]:paragraph.children.flatMap((node,index)=>{
    if(node.type!=="text"||!node.position)return [];
    const value=node.value,absolute=node.position.start.offset!;
    if(source&&source.slice(absolute,node.position.end.offset!)!==value)return [];
@@ -165,6 +169,8 @@ function highlightSections(tree:Root,file:VFile|undefined,phrases:string[],onHig
     if(CONNECTIVE.test(selected.trim()))return [];
     // Nor is a purpose tail or a sentence commenting on the paragraph: the next best point is bolded instead.
     if(FILLER.test(selected.trim())||COMMENTARY_SENTENCE.test(sentence.trim()))return [];
+    // Nor is the lead-in to a colon ("完整的PR流程包括：…"): it names what follows, and the steps are the point.
+    if(/^\s*[：:]/u.test(all.slice(before.length+end)))return [];
     if(!short(selected)||seen.has(key)||localQuotes.some(range=>before.length+start<range.end&&before.length+end>range.start)||quotations.some(range=>absolute+start<range.end&&absolute+end>range.start))return [];
     return [{node,index,paragraph,start,end,key,priority:point.priority,score:importance(selected),order}];
    });

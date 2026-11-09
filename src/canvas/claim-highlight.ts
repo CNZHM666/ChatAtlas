@@ -214,7 +214,7 @@ export function paintClaimHighlights(root: HTMLElement | null, keys: string[], p
   return ranges;
 }
 
-const HOLDERS = ["decided", "open", "earlier", "user", "material"] as const;
+const HOLDERS = ["decided", "open", "earlier", "user", "material", "corrected"] as const;
 /** With holder marks shown, the text each mark covers (back to the previous mark in its paragraph) is tinted in the
  * mark's colour, so whose a sentence is reads at a glance instead of by finding its mark. Painted under the claim
  * highlight of evidence checking; cleared when the marks are hidden. Returns how many runs were tinted. */

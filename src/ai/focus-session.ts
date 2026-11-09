@@ -26,6 +26,7 @@ import { AIProviderValidationError } from "./provider-errors";
 import { loadFullReadingPassages, sampleReadingPassages } from "./focus-source-text";
 import type { FocusAnalysisProgress } from "../shared/focus-progress";
 import { scopedFocusPassages } from "./focus-scope";
+import { fallbackProjectTitle } from "./project-title";
 import { projectQueryPassages } from "./project-query-materials";
 import { validateSemanticStructure } from "../shared/semantic-structure";
 import { projectStateSignature } from "../shared/project-state";
@@ -39,15 +40,21 @@ import { normalizeWikiDirectory } from "./wiki-directory";
 import { prepareManualWikiReview } from "./wiki-manual-review";
 import { autoOrganizeWiki,requireOrganizedWiki } from "./wiki-auto-organize";
 import {generateWikiOverview} from "./wiki-overview";
-import {withWriterQuestions,withWritingQuestions} from "./wiki-writing-questions";
+import {withAnswersRevisited,withWriterQuestions,withWritingQuestions} from "./wiki-writing-questions";
 import {consolidateWikiExplanations} from "./wiki-explanation-repair";
 import {extractWikiKnowledge,type WikiKnowledgeReport} from "./wiki-knowledge-units";
+import { withWikiSources } from "../shared/wiki-sources";
+import { datedSources, withStoredSections } from "./wiki-knowledge-session";
 import {organizeLedger} from "./wiki-knowledge-organize";
 import {reviseForAnswers,writeLedgerDraft} from "./wiki-knowledge-write";
 import {coverageMaterials} from "./focus-coverage";
 import {ledgerDocument,ledgerPipelineEnabled} from "./wiki-ledger-document";
 import type {WikiDraftChapter,WikiKnowledgeLedger,WikiKnowledgeUnit,WikiProgress,WikiWritingQuestion} from "../shared/wiki-knowledge";
 import { projectKnowledgeSignature, projectKnowledgeScopeSignature } from "./project-knowledge";
+import { detectDocumentType, learningChapterOrder, learningRoles, learningUnitsOwn } from "./wiki-learning";
+import { withLearnerCode } from "./wiki-learning-code";
+import { wikiLedgerUnits } from "../shared/wiki-knowledge";
+import { LEARNING_BETA, type WikiDocumentType } from "../shared/wiki-document-type";
 
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
@@ -85,6 +92,14 @@ export function requireLedgerDirectory(ledger: WikiKnowledgeLedger, locale: stri
   if (!ledger.organization || ledger.lastFailure?.step === "organize") throw new Error(locale === "zh-CN" ? "整理没有得到目录（请求失败）。请检查网络和 AI 设置后重试；已保存的版本保留。" : "Organizing produced no directory (requests failed). Check the connection and AI settings, then retry; the saved version is kept.");
 }
 
+/** A learning document reads in the order things were learned, each point with its role to the learner; a project is
+ * left as it is. */
+export async function asLearningDocument(ledger: WikiKnowledgeLedger, input: Parameters<typeof learningRoles>[1]): Promise<WikiKnowledgeLedger> {
+  if (ledger.documentType !== "learning" || !ledger.organization) return ledger;
+  const organization = learningChapterOrder(ledger.organization, wikiLedgerUnits(ledger));
+  return { ...ledger, organization, learningRoles: await learningRoles({ ...ledger, organization }, input) };
+}
+
 /** A project document from a written ledger: its chapters as sections and their sources as evidence, the claims
  * grounded in the originals and the overview written last. fields carries the document's identity and sources. */
 export async function ledgerDocumentSession(ledger: WikiKnowledgeLedger, fields: Omit<FocusSession, "sections" | "evidence" | "activeSectionId" | "completedSectionIds" | "notes" | "createdAt" | "updatedAt">, sources: Conversation[], originals: ConversationMessage[], ai: Parameters<typeof generateWikiOverview>[1], signal: AbortSignal, runId: string): Promise<FocusSession> {
@@ -108,7 +123,7 @@ export async function generateFocusSession(...args:Parameters<typeof generateFoc
   return measureAILocalStep(runId,"wiki","wiki:generation",()=>generateFocusSessionWork(...args));
 }
 
-async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: Conversation[], locale: string, signal: AbortSignal, revision?: { instruction: string; sections: FocusSection[]; evidence: FocusEvidence[]; sectionId?: string; title?: string; completedSectionIds?: string[]; locale?: "zh-CN" | "en" }, onRequestState?: AIRequestStateListener, taskRunId?: string, onCoverageProgress?: (completed: number, total: number, stage: "reading" | "synthesis", detail?: FocusAnalysisProgress) => void, options?: { wikiProjectBoundary?:WikiProjectBoundary; wikiPreviousDirectory?:import("./wiki-topic-plan").WikiPreviousChapter[]; wikiScopeIncludeKeys?:string[];wikiScopeExcludeKeys?:string[];wikiScopeIgnoredKeys?:string[]; complete?: boolean; scope?: FocusScope; query?: boolean; queryHistory?: Array<{ question: string; answer: string }>; queryTerms?: string; querySearchQueries?: string[]; queryReferences?: FocusEvidence[]; queryContext?: string; queryCompact?: boolean; homeRecallIntent?: "find" | "summarize" | "answer"; skipProjectState?: boolean; onResponseText?: (text: string) => void; /** Before writing: the user's verdicts on the key points the directory found; returns the ledger to write from. */ onKeyDecisions?: (ledger: WikiKnowledgeLedger) => Promise<WikiKnowledgeLedger>; /** While writing: what a chapter's writer asks, as soon as that part is written (ledger: the one being written from). */ onWriterQuestions?: (questions: WikiWritingQuestion[], ledger: WikiKnowledgeLedger) => void; /** Once written: the ledger with the answers given to them, when the user has answered or let them be. */ settleWriterQuestions?: (ledger: WikiKnowledgeLedger) => Promise<WikiKnowledgeLedger>; onPartial?: (session:FocusSession)=>void; priorityOwner?: () => string | undefined }): Promise<FocusSession> {
+async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: Conversation[], locale: string, signal: AbortSignal, revision?: { instruction: string; sections: FocusSection[]; evidence: FocusEvidence[]; sectionId?: string; title?: string; completedSectionIds?: string[]; locale?: "zh-CN" | "en" }, onRequestState?: AIRequestStateListener, taskRunId?: string, onCoverageProgress?: (completed: number, total: number, stage: "reading" | "synthesis", detail?: FocusAnalysisProgress) => void, options?: { wikiProjectBoundary?:WikiProjectBoundary; wikiPreviousDirectory?:import("./wiki-topic-plan").WikiPreviousChapter[]; wikiScopeIncludeKeys?:string[];wikiScopeExcludeKeys?:string[];wikiScopeIgnoredKeys?:string[]; complete?: boolean; scope?: FocusScope; query?: boolean; queryHistory?: Array<{ question: string; answer: string }>; queryTerms?: string; querySearchQueries?: string[]; queryReferences?: FocusEvidence[]; queryContext?: string; queryCompact?: boolean; homeRecallIntent?: "find" | "summarize" | "answer"; skipProjectState?: boolean; /** The document type the user chose; absent lets the run decide. */ documentType?: WikiDocumentType; onResponseText?: (text: string) => void; /** Before writing: the user's verdicts on the key points the directory found; returns the ledger to write from. */ onKeyDecisions?: (ledger: WikiKnowledgeLedger) => Promise<WikiKnowledgeLedger>; /** While writing: what a chapter's writer asks, as soon as that part is written (ledger: the one being written from). */ onWriterQuestions?: (questions: WikiWritingQuestion[], ledger: WikiKnowledgeLedger) => void; /** Once written: the ledger with the answers given to them, when the user has answered or let them be. */ settleWriterQuestions?: (ledger: WikiKnowledgeLedger) => Promise<WikiKnowledgeLedger>; onPartial?: (session:FocusSession)=>void; priorityOwner?: () => string | undefined }): Promise<FocusSession> {
   if(mode==="review")throw new Error(locale==="zh-CN"?"复习模式已移除，已有内容仍可阅读。请从项目工作创建新的整理。":"Review mode has been removed. Saved content remains readable; use Project work for new organization.");
   const startedAt = performance.now();
   const runId = taskRunId ?? `focus-${crypto.randomUUID()}`;
@@ -162,23 +177,31 @@ async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: 
       const now = Date.now(), sections: FocusSection[] = top.map(([subject, members]) => ({ id: `rough:${subject}`, title: subject, kind: "finding", transition: "", evidenceIds: [], wikiOutline: true,
         body: [zh ? `已读到 ${members.length} 条相关内容。` : `${members.length} points read so far.`, ...members.slice(0, 2).map(unit => `- ${unit.statement}`)].join("\n") }));
       if (!sections.length) return;
-      options.onPartial!({ id: `partial:${runId}`, runId, goal, mode, scope, status: "preview", locale: zh ? "zh-CN" : "en", title: project ?? goal, wikiProjectBoundary: options.wikiProjectBoundary, sourceConversationIds: sources.map(source => source.id), sourceVersionIds, sourceSignatures, sourceRoles, sourceMessageOrder,
+      options.onPartial!({ id: `partial:${runId}`, runId, goal, mode, scope, status: "preview", locale: zh ? "zh-CN" : "en", title: project ?? fallbackProjectTitle(goal, sources.map(source => source.title), zh), wikiProjectBoundary: options.wikiProjectBoundary, sourceConversationIds: sources.map(source => source.id), sourceVersionIds, sourceSignatures, sourceRoles, sourceMessageOrder,
         evidence: [], sections, activeSectionId: sections[0].id, completedSectionIds: [], notes: "", createdAt: now, updatedAt: now,
         // Written from the ledger: no separate scope review runs for it, so none is shown as pending.
         wikiKnowledge: { version: 1, generatedAt: now, status: "partial", materials: materials.length, batches: [] } });
     } : undefined;
     const extracted = await measureAILocalStep(runId, "wiki", "wiki:knowledge-units", async () => { const result = await extractWikiKnowledge({ materials, locale, signal, ai, project: project ?? goal, progress, onUnits: roughDirectory }); Object.assign(unitReport, result.report); return result.ledger; }, () => ({ ...unitReport } as Record<string, number>));
-    const planned = await organizeLedger(extracted, { ai, ...embeddingsFor(settings, runId), locale, signal, runId, conversations: sources.length, names: [project, goal.length <= 32 ? goal : undefined, ...sources.map(source => source.title)], progress });
-    requireLedgerDirectory(planned, locale);
+    // The document's type: the user's choice, or what the points read as. A project unless clearly a learning record;
+    // while learning is in beta, Auto always means a project.
+    const chosenType = options?.documentType ?? scope?.documentType;
+    // A learning record keeps the learner's own code as exercises, read from the messages (withLearnerCode).
+    const typed: WikiKnowledgeLedger = withLearnerCode(learningUnitsOwn({ ...extracted, documentType: chosenType ?? (LEARNING_BETA ? "project" : detectDocumentType(wikiLedgerUnits(extracted))), documentTypeBy: chosenType ? "user" : "auto" }), materials, zh);
+    // Each source named and dated: the document tells conversations apart, and which came later.
+    const organizedOnce = await organizeLedger(withWikiSources(typed, await datedSources(sources)), { ai, ...embeddingsFor(settings, runId), locale, signal, runId, conversations: sources.length, names: [project, goal.length <= 32 ? goal : undefined, ...sources.map(source => source.title)], progress });
+    requireLedgerDirectory(organizedOnce, locale);
+    const planned = await asLearningDocument(organizedOnce, { ai, locale, signal });
     // The key points still left as suggestions are put to the user before anything is written, so the document is
     // written around their decisions rather than rewritten after.
     // Before that, a reading of the organized material asks what it cannot write faithfully without the user (two
     // versions of one thing, a direction beside this round's limit, another project's points), in its own words.
     const asked = options?.onKeyDecisions ? await withWritingQuestions(planned, { ai, signal, locale, runId }) : planned;
-    const organized = options?.onKeyDecisions ? await options.onKeyDecisions(asked) : planned;
+    // Saved answers are applied again with the current checks: a rejection an earlier version took too far comes back.
+    const organized = withAnswersRevisited(options?.onKeyDecisions ? await options.onKeyDecisions(asked) : planned);
     signal.throwIfAborted();
     // A document no one named takes the project's own name from the directory plan, not the request text.
-    const title = project ?? organized.organization?.projectName ?? goal;
+    const title = project ?? organized.organization?.projectName ?? fallbackProjectTitle(goal, sources.map(source => source.title), zh);
     // Each finished chapter shows at once as a preview, while the others are still written.
     const titles = Object.fromEntries(sources.map(source => [source.id, source.title])), onPartial = options?.onPartial;
     // The directory shows as soon as it is planned: each chapter's question and parts, replaced by its text once written.
@@ -202,7 +225,7 @@ async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: 
       const fresh = questions.filter(question => { const key = [...question.unitIds].sort().join("|"); if (shown.has(key) || question.unitIds.some(id => settled.has(id))) return false; shown.add(key); return true; });
       if (fresh.length && !signal.aborted) options.onWriterQuestions!(fresh, organized);
     } : undefined;
-    let ledger = await writeLedgerDraft(organized, { ai, locale, signal, runId, project, progress, onChapters, ...(onQuestions ? { onQuestions } : {}) });
+    let ledger = await writeLedgerDraft(await withStoredSections(organized), { ai, locale, signal, runId, project, progress, onChapters, ...(onQuestions ? { onQuestions } : {}) });
     // Once written, the answers given are applied to the paragraphs they concern, one small request each; a question
     // left unanswered keeps its paragraph as written, at no cost.
     if (options?.settleWriterQuestions) {

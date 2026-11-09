@@ -25,3 +25,19 @@ it("keeps status-only sentences, unique content, claims, lists, code and persona
  expect(wikiReadingCleanup(claim,{claims:[{text:"首先让人看得懂、管得住",quote:"q",evidenceIds:["e1"]}]})).toBe(wikiReadingCleanup(claim,generated));
  expect(wikiReadingCleanup(`${principle}\n\n${principle}`,{claims:[],userEdited:true})).toBe(`${principle}\n\n${principle}`);
 });
+
+it("keeps a subtopic's only paragraph though the opening said it first", () => {
+  const body = "仅测试单一数据可能无法发现 Bug，必须测试所有分支及边界值（如电压 12, 2, 5）。\n\n### pytest测试\n\n仅测试单一数据可能无法发现 Bug，必须测试所有分支及边界值（如电压 12, 2, 5）。";
+  expect(wikiReadingCleanup(body, {})).toContain("### pytest测试\n\n仅测试单一数据");
+});
+
+it("numbers a list opening a subtopic from 1", () => {
+  const body = "开场。\n\n### 短期里程碑\n\n2. **第2周**：学习 NumPy。\n3. **第3周**：学习 pytest。";
+  expect(wikiReadingCleanup(body, {})).toContain("### 短期里程碑\n\n1. **第2周**：学习 NumPy。\n2. **第3周**：学习 pytest。");
+  expect(wikiReadingCleanup("开场。\n\n```text\nx\n```\n\n2. **第2周**：学习。", {})).toContain("2. **第2周**");
+});
+
+it("keeps a labelled sentence an earlier paragraph also said: the label says whose words follow", () => {
+  const body = "### 第一题\n\n**AI 批改**：完全正确。\n\n### 第二题\n\n**AI 批改**：完全正确。这里你已经掌握了参数传入、函数内部计算和 return 返回结果的完整过程。";
+  expect(wikiReadingCleanup(body, {})).toContain("### 第二题\n\n**AI 批改**：完全正确。这里你已经掌握了");
+});

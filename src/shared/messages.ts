@@ -58,7 +58,7 @@ export type AtlasMessage =
   | { type: "ATLAS_IMPORT_CURRENT" }
   | { type: "ATLAS_CAPTURE_SAVED"; summary: CaptureSummary }
   | { type: "ATLAS_IMPORT_START"; mode: "full" | "incremental" | "failed" | "titles" }
-  | { type: "ATLAS_IMPORT_SELECT"; conversationIds: string[] }
+  | { type: "ATLAS_IMPORT_SELECT"; conversationIds: string[]; /** Sync again even when already synced and unchanged. */ force?: boolean }
   | { type: "ATLAS_IMPORT_OPEN_CHATGPT" }
   | { type: "ATLAS_IMPORT_RETRY"; reload?: boolean }
   | { type: "ATLAS_IMPORT_PAUSE" }

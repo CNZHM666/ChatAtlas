@@ -262,3 +262,9 @@
 .home-recall-pick-bar > span { margin-right: auto; font-size: 13px; font-weight: 600; }
 .home-recall-pick-bar select { min-height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 13px; }
 .home-recall-pick-bar button.primary { min-height: 32px; padding: 0 14px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+
+/* The document type, before organizing: a small segmented choice beside the model picker. */
+.document-type-picker { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-muted); }
+.document-type-picker button { min-height: 28px; padding: 3px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: var(--text-xs); cursor: pointer; }
+.document-type-picker button[aria-checked="true"] { background: var(--surface-solid); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 8%); }
+.document-type-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -9,8 +9,20 @@ import { measureAILocalStep } from "./pipeline-timing";
 import { extractWikiKnowledge, type WikiKnowledgeReport } from "./wiki-knowledge-units";
 import { organizeLedger } from "./wiki-knowledge-organize";
 import { writeLedgerDraft } from "./wiki-knowledge-write";
+import { datedWikiSources, withWikiSources, type WikiSourceInput } from "../shared/wiki-sources";
+import { wikiLedgerConversations, withWikiSections } from "../shared/wiki-sections";
+import { getMessagesForConversation } from "../storage/messages";
 
 type AI = { generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> };
+
+/** The ledger with each unit given the heading it stood under in its stored message, read before writing: a ledger
+ * extracted before units kept it gets it too. Messages that cannot be read leave the ledger as it was. */
+export async function withStoredSections(ledger: WikiKnowledgeLedger): Promise<WikiKnowledgeLedger> {
+  try {
+    const messages = (await Promise.all(wikiLedgerConversations(ledger).map(id => getMessagesForConversation(id)))).flat();
+    return withWikiSections(ledger, messages);
+  } catch { return ledger; }
+}
 
 /** Redesign P1 again on a saved document: the same sources and scope as its
  * generation, without rewriting the Wiki. The new ledger has no organization
@@ -25,7 +37,17 @@ export async function reextractSessionKnowledge(session: FocusSession, ai: AI, s
   const included = new Set(passages.map(passage => passage.document.conversationId));
   const report: Partial<WikiKnowledgeReport> = {};
   const work = async () => { const result = await extractWikiKnowledge({ materials: coverageMaterials(passages, sources.filter(source => included.has(source.id))).materials, locale: session.locale ?? "zh-CN", signal, ai, previous, project: session.wikiProjectBoundary?.name ?? session.title, progress }); Object.assign(report, result.report); return result.ledger; };
-  return session.runId ? measureAILocalStep(session.runId, "wiki", "wiki:knowledge-units", work, () => ({ ...report } as Record<string, number>)) : work();
+  const ledger = await (session.runId ? measureAILocalStep(session.runId, "wiki", "wiki:knowledge-units", work, () => ({ ...report } as Record<string, number>)) : work());
+  // Each source named and dated: the document tells conversations apart, and which came later.
+  return withWikiSources(ledger, await datedSources(sources));
+}
+
+/** Sources with a start time, read from their stored messages when the platform's list gave none. */
+export async function datedSources<T extends WikiSourceInput>(sources: T[]): Promise<T[]> {
+  const undated = sources.filter(source => source.sourceCreatedAt === undefined);
+  if (!undated.length) return sources;
+  const messages = (await Promise.all(undated.map(source => getMessagesForConversation(source.id).catch(() => [])))).flat();
+  return datedWikiSources(sources, messages);
 }
 
 /** Redesign P4: bring a saved ledger up to date with its sources. Unchanged batches,
@@ -37,5 +59,5 @@ export async function updateSessionKnowledge(session: FocusSession, ai: AI, sign
   const organized = await organizeLedger(extracted, { ai, locale, signal, runId, names: options.names, conversations: session.sourceConversationIds.length, previous: previous?.organization, progress: options.progress });
   // Organizing failed: the new batches are kept with the earlier directory and draft, nothing is written.
   if (organized.lastFailure?.step === "organize" && !organized.organization) return { ...organized, ...(previous?.organization ? { organization: previous.organization } : {}), ...(previous?.draft ? { draft: previous.draft } : {}) };
-  return writeLedgerDraft(organized, { ai, locale, signal, runId, project: options.project, previous: previous?.draft, progress: options.progress });
+  return writeLedgerDraft(await withStoredSections(organized), { ai, locale, signal, runId, project: options.project, previous: previous?.draft, progress: options.progress });
 }

@@ -111,3 +111,12 @@ it("raises no status issue in a chapter whose sentences carry status marks: the 
  const {session:value}=session([{text:proposal,role:"assistant"}],[marked]);
  expect(wikiBlockIssues(value).filter(issue=>["unsupported_status","unbound_decision","retired_as_current"].includes(issue.code))).toEqual([]);
 });
+
+it("keeps the line over a table even when an earlier chapter tells the decision it names",()=>{
+ const decision="Pocket Ledger v1 supports USD only; multi-currency functionality is explicitly excluded from the first release.";
+ const caption=`*Table from the discussion · AI suggestion, not confirmed; your later decision takes precedence: ${decision}*`;
+ const table="| Milestone | Proposed adjustment |\n|---|---|\n| M2 | Finish CSV export; consider configurable currency |";
+ const body=`Cloud sync is deferred.\n\n${caption}\n\n${table}`;
+ const chapters=[page("a","Scope",decision,[]),page("b","Architecture",body,[])];
+ expect(wikiChapterLinks(body,chapters[1],chapters,false)).toBe(body);
+});

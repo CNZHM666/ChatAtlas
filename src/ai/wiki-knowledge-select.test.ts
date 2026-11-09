@@ -133,6 +133,14 @@ it("keeps a subtopic within its length, leaving its lowest-valued optional point
   expect(tight.report.subtopic_dropped).toBe(5);
 });
 
+it("counts English material by what it says, not its longer spelling, against a subtopic's length", () => {
+  // Each about 75 characters of English, which says what about 30 characters of Chinese do.
+  const points = Array.from({ length: 8 }, (_, index) => unit(index + 1, "Visual", `Suggestion ${index + 1}: rows use a ${40 + index}px icon container with a hover surface.`, { kind: "fact" }));
+  const book = ledger(points, { subjects: [subject("s:a", "Visual", points)], chapters: [{ id: "c", title: "Interface", question: "", group: "", subtopics: [{ title: "Rows", subjectIds: ["s:a"] }] }] });
+  // 130 characters of room: one of them counted as written; the subject's quota of four counted by what they say.
+  expect(curateWikiUnits(book, wikiUnitStatuses(points, book.organization!), undefined, undefined, 130).selected.size).toBe(4);
+});
+
 it("leaves advice to the developer about their own learning out of the project's text", () => {
   const skills = unit(1, "技术栈", "开发者需掌握嵌入式、控制理论、Linux、ROS2 及前端开发能力。", { kind: "fact" }), stack = unit(2, "技术栈", "前端使用 Next.js 与 React Flow。", { kind: "decision" });
   const book = ledger([skills, stack], { subjects: [subject("s:a", "技术栈", [skills, stack])] });

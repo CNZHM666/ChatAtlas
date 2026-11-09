@@ -140,3 +140,13 @@ it("wakes free slots for a newly selected source while another source's requests
   } finally { release(); await idle(runner); }
   expect(await getImportJob()).toMatchObject({ status: "completed", completed: 3 });
 });
+it("reads an already synced, unchanged conversation again only when asked to sync it again", async () => {
+  let text = "First read";
+  const runner = createNativeImportRunner(async (_s, req) => ({ account: "account-a", data: req.path.includes("fetch_page") ? listing : body(text) }), async () => {});
+  await runner.start([source]); await idle(runner); await runner.select(["deepseek:a"]); await idle(runner);
+  text = "Read again";
+  await runner.select(["deepseek:a"]); await idle(runner);
+  expect((await getMessagesForConversation("deepseek:a"))[0].content).toBe("First read");
+  await runner.select(["deepseek:a"], [], true); await idle(runner);
+  expect((await getMessagesForConversation("deepseek:a"))[0].content).toBe("Read again");
+});

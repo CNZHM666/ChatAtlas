@@ -1,5 +1,6 @@
 import { Bot, Layers3 } from "lucide-react";
 import { conversationPlatformGroup } from "../../shared/platforms";
+import "../ai-platform-filter.css";
 import chatgpt from "../../assets/ai/openai.svg";
 import claude from "../../assets/ai/claude-color.svg";
 import gemini from "../../assets/ai/gemini-color.svg";

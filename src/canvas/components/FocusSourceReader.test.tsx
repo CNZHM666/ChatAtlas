@@ -53,7 +53,9 @@ it("shares question navigation between the library and project source while reta
   fireEvent.change(screen.getByRole("textbox", { name: "Search questions or answers" }), { target: { value: "Distinctive condition" } });
   await waitFor(() => expect(project.container.querySelectorAll(".conversation-message-item")).toHaveLength(1));
   expect(project.container.querySelector(".conversation-question-count")).toHaveTextContent("1");
-  fireEvent.click(screen.getByRole("button", { name: "02 Next question" }));
+  // Found in the answer, so the line it was found in is shown under the question.
+  expect(project.container.querySelector(".message-search-snippet")).toHaveTextContent("In the answer: Distinctive condition");
+  fireEvent.click(screen.getByRole("button", { name: /^02 Next question/u }));
   await waitFor(() => expect(project.container.querySelector(".knowledge-reader-message.is-focused")).toHaveTextContent("Next question"));
   fireEvent.click(screen.getByRole("button", { name: "Back to reading" }));
   expect(back).toHaveBeenCalledOnce();

@@ -66,11 +66,11 @@ export function understandingEdges(steps: FocusSection[]): UnderstandingEdge[] {
       if (!searchText.includes(title.toLowerCase())) continue;
       const escaped = title.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
       const explicit = new RegExp(`(?:基于|依赖(?:于)?|需要先(?:理解|掌握|了解)|based on|depends on|requires)\\s*[“"'「]?${escaped}(?:[”"'」]?)(?=[，。；,:;.!?\\s]|作为|为|$)`, "iu");
-      const sentence = text.split(/(?<=[。！？.!?])\s*/u).find(item => explicit.test(item)
+      const sentence = text.split(/(?:(?<=[。！？.!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))\s*/u).find(item => explicit.test(item)
         && !/[?？]|是否|假设|如果|if\s|whether|suppose/iu.test(item)
         && !/(?:不|无需|并非|不是|不必|not|without|avoid)[^。！？.!?]{0,12}(?:需要|依赖|基于|depend|require|based on)/iu.test(item));
       if (sentence) edges.push({ from: candidate.id, to: step.id, kind: "requires", excerpt: sentence.trim() });
-      const relationSentence = text.split(/(?<=[。！？.!?])\s*/u).filter(item => !/[?？]|是否|假设|如果|if\s|whether|suppose/iu.test(item));
+      const relationSentence = text.split(/(?:(?<=[。！？.!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))\s*/u).filter(item => !/[?？]|是否|假设|如果|if\s|whether|suppose/iu.test(item));
       for (const [kind, pattern] of [
         ["example", new RegExp(`(?:以\\s*[“"'「]?${escaped}[”"'」]?\\s*为例|example of\\s+${escaped}(?=[\\s,.!;]|$))`, "iu")],
         ["comparison", new RegExp(`(?:与\\s*[“"'「]?${escaped}[”"'」]?\\s*(?:相比|比较)|compared (?:with|to)\\s+${escaped}(?=[\\s,.!;]|$))`, "iu")],

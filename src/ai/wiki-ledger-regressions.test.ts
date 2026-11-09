@@ -2,7 +2,7 @@ import { gatherNamedItems, gatherPositioning, gatherVersions } from "./wiki-know
 import { ensureWikiDecisions } from "./wiki-decision-coverage";
 import { retitleMisnamedChapters, routeOutOfReferences, routeWikiUnits, wikiUnitLane } from "./wiki-unit-routing";
 import { componentExceptions, componentParts, notePartExceptions } from "./wiki-component-values";
-import { currentCapabilityState } from "./wiki-capability-state";
+import { currentCapabilityState, outdatedCapabilityReports, pastCapabilityWords } from "./wiki-capability-state";
 import { expect, it } from "vitest";
 import { claimSupported } from "./wiki-claim-support";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
@@ -217,6 +217,20 @@ it("routes a stage out of the interface chapter, README rules to the development
  expect([freeze,theme,readme,proxy,rollback,example].map(item=>home(item.id))).toEqual(["c","a","c","e","d","c"]);
 });
 
+it("routes a point into the planned subtopic its words fit, and opens a role heading only when none does",()=>{
+ const rule=unit(1,"Validator 作为规则引擎核心，分为结构、电气和可构建性三层，检查 GPIO 冲突。",{subject:"Validator 架构",kind:"mechanism"});
+ const stray=unit(2,"项目目录采用 Next.js App Router 与 components 分层。",{subject:"目录结构",kind:"mechanism"});
+ const engine=unit(3,"规则引擎确定性运行，Validator 检查 GPIO 冲突与电压兼容。",{subject:"规则引擎",kind:"mechanism"});
+ const parts=unit(4,"优先使用成熟主控板和成品模块。",{subject:"元件策略",kind:"decision"});
+ const units=[rule,stray,engine,parts],ledger=book(units);
+ ledger.organization!.subjects=[{id:"plan",name:"规划",aliases:[],unitIds:[rule.id,stray.id]},{id:"rules",name:"规则引擎",aliases:[],unitIds:[engine.id]},{id:"parts",name:"元件",aliases:[],unitIds:[parts.id]}];
+ ledger.organization!.chapters=[{id:"p",title:"开发规划与发布策略",question:"",group:"",subtopics:[{title:"版本路线图",subjectIds:["plan"]}]},{id:"t",title:"技术架构与验证引擎",question:"",group:"",subtopics:[{title:"元件策略",subjectIds:["parts"]},{title:"规则引擎与电气验证",subjectIds:["rules"]}]}];
+ const routed=routeWikiUnits(ledger.organization!,new Map(units.map(item=>[item.id,item])));
+ const topicOf=(id:string)=>routed.chapters.flatMap(chapter=>chapter.subtopics).find(topic=>topic.subjectIds.some(subject=>routed.subjects.find(row=>row.id===subject)?.unitIds.includes(id)))?.title;
+ expect(topicOf(rule.id)).toBe("规则引擎与电气验证");
+ expect(topicOf(stray.id)).toBe("实现机制");
+});
+
 it("leaves out the untagged rest of an excluded project, and a subtopic named for it, though nothing was extracted again",()=>{
  const atlas={about:{name:"ChatAtlas",role:"other_project" as const}};
  const said=(n:number,statement:string,extra:Partial<WikiKnowledgeUnit>={})=>unit(n,statement,{evidence:{evidenceId:`e${n}`,conversationId:"c",messageId:"review",messageIndex:9,role:"assistant",pasted:false,quote:statement},...extra});
@@ -301,13 +315,35 @@ it("names the parts that set a global rule's property otherwise, and what the us
   const composer = unit(2, "采用极简设计，圆角极轻边框，无阴影；max-width 760~800px，border-radius 20~26px，padding 16~20px。", { subject: "Welcome Screen", kind: "decision" });
   const button = unit(3, "Primary按钮高度40~44px，圆角6~8px。", { subject: "CTA", kind: "decision" });
   expect([...componentExceptions([rule, composer, button])]).toEqual([[rule.id, ["Welcome Screen：border-radius 20~26px"]]]);
-  const report = unit(4, "当前画布仅为架构预览；Validator不检查电压、GPIO冲突或电源安全。", { kind: "constraint" });
+  const report = unit(7, "当前画布仅为架构预览；Validator不检查电压、GPIO冲突或电源安全。", { kind: "constraint" });
   report.evidence = { ...report.evidence, role: "user" };
   const engine = unit(5, "构建 Compatibility Engine，用于实时检查电压、电流及通信协议冲突。", { kind: "fact" });
   const shopping = unit(6, "商品搜索后必须经过“兼容性检查”的确定性流程，需确保逻辑电压符合当前设计。", { kind: "constraint" });
   const lacks = currentCapabilityState([report, engine, shopping], new Map());
   expect([...lacks.keys()]).toEqual([engine.id]);
-  expect(lacks.get(engine.id)).toContain("Validator不检查电压");
+  expect(lacks.get(engine.id)).toEqual({ id: report.id, text: expect.stringContaining("Validator不检查电压") });
+});
+
+it("tells a report of what a part does not do yet as before once later units build it", () => {
+  const design = unit(24, "实现确定性执行的 validateProject 函数，检查元件存在性、Pin存在性、电压兼容、GPIO冲突等基础电气规则。", { kind: "mechanism" });
+  const report = unit(58, "当前画布仅为架构预览，不能直接照图接线；Validator不检查电压、GPIO冲突、I²C地址或电源安全。", { kind: "constraint" });
+  report.evidence = { ...report.evidence, role: "user" };
+  const built = unit(59, "实现 GPIO 冲突、I²C 地址冲突、电压兼容、负载驱动检查等六类电气规则，Validator 检查这些冲突。", { kind: "mechanism", delivery: "user_reported" });
+  // Only proposed after the report: still a plan, and the report holds.
+  const proposed = { ...built, delivery: "unknown" as const };
+  expect(outdatedCapabilityReports([design, report, proposed], new Map()).size).toBe(0);
+  expect([...currentCapabilityState([design, report, proposed], new Map()).keys()]).toEqual([design.id, proposed.id]);
+  const units = [design, report, built];
+  expect(currentCapabilityState(units, new Map()).size).toBe(0);
+  const outdated = outdatedCapabilityReports(units, new Map());
+  expect([...outdated]).toEqual([[report.id, "Validator"]]);
+  const text = "实现确定性执行的 validateProject 函数，检查电压兼容、GPIO冲突。当前 Validator 不检查电压、GPIO冲突、I²C地址或电源安全；计划补充电压兼容检查。";
+  const written = { ...chapter([design, report], text), body: `当前 Validator 不检查电压、GPIO 冲突或电源安全，画布仅为架构预览。\n\n### 方案\n\n${text}` };
+  expect(pastCapabilityWords([written], outdated)).toBe(2);
+  expect(written.paragraphs[0].text).toContain("此前 Validator 不检查电压");
+  expect(written.paragraphs[0].text).toContain("检查电压兼容、GPIO冲突。");
+  expect(written.body.startsWith("此前 Validator 不检查电压")).toBe(true);
+  expect(written.body).not.toContain("当前 Validator");
 });
 
 it("never lets an earlier point replace one said after it, and notes a global rule's part values", () => {
@@ -348,4 +384,59 @@ it("keeps open whether a part's own value is an exception, and has the line cite
   expect(paragraph.claims[0].unitIds).toEqual([rule.id, composer.id]);
   expect(paragraph.text.includes(paragraph.claims[0].text)).toBe(true);
   expect(paragraph.unitIds).toContain(composer.id);
+});
+
+it("does not add a decision again when its steps already state it",()=>{
+ const flow=unit(1,"首屏采用ChatGPT式简洁欢迎页，用户输入需求后进入对话层确定清单，再进入Canvas，中间嵌套旧物识别，最后进行仿真。",{kind:"decision",adoption:{status:"user_decision"}});
+ flow.evidence={...flow.evidence,role:"user",quote:flow.statement};
+ const steps=["采用ChatGPT式简洁欢迎页。","用户输入需求后进入此层确定清单。","确定清单后进入画布视图。","在流程中间嵌套旧物识别环节。","最后进行仿真操作。"];
+ const written=chapter([flow],steps.map((text,index)=>`${index+1}. **步骤${index+1}**：${text}`).join("\n"),steps.map(text=>({text,unitIds:[flow.id]})));
+ const ledger=book([flow]),statuses=wikiUnitStatuses([flow],ledger.organization!);
+ expect(ensureWikiDecisions([written],ledger.organization!,[flow],statuses)).toBe(0);
+ expect(written.paragraphs).toHaveLength(1);
+});
+
+it("does not write back a decision whose sentence lost a default a later message changed",()=>{
+ const byok=unit(1,"采用 BYOK 模式，默认仅保存在当前浏览器会话中，不保存到服务器，以降低运营成本并保护用户隐私。",{kind:"decision",adoption:{status:"user_decision"}});
+ byok.evidence={...byok.evidence,role:"user",quote:"我想让用户自己接api，我不想别人用我自己的"};
+ const left="采用 BYOK 模式，不保存到服务器。",ledger=book([byok]),statuses=wikiUnitStatuses([byok],ledger.organization!);
+ const written=()=>chapter([byok],left,[{text:left,unitIds:[byok.id]}]);
+ const trimmed=written();
+ expect(ensureWikiDecisions([trimmed],ledger.organization!,[byok],statuses,new Set([byok.id]))).toBe(0);
+ expect(trimmed.paragraphs).toHaveLength(1);
+ // Without the note, the shorter sentence does not state the decision, and it is written in full.
+ expect(ensureWikiDecisions([written()],ledger.organization!,[byok],statuses)).toBe(1);
+});
+
+it("adds a decision before the paragraph that opens with its words, which then goes on without them",()=>{
+ const flow=unit(1,"首屏采用ChatGPT式简洁欢迎页，用户输入需求后进入对话层确定清单，再进入Canvas，中间嵌套旧物识别，最后进行仿真。",{kind:"decision",adoption:{status:"user_decision"}});
+ flow.evidence={...flow.evidence,role:"user",quote:flow.statement};
+ const text="首屏采用 ChatGPT 式简洁欢迎页，用户输入需求后不直接生成 Canvas，而是通过轻量对话复述目标。";
+ const written=chapter([flow],text,[{text:"用户输入需求后不直接生成 Canvas，而是通过轻量对话复述目标。",unitIds:[flow.id]}]);
+ const ledger=book([flow]),statuses=wikiUnitStatuses([flow],ledger.organization!);
+ expect(ensureWikiDecisions([written],ledger.organization!,[flow],statuses)).toBe(1);
+ expect(written.paragraphs.map(paragraph=>paragraph.text)).toEqual([flow.statement,"用户输入需求后不直接生成 Canvas，而是通过轻量对话复述目标。"]);
+ expect(written.body).toBe(`${flow.statement}\n\n用户输入需求后不直接生成 Canvas，而是通过轻量对话复述目标。`);
+ expect(written.body.match(/简洁欢迎页/gu)).toHaveLength(1);
+});
+
+it("moves delivery rules and test plans to the plan chapter's testing subtopic, out of its roadmap",()=>{
+ const flow=unit(1,"每个Phase开始需说明目标/文件/理由/风险，完成后必须通过lint/typecheck/test/build。",{kind:"constraint"});flow.subject="开发工作流要求";flow.facet="交付标准";
+ const bench=unit(2,"建立 tests/e2e-hardware-bench/，准备 20~30 个真实用户需求。",{kind:"plan"});bench.subject="End-to-End HardwareBench";
+ const step=unit(3,"Phase 1 建立最基础 Hardware IR Schema。",{kind:"plan"});
+ const rule=unit(4,"提交前运行 lint 和 test。",{kind:"constraint"});
+ const organization={...book([]).organization!,subjects:[{id:"ui",name:"Bottom Panel",aliases:[],unitIds:[flow.id]},{id:"road",name:"开发路线图",aliases:[],unitIds:[step.id,bench.id]},{id:"tests",name:"测试要求",aliases:[],unitIds:[rule.id]}],
+  chapters:[{id:"a",title:"界面设计与交互体验",question:"",group:"",subtopics:[{title:"元件库与库存管理UI",subjectIds:["ui"]}]},{id:"b",title:"开发规划与发布策略",question:"",group:"",subtopics:[{title:"版本路线图与功能范围",subjectIds:["road"]},{title:"工程规范与测试要求",subjectIds:["tests"]}]}]};
+ const routed=routeWikiUnits(organization,new Map([flow,bench,step,rule].map(item=>[item.id,item])));
+ expect([...routed.subjects.find(subject=>subject.id==="tests")!.unitIds].sort()).toEqual([rule.id,bench.id,flow.id].sort());
+ expect(routed.subjects.find(subject=>subject.id==="road")!.unitIds).toEqual([step.id]);
+ expect(routed.chapters[0]?.title).not.toBe("界面设计与交互体验");
+});
+
+it("keeps the error code and address a short quote about the rule gives in plain text",()=>{
+ const i2c=unit(1,"检查SDA/SCL类型及同一Bus下的设备地址冲突，未知地址仅给info提示。",{kind:"constraint"});
+ i2c.evidence={...i2c.evidence,quote:"- I²C 设备是否连接到正确 bus\n- 同一 bus 地址冲突\n\n如果两个设备声明：\n\n0x3C\n\n并处于同一 I²C bus：\n\n产生：\n\nI2C_ADDRESS_CONFLICT"};
+ expect(wikiUnitDetails(i2c)).toEqual(["0x3C","I2C_ADDRESS_CONFLICT"]);
+ const long=unit(2,"检查地址冲突。",{kind:"constraint"});long.evidence={...long.evidence,quote:`${"其他说明。".repeat(140)}\n\nOTHER_RULE_CODE`};
+ expect(wikiUnitDetails(long)).toEqual([]);
 });

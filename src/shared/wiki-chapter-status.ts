@@ -50,7 +50,7 @@ const unconfirmedProposals=(counts:Map<WikiClaimSource,number>,total:number,stan
 // "经用户确认的决策", "区分用户确认和 AI 推断", "重度用户要求……" and "用户确认后才更新"
 // describe roles or product rules: 用户 then follows another word, or the verb
 // heads a noun phrase or a time clause.
-const USER_STANCE=/(?:^|(?<=[\s*，,。；;：:！？!?（(“「—]))用户(?:已经?|也|还|曾|随后|同时|再次)?(?:明确)?(?:确认|决定|要求|提出|反驳|否定|拒绝|指出|强调|坚持|补充|认为)(?!了?(?:的|后|前|时|才|状态|是否|内容|事实|决策|结论|知识|信息|生成)|\s*[/／、和与或及])|\bthe user (?:explicitly )?(?:confirmed|decided|required|asked|rejected|insisted|chose)\b/iu;
+const USER_STANCE=/(?:^|(?:(?<=[\s*，,。；;：:！？!?（(“「—])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s)))用户(?:已经?|也|还|曾|随后|同时|再次)?(?:明确)?(?:确认|决定|要求|提出|反驳|否定|拒绝|指出|强调|坚持|补充|认为)(?!了?(?:的|后|前|时|才|状态|是否|内容|事实|决策|结论|知识|信息|生成)|\s*[/／、和与或及])|\bthe user (?:explicitly )?(?:confirmed|decided|required|asked|rejected|insisted|chose)\b/iu;
 export const stanceKey=(text:string)=>text.normalize("NFKC").toLocaleLowerCase().replace(/[\s*`_[\]（）()「」“”"'，,。.！!？?；;：:、-]/gu,"");
 /** A stance sentence is backed when a claim it states has a user-authored source;
  * otherwise the cited originals do not show it. Code, quotations and tables are not narration. */
@@ -59,7 +59,7 @@ function userStances(section:StatusSection):Stances&{sentences:string[]} {
  const prose=section.body.replace(/^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[^\n]*$/gmu,"").split("\n").filter(line=>!/^\s*(?:#|>|\|)/u.test(line)).join("\n");
  const claims=(section.claims??[]).map(claim=>({user:USER_SOURCES.includes(wikiClaimSource(claim))||Boolean(claim.sourceReading?.sources.some(source=>source.role==="user")),keys:[claim.text,...claim.formulations??[]].map(stanceKey).filter(key=>key.length>=6)}));
  let backed=0,unbacked=0;const sentences:string[]=[];const kept=new Set((section as {wikiStancesKept?:string[]}).wikiStancesKept??[]);
- for(const sentence of prose.split(/(?<=[。！？!?])|\n+/u)){
+ for(const sentence of prose.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))|\n+/u)){
   // "材料未显示用户已确认采用" denies a stance; it does not name one.
   // Quoted words become an empty quote, so "反驳「…」的观点" does not read as "反驳的".
   const narration=sentence.replace(/“[^”]*”|「[^」]*」|`[^`\n]*`|"[^"\n]*"/gu,"「」"),stance=USER_STANCE.exec(narration);
@@ -124,12 +124,13 @@ export function wikiUnbackedStances(section:StatusSection):string[] {
 /** What a reader should know before trusting a chapter, without counts: how many AI proposals it holds changes
  * nothing for them. Only a chapter that is mostly unconfirmed proposals, prose naming the user's stance that no
  * cited message backs, or a draft the user kept says anything. */
-export function wikiChapterNotice(section:StatusSection,zh:boolean):string|undefined {
+/** A learning record leaves out "mostly AI proposals": there the AI explains, and unmarked text is its explanation. */
+export function wikiChapterNotice(section:StatusSection,zh:boolean,learning=false):string|undefined {
  if(!generated(section)||!section.claims?.length)return undefined;
  const counts=sourceCounts(section.claims),stances=userStances(section),parts:string[]=[];
  // Marked sentences already say what is decided; unmarked text is the AI's by the legend, so "mostly proposals" repeats it.
  const marked=section.claims.some(claim=>claim.holderMark&&claim.holder);
- if(!marked&&unconfirmedProposals(counts,section.claims.length,stances))parts.push(zh?"多为 AI 建议，相关原文里没有看到你的确认":"Mostly AI proposals; the cited messages show no decision of yours");
+ if(!marked&&!learning&&unconfirmedProposals(counts,section.claims.length,stances))parts.push(zh?"多为 AI 建议，相关原文里没有看到你的确认":"Mostly AI proposals; the cited messages show no decision of yours");
  else if(stances.unbacked)parts.push(zh?`正文有 ${stances.unbacked} 处写到你的表态，引用原文里没有核对到`:`The text names your stance in ${stances.unbacked} place${stances.unbacked>1?"s":""} the cited messages do not show`);
  if(wikiDraftKept(section as FocusSection))parts.push(zh?"你已保留这一章的整理稿（不代表事实已确认）":"You kept this draft (not a confirmation of the facts)");
  return parts.length?parts.join(zh?"。":". "):undefined;

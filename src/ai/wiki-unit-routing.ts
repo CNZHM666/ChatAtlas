@@ -1,3 +1,5 @@
+import { LEAVES_OUT } from "../shared/negation";
+import { PHASE } from "../shared/stage-words";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { personalDirection, statesCore, type WikiKnowledgeOrganization, type WikiKnowledgeUnit, type WikiSubject } from "../shared/wiki-knowledge";
 
@@ -12,13 +14,16 @@ const TITLE: Record<Lane, RegExp> = {
   progress: /计划|进度|状态|发布|plan|progress|status|release/iu,
   stage: /规划|路线|里程碑|计划|roadmap|milestone|plan/iu,
   roadmap: /规划|路线|里程碑|计划|roadmap|milestone|plan/iu,
-  quality: /测试|质量|验收|计划|test|quality|validation|plan/iu,
+  // 规划 too: "开发规划与发布策略" holds the tests and the delivery rules ("每个 Phase 完成后必须通过 lint/typecheck……").
+  quality: /测试|质量|验收|计划|规划|test|quality|validation|plan/iu,
   // Not 交互: a requirement example ("温度超过 28℃ 时蜂鸣器提醒") went to 界面设计与交互体验 for that word.
   example: /工作流|流程|示例|workflow|example/iu,
 };
 const LABEL: Record<Lane, [string, string]> = { purpose: ["产品定位", "Product purpose"], interface: ["界面交互", "Interface"], technical: ["实现机制", "Implementation"], security: ["安全边界", "Security"], documentation: ["文档与维护", "Documentation"], progress: ["实现进度", "Progress"], stage: ["阶段安排", "Stages"], roadmap: ["开发路线", "Roadmap"], quality: ["验证与验收", "Validation"], example: ["使用示例", "Usage examples"] };
 /** A statement laying out a whole roadmap: so many phases or milestones, or three or more of them named in order. */
 const ROADMAP_COUNT = /(?:分|按|共)\s*\d+\s*个\s*(?:Phase|阶段|里程碑|Milestone)/iu, ROADMAP_STEP = /(?:\bPhase\s*|\bM\s*|Milestone ?|第)\d+(?:\s*阶段)?/giu;
+/** A roadmap subtopic, and a subtopic for tests, within one chapter. */
+const ROADMAP_TOPIC = /路线图|里程碑|版本规划|开发路线|roadmap|milestone/iu, TESTS_TITLE = /测试|验收|质量|基准|test|quality|benchmark/iu;
 /** A screen of the product, named as one. */
 const SCREEN = /首页|落地页|欢迎页|Landing\s*Page|Welcome\s*Screen|Hero|页面布局|\bpage\b/iu;
 export const wikiRoadmap = (text: string) => ROADMAP_COUNT.test(text) || (text.match(ROADMAP_STEP) ?? []).length >= 3;
@@ -28,7 +33,8 @@ export function wikiUnitLane(unit: WikiKnowledgeUnit): Lane | undefined {
   if (/示例|例子|\b(?:demo|example)\b/iu.test(identity) || /用户原始需求/u.test(unit.evidence.quote) && /结构化理解/u.test(unit.evidence.quote) && !/项目|产品|平台|界面|交互|字段|数据/u.test(text)) return "example";
   if (/文档|README|documentation/iu.test(identity) || /文档(?:重组|分层|结构)|PROJECT_OVERVIEW\.md/iu.test(text)) return "documentation";
   if (/进度|实现状态|已完成功能|completed features|project status/iu.test(identity) && /已完成|已实现|已通过|完成了|\b(?:implemented|completed|passed)\b/iu.test(text)) return "progress";
-  if (/基准测试|验收|质量保障|成功标准|benchmark|acceptance|quality assurance/iu.test(identity)) return "quality";
+  // Tests and delivery rules ("开发工作流要求 · 交付标准", "视觉识别测试规范", "End-to-End HardwareBench"), wherever they were filed.
+  if (/基准测试|验收|质量保障|成功标准|交付标准|开发工作流|测试规范|测试集|测试用例|benchmark|acceptance|quality assurance|definition of done/iu.test(identity) || /[A-Z][a-z]*Bench\b/u.test(identity)) return "quality";
   if (TITLE.purpose.test(identity) && /定位|面向|服务|目标用户|核心价值|positioned|targets|built for/iu.test(text)) return "purpose";
   // A whole roadmap ("分 7 个 Phase：1.Foundation…", "开发按 7 个里程碑推进：静态 Canvas、……") belongs with the plans from any
   // chapter: one run told three of them, in the interface, architecture and plan chapters, none saying which holds.
@@ -36,7 +42,7 @@ export function wikiUnitLane(unit: WikiKnowledgeUnit): Lane | undefined {
   // A stage of the work ("Milestone 5 · Alpha Validation": 冻结大功能 1-2 周) is a plan, whatever subject carried it.
   if (/Milestone\s*[\d.]+|\bPhase\s*[A-Z0-9]\b|里程碑|开发路线|开发阶段|阶段安排|开发顺序|roadmap/iu.test(identity) && ["plan", "decision"].includes(unit.kind)) return "stage";
   // What a version leaves out ("V0.1 范围 · 功能限制": 第一版禁止 PCB、STM32……) is that stage's scope, not a visual rule.
-  if (/范围|功能限制|功能边界|\bscope\b/iu.test(identity) && /第一版|首版|\bV\d|本阶段|当前阶段|\bMVP\b/iu.test(`${identity} ${text}`) && /禁止|不做|不支持|不包含|严禁|暂不|仅支持|限定/u.test(text) && ["constraint", "decision", "plan"].includes(unit.kind)) return "stage";
+  if (/范围|功能限制|功能边界|\bscope\b/iu.test(identity) && PHASE.test(`${identity} ${text}`) && new RegExp(`${LEAVES_OUT}|仅支持|限定`, "u").test(text) && ["constraint", "decision", "plan"].includes(unit.kind)) return "stage";
   // How keys and the proxy are kept safe ("AI代理限制 · 后端安全", "密钥存储策略") belongs with the security rules. 安全
   // alone says less: "Transaction / Rollback · 安全机制" is how the IR is changed, "兼容性校验 · 安全约束" a buying rule.
   if (["mechanism", "constraint", "decision"].includes(unit.kind) && (/密钥|API\s*Key|代理|proxy|secret|凭证|credential/iu.test(identity)
@@ -60,6 +66,14 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
   for (const subject of [...subjects]) for (const id of [...subject.unitIds]) {
     const unit = units.get(id), from = home.get(subject.id), lane = unit && wikiUnitLane(unit);
     if (!unit || unit.about || !from || !lane || /相关项目|外部参考|参考项目|related project|outside reference/iu.test(from.title)) continue;
+    // A test plan under the chapter's roadmap ("1. Phase 1…… 4. Benchmark 建设…… 6. E2E Benchmark……") joins the chapter's
+    // testing subtopic: listed as roadmap steps, test suites read as stages of the product.
+    if (lane === "quality" && TITLE.quality.test(from.title)) {
+      const topic = from.subtopics.find(item => item.subjectIds.includes(subject.id)), tests = from.subtopics.find(item => item !== topic && TESTS_TITLE.test(item.title));
+      const into = tests && subjects.find(other => other.id === tests.subjectIds[0]);
+      if (topic && ROADMAP_TOPIC.test(topic.title) && into) { subject.unitIds = subject.unitIds.filter(other => other !== id); into.unitIds.push(id); moved++; }
+      continue;
+    }
     if (TITLE[lane].test(from.title) && !(lane === "technical" && TITLE.purpose.test(from.title))) continue;
     // A stage told under a technical or validation chapter may be that part's own milestone (Milestone 3.1 · BYOK): only
     // the interface and positioning chapters never hold one.
@@ -72,7 +86,12 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
     const to = candidates[0];
     if (!to) continue;
     const targetId = `${to.id}:role:${lane}`, label = LABEL[lane][/\p{Script=Han}/u.test(to.title) ? 0 : 1];
-    let target = subjects.find(subject => subject.id === targetId);
+    // A test item joins the chapter's own testing subtopic (工程规范与测试要求) rather than opening another beside it.
+    const testing = lane === "quality" ? to.subtopics.find(topic => TESTS_TITLE.test(topic.title)) : undefined;
+    // Otherwise the planned subtopic whose points share most of its words: a heading of the role's own ("### 产品定位" in
+    // 产品定位与用户价值, "### 实现机制", "### 阶段安排") stood beside the planned ones, repeating the chapter or saying nothing.
+    const fitting = testing ?? fittingTopic(to, unit, subjects, units);
+    let target = fitting ? subjects.find(subject => subject.id === fitting.subjectIds[0]) : subjects.find(subject => subject.id === targetId);
     if (!target) {
       target = { id: targetId, name: label, aliases: [], unitIds: [] }; subjects.push(target); home.set(targetId, to);
       to.subtopics.push({ title: label, subjectIds: [targetId] });
@@ -99,6 +118,22 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
   return { ...organization, subjects: subjects.filter(subject => live.has(subject.id)), chapters: keptChapters, ...(groups ? { groups } : {}) };
 }
 
+/** The chapter's planned subtopic a routed point belongs in: the one whose title and points share most of its words,
+ * three or more. A subtopic routing made ("…:role:…") is no plan. */
+const TOPIC_SHARED = 3;
+function fittingTopic(chapter: WikiKnowledgeOrganization["chapters"][number], unit: WikiKnowledgeUnit, subjects: WikiSubject[], units: Map<string, WikiKnowledgeUnit>) {
+  const own = knowledgeTerms(`${unit.subject} ${unit.facet ?? ""} ${unit.statement}`);
+  let best: { topic: typeof chapter.subtopics[number]; shared: number } | undefined;
+  for (const topic of chapter.subtopics) {
+    if (topic.subjectIds.some(id => id.includes(":role:"))) continue;
+    const held = topic.subjectIds.flatMap(id => subjects.find(subject => subject.id === id)?.unitIds.slice(0, 30) ?? []).flatMap(id => units.get(id) ?? []);
+    const terms = knowledgeTerms(`${topic.title} ${held.map(other => `${other.subject} ${other.statement}`).join(" ")}`);
+    let shared = 0; for (const term of own) if (terms.has(term)) shared++;
+    if (shared >= TOPIC_SHARED && (!best || shared > best.shared)) best = { topic, shared };
+  }
+  return best?.topic;
+}
+
 /** Pick a source-owned home for a recovered point without inventing a chapter. */
 export function wikiUnitHome(organization: WikiKnowledgeOrganization, unit: WikiKnowledgeUnit) {
   const owners = new Set(organization.subjects.filter(subject => subject.unitIds.includes(unit.id)).map(subject => subject.id));
@@ -116,13 +151,17 @@ const PERSONAL_TITLE = /个人|学习路线|学习方向|职业|career|personal|
 export function retitleMisnamedChapters(organization: WikiKnowledgeOrganization, units: Map<string, WikiKnowledgeUnit>, report: Record<string, number> = {}): WikiKnowledgeOrganization {
   const subjects = new Map(organization.subjects.map(subject => [subject.id, subject]));
   let renamed = 0;
+  const taken = new Set(organization.chapters.map(chapter => chapter.title));
   const chapters = organization.chapters.map(chapter => {
     if (!PERSONAL_TITLE.test(chapter.title)) return chapter;
     const held = chapter.subtopics.flatMap(topic => topic.subjectIds.flatMap(id => subjects.get(id)?.unitIds ?? [])).flatMap(id => units.get(id) ?? []);
     if (!held.length || held.filter(unit => personalDirection(unit.statement)).length >= held.length * PERSONAL_SHARE) return chapter;
+    const zh = /\p{Script=Han}/u.test(chapter.title), title = zh ? "开发计划与流程" : "Development plan";
+    // Two such chapters were both renamed, and the directory listed "开发计划与流程" twice.
+    if (taken.has(title)) return chapter;
+    taken.add(title);
     renamed++;
-    const zh = /\p{Script=Han}/u.test(chapter.title);
-    return { ...chapter, title: zh ? "开发计划与流程" : "Development plan", question: zh ? "项目按什么阶段和流程推进？" : "In what phases and steps does the work proceed?" };
+    return { ...chapter, title, question: zh ? "项目按什么阶段和流程推进？" : "In what phases and steps does the work proceed?" };
   });
   if (!renamed) return organization;
   report.chapters_retitled = renamed;

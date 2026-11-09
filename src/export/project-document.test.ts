@@ -1,5 +1,5 @@
 import {expect,it} from "vitest";
-import {projectDocument,type ProjectExportSelection} from "./project-document";
+import {numberedLearningChapter,projectDocument,type ProjectExportSelection} from "./project-document";
 import {contextKnowledge} from "../test/context-fixture";
 
 const selection:ProjectExportSelection={overview:false,wikiIds:["database"],matters:false,history:false,sources:false};
@@ -144,11 +144,11 @@ it("T24: states the document type from saved checks and puts key conclusions bes
  session.sourceConversationIds=["source"];session.sourceRoles={source:{m0:"assistant",m1:"user"}};session.sourceSignatures={source:Object.fromEntries(originals.map(message=>[message.id,sourceMessageSignature(message.content)]))};session.sourceMessageOrder={source:["m0","m1"]};
  session.sections=groundWikiClaims([{id:"store",title:"存储与搜索",body:"消息保存在 IndexedDB 中。\n\n用户已确认采用 Orama 作为搜索引擎。",kind:"finding",transition:"",evidenceIds:["e0","e1"],claims:[{text:"消息保存在 IndexedDB 中。",quote:texts[1].text,evidenceIds:["e1"],overviewRole:"decision"},{text:"用户已确认采用 Orama 作为搜索引擎。",quote:texts[0].text,evidenceIds:["e0"],workStatus:"proposed",overviewRole:"decision"}]}],session.evidence,originals,true);
  const file=projectDocument(session,{overview:false,wikiIds:["store"],matters:false,history:false,sources:true},"md").text;
- expect(file).toContain("> 文档类型：历史讨论整理稿");
- expect(file).toContain("原始讨论时间");
+ expect(file).toContain("| 文档类型 | 历史讨论整理稿");
+ expect(file).toMatch(/\| 来源 \| .* · 讨论于 /u);
  // The first line says when the discussions took place, so "当前" in the text reads as of then.
- expect(file.split("\n")[0]).toMatch(/^> 整理稿 · 讨论于 \d+\/\d+(?:–\d+\/\d+)? · \d+ 个来源对话 · 实现未核验$/u);
- expect(file).toContain("> 实现核对：未进行。");
+ expect(file.split("\n")[0]).toBe("文档状态：整理稿 · 实现未核验  ");expect(file.split("\n")[1]).toMatch(/^来源：\d+ 个来源对话 · 讨论于 \d+\/\d+(?:–\d+\/\d+)?$/u);
+ expect(file).toContain("| 实现核对 | 未进行");
  expect(file).toContain("**关键结论与来源**");
  // Each label heads its group once; the conclusions under it are plain items.
  expect(file).toMatch(/\*所选讨论中的决定 · 实现未核验\*\n\n- 消息保存在 IndexedDB 中。〔来源 \d〕/u);
@@ -172,9 +172,9 @@ it("keeps the reading entrance brief, retains scope warnings and moves detailed 
  session.sections=groundWikiClaims([{id:"index",title:"索引",body:`方案 9 采用本地索引。\n\n## 细节\n\n${claims.slice(0,9).map(claim=>claim.text).join("\n\n")}`,kind:"finding",transition:"",evidenceIds:session.evidence.map(ref=>ref.id),claims}],session.evidence,originals,true);
  const file=projectDocument(session,{overview:false,wikiIds:["index"],matters:false,history:false,sources:true},"md").text;
  const opening=file.split("\n\n## ")[0];
- expect(opening.split("\n").length).toBeLessThanOrEqual(2);expect(opening).toContain("实现未核验");
- expect(opening).not.toContain("句末标记说明");
- const notes=file.split("## 文档信息与核对说明")[1];expect(notes).toContain("文档类型");expect(notes).toContain("实现核对：未进行");
+ expect(opening.split("\n").length).toBeLessThanOrEqual(5);expect(opening).toContain("实现未核验");
+ expect(opening).not.toContain("### 句末标记");
+ const notes=file.split("## 文档信息与核对说明")[1];expect(notes).toContain("文档类型");expect(notes).toContain("| 实现核对 | 未进行");
  expect(file).toContain("**本章来源**：共 10 条，见来源索引；关键结论旁已标出对应来源");
  const block=file.slice(file.indexOf("**关键结论与来源**"),file.indexOf("**本章来源**")),keys=block.split("\n").filter(line=>line.startsWith("- "));
  // Only the suggestion the chapter opens with is listed, under one label: the list is not filled up to a count.
@@ -221,9 +221,30 @@ it("marks who holds each run of text after its last sentence, with a legend at t
  // The assistant's text carries no mark; a decision does, and the legend says what no mark means.
  expect(file).not.toContain("〔建议／分析〕");expect(file).toContain("〔已定〕");
  expect(file).toContain("首页只保留搜索入口。〔已定〕");
- expect(file).toContain("> 句末标记说明：〔已定〕你确认的决定");expect(file).toContain("没有标记的是 AI 的建议或分析");
+ expect(file).toContain("### 句末标记\n\n- 〔已定〕你确认的决定");expect(file).toContain("- 没有标记：AI 的建议或分析");
  page.claims=page.claims.map(claim=>({...claim,holder:undefined,holderMark:undefined}));
- expect(projectDocument(session,{...selection,holderMarks:true},"md").text).not.toContain("句末标记说明");
+ expect(projectDocument(session,{...selection,holderMarks:true},"md").text).not.toContain("### 句末标记");
+});
+
+it("names each of several conversations by its AI: in the source scope, after each chapter, in marks and in the key decisions",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],noon=(day:number)=>Date.UTC(2026,8,day,12);
+ session.sourceConversationIds=["c","c2"];
+ session.evidence[1]={...session.evidence[1],conversationId:"c2"};
+ const unit=(id:string,conversationId:string,statement:string)=>({id,subject:"",statement,kind:"decision" as const,details:[],evidence:{evidenceId:id,conversationId,messageId:id,messageIndex:0,role:"user" as const,pasted:false,quote:statement},adoption:{status:"user_decision" as const},delivery:"unknown" as const});
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[{sourceIds:[],status:"ok",units:[unit("u-db","c","数据库使用 IndexedDB。"),unit("u-ui","c2","首页只保留搜索入口。")],rejected:{}}],
+  sources:{c:{platform:"chatgpt",title:"硬件方向",start:noon(1),end:noon(3)},c2:{platform:"claude",title:"界面细化",start:noon(5),end:noon(9)}}};
+ page.body="数据库使用 IndexedDB。首页只保留搜索入口。";page.evidenceIds=["e-db","e-ui"];
+ page.claims=[{text:"数据库使用 IndexedDB。",quote:"数据库使用 IndexedDB。",evidenceIds:["e-db"],unitIds:["u-db"],holder:"ai",holderMark:true},{text:"首页只保留搜索入口。",quote:"首页只保留搜索入口。",evidenceIds:["e-ui"],unitIds:["u-ui"],holder:"decided",holderMark:true}];
+ const file=projectDocument(session,{...selection,overview:true,holderMarks:true},"md").text;
+ expect(file).toContain("首页只保留搜索入口。〔已定 · Claude〕");
+ expect(file).toContain("**本章来源对话**：ChatGPT、Claude");
+ expect(file).toContain("- ChatGPT · 《硬件方向》 · 9/1–9/3 · 引用 1 条");
+ expect(file).toContain("- Claude · 《界面细化》 · 9/5–9/9 · 引用 1 条");
+ expect(file).toMatch(/\| [^|\n]+ · Claude \| 首页只保留搜索入口。 \|/u);
+ // One conversation: nothing to tell apart, nothing named.
+ session.sourceConversationIds=["c"];
+ const single=projectDocument(session,{...selection,overview:true,holderMarks:true},"md").text;
+ expect(single).toContain("首页只保留搜索入口。〔已定〕");expect(single).not.toContain("本章来源对话");expect(single).not.toContain("〔已定 · ChatGPT〕");
 });
 
 it("sums each chapter up in the overview: its first sentence, how many points are decided and open, and those points",()=>{
@@ -234,8 +255,17 @@ it("sums each chapter up in the overview: its first sentence, how many points ar
  const overview=file.slice(file.indexOf("## 项目总览"),file.indexOf("\n---\n"));
  // The answer is the first sentence, bold dropped; the counts come from the marks.
  expect(overview).toContain(`| 章节 | 结论 | 决策情况 |\n|---|---|---|\n| ${title} | 数据库使用 IndexedDB。 | 1 项你的决定，1 项仍在讨论；其余见句末标记 |`);
- expect(overview).toContain(`### 已定的关键决定\n\n- 首页只保留搜索入口。（${title}）`);
- expect(overview).toContain(`### 待决问题\n\n- 导出格式待定。（${title}）`);
+ expect(overview).toContain(`### 已定的关键决定\n\n| 领域 | 决定 |\n|---|---|\n| ${title}`);expect(overview).toContain(` | 首页只保留搜索入口。 |`);
+ expect(overview).toContain(`### 待决问题\n\n| 领域 | 问题 |\n|---|---|\n| ${title}`);expect(overview).toContain(` | 导出格式待定。 |`);
+});
+
+it("names the subtopic a key decision sits under, sets its figures in bold and says first how to read the marks",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0],title=page.wikiDisplayTitle||page.title;
+ page.body="数据库使用 IndexedDB。\n\n### 顶栏\n\n顶栏高度固定为 48px。";
+ page.claims=[{text:"顶栏高度固定为 48px。",quote:"顶栏高度固定为 48px。",evidenceIds:[source.id],holder:"decided",holderMark:true}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ expect(file).toContain(`| ${title} › 顶栏 | 顶栏高度固定为 **48px**。 |`);
+ expect(file.slice(0,file.indexOf("\n## "))).toContain("> 阅读方式：标〔已定〕的是你确认的决定");
 });
 
 
@@ -268,27 +298,14 @@ it("keeps exported Markdown free of a repeated display title and moves full note
  expect(json.title).toBe(session.title);expect(json.context.identity.join(" ")).toContain("实现核对");
 });
 
-it("folds a long subsection after its answer and the table right after it, in Markdown files only",()=>{
+it("shows a long subsection in full, with no HTML folding a Markdown viewer would print as tags",()=>{
  const session=contextKnowledge().session,page=session.sections[0];
- const topics=["离线检索","隐私边界","增量更新","崩溃恢复","多语言分词","向量回退","缓存失效","导入兼容","排序权重","内存上限","版本迁移","消息定位","去重聚合","批量写入","索引压缩","冷启动","附件解析","代码高亮","公式渲染","时间线","书签同步","标签合并","快捷键","主题切换","字体缩放","权限申请","错误上报","日志轮转","配额提醒","网络重试","页面预热","草稿保存"];
- const reason=(n:number)=>`第 ${n} 条原因：`+topics.slice((n-1)*4,n*4).map(topic=>`${topic}需要独立的处理路径，它和其他环节分开验收，出问题时只回退这一环节，不影响已经完成的索引与阅读进度。`).join("");
- page.body=["## 检索","索引放在本地。","| 层 | 选型 |\n|---|---|\n| 存储 | IndexedDB |\n| 检索 | Orama |",...[1,2,3,4,5,6,7,8].map(reason),"## 导出","导出只读本地数据库。"].join("\n\n");
- // A body the user wrote is exported as written, so only the folding is tested.
+ const reason=(n:number)=>`第 ${n} 条原因：`+"这一环节需要独立的处理路径，它和其他环节分开验收，出问题时只回退这一环节。".repeat(6);
+ page.body=["## 检索","索引放在本地。",...[1,2,3,4,5,6,7,8].map(reason),"## 导出","导出只读本地数据库。"].join("\n\n");
  page.claims=[];page.userEdited=true;
  const file=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
- // The answer and its table stay in view; only the tail of reasons folds, in order, at most half the subsection;
- // a short section does not fold.
- expect(file).toMatch(/### 检索\n\n索引放在本地。\n\n\| 层 \| 选型 \|[\s\S]*?\| 检索 \| Orama \|\n\n第 1 条[\s\S]*?\n\n<details>\n<summary>展开细节<\/summary>\n\n第 \d 条[\s\S]*第 8 条[\s\S]*?\n\n<\/details>\n\n### 导出\n\n导出只读本地数据库。/u);
- expect(file.match(/<details>/gu)).toHaveLength(1);
- const section=file.slice(file.indexOf("### 检索"),file.indexOf("### 导出")),folded=section.slice(section.indexOf("<details>"));
- expect(folded.length).toBeLessThanOrEqual(section.length/2+80);
- // A rule late in the subsection keeps everything up to it in view.
- page.body=page.body.replace("第 7 条原因：","第 7 条原因：导出必须只读本地数据库。");
- const ruled=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
- // What is left after it is too short to fold.
- expect(ruled).toContain("导出必须只读本地数据库。");expect(ruled).not.toContain("<details>");
- // Other formats show everything.
- expect(projectDocument(session,{...selection,wikiIds:[page.id]},"txt").text).not.toContain("<details>");
+ expect(file).toMatch(/### 检索\n\n索引放在本地。\n\n第 1 条[\s\S]*第 8 条[\s\S]*?\n\n### 导出/u);
+ expect(file).not.toMatch(/<\/?(?:details|summary)>/u);
 });
 
 it("answers in the overview only with the chapter's opening, and lists only whole sentences as decided or open",()=>{
@@ -315,7 +332,7 @@ it("lists no decision that is only the end of a longer one listed",()=>{
  page.body="首屏为欢迎页，随后进入对话层，再进入 Canvas，最后进行仿真。\n\n1. **仿真验证**：最后进行仿真。";
  page.claims=[{text:"首屏为欢迎页，随后进入对话层，再进入 Canvas，最后进行仿真。",quote:"首屏",evidenceIds:[source.id],holder:"decided",holderMark:true},{text:"最后进行仿真。",quote:"仿真",evidenceIds:[source.id],holder:"decided",holderMark:true}];
  const overview=(file=>file.slice(file.indexOf("## 项目总览"),file.indexOf("\n---\n")))(projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text);
- expect(overview).toContain("- 首屏为欢迎页，随后进入对话层，再进入 Canvas，最后进行仿真。");
+ expect(overview).toContain("| 首屏为欢迎页，随后进入对话层，再进入 Canvas，最后进行仿真。 |");
  expect(overview).not.toContain("- 最后进行仿真。");
 });
 
@@ -347,7 +364,7 @@ it("lists the decided first clause of a sentence whose rest was never confirmed"
  page.body="采用浅色极简新手首页设计基准，并认可推开式分屏作为默认交互模式。";
  page.claims=[{text:"采用浅色极简新手首页设计基准",quote:"浅色",evidenceIds:[source.id],holder:"decided",holderMark:true},{text:"并认可推开式分屏作为默认交互模式。",quote:"分屏",evidenceIds:[source.id],holder:"ai",holderMark:true}];
  const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
- expect(file).toContain(`### 已定的关键决定\n\n- 采用浅色极简新手首页设计基准。（${title}）`);
+ expect(file).toContain(`### 已定的关键决定\n\n| 领域 | 决定 |\n|---|---|\n| ${title}`);expect(file).toContain(` | 采用浅色极简新手首页设计基准。 |`);
  expect(file).toContain("采用浅色极简新手首页设计基准〔已定〕，并认可推开式分屏作为默认交互模式。");
 });
 
@@ -357,20 +374,20 @@ it("says under the header what the automatic checks left, with the counts in the
  const draft={version:1,generatedAt:1,status:"complete",chapters:[],report:{},quality:{sources:"complete",failedBatches:0,uncovered:83,organization:"partial",critical:2,problems:32,passed:false}};
  session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[],draft} as unknown as typeof session.wikiKnowledge;
  const file=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
- const head=file.slice(0,file.indexOf("\n\n"));
- expect(head).toContain("> 本次整理仍有关键检查未通过，部分用户消息未提取知识点，整理不完整；决定与范围请结合来源核对。");
+ const head=file.slice(0,file.indexOf("\n## "));
+ expect(head).toContain("> 本次仍有关键检查未通过，部分用户消息未提取知识点，整理未全部完成；决定与范围请结合来源核对。");
  expect(head).not.toContain("83");
- expect(file).toContain("自动检查：质量检查未通过 · 整理完整性部分完成 · 关键检查未通过 2 项 · 全部检查提示 32 项 · 未抽出知识点的用户消息 83 条。");
+ expect(file).toContain("| 自动检查 | 质量检查未通过 · 整理完整性部分完成 · 关键检查未通过 2 项 · 提示 32 项 · 未抽出知识点的消息 83 条 |");
  draft.quality={sources:"complete",failedBatches:0,uncovered:0,organization:"complete",critical:0,problems:0,passed:true};
  const clean=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
- expect(clean).not.toContain("本次整理");expect(clean).not.toContain("自动检查");
+ expect(clean).not.toContain("本次仍有");expect(clean).not.toContain("自动检查");
 });
 
 it("lists a first-version scope stated both ways among the open questions",()=>{
  const session=contextKnowledge().session,page=session.sections[0],title=page.wikiDisplayTitle||page.title;
  page.body="| 事项 | 第一版 |\n| --- | --- |\n| Wiki/知识图谱 | 暂缓 |\n\n> 范围有分歧：「Wiki/知识图谱」写为暂缓，下文又写「Wiki 为核心」。第一版是否包含，需要你确认。\n\nWiki 为核心。";
  const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
- expect(file).toContain(`### 待决问题\n\n- 范围有分歧：「Wiki/知识图谱」写为暂缓，下文又写「Wiki 为核心」。第一版是否包含，需要你确认。（${title}）`);
+ expect(file).toContain(`### 待决问题\n\n| 领域 | 问题 |\n|---|---|\n| ${title}`);expect(file).toContain(` | 范围有分歧：「Wiki/知识图谱」写为暂缓，下文又写「Wiki 为核心」。第一版是否包含，需要你确认。 |`);
  expect(file).toContain("> 范围有分歧：「Wiki/知识图谱」写为暂缓");
 });
 
@@ -382,7 +399,7 @@ it("shows the current baseline from the draft: doing now, not now and done when,
   {part:"notNow",text:"V0.1 暂不做实时比价。",unitIds:["u2"],holder:"decided"},
   {part:"done",text:"lint、typecheck、test、build 必须全部通过。",unitIds:["u3"],holder:"user"}]}} as unknown as typeof session.wikiKnowledge;
  const overview=(file=>file.slice(file.indexOf("## 项目总览"),file.indexOf("\n---\n")))(projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text);
- expect(overview).toContain("### 当前基线\n\n**现在做**\n\n- 下一阶段开发 Inventory 模块。\n\n**暂不做**\n\n- V0.1 暂不做实时比价。〔已定〕\n\n**完成标准**\n\n- lint、typecheck、test、build 必须全部通过。〔你〕");
+ expect(overview).toContain("### 当前基线\n\n**当前阶段**\n\n- 下一阶段开发 Inventory 模块。\n\n**暂不做**\n\n- V0.1 暂不做实时比价。〔已定〕\n\n**完成标准**\n\n- lint、typecheck、test、build 必须全部通过。〔你〕");
 });
 
 it("reports failed planned chapters separately from the available export selection",()=>{
@@ -406,4 +423,244 @@ it("lists every decided sentence of a run among the key decisions, not only the 
  const file=projectDocument(session,{...selection,overview:true,holderMarks:true},"md").text;
  expect(file).toContain("命令面板作为后续增强。〔已定〕");
  expect(file).toMatch(/已定的关键决定[\s\S]*第一阶段允许使用 Mock AI 准备三个演示项目。/u);
+});
+
+it("counts and lists a decision told as steps once, each step with its own label",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0],title=page.wikiDisplayTitle||page.title;
+ const steps=[["首屏","采用ChatGPT式简洁欢迎页。"],["对话层","用户输入需求后进入此层确定清单。"],["仿真","最后进行仿真操作。"]];
+ page.body=`**数据库使用 IndexedDB。**\n\n${steps.map(([label,text],index)=>`${index+1}. **${label}**：${text}`).join("\n")}`;
+ page.claims=steps.map(([,text],index)=>({text,quote:text,evidenceIds:[source.id],holder:"decided" as const,holderMark:index===steps.length-1,unitIds:["u-flow"]}));
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ const overview=file.slice(file.indexOf("## 项目总览"),file.indexOf("\n---\n"));
+ expect(overview).toContain("| 1 项你的决定；其余见句末标记 |");
+ expect(overview).toContain(`### 已定的关键决定\n\n| 领域 | 决定 |\n|---|---|\n| ${title}`);expect(overview).toContain(` | 首屏：采用ChatGPT式简洁欢迎页；对话层：用户输入需求后进入此层确定清单；仿真：最后进行仿真操作。 |`);
+ // With its whole sentence in the chapter too, the sentence is the item.
+ const whole="首屏采用ChatGPT式简洁欢迎页，用户输入需求后进入对话层确定清单，最后进行仿真。";
+ page.body+=`\n\n${whole}`;page.claims=[...page.claims,{text:whole,quote:whole,evidenceIds:[source.id],holder:"decided",holderMark:true,unitIds:["u-flow"]}];
+ const again=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ expect(again).toContain(`### 已定的关键决定\n\n| 领域 | 决定 |\n|---|---|\n| ${title}`);expect(again).toContain(` | ${whole} |`);
+ expect(again).toContain("| 1 项你的决定；其余见句末标记 |");
+});
+
+it("lists a decision written in several places once, by its whole sentence",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0],title=page.wikiDisplayTitle||page.title;
+ const whole="首屏采用 ChatGPT 式简洁欢迎页，用户输入需求后进入对话层确定清单，再进入 Canvas，中间嵌套旧物识别，最后进行仿真。";
+ const again="首屏采用ChatGPT式简洁欢迎页，用户输入需求后进入对话层确定清单，再进入Canvas，中间嵌套旧物识别，最后进行仿真。";
+ const tail="随后进入对话层确定清单，中间嵌套旧物识别，最后进行仿真。";
+ page.body=`${whole}\n\n用户输入需求后不直接生成 Canvas，${tail}\n\n${again}`;
+ page.claims=[whole,tail,again].map(text=>({text,quote:text,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-flow"]}));
+ const overview=(file=>file.slice(file.indexOf("## 项目总览"),file.indexOf("\n---\n")))(projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text);
+ expect(overview).toContain(`### 已定的关键决定\n\n| 领域 | 决定 |\n|---|---|\n| ${title}`);expect(overview).toContain(` | ${whole} |`);
+});
+
+it("lists a decision saved with its list bullet and label by what it says",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0],title=page.wikiDisplayTitle||page.title;
+ const item="- **BYOK模式**：采用 BYOK 模式，不保存到服务器。";
+ page.body=`**数据库使用 IndexedDB。**\n\n${item}`;
+ page.claims=[{text:item,quote:item,evidenceIds:[source.id],holder:"decided",holderMark:true,unitIds:["u-byok"]}];
+ const overview=(file=>file.slice(file.indexOf("## 项目总览"),file.indexOf("\n---\n")))(projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text);
+ expect(overview).toContain(`### 已定的关键决定\n\n| 领域 | 决定 |\n|---|---|\n| ${title}`);expect(overview).toContain(` | 采用 BYOK 模式，不保存到服务器。 |`);
+});
+
+it("lists a decided list item that left its subject to the label with the label first",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const text="Confirmed at 48px for both desktop and mobile views.";
+ page.body=`Opening line.\n\n- **Dashboard Top Bar Height**: ${text}\n- **Users can** add expenses.`;
+ page.claims=[{text,quote:text,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-bar"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md",false).text;
+ expect(file).toContain(" | Dashboard Top Bar Height: confirmed at **48px** for both desktop and mobile views. |");
+});
+
+it("lists an open list item that left its subject to the label with the label first",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const text="Deferred to V2 evaluation, pending validation of demand during private alpha.";
+ page.body=`Opening line.
+
+- **Cloud Sync**: ${text}
+- **Users can** add expenses.`;
+ page.claims=[{text,quote:text,evidenceIds:[source.id],holder:"ai" as const,unitIds:["u-sync"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md",false).text;
+ expect(file).toContain(" | Cloud Sync: deferred to V2 evaluation, pending validation of demand during private alpha. |");
+});
+
+it("does not list a decided sentence that names its subject only through the sentence before it",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const lean="This was replaced by the confirmed global standard of 8px corner radius.",own="Standard UI components use a global corner radius of 8px.";
+ page.body=`Opening line.\n\nEarlier specifications proposed a 16px card radius. ${lean}\n\n${own}`;
+ page.claims=[lean,own].map((text,index)=>({text,quote:text,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:[`u-${index}`]}));
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md",false).text;
+ const overview=file.slice(0,file.indexOf("\n---\n"));
+ expect(overview).toContain("global corner radius of **8px**. |");
+ expect(overview).not.toContain("| This was replaced");
+});
+
+it("lists a decision without the connective that tied it to the sentence before, and one open question said twice once",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const usd="However, Pocket Ledger v1 explicitly excludes multi-currency functionality, supporting USD only.";
+ const first="The specific cadence—monthly versus per-pay-period—remains an open product decision; explicit start/end dates are proposed.",second="The choice between monthly budgets and per-pay-period budgets remains explicitly undecided.";
+ page.body=`Opening line.\n\nFeedback asked for currencies. ${usd}\n\n${first} ${second}`;
+ page.claims=[{text:usd,quote:usd,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-usd"]},...[first,second].map((text,index)=>({text,quote:text,evidenceIds:[source.id],holder:"open" as const,holderMark:true,unitIds:[`u-open-${index}`]}))];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md",false).text;
+ const overview=file.slice(0,file.indexOf("\n---\n"));
+ expect(overview).toContain("| Pocket Ledger **v1** explicitly excludes multi-currency functionality, supporting USD only. |");
+ expect(overview.split("per-pay-period").length-1).toBe(1);
+});
+
+it("lists the whole sentences of one decision together, and a ban apart from the choice it goes with",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ session.locale="en";
+ const stack="The system is built as a client-only web application using React, Vite, and TypeScript with IndexedDB via Dexie for local data persistence.";
+ const ban="Use IndexedDB via Dexie for local data persistence; do not use localStorage.";
+ const never="In version 1, transaction data must never be sent to any server.",analytics="Analytics are limited to collecting anonymous page views only, excluding all transaction details or identifying information.";
+ page.body=`${stack}\n\n${ban}\n\n${never} ${analytics}`;
+ page.claims=[{text:stack,quote:stack,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-stack"]},{text:ban,quote:ban,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-ban"]},
+  {text:never,quote:never,evidenceIds:[source.id],holder:"decided" as const,unitIds:["u-never"]},{text:analytics,quote:analytics,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-never"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md",false).text;
+ const overview=file.slice(file.indexOf("### Key decisions"),file.indexOf("\n---\n"));
+ expect(overview).toContain(` | ${ban} |`);
+ expect(overview).toContain(` | ${never} ${analytics} |`);
+});
+
+it("lists a decision told after another point without the joining word",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const usd="but Pocket Ledger v1 supports USD only; multi-currency functionality is explicitly excluded.";
+ page.body=`Opening line.\n\nExternal feedback suggests supporting multiple currencies, ${usd}`;
+ page.claims=[{text:usd,quote:usd,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-usd"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md",false).text;
+ const overview=file.slice(0,file.indexOf("\n---\n"));
+ expect(overview).toContain("| Pocket Ledger **v1** supports USD only; multi-currency functionality is explicitly excluded. |");
+ expect(overview).not.toContain("| but ");
+});
+
+it("names the failing key checks, with where they are, under the header",()=>{
+ const session=contextKnowledge().session,page=session.sections[0];
+ page.body="Opening line.";
+ const chapters=[{id:"c",title:"Scope and Roadmap",question:"",group:"",body:"",paragraphs:[],problems:["\" **Milestone 3**：Private…\" has no claim naming the units it states; add a claim for each decided, done, figure or change sentence","\"- Bank syncing…\" explains the core of one explanation group again"]}];
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[],draft:{version:1,generatedAt:1,status:"complete",chapters,report:{},quality:{sources:"complete",failedBatches:0,organization:"complete",critical:1,problems:2,passed:false}}} as unknown as typeof session.wikiKnowledge;
+ const file=projectDocument(session,{...selection,wikiIds:[page.id]},"md",false).text;
+ expect(file.slice(0,file.indexOf("\n## "))).toContain("Failing: Scope and Roadmap (“Milestone 3: Private…”): a decided, done or figure sentence is not tied to its sources.");
+ expect(file).not.toContain("explains the core");
+});
+
+it("gives a chapter's answer at a glance without its sentence mark",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const stack="The system is built as a client-only web application using React, Vite, and TypeScript.";
+ page.body=`${stack} Amounts are stored as integers.\n\n### Tech Stack\n\nDetails.`;
+ page.claims=[{text:stack,quote:stack,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-stack"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md",false).text;
+ const glance=file.slice(file.indexOf("### At a glance"),file.indexOf("### Key decisions"));
+ expect(glance).toContain(`| ${stack} |`);
+ expect(glance).not.toContain("[Decided]");
+ expect(file).toContain(`${stack} [Decided]`);
+});
+
+it("lists a decided table row with its item first, and two overlapping sentences once",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const look="界面采用极简暖白色风格，Popup 布局宽度固定为 360px，高度按内容自适应。",size="Popup 布局宽度固定为 360px，高度按内容自适应，首页目标高度约 460px，以避免首页出现滚动条。";
+ page.body=`${look}${size}\n\n| 事项 | 决策 |\n| --- | --- |\n| 云同步 | 不做，后续规划不再纳入开发范围 |`;
+ page.claims=[{text:look,quote:look,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-look"]},{text:size,quote:size,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-look"]},
+  {text:"云同步",quote:"云同步",evidenceIds:[source.id],holder:"decided" as const,unitIds:["u-sync"]},{text:"不做，后续规划不再纳入开发范围",quote:"不做，后续规划不再纳入开发范围",evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-sync"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ const overview=file.slice(file.indexOf("### 已定的关键决定"));
+ expect(overview).toContain(" | 界面采用极简暖白色风格，Popup 布局宽度固定为 **360px**，高度按内容自适应，首页目标高度约 **460px**，以避免首页出现滚动条。 |");
+ expect(overview).toContain(" | 云同步：不做，后续规划不再纳入开发范围。 |");
+});
+
+it("lists a decision without the 但 tying it to the clause before, and an earlier undecided point not as open",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const chose="但最终确认 Popup 宽度为 380px。",waited="宽度未定前 CSS 变量默认值暂用 B2 (360px)。";
+ page.body=`尽管曾有两案并存的提议，${chose}\n\n${waited}`;
+ page.claims=[{text:chose,quote:chose,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-w"]},{text:waited,quote:waited,evidenceIds:[source.id],holder:"earlier" as const,holderMark:true,unitIds:["u-old"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ expect(file).toContain(" | 最终确认 Popup 宽度为 **380px**。 |");
+ expect(file).not.toContain("### 待决问题");
+});
+
+it("lists once two decisions ruling out the same thing in different words",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const first="第一版采用本地优先策略，不引入服务器、云数据库或 API，后续规划不再将云同步纳入开发范围。",second="V0.1 版本明确决定不做数据云同步，采用本地优先策略。";
+ page.body=`${first}\n\n${second}`;
+ page.claims=[{text:first,quote:first,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-first"]},{text:second,quote:second,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-second"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ const overview=file.slice(file.indexOf("### 已定的关键决定"),file.indexOf("\n---\n"));
+ expect(overview).toContain(first);
+ expect(overview).not.toContain(second);
+});
+
+it("lists once a short ban told inside a longer decision",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const first="第一版采用本地优先策略，不引入服务器、云数据库或 API，后续规划不再将云同步纳入开发范围。",second="V0.1 版本明确决定不做数据云同步。",other="V0.1 版本明确决定不做账号系统。";
+ page.body=`${first}
+
+${second}
+
+${other}`;
+ page.claims=[first,second,other].map((text,index)=>({text,quote:text,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:[`u-${index}`]}));
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ const overview=file.slice(file.indexOf("### 已定的关键决定"),file.indexOf("\n---\n"));
+ expect(overview).toContain(first);
+ expect(overview).not.toContain(second);
+ // A ban on something the longer one never names stays.
+ expect(overview).toContain("版本明确决定不做账号系统");
+ expect(overview).not.toContain("版本明确决定不做数据云同步");
+});
+
+it("tells a chapter whose decision is listed with another chapter's that it still holds one",()=>{
+ const session=contextKnowledge().session,[first,second]=session.sections,source=session.evidence[0];
+ const wide="第一版采用本地优先策略，不引入服务器、云数据库或 API，后续规划不再将云同步纳入开发范围。",narrow="V0.1 版本明确决定不做数据云同步。";
+ if(!second)return;
+ first.body=wide;first.claims=[{text:wide,quote:wide,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-wide"]}];
+ second.body=narrow;second.claims=[{text:narrow,quote:narrow,evidenceIds:[source.id],holder:"decided" as const,holderMark:true,unitIds:["u-narrow"]}];
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[first.id,second.id]},"md").text;
+ const glance=file.slice(file.indexOf("### 一页速览"),file.indexOf("### 已定的关键决定"));
+ expect(glance).toContain("1 项与其他章节相同的决定");
+ expect(glance).not.toContain("未见你的确认");
+});
+
+it("opens a learning record with where the learner stands, not decisions or a baseline",()=>{
+ const session=contextKnowledge().session,page=session.sections[0];
+ page.body="### 条件判断 · 已会\n\nif 判断从上往下，遇到第一个 True 即停止。\n\n> **回忆**：多个条件为真时执行哪个？\n>\n> 第一个为真的。\n\n### 列表\n\nlist 可以存多个值。";
+ const unit=(id:string,statement:string,role:"user"|"assistant"="assistant")=>({id,subject:"s",statement,kind:"fact",details:[],evidence:{evidenceId:id,conversationId:"c",messageId:id,messageIndex:Number(id.slice(1)),role,pasted:false,quote:statement},adoption:{status:"proposal"},delivery:"unknown"});
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,documentType:"learning",documentTypeBy:"auto",
+  learningRoles:{u1:"learned",u2:"todo",u3:"skip",u4:"mistake",u5:"exercise",u6:"learned",u7:"goal"},
+  batches:[{sourceIds:[],status:"ok",units:[unit("u1","已掌握 if、list、for、def。"),unit("u2","尚未学习 NumPy 和 class。"),unit("u3","暂时不学习 lambda。"),unit("u4","注意区分赋值 = 与比较 ==。"),unit("u5","写了电压检查函数。","user"),unit("u6","学会了用 Notion 记录学习笔记。"),unit("u7","学习目标是读懂 python-control 源码。")]}],
+  draft:{version:1,generatedAt:1,status:"complete",chapters:[],report:{},baseline:[{part:"now",text:"下一阶段学 NumPy。",unitIds:["u2"]}]}} as unknown as typeof session.wikiKnowledge;
+ const file=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ const overview=file.slice(file.indexOf("## 学习总览"),file.indexOf("\n---\n"));
+ expect(overview).toContain("**现在在哪**：已掌握 if、list、for、def。（AI 看过练习后的判断）");
+ expect(overview).toContain("### 学习地图");
+ // Three parts: what was learned, how the learner studies (never "learned"), and the goals and plans.
+ expect(overview).toContain("**知识点**\n\n| 知识点 | 状态 | 依据 |\n|---|---|---|\n| if、list、for、def | 已会 · AI 看过练习后的判断 | 第 2 条消息 |\n\n**学习方法与资源**\n\n- 学会了用 Notion 记录学习笔记。\n\n**目标与计划**");
+ expect(overview).toContain("1. 学习目标是读懂 python-control 源码。\n\n| 计划 | 状态 | 依据 |\n|---|---|---|\n| NumPy、class | 计划学 | 第 3 条消息 |\n| 暂时不学习 lambda。 | 暂不学 | 第 4 条消息 |");
+ expect(overview).not.toContain("Notion 记录学习笔记 | 已会");
+ // A file cannot fold: the chapter's recall questions come at its end, the answers after them.
+ expect(file).toContain("1. 多个条件为真时执行哪个？（「1.1 条件判断」）");
+ expect(file.indexOf("多个条件为真时执行哪个？")).toBeGreaterThan(file.indexOf("list 可以存多个值。"));
+ expect(file).not.toContain("**回忆**");
+ expect(overview).toContain("### 常见错误与纠正\n\n- 注意区分赋值 = 与比较 ==。");
+ expect(overview).not.toContain("当前基线");
+ expect(file).not.toContain("## 项目总览");
+ expect(file).toContain("| 学习 |");
+ expect(file).toContain("你的练习 1 条 · 错误与纠正 1 条 · 类型：学习（自动识别）");
+ expect(file).not.toContain("实现核对");
+ // A mistake its chapter shows on a card is read there: the overview says where, and does not list it again.
+ const ledger=session.wikiKnowledge!;
+ session.wikiKnowledge={...ledger,draft:{...ledger.draft!,chapters:[{id:"c1",title:"Python",question:"",group:"",body:"",paragraphs:[{subtopic:"s",text:"**易错**：注意区分赋值 = 与比较 ==。",unitIds:["u4"]}],problems:[]}]}} as typeof session.wikiKnowledge;
+ const carded=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ const cardedOverview=carded.slice(carded.indexOf("## 学习总览"),carded.indexOf("\n---\n"));
+ expect(cardedOverview).not.toContain("### 常见错误与纠正");
+ expect(cardedOverview).toContain("易错 1 条放在各章对应的卡片里，章首「本章学习总览」标出了位置；每章末尾有回忆题。");
+});
+
+it("gives the HTML export a script-free quick navigation beside the text",()=>{
+ const session=contextKnowledge().session,html=projectDocument(session,{...selection,overview:true,sources:true},"html").text;
+ expect(html).toContain('<nav class="locator" aria-label="快捷导航">');expect(html).toMatch(/<nav class="locator"[^>]*><a href="#section-\d+" title=/u);expect(html).not.toContain("<script");
+ expect(projectDocument(session,{...selection,overview:true,sources:true},"md").text).not.toContain("locator");
+});
+
+
+it("numbers a learning record's chapter, its cards, and the cards its table and recall questions name", () => {
+ const fence="```";
+ const part={title:"Python编程基础",body:["**本章学习总览**","| 知识点 | 状态 |\n|---|---|\n| 条件判断 | 已会 |\n| for循环 | 讲过 |","### 条件判断 · 已会","讲解。",`${fence}markdown\n### 不是标题\n${fence}`,"### for循环","讲解。","### 本章回忆题","1. 「for循环」容易错在哪里？"].join("\n\n")};
+ expect(numberedLearningChapter(part,2)).toEqual({title:"2. Python编程基础",body:["**本章学习总览**","| 知识点 | 状态 |\n|---|---|\n| 2.1 条件判断 | 已会 |\n| 2.2 for循环 | 讲过 |","### 2.1 条件判断 · 已会","讲解。",`${fence}markdown\n### 不是标题\n${fence}`,"### 2.2 for循环","讲解。","### 本章回忆题","1. 「2.2 for循环」容易错在哪里？"].join("\n\n")});
 });

@@ -209,6 +209,9 @@ export interface WikiVerification {
  claims:{total:number;read:number;confirmed:number;proposals:number;reported:number;unread:number};
  openIssues:number;implementation:"not_checked";
 }
+/** Decisions, not sentences: one decision told as five steps, each a claim of the same units, is one. A claim without
+ * units counts by its own text. */
+const decisionCount=(facts:ProjectKnowledgeFact[])=>new Set(facts.map(fact=>fact.claim.unitIds?.length?[...fact.claim.unitIds].sort().join("|"):`text:${fact.claim.text}`)).size;
 export function wikiVerification(session:FocusSession,issues=wikiBlockIssues(session)):WikiVerification{
  const facts=projectKnowledgeFacts(session).facts;
  const keyed=facts.filter(fact=>fact.claim.overviewRole&&["decision","stage","progress","scope","constraint","workflow"].includes(fact.claim.overviewRole)||fact.adoption==="accepted"||fact.implementation==="reported");
@@ -220,7 +223,7 @@ export function wikiVerification(session:FocusSession,issues=wikiBlockIssues(ses
  const status=issues.some(issue=>issue.code!=="duplicate_explanation"&&issue.code!=="duplicate_with_extra")||read.length<keyed.length||!keyed.length?"history_digest":"decisions_checked";
  return {version:1,signature:wikiVerificationSignature(session),status,
   sources:{conversations:session.sourceConversationIds.length,messages:messages.size,...(dates.length?{earliest:Math.min(...dates),latest:Math.max(...dates)}:{})},
-  claims:{total:facts.length,read:facts.filter(fact=>fact.claim.sourceReading).length,confirmed:facts.filter(fact=>fact.adoption==="accepted").length,proposals:facts.filter(fact=>fact.adoption==="proposed").length,reported:facts.filter(fact=>fact.implementation==="reported").length,unread:keyed.length-read.length},
+  claims:{total:facts.length,read:facts.filter(fact=>fact.claim.sourceReading).length,confirmed:decisionCount(facts.filter(fact=>fact.adoption==="accepted")),proposals:facts.filter(fact=>fact.adoption==="proposed").length,reported:facts.filter(fact=>fact.implementation==="reported").length,unread:keyed.length-read.length},
   openIssues:issues.length,implementation:"not_checked"};
 }
 export const wikiVerificationSignature=(session:FocusSession)=>sourceMessageSignature(JSON.stringify([WIKI_SEMANTIC_VERSION,session.sourceSignatures,session.sourceRoles,session.sections.map(section=>[section.id,section.body,section.userEdited,section.claims?.map(claim=>[claim.text,claim.quote,claim.evidenceIds,claim.sourceReading?.status])])]));

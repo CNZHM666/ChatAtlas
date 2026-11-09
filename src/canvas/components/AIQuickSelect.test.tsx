@@ -38,4 +38,17 @@ describe("quick AI switching", () => {
     expect(screen.queryByRole("option", { name: "ChatAtlas AI" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "连接 AI" })).toBeEnabled();
   });
+
+  it("groups models by provider and manages connections from a button, not a list option", async () => {
+    await saveAISettings({ mode: "byok", provider: "qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", apiKey: "qwen-fixture", model: "qwen-plus" });
+    await saveAISettings({ mode: "byok", provider: "deepseek", baseUrl: "https://api.deepseek.com/v1", apiKey: "deepseek-fixture", model: "deepseek-chat" });
+    const configure = vi.fn();
+    const { container } = render(<AIQuickSelect zh onConfigure={configure} />);
+    await screen.findByRole("option", { name: "qwen-plus" });
+    expect([...container.querySelectorAll("optgroup")].map(group => group.label)).toEqual(["通义千问 / 阿里云百炼", "DeepSeek"]);
+    expect(screen.queryByRole("option", { name: /管理/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "连接 / 管理 AI" }));
+    expect(configure).toHaveBeenCalledOnce();
+    expect((await getAISettings())?.model).toBe("deepseek-chat");
+  });
 });

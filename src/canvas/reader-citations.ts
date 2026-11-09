@@ -9,14 +9,19 @@ export function readerCitations(conversationId: string, messages: ConversationMe
   const result = new Map<string, ReaderCitation[]>();
   const byId = new Map<string, string>();
   for (const message of messages) { byId.set(message.id, message.id); if (message.platformMessageId) byId.set(message.platformMessageId, message.id); }
-  for (const session of sessions) {
-    if (session.deletedAt || session.ledgerTest || session.status === "preview") continue;
+  // Each regeneration saves a new version of the project. Only the newest version of a project leads anywhere,
+  // and a chapter is offered once, so a message cited by every version does not list the same chapter over and over.
+  const projects = new Set<string>();
+  const current = sessions.filter(session => !session.deletedAt && !session.ledgerTest && session.status !== "preview")
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .filter(session => !projects.has(session.title) && Boolean(projects.add(session.title)));
+  for (const session of current) {
     for (const section of session.sections) {
       for (const ref of chapterEvidence(session, section)) {
         const id = ref.conversationId === conversationId ? byId.get(ref.messageId) : undefined;
         if (!id) continue;
         const list = result.get(id) ?? [];
-        if (!list.some(item => item.sessionId === session.id && item.sectionId === section.id)) list.push({ sessionId: session.id, sectionId: section.id, section: section.title, project: session.title });
+        if (!list.some(item => item.project === session.title && (item.sectionId === section.id || item.section === section.title))) list.push({ sessionId: session.id, sectionId: section.id, section: section.title, project: session.title });
         result.set(id, list);
       }
     }

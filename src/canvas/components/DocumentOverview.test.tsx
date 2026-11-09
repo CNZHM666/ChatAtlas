@@ -50,12 +50,13 @@ it("keeps one flat chapter list without a part count when all chapters share a p
   expect(screen.getByText("数据库存储")).toBeVisible();
 });
 
-it("puts title actions beside the title and scope in its own full-width row below the heading",()=>{
+it("lays out its heading as a chapter does, actions above the title, and scope in its own full-width row below",()=>{
  const session=contextKnowledge().session;session.brief=undefined;session.projectState=undefined;session.sections[0].title="产品定位";session.sections[0].body="ChatAtlas 是帮助用户找回历史讨论的本地知识助手。";
  const {container}=render(<DocumentOverview session={session} zh onRead={vi.fn()} onLocate={vi.fn()} scope={<details className="wiki-scope-notice"><summary>整理范围：11 段作为背景参考</summary></details>}/>);
- const row=container.querySelector(".document-overview-title-row")!;
- expect(row.querySelector("h1")).toHaveTextContent(session.title);
- const evidence=within(row as HTMLElement).getByRole("button",{name:"核对依据"});expect(evidence).toHaveAttribute("title","核对依据");expect(evidence.textContent).toBe("");
+ const row=container.querySelector(".document-overview-heading > .wiki-document-location")!;
+ expect(row).toHaveTextContent("文档总览");expect(container.querySelector(".document-overview-heading > h1")).toHaveTextContent(session.title);
+ // The same text button as in a chapter, not an icon.
+ const evidence=within(row as HTMLElement).getByRole("button",{name:"核对依据"});expect(evidence.textContent).toBe("核对依据");
  const heading=container.querySelector(".document-overview-heading")!;
  const scope=container.querySelector(".wiki-scope-notice")!;
  expect(scope.parentElement).toHaveClass("document-overview");

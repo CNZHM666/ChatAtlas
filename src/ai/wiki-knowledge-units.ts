@@ -1,4 +1,5 @@
 import { wikiUserChooses } from "../shared/wiki-user-choice";
+import { UNDECIDED } from "../shared/open-words";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
@@ -15,6 +16,28 @@ const UNIT_BATCH_CHARACTERS = 12000, MAX_UNITS = 40, UNIT_OUTPUT_TOKENS = 6000, 
 const KINDS: WikiUnitKind[] = ["mechanism", "decision", "constraint", "fact", "question", "plan", "report", "history"];
 /** A statement that asks, and words saying how something should be. */
 const ASKS = /[？?]|吗|呢|如何|怎么|怎样|是否|为什么|能否|哪(?:个|些|种|里)/u, SHOULD = /应该|应当|必须|一定要|我要|我希望|就用|改成|改为|我决定/u;
+/** Words declaring a decision: 「★ 确定：」「决定：」「就这么定」「改主意了」, "Decided:". */
+const DECLARES = /(?:^|[★*\s，,。；;：:])(?:确定|决定|定了|拍板|就这么定)了?[：:，,]|改主意|b(?:decided|confirmed|final decision)\s*[:：,]/iu;
+const DECLARED_KINDS: WikiUnitKind[] = ["fact", "decision", "constraint", "plan"];
+const OPEN_LEFT_KINDS: WikiUnitKind[] = ["history", "fact", "decision", "constraint", "plan"];
+/** Shared words a user's message needs with a decision credited to it. */
+const USER_WORDS_SHARED = 2, USER_WORDS_COVER = .12;
+/** Whether the user's message says what a decision credited to them states. "帮我把到目前为止的决定和待定事项总结成一段，
+ * 我要拿去问另一个 AI" was credited with 「第一版采用本地优先策略……后续规划不再将云同步纳入开发范围」: its "我要" read as a
+ * choice, and a point it never states was marked as the user's decision. Text in two scripts is not compared: a statement
+ * written in another language than the message shares no words with it. */
+function userWordsSay(statement: string, message: string): boolean {
+  const han = (text: string) => (text.match(/\p{Script=Han}/gu) ?? []).length > 8;
+  if (han(statement) !== han(message)) return true;
+  // A share of the statement too: "学习时长的统计数据存在哪里比较好？" shares 学习 and 习时 with "完成专注或休息后仅提醒用户……避免
+  // 自动计入未实际完成的学习时间", which it never says.
+  // Low, as statements add to what the user said: "用户决定将默认专注时长改为 50 分钟……需同步更新常量、文案及验收标准" shares
+  // .17 of its words with "★ 改主意了：默认改成专注 50 分钟、休息 10 分钟。"; the misplaced points share under .1.
+  const said = knowledgeTerms(message), own = knowledgeTerms(statement);
+  let shared = 0;
+  for (const term of own) if (said.has(term)) shared++;
+  return shared >= USER_WORDS_SHARED && shared / Math.max(1, own.size) >= USER_WORDS_COVER;
+}
 const ADOPTIONS: WikiUnitAdoption[] = ["user_decision", "user_adopted", "rejected", "proposal", "unknown"];
 const RELATIONS = ["replaces", "narrows", "supplements", "coexists", "rejects"] as const;
 // A short reply that accepts the single preceding proposal ("好，就这样", "ok").
@@ -34,7 +57,8 @@ const COVER_MIN = 15;
 const ONLY_ASKS = /[?？]\s*$/u, STATES_INTENT = /我(?:打算|准备|想|要|决定|希望|觉得应该)|我们(?:要|先|就)|必须|不要|不用|改成|换成|去掉|加上|就用|先做|\b(?:I (?:want|plan|will|need)|we (?:should|will|need)|must|let's)\b/iu;
 const onlyAsks = (body: string) => body.length < 80 && ONLY_ASKS.test(body) && !STATES_INTENT.test(body);
 /** Version of the sentence check: a batch that passed this one is not checked again. */
-const SENTENCE_RULES = 1;
+// 2: English choices (move, drop, exclude …) and each clause of a sentence giving several.
+const SENTENCE_RULES = 2;
 /** Version of the product check, and its limits: a passage comparing other products ("竞品对比", "参考项目") that names
  * at least two of them and yielded fewer units about them than that was read as one sentence ("AI 生成硬件路线已被
  * Boardly、WireMind 等产品验证"), and every run's competitor chapter was the thin one. Such passages are read once more,
@@ -61,19 +85,31 @@ export function comparedProducts(text: string): string[] {
 }
 /** A sentence of the user's own words stating a choice for the project: what to build, use, keep, drop or do first,
  * or a feature it has or will have (我的项目还有个功能就是……). */
-const CHOICE_SENTENCE = /我(?:的|们的)?(?:项目|产品)[^。！？]{0,10}(?:有|要|会|是)[^。！？]{0,4}功能|(?:还有|要有|增加|加)个?功能|我(?:们)?(?:要|想|打算|决定|准备|希望)|(?:就|还是|先|只|统一)(?:用|做|按|保留|放|叫|加)|先做|再做|之后再|以后再|不要|不用|不做|不需要|不考虑|改成|改为|换成|保留|去掉|删掉|加上|加个|定为|就叫|采用|放弃|\b(?:we|I)(?:'ll| will| want| need| decided)\b|\blet's\b/iu;
-const sentencesOf = (text: string) => text.split(/(?<=[。！？!?；;\n])/u).map(sentence => sentence.trim()).filter(sentence => sentence.length >= 8);
+const CHOICE_SENTENCE = new RegExp(/我(?:的|们的)?(?:项目|产品)[^。！？]{0,10}(?:有|要|会|是)[^。！？]{0,4}功能|(?:还有|要有|增加|加)个?功能|我(?:们)?(?:要|想|打算|决定|准备|希望)|(?:就|还是|先|只|统一)(?:用|做|按|保留|放|叫|加)|先做|再做|之后再|以后再|不要|不用|不做|不需要|不考虑|改成|改为|换成|保留|去掉|删掉|加上|加个|定为|就叫|采用|放弃|\b(?:we|I)(?:'ll| will| want| need| decided)\b|\blet's\b/.source
+  // In English, also a choice told as an order, alone or after a label or "and": "★ Revise the roadmap: move CSV export
+  // into milestone 2, and drop the "shared budgets" milestone entirely."
+  + /|\b(?:decided|confirmed|change of plan|do not (?:include|use|add|build))\b|(?:^|[:;,★]\s*|\band\s+)(?:move|drop|remove|exclude|add|switch|use|keep|replace|forget|revise|make)\b/.source, "iu");
+/** The clauses of a sentence giving several choices at once: "move CSV export into milestone 2, and drop the shared
+ * budgets milestone entirely" is two, and only the second became a unit. */
+const choiceClauses = (sentence: string) => sentence.split(/[;；]|,\s*and\s+|，(?:并且?|再|然后)/u).map(clause => clause.trim()).filter(Boolean);
+const sentencesOf = (text: string) => text.split(/(?:(?<=[。！？!?；;\n])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))/u).map(sentence => sentence.trim()).filter(sentence => sentence.length >= 8);
 /** The user's own choice sentences in a batch that no unit from their message states: most of the sentence's terms
  * in those units' statements and details. A quote often spans the whole message, so it proves nothing here; a
  * message often states several points and yields one unit. */
-function uncoveredSentences(batch: CoverageMaterial[], units: WikiKnowledgeUnit[], pasted: (material: CoverageMaterial) => boolean) {
+export function uncoveredSentences(batch: CoverageMaterial[], units: WikiKnowledgeUnit[], pasted: (material: CoverageMaterial) => boolean) {
   return batch.flatMap(material => {
     if (roleOf(material) !== "user" || pasted(material) || assistantRequest(bodyOf(material))) return [];
     const own = units.filter(unit => unit.evidence.evidenceId === material.id);
-    const terms = new Set(own.flatMap(unit => [...knowledgeTerms(`${unit.statement} ${unit.details.join(" ")}`)]));
-    const left = sentencesOf(bodyOf(material)).filter(sentence => CHOICE_SENTENCE.test(sentence) && !assistantRequest(sentence)).filter(sentence => {
-      const mine = knowledgeTerms(sentence);
-      return !(mine.size && [...mine].filter(term => terms.has(term)).length / mine.size >= .5);
+    // Words without the quotes and stops around them: '"shared' and "entirely." are words of "Shared budgets are dropped
+    // entirely …".
+    const words = (text: string) => new Set([...knowledgeTerms(text.replace(/["“”'‘’「」]/gu, " "))].map(term => term.replace(/[.,;:!?]+$/u, "")).filter(Boolean));
+    const terms = new Set(own.flatMap(unit => [...words(`${unit.statement} ${unit.details.join(" ")}`)]));
+    // Clause by clause: a sentence giving two choices read as stated when a unit told the one sharing most of its words.
+    const said = (text: string) => { const mine = words(text); return !mine.size || [...mine].filter(term => terms.has(term)).length / mine.size >= .5; };
+    const left = sentencesOf(bodyOf(material)).filter(sentence => CHOICE_SENTENCE.test(sentence) && !assistantRequest(sentence)).flatMap(sentence => {
+      const clauses = choiceClauses(sentence);
+      if (clauses.length < 2) return said(sentence) ? [] : [sentence];
+      return clauses.filter(clause => knowledgeTerms(clause).size >= 2 && CHOICE_SENTENCE.test(clause) && !said(clause));
     });
     return left.length ? [{ id: material.id, sentences: left }] : [];
   });
@@ -175,7 +211,7 @@ export function checkWikiUnits(value: unknown, passages: Passage[], project?: st
     const approvalSource = Array.isArray(row.confirmationEvidenceIds) ? byAlias.get(String(row.confirmationEvidenceIds[0])) : undefined, approvalQuote = text(row.confirmationQuote, 350);
     let adoption: WikiKnowledgeUnit["adoption"] = { status: "unknown" };
     // A question asks; it does not decide.
-    if (requested === "user_decision") adoption = source.role === "user" && !source.pasted && DECIDING_KINDS.includes(kind) && wikiUserChooses(quote) ? { status: "user_decision" } : { status: source.role === "assistant" ? "proposal" : "unknown" };
+    if (requested === "user_decision") adoption = source.role === "user" && !source.pasted && DECIDING_KINDS.includes(kind) && wikiUserChooses(quote) && userWordsSay(statement, source.text) ? { status: "user_decision" } : { status: source.role === "assistant" ? "proposal" : "unknown" };
     else if (requested === "user_adopted" || requested === "rejected") {
       const reply = approvalSource?.material;
       const later = reply && approvalSource.role === "user" && !approvalSource.pasted && reply.conversationId === material.conversationId && (reply.messageIndex ?? -1) > (material.messageIndex ?? -1);
@@ -250,7 +286,7 @@ export function wikiUnitRequest(batch: CoverageMaterial[], all: CoverageMaterial
   return {
     taskType: "other", temperature: 0, maxAttempts: 1, resendUnsent: true, maxOutputTokens: UNIT_OUTPUT_TOKENS, signal, trace: { feature: "wiki", operation: "wiki:knowledge-units" },
     system: SYSTEM,
-    prompt: JSON.stringify({ presentation: "wiki_unit_extract", version: 1, rules: EXTRACT_RULES, locale, ...(cover?.length ? { cover: passages.filter(passage => !passage.context && cover.includes(passage.material.id)).map(passage => passage.alias) } : {}), ...(coverSentences?.length ? { coverNote: "coverSentences lists sentences of the user's own passages that produced no unit before: extract what each one states for this project (an intent, choice, plan, requirement or order of work), with that passage's label; skip one only when it holds no project content.", coverSentences: coverSentences.flatMap(item => { const passage = passages.find(entry => !entry.context && entry.material.id === item.id); return passage ? [{ passage: passage.alias, sentences: item.sentences.map(sentence => sentence.slice(0, 300)) }] : []; }) } : {}), ...(products?.length ? { productNote: "products lists passages that compare other products with this project, and the products each names: for every product, extract each distinct point the passage makes about it as its own unit with about set (what it is and does, whom it serves, a figure it gives, where it falls short, and what this project takes from it or avoids), each with that passage's label; never one unit for several products, and never a point about this project alone.", products: products.flatMap(item => { const passage = passages.find(entry => !entry.context && entry.material.id === item.id); return passage ? [{ passage: passage.alias, names: item.names.slice(0, 12) }] : []; }) } : {}), passages: passages.map(passage => ({ id: passage.alias, role: passage.role, ...(passage.pasted ? { pasted: true } : {}), ...(passage.context ? { context: true } : {}), ...(passage.material.precedingContext && !passage.context ? { before: passage.material.precedingContext.slice(-200) } : {}), text: labelled(passage) })) }),
+    prompt: JSON.stringify({ presentation: "wiki_unit_extract", version: 2, rules: EXTRACT_RULES, locale, ...(cover?.length ? { cover: passages.filter(passage => !passage.context && cover.includes(passage.material.id)).map(passage => passage.alias) } : {}), ...(coverSentences?.length ? { coverNote: "coverSentences lists sentences of the user's own passages that produced no unit before: extract what each one states for this project (an intent, choice, plan, requirement or order of work), with that passage's label; a sentence giving several choices (move one item into another milestone, and drop another) gives one unit per choice; skip one only when it holds no project content.", coverSentences: coverSentences.flatMap(item => { const passage = passages.find(entry => !entry.context && entry.material.id === item.id); return passage ? [{ passage: passage.alias, sentences: item.sentences.map(sentence => sentence.slice(0, 300)) }] : []; }) } : {}), ...(products?.length ? { productNote: "products lists passages that compare other products with this project, and the products each names: for every product, extract each distinct point the passage makes about it as its own unit with about set (what it is and does, whom it serves, a figure it gives, where it falls short, and what this project takes from it or avoids), each with that passage's label; never one unit for several products, and never a point about this project alone.", products: products.flatMap(item => { const passage = passages.find(entry => !entry.context && entry.material.id === item.id); return passage ? [{ passage: passage.alias, names: item.names.slice(0, 12) }] : []; }) } : {}), passages: passages.map(passage => ({ id: passage.alias, role: passage.role, ...(passage.pasted ? { pasted: true } : {}), ...(passage.context ? { context: true } : {}), ...(passage.material.precedingContext && !passage.context ? { before: passage.material.precedingContext.slice(-200) } : {}), text: labelled(passage) })) }),
     validate: value => checkWikiUnits(value, passages, project),
   };
 }
@@ -476,6 +512,10 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
   // First, a quote that does not state its unit is replaced by the block of its message that does (fittingQuote).
   const byMaterial = new Map(materials.map(material => [material.id, material]));
   let figuresRecovered = 0, quotesRefit = 0, questionsRead = 0;
+  // The assistant messages of a user message's conversation, nearest first, replies after it before ones before it.
+  const repliesNear = (message: CoverageMaterial) => { const at = message.messageIndex ?? -1, gap = (item: CoverageMaterial) => { const distance = (item.messageIndex ?? -1) - at; return distance > 0 ? distance : 1000 - distance; };
+    return materials.filter(item => item.conversationId === message.conversationId && roleOf(item) === "assistant").sort((a, b) => gap(a) - gap(b)); };
+  let pointsUnsaid = 0;
   results.forEach((batch, index) => {
     if (!batch?.units.length) return;
     let changed = false;
@@ -485,15 +525,45 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       const body = bodyOf(source), quote = fittingQuote(original.statement, original.evidence.quote, projectProofBlocks(body).map(block => block.text));
       let unit = original;
       if (quote !== original.evidence.quote) { unit = { ...unit, evidence: { ...unit.evidence, quote } }; quotesRefit++; changed = true; }
+      // A point read from material the user attached or pasted, cached from before the material was known as such.
+      if (unit.evidence.role === "user" && !unit.evidence.pasted && pasted(source)) {
+        unit = { ...unit, evidence: { ...unit.evidence, pasted: true }, adoption: unit.adoption.status === "user_decision" ? { status: "unknown" } : unit.adoption }; changed = true;
+      }
+      // A point of an assistant reply cited to a user message ("维持 chrome.storage.local 作为唯一存储层，按分片键结构实现。"
+      // on "弹出窗口宽度你会选多少像素？", "完成专注或休息后仅提醒用户……" on the storage question): the user never said it, and it
+      // was marked 〔你〕. It is cited to the nearest reply of the conversation that states it; a point no message says ("后续
+      // 规划不再将云同步纳入开发范围", credited to "帮我把……总结成一段") is left out.
+      if (unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about && unit.kind !== "question" && !userWordsSay(unit.statement, body)) {
+        let reply: CoverageMaterial | undefined, replyQuote = "";
+        for (const item of repliesNear(source)) { replyQuote = fittingQuote(unit.statement, "", projectProofBlocks(bodyOf(item)).map(block => block.text)); if (replyQuote) { reply = item; break; } }
+        if (!reply) { pointsUnsaid++; changed = true; return undefined; }
+        const rest = { ...unit.evidence };
+        delete rest.conversationSpan; delete rest.section; delete rest.code;
+        quotesRefit++; changed = true;
+        return { ...unit, evidence: { ...rest, evidenceId: reply.id, messageId: reply.messageId, messageIndex: reply.messageIndex ?? -1, role: "assistant" as const, pasted: false, quote: replyQuote },
+          adoption: unit.adoption.status === "user_decision" ? { status: "proposal" as const } : unit.adoption };
+      }
+      // The user leaving a choice open ("存储方案和弹窗宽度我先不定，两个方案都留着。"), typed history or a fact: it read as
+      // an earlier version, and the two widths showed no 〔未定〕. It is the user's open question.
+      if (unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about && OPEN_LEFT_KINDS.includes(unit.kind) && unit.adoption.status !== "user_decision"
+        && UNDECIDED.test(unit.evidence.quote) && UNDECIDED.test(unit.statement)) {
+        unit = { ...unit, kind: "question" }; changed = true;
+      }
       // Cached extraction gets the same local adoption check as a fresh answer.
       // Keep the point and its original text; a feasibility question stays an intention.
-      if (unit.adoption.status === "user_decision" && !wikiUserChooses(unit.evidence.quote)) {
+      if (unit.adoption.status === "user_decision" && (!wikiUserChooses(unit.evidence.quote) || !userWordsSay(unit.statement, body))) {
         unit = { ...unit, adoption: { status: "unknown" } }; changed = true;
+      }
+      // The user's own words declaring a decision ("★ 确定：第一版不做账号系统，所有数据只存在本地。"), which extraction
+      // typed a fact: the point was marked as the user's view, not as decided. Their words decide it.
+      if (unit.adoption.status === "unknown" && unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about && DECLARED_KINDS.includes(unit.kind)
+        && DECLARES.test(unit.evidence.quote) && wikiUserChooses(unit.evidence.quote) && userWordsSay(unit.statement, body)) {
+        unit = { ...unit, kind: unit.kind === "fact" ? "decision" : unit.kind, adoption: { status: "user_decision" } }; changed = true;
       }
       // The user's own words saying how it should be, typed a question because the message opens on one ("怎么跟 codex
       // 说……既然是小白应该首屏就展示一个类似 chatgpt 的欢迎页面……"): one run kept it as their decision, the next left
       // it out as a question. A statement asking nothing is their plan, and their decision when their words say so.
-      if (unit.kind === "question" && unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about && !ASKS.test(unit.statement)) {
+      if (unit.kind === "question" && unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about && !ASKS.test(unit.statement) && !UNDECIDED.test(unit.statement)) {
         unit = { ...unit, kind: "plan", ...(unit.adoption.status === "unknown" && SHOULD.test(unit.evidence.quote) && wikiUserChooses(unit.evidence.quote) ? { adoption: { status: "user_decision" as const } } : {}) };
         questionsRead++; changed = true;
       }
@@ -501,7 +571,7 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       if (!found.length) return unit;
       changed = true; figuresRecovered += found.length; return { ...unit, details: [...unit.details, ...found] };
     });
-    if (changed) results[index] = { ...batch, units };
+    if (changed) results[index] = { ...batch, units: units.flatMap(unit => unit ? [unit] : []) };
   });
   // A code given on the wrong point of its message ("LOAD_REQUIRES_DRIVER ERROR" on 「仿真入口仅在设计通过后才出现」, the
   // load-driver rule beside it left without it) goes to the point its line in the message is about.
@@ -530,7 +600,7 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
     // So are the user's answers before writing, and the points they said are another project's.
     ...(input.previous?.userAnswers ? { userAnswers: input.previous.userAnswers } : {}), ...(input.previous?.userOwners ? { userOwners: input.previous.userOwners } : {}),
     ...(skippedNow().size ? { skippedMessages: [...skippedNow()] } : {}), ...((input.sourceChoices?.() ?? input.previous?.sourceChoices) ? { sourceChoices: input.sourceChoices?.() ?? input.previous!.sourceChoices } : {}) };
-  return { ledger, report: { requests: batches.length - reused, coverRetries: coverRequests, ...(coverUnits ? { coverUnits } : {}), uncoveredMessages: pending.reduce((sum, item) => sum + item.missing.length, 0), ...(figuresRecovered ? { figuresRecovered } : {}), ...(codesMoved ? { codesMoved } : {}), ...(quotesRefit ? { quotesRefit } : {}), ...(discussed.size ? { discussedOtherProject: discussed.size } : {}), ...(ownNames.size ? { ownNamesUntagged: ownNames.size } : {}), ...(questionsRead ? { questionsReadAsPlans: questionsRead } : {}), ...(splitRetries ? { splitRetries } : {}), ...(productRequests ? { productRequests, productUnits, productTagged } : {}), reused, failed: results.filter(batch => batch.status === "failed").length, units: units.length, rejected: results.reduce((sum, batch) => sum + Object.values(batch.rejected).reduce((total, count) => total + count, 0), 0), materials: materials.length, coveredMaterials: covered.size, ...(skippedMaterials ? { skippedMaterials, skippedCharacters } : {}), totalCharacters: materials.reduce((sum, material) => sum + material.text.length, 0), pastedCharacters: materials.filter(material => roleOf(material) === "user" && pasted(material)).reduce((sum, material) => sum + material.text.length, 0) } };
+  return { ledger, report: { requests: batches.length - reused, coverRetries: coverRequests, ...(coverUnits ? { coverUnits } : {}), uncoveredMessages: pending.reduce((sum, item) => sum + item.missing.length, 0), ...(figuresRecovered ? { figuresRecovered } : {}), ...(codesMoved ? { codesMoved } : {}), ...(quotesRefit ? { quotesRefit } : {}), ...(discussed.size ? { discussedOtherProject: discussed.size } : {}), ...(ownNames.size ? { ownNamesUntagged: ownNames.size } : {}), ...(questionsRead ? { questionsReadAsPlans: questionsRead } : {}), ...(pointsUnsaid ? { pointsUnsaid } : {}), ...(splitRetries ? { splitRetries } : {}), ...(productRequests ? { productRequests, productUnits, productTagged } : {}), reused, failed: results.filter(batch => batch.status === "failed").length, units: units.length, rejected: results.reduce((sum, batch) => sum + Object.values(batch.rejected).reduce((total, count) => total + count, 0), 0), materials: materials.length, coveredMaterials: covered.size, ...(skippedMaterials ? { skippedMaterials, skippedCharacters } : {}), totalCharacters: materials.reduce((sum, material) => sum + material.text.length, 0), pastedCharacters: materials.filter(material => roleOf(material) === "user" && pasted(material)).reduce((sum, material) => sum + material.text.length, 0) } };
 }
 
 /** A product the discussion talks about as a product ("ChatAtlas 当前能收集……", "针对 ChatAtlas 生成的综述", "升级

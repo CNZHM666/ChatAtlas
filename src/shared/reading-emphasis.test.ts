@@ -119,3 +119,20 @@ it("never bolds a purpose tail or a sentence commenting on the paragraph, and mo
 it("never starts or ends a highlight inside a command or path", () => {
   expect(emphasize("使用 npm run benchmark:providers 对同一需求在不同协议下运行，比较最终 Hardware IR 的关键语义等价性。", ["providers 对同一需求在不同协议下运行"])).not.toContain("benchmark:**");
 });
+
+it("never bolds an English clause of one or two words, a list item or a lone word",()=>{
+ const text="Milestone 2 includes CSV export alongside remaining core features like category management and budget tracking. Bank syncing, receipt OCR, AI coaching, native mobile apps, and complex reports are excluded from the v1 beta scope. Privacy and currency constraints apply to all future architecture recommendations made for the project.";
+ const body=readingEmphasisMarkdown(`## Scope\n\n${text}`,{sectioned:true,phrases:["Milestone 2, category, budget tracking","Bank syncing, receipt OCR, AI coaching","Privacy and currency, currency"]});
+ expect(highlights(body).filter(phrase=>phrase.trim().split(/\s+/u).length<3)).toEqual([]);
+});
+
+it("leaves a list line opening on a bold label without a second bold",()=>{
+ const list="- **Built**: Adding and editing transactions and the monthly spending chart are built by the team.\n- **Unfinished**: CSV export functionality does not work yet and needs fixing before the beta.\n- **Criticality**: Export and backup features are critical because browser storage can be cleared, leading to data loss.";
+ const body=readingEmphasisMarkdown(`## Status\n\n${list}`,{sectioned:true,phrases:["CSV export functionality does not work yet","Export and backup features are critical"]});
+ expect(highlights(body)).toEqual(["Built","Unfinished","Criticality"]);
+});
+
+it("keeps a label line with only a note in brackets after it bold, and a bolded sentence start still re-chosen", () => {
+ expect(emphasize("**你写的**（第 42 条消息）")).toContain("**你写的**（第 42 条消息）");
+ expect(emphasize("**你写的**（第 42 条消息）后面还有一整句话说明这段代码。")).not.toContain("**你写的**（第 42 条消息）后面");
+});

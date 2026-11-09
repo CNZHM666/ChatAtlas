@@ -27,7 +27,13 @@ const roleHolders=(units:WikiKnowledgeUnit[])=>new Set(units.flatMap(unit=>[...u
 const PARALLEL_KINDS:Array<WikiKnowledgeUnit["kind"]>=["constraint","mechanism","fact"],PARALLEL_MIN=4;
 const TABLE_MIN=3,OPEN_MIN=2,MAX_STAGES=8,STAGE_LABEL=16,LIST_LABEL=12;
 /** A short label for a stage or list item, markdown marks stripped; one too long or empty is left off. */
-const labelOf=(value:unknown,max:number)=>{const label=typeof value==="string"?value.replace(/[*_`#]/gu,"").replace(/\s+/gu," ").replace(/[：:]$/u,"").trim():"";return label&&label.length<=max?label:"";};
+// Too long, it is shortened first: "Phase A (Pipeline Hardening)" left the step unlabelled; "Phase A" names it.
+const labelOf=(value:unknown,max:number)=>{
+ const label=typeof value==="string"?value.replace(/[*_`#]/gu,"").replace(/\s+/gu," ").replace(/[：:]$/u,"").trim():"";
+ if(!label||label.length<=max)return label;
+ const short=label.replace(/\s*[（(][^）)]*[）)]\s*/gu," ").trim().split(/\s*[：:，,—–]\s*|\s+-\s+/u)[0].trim();
+ return short&&short.length<=max?short:"";
+};
 /** A cell holding only a status, or nothing ("-"). */
 const PLACEHOLDER=/^[-—–]?$/u;
 const STATUS_CELL=new RegExp(`^(?:[-—–]?|(?:open|decided|confirmed|proposal|proposed|resolved|history|earlier|已定|未定|待定|已决定|已确认|仍在讨论|讨论中|此前|建议|早期方案|替代方案)(?:\\s*[（(][^）)]*[）)])?)$`,"iu");
@@ -83,7 +89,7 @@ export function wikiWritingLayout(units:WikiKnowledgeUnit[],options:{zh?:boolean
  * settle a miscount. A claim written out in full is still read. */
 export function claimSentence(paragraph:string,claim:Record<string,unknown>):string|undefined{
  if(typeof claim.text==="string"&&claim.text.trim())return claim.text.trim();
- const sentences=paragraph.split(/(?<=[。！？!?])(?![^“”「」\n]*[”」])|\n/u).map(sentence=>sentence.trim()).filter(Boolean);
+ const sentences=paragraph.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))(?![^“”「」\n]*[”」])|\n/u).map(sentence=>sentence.trim()).filter(Boolean);
  const number=typeof claim.sentence==="number"&&Number.isInteger(claim.sentence)?claim.sentence:undefined;
  const start=typeof claim.starts==="string"?bareStart(claim.starts):"";
  const opening=start?sentences.filter(sentence=>bareStart(sentence).startsWith(start)):[];
@@ -135,7 +141,18 @@ export function readWikiWritingBlock(value:unknown,known:Set<string>):WritingBlo
   // its rows: refused, it threw away the part's whole writing (one run's chapter part).
   const lines=Array.isArray(block.rows)?block.rows:[];
   if(!lines.length)throw Error("invalid_writing_comparison");
-  rows=lines.map(value=>{const row=record(value),cells=Array.isArray(row.cells)?row.cells.filter((cell):cell is string=>typeof cell==="string"&&Boolean(cell.trim())).map(cell=>cell.replace(/\s+/gu," ").trim()):[];return item({text:cells.join(" / "),unitIds:row.unitIds});});
+  // With its columns, each cell keeps its column's name: "Core Functionality / 10-second logging / Bank integrations"
+  // did not say which were in and which out.
+  const names=Array.isArray(block.columns)&&block.columns.every(singleLine)?(block.columns as string[]).map(name=>name.trim()):[];
+  rows=lines.map(value=>{
+   const row=record(value),raw=Array.isArray(row.cells)?row.cells:[];
+   const cells=raw.flatMap((cell,index)=>typeof cell==="string"&&cell.trim()?[{text:cell.replace(/\s+/gu," ").trim(),index}]:[]);
+   const bound=item({text:cells.map(cell=>cell.text).join(" / "),unitIds:row.unitIds});
+   if(names.length!==raw.length||cells.length<2||cells[0].index!==0)return bound;
+   // Two columns need no names: the second says what the first is.
+   const rest=cells.slice(1).map(cell=>names.length>2?`${names[cell.index]}: ${cell.text}`:cell.text).join("; ");
+   return {...bound,text:`**${cells[0].text}**：${rest}`,claims:cells.map(cell=>({text:cell.text,unitIds:bound.unitIds}))};
+  });
   text=rows.map(row=>`- ${row.text}`).join("\n");
  }else if(block.type==="comparison"){
   if(!Array.isArray(block.columns)||block.columns.length<2||block.columns.length>4||!block.columns.every(singleLine)||!Array.isArray(block.rows)||block.rows.length<2)throw Error("invalid_writing_comparison");
@@ -163,6 +180,24 @@ export function readWikiWritingBlock(value:unknown,known:Set<string>):WritingBlo
  * item through the same evidence checks, then split without cutting its text. */
 export function readWikiWritingBlocks(value:unknown,known:Set<string>):WritingBlock[]{
  const block=record(value);
+ // A list or table past the size limit is halved until each part fits: refused, it threw away the part's whole answer
+ // (one run lost 6 points). A table keeps two rows a part, so each half still reads as a table.
+ if(block.type==="list"||block.type==="comparison"){
+  const key=block.type==="list"?"items":"rows",least=block.type==="list"?1:2;
+  const split=(part:Record<string,unknown>):WritingBlock[]=>{
+   try{return [readWikiWritingBlock(part,known)];}
+   catch(error){
+    const all=part[key];
+    if(!(error instanceof Error)||error.message!=="writing_block_too_large"||!Array.isArray(all)||all.length<least*2)throw error;
+    const half=Math.max(least,Math.ceil(all.length/2));
+    const parts=[...split({...part,[key]:all.slice(0,half)}),...split({...part,[key]:all.slice(half)})];
+    // A half of one item reads as a sentence, which has no size check of its own: one item too long is still refused.
+    if(parts.some(item=>item.text.length>1600))throw error;
+    return parts;
+   }
+  };
+  return split(block);
+ }
  if(block.type!=="stages"||!Array.isArray(block.items)||!block.items.length)return [readWikiWritingBlock(value,known)];
  const rows=block.items.map(item=>readWikiWritingBlock({type:"stages",items:[item]},known));
  const chunks:WritingBlock[][]=[];

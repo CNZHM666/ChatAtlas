@@ -18,7 +18,7 @@ async function walk(directory) {
 }
 
 export async function publicSourceFiles() {
-  return [...new Set([...rootFiles, ...docs.map(name => `docs/${name}`),...englishDocs.map(name=>`docs/en/${name}`), ...await walk("src"), ...await walk("scripts"), ...await walk(".github"), ...await walk("docs/handoff"), "evaluation/memory-search/cases.ts"])].sort();
+  return [...new Set([...rootFiles, ...docs.map(name => `docs/${name}`),...englishDocs.map(name=>`docs/en/${name}`), ...await walk("src"), ...await walk("scripts"), ...await walk(".github"), ...await walk("docs/handoff"), ...await walk("samples"), "evaluation/memory-search/cases.ts"])].sort();
 }
 
 export async function verifyPublicSource({ checkGit = true } = {}) {

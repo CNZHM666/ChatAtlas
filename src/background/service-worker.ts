@@ -46,7 +46,9 @@ let selectionCommand: Promise<unknown> = Promise.resolve();
 let importCancellation = 0;
 
 /** Serialize acknowledgements, never the entire sync. Selections made during connection are not lost. */
-function syncSelectedConversations(ids: string[]): Promise<ImportJob> {
+/** Conversations to read again although already synced, until the next selected import starts. */
+let forcedSelection: string[] = [];
+function syncSelectedConversations(ids: string[], force = false): Promise<ImportJob> {
   const cancellation = importCancellation;
   const request = selectionCommand.catch(() => undefined).then(async () => {
     if (cancellation !== importCancellation) return historyImportStatus();
@@ -55,7 +57,7 @@ function syncSelectedConversations(ids: string[]): Promise<ImportJob> {
     const job = await historyImportStatus();
     if (job.native || ids.some(id => /^(?:claude|gemini|deepseek|doubao|kimi|qwen):/u.test(id))) {
       if (!job.native) throw Error("请先点击导入并选择对应 AI / Import the source AI first");
-      return nativeImports.select(ids, nativeImportSources(await chrome.tabs.query({})));
+      return nativeImports.select(ids, nativeImportSources(await chrome.tabs.query({})), force);
     }
     if (isHistoryImportRunning()) {
       if (job.status === "paused" || job.phase === "reconciling" || job.retryScope === "titles") {
@@ -67,6 +69,7 @@ function syncSelectedConversations(ids: string[]): Promise<ImportJob> {
         return historyImportStatus();
       }
     }
+    forcedSelection = force ? [...new Set(ids)] : [];
     return connectAndStartImport("selected", [...new Set(ids)]);
   });
   selectionCommand = request;
@@ -300,7 +303,9 @@ async function connectAndStartImport(mode: ImportMode, selectedIds: string[] = [
     if (cancellation !== importCancellation) return pauseHistoryImport();
     const latest = await historyImportStatus();
     if (latest.status === "paused") return latest;
-    const job = await startHistoryImport(adapter, mode, selectedIds, { resumeTitles });
+    const force = mode === "selected" ? forcedSelection : [];
+    forcedSelection = [];
+    const job = await startHistoryImport(adapter, mode, selectedIds, { resumeTitles, force });
     await chrome.storage.session.remove([IMPORT_INTENT_KEY, IMPORT_SELECTION_KEY]);
     return job;
   })().catch(async (error: unknown) => {
@@ -442,7 +447,7 @@ chrome.runtime.onMessage.addListener((message: AtlasMessage, sender, sendRespons
     try { return await connectAndStartImport(message.mode); }
     catch (error) { return markHistoryUnavailable(error instanceof Error ? error.message : "Unable to start import."); }
   });
-  if (message.type === "ATLAS_IMPORT_SELECT") return reply(() => syncSelectedConversations(message.conversationIds));
+  if (message.type === "ATLAS_IMPORT_SELECT") return reply(() => syncSelectedConversations(message.conversationIds, message.force));
   if (message.type === "ATLAS_IMPORT_OPEN_CHATGPT") return reply(openChatGPTForPendingImport);
   if (message.type === "ATLAS_IMPORT_RETRY") return reply(() => retryPendingImport(Boolean(message.reload), true));
   if (message.type === "ATLAS_IMPORT_PAUSE") {

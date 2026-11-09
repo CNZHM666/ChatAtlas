@@ -224,7 +224,7 @@ it("checks what a reader continuing the work would catch, and caps a document th
 
 ### 当前基线
 
-**现在做**
+**当前阶段**
 
 - 用户需要向 Codex 传达 Milestone 4 的核心价值主张。
 

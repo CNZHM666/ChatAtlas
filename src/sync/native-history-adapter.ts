@@ -121,6 +121,8 @@ export class NativeHistoryAdapter {
       return this.receipt(await claudeImporter.normalize({ ...record, uuid: id, name: conversation.title } as ClaudeConversation, await importRevision(raw)), conversation);
     }
     const messages: DraftMessage[] = [], seen = new Set<string>(), cursors = new Set<string>();
+    // What an unreadable message carried (field names and fragment types, never its text), so a failure names its shape.
+    const shapes = new Map<string, string>();
     let cursor = "", page = 0;
     do {
       this.check();
@@ -166,8 +168,16 @@ export class NativeHistoryAdapter {
           // Empty fragment arrays do not mean an empty message. Some history
           // responses store the same message's readable body in content/text.
           const bodyText = text(row.content);
-          const content = fragmentText || (bodyText.trim() ? bodyText : text(row.text));
-          return { id: string(row.message_id ?? row.id) || fail(), role, content, createdAt: sourceTimestamp(row.inserted_at ?? row.created_at) };
+          // A message that is only a file (long pasted text becomes one) has no text fragment: its files are its body,
+          // named as the other platforms name attachments. Without them the whole conversation was refused. A file without a name still counts.
+          const files = [row.files, ...fragments.map(fragment => fragment.files)].flatMap(list => Array.isArray(list) ? list.map(file => { const item = object(file); return string(item.file_name ?? item.name ?? item.fileName ?? item.title); }) : []);
+          const attached = files.map(name => name ? `【附件 ${name}】` : "【附件】").join("\n");
+          // A user message whose text sits in a fragment type this reader does not know yet; the model's reasoning and searches are never the user's words.
+          const otherText = role === "user" ? fragments.filter(fragment => fragment.type !== "THINK" && fragment.type !== "SEARCH").map(fragment => text(fragment.content)).filter(value => value.trim()).join("\n\n") : "";
+          const content = fragmentText || (bodyText.trim() ? bodyText : text(row.text)) || otherText || attached;
+          const messageId = string(row.message_id ?? row.id) || fail();
+          if (!content.trim()) shapes.set(messageId, `${Object.keys(row).sort().join(",")}${fragments.length ? `; fragments ${fragments.map(fragment => string(fragment.type) || "?").join(",")}` : ""}`);
+          return { id: messageId, role, content, createdAt: sourceTimestamp(row.inserted_at ?? row.created_at) };
         });
         next = more(data.has_more, data.next_cursor);
       } else if (platform === "kimi") {
@@ -227,7 +237,7 @@ export class NativeHistoryAdapter {
     } while (cursor);
     if (!messages.length) throw Error("未读取到对话正文，已保留原内容 / Missing message text; saved content retained");
     const missing = messages.findIndex(message => !message.content.trim());
-    if (missing >= 0) throw Error(`第 ${missing + 1} 条${messages[missing].role === "user" ? "用户消息" : "AI 回答"}未解析出正文（消息 ${messages[missing].id?.slice(0, 80)}），已保留原内容 / Missing message text; saved content retained`);
+    if (missing >= 0) throw Error(`第 ${missing + 1} 条${messages[missing].role === "user" ? "用户消息" : "AI 回答"}未解析出正文（消息 ${messages[missing].id?.slice(0, 80)}${shapes.has(messages[missing].id ?? "") ? `，字段 ${shapes.get(messages[missing].id ?? "")!.slice(0, 200)}` : ""}），已保留原内容 / Missing message text; saved content retained`);
     return this.receipt(await captureFromDrafts({ ...conversation, sourceRevision: await importRevision(messages) }, messages), conversation);
   }
   private receipt(capture: ConversationCapture, original: Conversation): ConversationCapture {

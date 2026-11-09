@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { pendingWriterQuestions, pendingWritingQuestions, wikiNamedProjects, withAnswersFrom, withWriterQuestions, withExcludedProject, withWritingAnswer, withWritingQuestions } from "./wiki-writing-questions";
+import { pendingWriterQuestions, pendingWritingQuestions, wikiNamedProjects, withAnswersFrom, withWriterQuestions, withExcludedProject, withWritingAnswer, withWritingQuestions, withAnswersRevisited, answerLiftedLimits } from "./wiki-writing-questions";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { reviseForAnswers, writeWikiDraft } from "./wiki-knowledge-write";
 import type { StructuredAIRequest } from "./provider";
@@ -8,7 +8,7 @@ import { readQuestions } from "./wiki-question-parse";
 
 const signal = new AbortController().signal;
 const unit = (index: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${index}`, subject: "密钥", statement, kind: "constraint", details: [], evidence: { evidenceId: `e${index}`, conversationId: "c", messageId: `m${index}`, messageIndex: index, role: "assistant", pasted: false, quote: statement }, adoption: { status: "proposal" }, delivery: "unknown", ...extra });
-const earlier = unit(1, "默认使用 sessionStorage；可选“在此设备记住”存 localStorage。"), later = unit(2, "API Key 仅保存在内存，禁止写入 localStorage。");
+const earlier = unit(1, "可选“在此设备记住”时把 API Key 存 localStorage。"), later = unit(2, "API Key 仅保存在内存，禁止写入 localStorage。");
 const atlas = unit(3, "需识别新决定替代旧决定的关系，避免保留冲突方案。", { subject: "决策演变" });
 const header = unit(4, "Header 不显示 Provider 连接状态。", { subject: "界面", details: ["除非用户正在进行需要 Provider 的任务。"] });
 const book = (): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: 4, batches: [{ sourceIds: [], status: "ok", units: [earlier, later, atlas, header], rejected: {} }],
@@ -145,4 +145,105 @@ it("drops a question or an answer that shows an id the model was sent", () => {
   expect(readQuestions({ questions: [{ about: "密钥", ask: "k1 和 k2 哪个算数？", unitIds: ["k1", "k2"], options: [option("是"), option("否")] }] }, real, 1)).toEqual([]);
   expect(readQuestions({ questions: [{ about: "密钥", ask: "密钥放在哪里？", unitIds: ["k1"], options: [option("按 k1"), option("本地")] }] }, real, 1)).toEqual([]);
   expect(readQuestions({ questions: [{ about: "密钥", ask: "密钥放在哪里？", unitIds: ["k1"], options: [option("服务端"), option("本地")] }] }, real, 1)).toHaveLength(1);
+});
+
+it("keeps from an answer's rejection a unit with other rules, the other mode the answer keeps, and another wording of what it confirms", () => {
+  const light = unit(1, "主背景接近 #FAFAFA，文字接近 #18181B。"), dark = unit(2, "主背景 #0D0D0D ~ #111111，Panel #151515，Border #27272A。");
+  const wish = unit(3, "针对小白用户，项目应增加直接询问购买清单、提供比价推荐及链接的功能。"), bom = unit(4, "BOM 必须从 Hardware IR 派生，不由 LLM 重新生成；V0.1 不需要实时价格、商城购买或电商链接。");
+  const missing = unit(5, "明确区分已有和缺少元件，对缺少元件显示采购规格，提供复制采购清单功能，本阶段不包含商城、比价或价格信息。"), early = unit(6, "前期不做实时全网比价，仅提供中英文搜索词，引导用户自行购买缺失零件。");
+  const chosen = unit(7, "项目定位为 AI Hardware Canvas，即面向大学生和硬件初学者的 Web 端可视化工作台，通过自然语言生成硬件方案。");
+  const same = unit(8, "面向大学生、电子/嵌入式初学者和创客的自然语言硬件设计工作台，核心是帮助小白理解并搭建硬件系统。"), other = unit(9, "项目定位为面向硬件小白的AI辅助硬件设计工具，解决“有想法但不会电子设计”的问题，而非专业EDA软件。");
+  const ledger = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [light, dark, wish, bom, missing, early, chosen, same, other], rejected: {} }] };
+  const ask = (id: string, about: string, text: string, label: string, confirm: string[], reject: string[]) => ({ id, about, ask: text, unitIds: [...confirm, ...reject], organization: 1, options: [{ id: "o1", label, actions: [{ do: "confirm" as const, units: confirm }, { do: "reject" as const, units: reject }] }, { id: "o2", label: "暂不确定", actions: [] }] });
+  let next = withWritingAnswer(ledger, ask("q1", "首页视觉", "首页采用浅色（#FAFAFA）还是深色（#0D0D0D）作为默认主背景？", "浅色为主，支持切换深色", [light.id], [dark.id]), "o1");
+  next = withWritingAnswer(next, ask("q2", "比价", "当前阶段是否包含“直接询问购买清单、提供比价推荐及链接”的功能？", "包含，需实现比价和链接推荐", [wish.id], [bom.id, missing.id, early.id]), "o1");
+  next = withWritingAnswer(next, ask("q3", "定位", "项目核心定位是“AI Hardware Canvas”工作台，还是通用的“AI辅助硬件设计工具”？", "定位为 AI Hardware Canvas", [chosen.id], [same.id, other.id]), "o1");
+  const verdict = (id: string) => next.decisions?.[id]?.verdict;
+  expect([light, wish, chosen].map(item => verdict(item.id))).toEqual(["confirmed", "confirmed", "confirmed"]);
+  expect([early, other].map(item => verdict(item.id))).toEqual(["rejected", "rejected"]);
+  // Kept: the dark mode the answer keeps, the BOM rule, the rule closing on a limit, the same positioning in other words.
+  expect([dark, bom, missing, same].map(item => verdict(item.id))).toEqual([undefined, undefined, undefined, undefined]);
+  // The answer still reaches the writer for every unit asked about.
+  expect(next.userAnswers?.find(answer => answer.questionId === "q2")?.unitIds).toContain(bom.id);
+});
+
+it("applies saved answers again with the checks, but leaves a decision the user changed by hand afterwards", () => {
+  const light = unit(1, "主背景接近 #FAFAFA，文字接近 #18181B。"), dark = unit(2, "主背景 #0D0D0D ~ #111111，Panel #151515，Border #27272A。");
+  const question = { id: "q1", about: "首页视觉", ask: "首页采用浅色（#FAFAFA）还是深色（#0D0D0D）作为默认主背景？", unitIds: [light.id, dark.id], organization: 1, options: [{ id: "o1", label: "浅色为主，支持切换深色", actions: [{ do: "confirm" as const, units: [light.id] }, { do: "reject" as const, units: [dark.id] }] }, { id: "o2", label: "暂不确定", actions: [] }] };
+  const at = 1000;
+  const saved = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [light, dark], rejected: {} }], writingQuestions: [question], userAnswers: [{ questionId: "q1", unitIds: [light.id, dark.id], question: question.ask, answer: question.options[0].label, optionId: "o1", at }], decisions: { [light.id]: { verdict: "confirmed" as const, at }, [dark.id]: { verdict: "rejected" as const, at } } };
+  expect(withAnswersRevisited(saved).decisions).toEqual({ [light.id]: expect.objectContaining({ verdict: "confirmed" }) });
+  const byHand = { ...saved, decisions: { ...saved.decisions, [dark.id]: { verdict: "rejected" as const, at: at + 60_000 } } };
+  expect(withAnswersRevisited(byHand)).toBe(byHand);
+});
+
+it("names the closing limit an answer lifts from a rule it keeps", () => {
+  const wish = unit(1, "针对小白用户，项目应增加直接询问购买清单、提供比价推荐及链接的功能。");
+  const missing = unit(2, "明确区分已有和缺少元件，对缺少元件显示采购规格，提供复制采购清单功能，本阶段不包含商城、比价或价格信息。");
+  const question = { id: "q1", about: "比价", ask: "当前阶段是否包含“直接询问购买清单、提供比价推荐及链接”的功能？", unitIds: [wish.id, missing.id], organization: 1, options: [{ id: "o1", label: "包含，需实现比价和链接推荐", actions: [{ do: "confirm" as const, units: [wish.id] }, { do: "reject" as const, units: [missing.id] }] }, { id: "o2", label: "不包含", actions: [] }] };
+  const asked = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [wish, missing], rejected: {} }], writingQuestions: [question] };
+  const answered = withWritingAnswer(asked, question, "o1");
+  expect(answered.decisions?.[missing.id]).toBeUndefined();
+  expect([...answerLiftedLimits(answered)]).toEqual([[missing.id, "本阶段不包含商城、比价或价格信息"]]);
+});
+
+it("keeps a limit held to a stage when the question and answer name no stage, and lifts one that is not", () => {
+  const wish = unit(1, "针对小白用户，项目应增加直接询问购买清单、提供比价推荐及链接的功能。");
+  const missing = unit(2, "明确区分已有和缺少元件，对缺少元件显示采购规格，提供复制采购清单功能，本阶段不包含商城、比价或价格信息。");
+  const first = unit(3, "第一版（V0.1）不实现实时全网比价和API对接，仅输出缺件清单。");
+  const early = unit(4, "前期不做实时全网比价，仅提供Procurement Spec和中英文搜索词。");
+  const never = unit(5, "购物页面只列出采购规格，不包含比价和链接。");
+  const question = { id: "q1", about: "比价", ask: "项目是否包含比价推荐及链接功能？", unitIds: [wish.id, missing.id], organization: 1, options: [{ id: "o1", label: "确认包含比价和链接", actions: [{ do: "confirm" as const, units: [wish.id] }, { do: "reject" as const, units: [missing.id] }] }] };
+  const asked = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [wish, missing, first, early, never], rejected: {} }], writingQuestions: [question] };
+  // The project has it; when is not said, so the first version's limits hold.
+  expect([...answerLiftedLimits(withWritingAnswer(asked, question, "o1"))]).toEqual([[never.id, "不包含比价和链接"]]);
+});
+
+it("lifts the same limit from rules the question did not list, and one closing after a semicolon", () => {
+  const wish = unit(1, "针对小白用户，项目应增加直接询问购买清单、提供比价推荐及链接的功能。");
+  const bom = unit(2, "BOM 必须从 Hardware IR 派生，不由 LLM 重新生成；V0.1 不需要实时价格、商城购买、库存或电商链接。");
+  const stage = unit(3, "本阶段不开发实时商品比价、淘宝/Amazon API、Affiliate 或商城系统。");
+  const focus = unit(4, "聚焦 ESP32 低压模块，不直接竞争专业 EDA；采用 BYOK，简单操作优先本地执行；暂不开发实时商品比价。");
+  const other = unit(5, "第一版不做 PCB 设计和 KiCad 导出。");
+  const question = { id: "q1", about: "比价", ask: "当前阶段是否包含“直接询问购买清单、提供比价推荐及链接”的功能？", unitIds: [wish.id, bom.id], organization: 1, options: [{ id: "o1", label: "包含，需实现比价和链接推荐", actions: [{ do: "confirm" as const, units: [wish.id] }, { do: "reject" as const, units: [bom.id] }] }, { id: "o2", label: "不包含", actions: [] }] };
+  const asked = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [wish, bom, stage, focus, other], rejected: {} }], writingQuestions: [question] };
+  const lifted = answerLiftedLimits(withWritingAnswer(asked, question, "o1"));
+  expect(lifted.get(bom.id)).toBe("V0.1 不需要实时价格、商城购买、库存或电商链接");
+  expect(lifted.get(stage.id)).toBe("本阶段不开发实时商品比价、淘宝/Amazon API、Affiliate 或商城系统");
+  expect(lifted.get(focus.id)).toBe("暂不开发实时商品比价");
+  expect(lifted.has(other.id)).toBe(false);
+  // Not listed by the question: "电商链接" ends in the 链接 the answer names.
+  const short = { ...question, unitIds: [wish.id, stage.id], options: [{ id: "o1", label: "确认包含比价和链接", actions: [{ do: "confirm" as const, units: [wish.id] }, { do: "reject" as const, units: [stage.id] }] }] };
+  const unlisted = answerLiftedLimits(withWritingAnswer({ ...asked, writingQuestions: [short] }, short, "o1"));
+  expect(unlisted.get(bom.id)).toBe("V0.1 不需要实时价格、商城购买、库存或电商链接");
+  expect(unlisted.has(other.id)).toBe(false);
+  // An answer naming a positioning puts nothing in: a rule that leaves out a word of it holds.
+  const canvas = unit(6, "项目定位为 AI Hardware Canvas，通过自然语言生成硬件方案。"), noAi = unit(7, "先完成 Schema 与 Validator，此阶段不需要 AI。");
+  const positioning = { id: "q2", about: "定位", ask: "项目定位是 AI Hardware Canvas 还是通用工具？", unitIds: [canvas.id], organization: 1, options: [{ id: "o1", label: "定位为 AI Hardware Canvas", actions: [{ do: "confirm" as const, units: [canvas.id] }] }] };
+  const named = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [canvas, noAi], rejected: {} }], writingQuestions: [positioning] };
+  expect(answerLiftedLimits(withWritingAnswer(named, positioning, "o1")).size).toBe(0);
+});
+
+it("rejects the option set aside when it gives other values for the same setting", () => {
+  const short = unit(1, "第一版默认专注时长为25分钟，短休息时长为5分钟。"), long = unit(2, "用户决定将默认专注时长改为 50 分钟，休息时长改为 10 分钟。", { evidence: { evidenceId: "e2", conversationId: "c", messageId: "m2", messageIndex: 2, role: "user", pasted: false, quote: "" } });
+  const ledger = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [short, long], rejected: {} }] };
+  const question = { id: "q1", about: "默认专注/休息时长", ask: "第一版默认时长用 25/5 还是 50/10？", unitIds: [short.id, long.id], organization: 1, options: [{ id: "o1", label: "25分钟专注，5分钟休息", actions: [{ do: "confirm" as const, units: [short.id] }, { do: "reject" as const, units: [long.id] }] }, { id: "o2", label: "暂不确定", actions: [] }] };
+  const next = withWritingAnswer(ledger, question, "o1");
+  expect(next.decisions?.[short.id]?.verdict).toBe("confirmed");
+  // Nearly every word is shared, but 50/10 is not another wording of 25/5.
+  expect(next.decisions?.[long.id]?.verdict).toBe("rejected");
+});
+
+it("retires what another option kept open once a choice is made", () => {
+  const narrow = unit(1, "宽度固定为360px。"), wide = unit(2, "建议将 Popup 宽度设为 380px。"), both = unit(3, "弹窗宽度保留 B1（380px）与 B2（360px）两案并存，未最终指定前不做选择。"), tip = unit(4, "宽度可用 CSS 变量控制。");
+  const ledger = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [narrow, wide, both, tip], rejected: {} }] };
+  const question = { id: "q", about: "Popup 宽度", ask: "Popup 宽度定为 360px 还是 380px？", unitIds: [narrow.id, wide.id, both.id, tip.id], organization: 1, options: [
+    { id: "o1", label: "380px", actions: [{ do: "confirm" as const, units: [wide.id] }, { do: "reject" as const, units: [narrow.id] }] },
+    { id: "o3", label: "暂不决定", actions: [{ do: "open" as const, units: [both.id, tip.id] }] }] };
+  const next = withWritingAnswer(ledger, question, "o1");
+  expect(next.decisions?.[both.id]?.verdict).toBe("rejected");
+  // A point not saying the choice is open stays as it was.
+  expect(next.decisions?.[tip.id]).toBeUndefined();
+  // Answering "not yet" retires nothing.
+  expect(withWritingAnswer(ledger, question, "o3").decisions?.[both.id]?.verdict).toBe("open");
 });

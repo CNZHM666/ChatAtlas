@@ -125,7 +125,7 @@
 .project-source-picker h2 { margin: 0; font-size: var(--text-xl); }
 .project-source-picker > input, .project-wiki-navigation > input { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-muted); color: var(--text); padding: 9px 12px; font-size: var(--text-sm); }
 .project-source-choices { overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
-.project-source-choices > label { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--border); line-height: 1.6; cursor: pointer; }
+.project-source-choices label { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--border); line-height: 1.6; cursor: pointer; }
 .project-source-choices span { flex: 1; min-width: 0; overflow-wrap: break-word; text-align: left; }
 :is(.focus-workspace,.focus-preview) .project-source-choices input[type="checkbox"] { width: 16px; min-width: 16px; max-width: 16px; height: 16px; flex: 0 0 16px; margin: 0; accent-color: var(--accent); }
 .project-source-choices small { display: block; color: var(--muted); }
@@ -1075,8 +1075,13 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 
 /* Preview chapters share the Reader's quiet right-edge locator. */
 .focus-preview.is-project-preview { position:relative; }
-.focus-preview.is-project-preview .focus-preview-inner { padding-inline-end:56px; }
-@media(max-width:620px) { .focus-preview.is-project-preview .focus-preview-inner { padding-inline-end:32px; } }
+/* Room for the locator on both sides, so the text stays centred in the window: room on the right alone put it 28px
+   left of centre. The scrollbar's room is kept on both sides too. */
+.focus-preview.is-project-preview .focus-preview-scroll { scrollbar-gutter:stable both-edges; }
+.focus-preview.is-project-preview .focus-preview-inner { width:min(876px,100%); padding-inline:56px; }
+/* The overview (and its learning progress card) runs the full width of the text below it, not its own 720px column. */
+.focus-preview.is-project-preview .document-overview { max-width:none; }
+@media(max-width:620px) { .focus-preview.is-project-preview .focus-preview-inner { padding-inline:0 32px; } }
 .focus-preview.is-project-preview :is(.focus-preview-inner > ol,.focus-update-preview > ol) { list-style:none; padding-left:0; }
 .wiki-chapter-number { font:inherit; margin-inline-end:.22em; font-variant-numeric:tabular-nums; }
 .project-items-filters { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0; }
@@ -1171,6 +1176,8 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
    About 45 Chinese characters per line at 16px. The content wrapper stays wide
    for diagrams; its prose is limited by .chapter-guide. */
 .wiki-document > :not(div), .wiki-document > .wiki-knowledge-links { max-width: var(--wiki-reading-width); }
+/* Editing keeps the reading column, so the page does not widen and the save button stays over the editor's right edge. */
+.wiki-document .focus-editor { max-width: var(--wiki-reading-width); }
 
 /* Key decisions on the overview: the points awaiting the user's verdict, each with confirm and set aside. */
 .key-decisions { margin: 18px 0 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid); }
@@ -1361,3 +1368,13 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .wiki-document.hides-holder-marks .wiki-claim-marker.is-holder-mark:is(.is-holder-decided, .is-holder-open, .is-holder-earlier) {
   display: inline-flex; opacity: 1; visibility: visible;
 }
+
+/* A learning record's mistake with its fix: teal mark and tint. */
+:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-corrected { --holder: color-mix(in srgb, #0f766e 85%, var(--text)); }
+::highlight(atlas-holder-corrected) { background-color: rgba(13, 148, 136, .2); }
+:root[data-theme="dark"] ::highlight(atlas-holder-corrected) { background-color: rgba(45, 212, 191, .28); }
+/* Choices from several AIs, under each AI's name. */
+.project-source-group + .project-source-group { margin-top: 12px; }
+.project-source-group > h3 { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 4px; background: var(--surface, var(--bg)); color: var(--muted); font-size: var(--text-sm); font-weight: 600; }
+.project-source-group > h3 span { flex: 0 1 auto; color: var(--text); }
+.project-source-group > h3 small { display: inline; font-weight: 400; }

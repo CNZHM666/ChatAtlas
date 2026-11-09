@@ -7,9 +7,11 @@ import { isInternalSearchQueryMessage } from "../shared/conversation-text";
 import { getDatabase } from "../storage/db";
 import { carryReviewNotes } from "../canvas/review-notes";
 import { sourceChange } from "../canvas/source-freshness";
-import { generateFocusSession, ledgerDocumentSession, requireLedgerDirectory } from "./focus-session";
+import { asLearningDocument, generateFocusSession, ledgerDocumentSession, requireLedgerDirectory } from "./focus-session";
+import { learningUnitsOwn } from "./wiki-learning";
+import { keptLearnerCode } from "./wiki-learning-code";
 import { ledgerPipelineEnabled } from "./wiki-ledger-document";
-import { reextractSessionKnowledge } from "./wiki-knowledge-session";
+import { datedSources, reextractSessionKnowledge, withStoredSections } from "./wiki-knowledge-session";
 import { organizeLedger } from "./wiki-knowledge-organize";
 import { writeLedgerDraft } from "./wiki-knowledge-write";
 import { wikiLedgerUnits, type WikiProgress } from "../shared/wiki-knowledge";
@@ -28,6 +30,7 @@ import {editableWikiTopic} from "../shared/wiki-directory";
 import {mergeWikiScopeReview} from "../shared/wiki-scope-review";
 import {remapWikiClaimEvidence} from "../shared/wiki-source-reading";
 import {consolidateWikiExplanations} from "./wiki-explanation-repair";
+import { withWikiSources } from "../shared/wiki-sources";
 import {previousWikiDirectory} from "./wiki-topic-plan";
 import {WIKI_SEMANTIC_VERSION} from "../shared/wiki-explanations";
 
@@ -178,12 +181,15 @@ async function ledgerUpdate(previous: FocusSession, sources: Conversation[], mes
   const progress = (next: WikiProgress) => onProgress?.(next.done, Math.max(next.total, 1), next.stage === "extract" ? "reading" : "synthesis");
   // Only the user's verdicts changed: the extracted units and the directory stand, and only chapters whose statuses moved
   // are written again (unchanged chapters keep their text through the draft's signatures).
-  const extracted = decisionsOnly ? earlier : await reextractSessionKnowledge({ ...previous, runId: id, sourceConversationIds: sources.map(source => source.id) }, ai, signal, earlier, progress);
+  const extracted = withWikiSources(decisionsOnly ? earlier : await reextractSessionKnowledge({ ...previous, runId: id, sourceConversationIds: sources.map(source => source.id) }, ai, signal, earlier, progress), await datedSources(sources));
   const known = new Set(wikiLedgerUnits(earlier).map(unit => unit.id)), units = wikiLedgerUnits(extracted), fresh = units.filter(unit => !known.has(unit.id)).length;
   const common = { ai, ...embeddingsFor(effectiveAISettings(await getAISettings()), id), locale, signal, runId: id, conversations: sources.length, names: [boundary.name, previous.goal.length <= 32 ? previous.goal : undefined, ...sources.map(source => source.title)], progress };
-  const organized = decisionsOnly && earlier.organization ? earlier : await organizeLedger(extracted, fresh > units.length * REORGANIZE_SHARE ? { ...common, directory: earlier.organization } : { ...common, previous: earlier.organization });
-  requireLedgerDirectory(organized, locale);
-  const ledger = await writeLedgerDraft(organized, { ai, locale, signal, runId: id, project: boundary.name, previous: earlier.draft, progress });
+  // An update keeps the document's type; a learning document's roles are read again for the points it now has.
+  const typed: typeof extracted = keptLearnerCode(learningUnitsOwn(earlier.documentType ? { ...extracted, documentType: earlier.documentType, ...(earlier.documentTypeBy ? { documentTypeBy: earlier.documentTypeBy } : {}) } : extracted), earlier);
+  const reorganized = decisionsOnly && earlier.organization ? earlier : await organizeLedger(typed, fresh > units.length * REORGANIZE_SHARE ? { ...common, directory: earlier.organization } : { ...common, previous: earlier.organization });
+  requireLedgerDirectory(reorganized, locale);
+  const organized = decisionsOnly ? reorganized : await asLearningDocument(reorganized, { ai, locale, signal });
+  const ledger = await writeLedgerDraft(await withStoredSections(organized), { ai, locale, signal, runId: id, project: boundary.name, previous: earlier.draft, progress });
   const patch = await ledgerDocumentSession(ledger, { id: crypto.randomUUID(), runId: id, goal: previous.goal, mode: previous.mode, strategy: previous.strategy, scope: previous.scope, title: previous.title, locale: previous.locale, sourceConversationIds: sources.map(source => source.id), wikiProjectBoundary: boundary,
     coverage: { method: "full_batched", sourceCount: sources.length, processedSegments: units.length, totalSegments: units.length, batchCount: ledger.batches.length } }, sources, messages, ai, signal, id);
   signal.throwIfAborted();

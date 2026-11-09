@@ -40,6 +40,14 @@ it("gives synonymous subject names one subject, across languages, and keeps the 
   expect(result.status).toBe("complete");
 });
 
+it("never folds a learner's exercise into another, however alike their cues", async () => {
+  const exercise = (index: number, code: string) => { const own = unit("条件判断", "第一题", { index }); return { ...own, evidence: { ...own.evidence, learnerCode: true as const, code: { language: "python", text: code } } }; };
+  const units = [exercise(44, "age = 20\nif age >= 18:\n    print(\"Adult\")"), exercise(47, "if age >= 18 and has_ticket:\n    print(\"Enter\")")];
+  const { result } = await run(units, { wiki_subject_merge: subjects(), wiki_subject_plan: oneChapterPerSubject, wiki_unit_merge: () => ({ duplicates: [["u1", "u2"]], relations: [] }) });
+  expect(result.merged).toEqual([]);
+  expect(result.subjects[0].unitIds).toHaveLength(2);
+});
+
 it("folds duplicates into the best-supported unit and resolves a replacement only from the user's own later words", async () => {
   const units = [
     unit("检索", "第一版用 SQLite FTS 做全文索引。", { index: 1 }),

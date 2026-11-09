@@ -7,6 +7,17 @@
 [简体中文](../../CHANGELOG.md) · **English**
 
 
+## 0.1.2 — Early Preview
+
+### 2026-11-08 More readable project documents; learning mode (beta)
+
+- Project documents tell your own decisions from the AI's suggestions, mark points your answer closed as decided, state each decision once and move replaced plans to "Earlier".
+- Exports open with the document status and what the marks mean, list key decisions and open questions as tables, show source code as written, and keep table rows, lists and marks intact.
+- Multi-conversation organizing names source conversations, orders them by platform time and keeps different AIs' proposals apart; English conversations keep English sentences and punctuation.
+- Workbench: a project is titled after its conversations, selected conversations can be reread on demand, DeepSeek messages that are only a file are read, and the empty-trash button stays when the bin is reopened.
+- Two public samples, Pocket Ledger and Focus Timer (exported Wiki, ledger, run record and bilingual report), in `samples/`.
+- **Learning mode (beta)**: choose **Learning (beta)** as the document type to organize study conversations into numbered cards (1.1, 1.2 …) with exercises, AI reviews, mistakes and recall questions at each chapter's end. While in beta, **Auto** always organizes as a project, and learning documents and exports say they are in beta.
+
 ## 0.1.1 — Early Preview
 
 ### 2026-10-21 multi-AI import and provider caching
