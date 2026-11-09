@@ -13,6 +13,9 @@ it("publishes no empty timing table and walks through installing the release ZIP
  expect(zh).not.toContain("## 生成耗时");expect(en).not.toContain("## Generation time");
  for(const text of [zh,en]){expect(text).toContain("releases/latest");expect(text).toContain("ChatAtlas-extension-v");expect(text).toContain("chrome://extensions");expect(text).toContain("manifest.json");}
  expect(zh).toContain("加载已解压的扩展程序");expect(en).toContain("Load unpacked");
+ // A prompt to install with an AI: from the official release only, never asking for secrets.
+ expect(zh).toContain("### 让 AI 帮你安装");expect(en).toContain("### Let an AI install it for you");
+ for(const text of [zh,en]){const prompt=text.split("```text")[1]?.split("```")[0]??"";expect(prompt).toContain("https://github.com/CNZHM666/ChatAtlas/releases/latest");expect(prompt).toMatch(/API Key|API key/u);}
 });
 it("retains the product principles' import and native-integration boundaries in both editions",()=>{
  const scope=principles.split("\n")[6];

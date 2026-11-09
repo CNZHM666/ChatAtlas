@@ -71,7 +71,7 @@ ChatAtlas 是本地优先的 Chrome 扩展：把你在各个 AI 网站上的对�
 
 ## 安装（约 2 分钟）
 
-ChatAtlas 还没有上架 Chrome 应用商店，需要以「开发者模式」加载。Edge 等基于 Chromium 的浏览器步骤相同（地址换成 `edge://extensions`）。
+ChatAtlas 还没有上架 Chrome 应用商店，需要以「开发者模式」加载。Edge 等基于 Chromium 的浏览器步骤相同（地址换成 `edge://extensions`）。也可以把[一段提示词](#让-ai-帮你安装)交给 AI，让它帮你完成。
 
 1. **下载**：打开 [Releases 最新版本](https://github.com/CNZHM666/ChatAtlas/releases/latest)，在 Assets 里下载 `ChatAtlas-extension-v0.1.2.zip`。不要下载 `Source code`，那是源码，不能直接加载。
 2. **解压**：把 ZIP 解压到一个固定的文件夹，例如 `文档/ChatAtlas`。解压后的文件夹里应直接能看到 `manifest.json`。加载后不要删除或移动这个文件夹，否则扩展会失效。
@@ -83,6 +83,20 @@ ChatAtlas 还没有上架 Chrome 应用商店，需要以「开发者模式」�
 Chrome 启动时可能提示「停用开发者模式扩展程序」，选择保留即可。如果加载时提示「清单文件缺失或不可读取」，说明选错了层级，请选择直接包含 `manifest.json` 的文件夹。
 
 **升级到新版本**：先在「设置 → 采集与数据」下载备份（不含 API Key）；然后用新 ZIP 的内容覆盖原文件夹，在 `chrome://extensions` 点击 ChatAtlas 卡片上的刷新按钮。本地数据保存在浏览器里，覆盖文件不会删除它们；但不要点「移除」，移除扩展会清空本地数据。
+
+### 让 AI 帮你安装
+
+不熟悉开发者模式也没关系：把下面这段话复制给 AI 助手即可。能操作电脑的 AI（如 Claude Code、Codex）可以替你下载、解压并核对文件；网页版 ChatGPT、Claude、DeepSeek 等会一步步带你完成，遇到报错也可以直接问它。最后在 `chrome://extensions` 里开启开发者模式和加载扩展这两步，通常需要你自己点。
+
+```text
+请帮我安装 Chrome 扩展 ChatAtlas（开源项目：https://github.com/CNZHM666/ChatAtlas）。
+
+1. 打开 https://github.com/CNZHM666/ChatAtlas/releases/latest ，在 Assets 里下载名为 ChatAtlas-extension-v版本号.zip 的文件。只用这个官方地址，不要下载 Source code，也不要从其他网站下载。
+2. 把 ZIP 解压到一个以后不会删除或移动的文件夹（例如 文档/ChatAtlas），确认这个文件夹里直接有 manifest.json。
+3. 告诉我这个文件夹的完整路径，然后指导我：在 Chrome 地址栏打开 chrome://extensions，开启右上角的「开发者模式」，点击「加载已解压的扩展程序」，选择这个文件夹，最后把 ChatAtlas 图标固定到工具栏。
+
+如果你不能直接操作我的电脑，请把每一步写清楚让我照做；如果出现报错，帮我判断原因。不要修改扩展里的任何文件，也不要让我提供任何密码或 API Key。
+```
 
 ## 第一次使用
 

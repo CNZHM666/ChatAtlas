@@ -71,7 +71,7 @@ Citations take you back to the original to check; they do not prove a suggestion
 
 ## Install (about 2 minutes)
 
-ChatAtlas is not on the Chrome Web Store yet, so it is loaded in Developer mode. Edge and other Chromium browsers work the same way (use `edge://extensions`).
+ChatAtlas is not on the Chrome Web Store yet, so it is loaded in Developer mode. Edge and other Chromium browsers work the same way (use `edge://extensions`). You can also hand [a ready-made prompt](#let-an-ai-install-it-for-you) to an AI and let it do this for you.
 
 1. **Download**: open the [latest Release](https://github.com/CNZHM666/ChatAtlas/releases/latest) and, under Assets, download `ChatAtlas-extension-v0.1.2.zip`. Not `Source code`: that cannot be loaded directly.
 2. **Extract**: unzip it into a folder you will keep, such as `Documents/ChatAtlas`. The folder should contain `manifest.json` directly. Do not delete or move it after loading, or the extension stops working.
@@ -83,6 +83,20 @@ ChatAtlas is not on the Chrome Web Store yet, so it is loaded in Developer mode.
 Chrome may ask on startup whether to disable developer-mode extensions; keep it. If loading says the manifest is missing or unreadable, you chose the wrong level: pick the folder that directly contains `manifest.json`.
 
 **Upgrading**: first download a backup from **Settings → Capture & data** (it contains no API key). Then replace the folder's contents with the new ZIP and click the reload button on the ChatAtlas card in `chrome://extensions`. Your data lives in the browser and survives this; do not click **Remove**, which deletes local data.
+
+### Let an AI install it for you
+
+New to Developer mode? Copy the text below to an AI assistant. An AI that can use your computer (such as Claude Code or Codex) can download, extract and check the files for you; ChatGPT, Claude or DeepSeek on the web will walk you through each step and help with any error. The last two steps in `chrome://extensions`, turning on Developer mode and loading the extension, are usually yours to click.
+
+```text
+Please help me install the Chrome extension ChatAtlas (open source: https://github.com/CNZHM666/ChatAtlas).
+
+1. Open https://github.com/CNZHM666/ChatAtlas/releases/latest and, under Assets, download the file named ChatAtlas-extension-v<version>.zip. Use only this official address: not Source code, and not any other website.
+2. Extract the ZIP into a folder I will keep (for example Documents/ChatAtlas) and check that the folder directly contains manifest.json.
+3. Tell me the folder's full path, then guide me: open chrome://extensions in Chrome, turn on Developer mode at the top right, click Load unpacked, choose that folder, and pin the ChatAtlas icon to the toolbar.
+
+If you cannot use my computer directly, write out each step for me to follow, and help me work out any error. Do not change any file in the extension, and do not ask me for any password or API key.
+```
 
 ## First use
 
