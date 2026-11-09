@@ -15,15 +15,15 @@ ChatAtlas is a local-first Chrome extension. It saves your conversations from AI
 > Demo GIF placeholder: recording pending (install → import → search without a key → read originals → organize a Wiki).
 <!-- demo-gif-placeholder: Recording pending; no demo file yet. -->
 
+![The ChatAtlas side panel next to ChatGPT: organized knowledge and related conversations](docs/images/sidecar-chatgpt-light.png)
+
+<p align="center"><sub>Open the side panel next to an AI website to find organized knowledge and related conversations</sub></p>
+
 | Workbench: search history, organize projects, browse sources by AI | Project document: overview and chapters |
-| --- | --- |
+| :---: | :---: |
 | ![ChatAtlas workbench home](docs/images/home-en-light.png) | ![Project document overview](docs/images/project-overview-light.png) |
-
-![Reading a Wiki chapter: decisions and details organized by topic](docs/images/wiki-chapter-light.png)
-
-![Reading the original conversation in order, with question search on the left](docs/images/reader-dark.png)
-
-<p align="center"><img src="docs/images/sidecar-search-light.png" width="300" alt="The side panel next to an AI website: organized knowledge and related conversations"><br><sub>The side panel next to an AI website: organized knowledge and related conversations</sub></p>
+| **Wiki chapter: decisions and details by topic** | **Reader: the original conversation, in order** |
+| ![Reading a Wiki chapter](docs/images/wiki-chapter-light.png) | ![Reading the original conversation (dark)](docs/images/reader-dark.png) |
 
 ## What it does
 
