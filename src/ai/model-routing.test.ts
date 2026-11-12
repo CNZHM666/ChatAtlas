@@ -31,6 +31,8 @@ describe("routing rules", () => {
     expect(control.current(1_000)).toBe(1);
     expect(control.current(62_000)).toBe(3);
     expect(new AdaptiveConcurrency(2).current(0)).toBe(2);
+    // A host that takes ten starts at six.
+    expect(new AdaptiveConcurrency(10).current(0)).toBe(6);
   });
 });
 

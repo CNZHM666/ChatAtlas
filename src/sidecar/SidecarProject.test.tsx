@@ -81,6 +81,12 @@ it("links an unsaved current conversation directly from the searchable picker an
   expect(screen.getByRole("button",{name:"使用已关联项目：ChatAtlas 目标项目"})).toBeVisible();
   fireEvent.keyDown(screen.getByRole("searchbox",{name:"搜索项目"}),{key:"Escape"});
   await waitFor(()=>expect(screen.queryByRole("region",{name:"选择关联项目"})).not.toBeInTheDocument());
+  // A link made by mistake is undone before the project organizes it.
+  fireEvent.click(screen.getByRole("button",{name:"关联项目"}));
+  fireEvent.click(screen.getByRole("button",{name:"取消关联：ChatAtlas 目标项目"}));
+  await screen.findByText("已取消与「ChatAtlas 目标项目」的关联");
+  expect((await db.get("focusSessions",target.id))?.sidecarConversationIds).not.toContain("unsaved");
+  expect(screen.getByRole("button",{name:"关联到：ChatAtlas 目标项目"})).toBeVisible();
 });
 it("does not show the previous conversation's import receipt after switching conversations",async()=>{
   let complete!:(value:unknown)=>void;send.mockImplementationOnce(()=>new Promise(resolve=>{complete=resolve;}));

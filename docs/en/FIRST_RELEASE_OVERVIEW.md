@@ -2,7 +2,7 @@
 
 [简体中文](../FIRST_RELEASE_OVERVIEW.md) · **English**
 
-Version **0.1.2 Early Preview**. This describes available entries and limits, not a promise of testing across every model.
+Version **0.1.3 Early Preview**. This describes available entries and limits, not a promise of testing across every model.
 
 ## Supported platform
 

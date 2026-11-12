@@ -73,17 +73,29 @@ function insideFence(text: string, offset: number): boolean {
   return open !== undefined;
 }
 
-export function withHolderMarks(text: string, marks: Array<{ text: string; holder: WikiHolder; source?: string }>, zh: boolean): string {
+export function withHolderMarks(text: string, marks: Array<{ text: string; holder: WikiHolder; source?: string; reference?: string }>, zh: boolean): string {
   const at: Array<{ offset: number; mark: string }> = [];
   let from = 0;
   for (const item of marks) {
     const holder = wikiShownHolder(item.holder, item.text);
-    if (wikiUnmarkedHolder(holder)) continue;
+    if (wikiUnmarkedHolder(holder) && !item.reference) continue;
     // An earlier point ending on what replaced it ("……两个备选方案均保留；后续确认 Popup 宽度为 380px……") is marked before
     // that clause: marked at the end, 〔此前〕 read as setting the current decision aside too.
     const later = holder === "earlier" ? item.text.trim().search(LATER_SETTLED) : -1;
     const claim = later > 0 ? item.text.trim().slice(0, later) : item.text.trim();
     let range = wikiQuoteRange(text.slice(from), claim);
+    if (!range) continue;
+    // A sentence found only in part inside a table row is not that row: 「你还提到当前小程序日活（DAU）约40……」 marked the
+    // cell 「日活 (DAU)」 of a table of June's figures. The next place saying it is looked for.
+    const inRow = (at: { start: number; end: number }) => { const start = text.lastIndexOf("\n", from + at.start - 1) + 1, stop = text.indexOf("\n", from + at.start); return /^\s*\|.*\|\s*$/u.test(text.slice(start, stop < 0 ? text.length : stop)); };
+    // Nor is a cell holding only part of it: 「当前小程序日活（DAU）约40……」 marked the label cell 「日活 (DAU)」 of a table of
+    // June's figures as the user's report of August, its value cell another reply's.
+    const compact = (value: string) => value.normalize("NFKC").replace(/[\s*。.，,；;：:、（）()“”"']/gu, "");
+    const cellHolds = (at: { start: number; end: number }) => { const start = text.lastIndexOf("\n", from + at.start - 1) + 1, offset = from + at.start - start, row = text.slice(start).split("\n")[0], cellStart = row.lastIndexOf("|", offset) + 1, cellEnd = row.indexOf("|", offset); return compact(row.slice(cellStart, cellEnd < 0 ? row.length : cellEnd)).includes(compact(claim)); };
+    while (range && !/\|/u.test(claim) && inRow(range) && ((range.end - range.start) * 2 < claim.length || !cellHolds(range))) {
+      const after: number = from + range.end, again = wikiQuoteRange(text.slice(after), claim);
+      range = again ? { start: after - from + again.start, end: after - from + again.end } : undefined;
+    }
     if (!range) continue;
     // A claim said again inside another sentence before its own place ("……且严格禁止改变……两个核心原则" in the opening, then
     // the bullet "**核心原则**：禁止改变……"): the mark goes where the claim starts a sentence, line or label, if it does.
@@ -135,7 +147,12 @@ export function withHolderMarks(text: string, marks: Array<{ text: string; holde
     // shows, and "```〔已纠正〕" broke the fence.
     if (insideFence(text, offset) || insideFence(text, from + range.start)) continue;
     const source = item.source ? ` · ${item.source}` : "";
-    at.push({ offset, mark: zh ? `〔${wikiHolderLabel(holder, true)}${source}〕` : ` [${wikiHolderLabel(holder, false)}${source}]` });
+    // A portable citation needs the whole claim, not a fuzzy match to one of
+    // its phrases. Earlier marks may intentionally cover only a clause.
+    const literal = (value: string) => value.normalize("NFKC").replace(/\*\*|__|\s/gu, "");
+    const reference = later < 0 && literal(text.slice(from + range.start, end)) === literal(claim) ? item.reference : undefined;
+    if (wikiUnmarkedHolder(holder) && !reference) continue;
+    at.push({ offset, mark: (zh ? `〔${wikiHolderLabel(holder, true)}${source}〕` : ` [${wikiHolderLabel(holder, false)}${source}]`) + (reference ?? "") });
     from = offset;
   }
   let result = text;

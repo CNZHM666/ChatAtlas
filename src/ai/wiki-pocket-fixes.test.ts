@@ -1,10 +1,10 @@
 import { expect, it } from "vitest";
 import type { WikiDraftChapter, WikiKnowledgeOrganization, WikiKnowledgeUnit, WikiSubject, WikiUnitStatus } from "../shared/wiki-knowledge";
 import { droppedRepeatedListItems, droppedRepeatedParagraphs } from "./wiki-paragraph-repeats";
-import { chapterRepeatedClauses, isCommentary, lostNegation, refreshedClaimProblems } from "./wiki-knowledge-write";
+import { chapterRepeatedClauses, isCommentary, lostNegation, refreshedClaimProblems, trimmedTailComments } from "./wiki-knowledge-write";
 import { ensureWikiDecisions } from "./wiki-decision-coverage";
 import { ordinalLabelledItems } from "./wiki-ordinal-labels";
-import { contentMoveAllowed, movedTopicUnits, technicalSubject, namedForContent, moveInterfaceSubjects, moveNamedSubjects, moveTechnicalSubjects, movedPartUnits } from "./wiki-knowledge-organize";
+import { contentMoveAllowed, movedTopicUnits, technicalSubject, namedForContent, moveInterfaceSubjects, moveNamedSubjects, moveSubtopicNamedSubjects, moveKindSubjects, moveTechnicalSubjects, movedPartUnits } from "./wiki-knowledge-organize";
 import { UNDECIDED } from "../shared/wiki-section-status";
 import { droppedCoveredListings, droppedContainedDecisions, droppedDecisionEchoes, mergedLabelledLists, droppedEnglishAsides, droppedInnerRepeats, droppedOpeningRepeats, droppedRepeatedSentences, droppedUncitedParagraphs, droppedUnrelatedParagraphs, labelledSubjectlessItems, restoredFragments, statementSubject, trimmedDecidedClaims, webPlatformKept } from "./wiki-fragments";
 import { claimSupported } from "./wiki-claim-support";
@@ -17,7 +17,7 @@ import { removeParagraph, replaceParagraph } from "../shared/wiki-body-text";
 import { statesCore, withoutOwnProjectAnswers, type WikiKnowledgeLedger, type WikiWritingQuestion } from "../shared/wiki-knowledge";
 import { openingSentenceMarks } from "./wiki-ledger-document";
 import { droppedEchoedReports, droppedRepeatedExclusions, droppedTableEchoes, earlierVersionsLast, foldedValueDecisions, joinedLeadRepeats, valueLabel } from "./wiki-fragments";
-import { labelContradicts, soundQuestion, withAnswerScope, withAnsweredChoices, withAnsweredOpenPoints, withDeclinedProposals, withSettledByAnswer, withSoundAnswers } from "./wiki-question-parse";
+import { labelContradicts, soundQuestion, withAnswerScope, withAnsweredChoices, withAnsweredOpenPoints, withDeclinedProposals, withSettledByAnswer, withSoundAnswers, withTurnedDownRestatements } from "./wiki-question-parse";
 
 const chapter = (texts: Array<[string, string[]]>): WikiDraftChapter => ({
   id: "c", title: "Interface", question: "", group: "",
@@ -170,6 +170,22 @@ it("moves a subject to the chapter named for it", () => {
   expect(pages[1].sectionIds).toEqual(["feed"]);
   expect(pages[2].sectionIds).toEqual(["mint"]);
   expect(report.plan_moved_named).toBe(2);
+});
+
+it("moves a competitor subject to the comparison chapter and the current numbers to the chapter on where things stand", () => {
+  const subject = (id: string, name: string): [string, WikiSubject] => [id, { id, name, aliases: [], unitIds: [] }];
+  const subjects = new Map([subject("core", "产品核心定位"), subject("keji", "克己-戒色助手 国内竞品现状"), subject("plan", "功能优先级"), subject("users", "用户留存现状"), subject("quittr", "竞品Quittr分析")]);
+  const pages = [
+    { title: "产品定位与合规", question: "", group: "", sectionIds: ["core", "keji"], subtopics: [{ title: "核心逻辑与目标", question: "", sectionIds: ["core", "keji"] }] },
+    { title: "用户现状与竞品", question: "", group: "", sectionIds: ["quittr"], subtopics: [{ title: "海外竞品分析", question: "", sectionIds: ["quittr"] }] },
+    { title: "功能机制与技术", question: "", group: "", sectionIds: ["plan", "users"], subtopics: [{ title: "版本迭代计划", question: "", sectionIds: ["plan", "users"] }] },
+  ];
+  const report: Record<string, number> = {};
+  moveKindSubjects(pages, subjects, report, 4, id => id === "keji" || id === "quittr");
+  expect(pages[0].sectionIds).toEqual(["core"]);
+  expect(pages[1].sectionIds.sort()).toEqual(["keji", "quittr", "users"]);
+  expect(pages[2].sectionIds).toEqual(["plan"]);
+  expect(report.plan_moved_kind).toBe(2);
 });
 
 it("moves a unit of a numbered part to the subject holding such parts", () => {
@@ -1048,4 +1064,137 @@ it("writes a short Chinese answer after what it is about", () => {
     userAnswers: [{ questionId: "q", optionId: "o", unitIds: ["label"], question: question.ask, answer: "使用“完成专注 X 轮”", at: 5 }], decisions: { label: { verdict: "confirmed", at: 5 } },
     organization: { subjects: [{ id: "s", name: "界面", aliases: [], unitIds: ["label"] }], relations: [] } } as unknown as WikiKnowledgeLedger;
   expect(withAnsweredChoices(ledger).batches[0].units.find(unit => unit.id.startsWith("answer:"))!.statement).toBe("首页统计文案：使用“完成专注 X 轮”。");
+});
+
+it("drops a clause saying only what a point is for, and a date stranded before 这表明", () => {
+  expect(trimmedTailComments("当前新增用户留存率为19%〔你 · ChatGPT 2〕，这一数据现状构成了后续功能扩展与优先级调整的基础参考指标。")).toBe("当前新增用户留存率为19%〔你 · ChatGPT 2〕。");
+  expect(trimmedTailComments("国内已出现“克己-戒色助手”。截至2026年，这表明简单功能易被复制。")).toBe("国内已出现“克己-戒色助手”。这表明简单功能易被复制。");
+  // A clause with a value of its own stays.
+  const kept = "留存率为19%，这为下一阶段提供了50 DAU的参考指标。";
+  expect(trimmedTailComments(kept)).toBe(kept);
+});
+
+it("clears a range or number problem once the paragraph now holding it cites a unit giving it", () => {
+  const unitOf = (id: string, statement: string, details: string[]) => ({ id, subject: "s", statement, kind: "constraint", details, adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: id, conversationId: "x", messageId: id, messageIndex: 1, role: "assistant", pasted: false, quote: statement } }) as unknown as WikiKnowledgeUnit;
+  const group = unitOf("g", "系统自动分配匿名小组。", ["每组6—10人"]), levels = unitOf("l", "风险分为四个等级。", ["60～79：高风险"]);
+  const draft = { id: "c", title: "算法", question: "", group: "", body: "", paragraphs: [
+    { subtopic: "s", text: "采用系统自动分配同期小组。", unitIds: ["a"], claims: [] },
+    { subtopic: "s", text: "每组6—10人，默认匿名。", unitIds: ["g"], claims: [] },
+    { subtopic: "s", text: "- **风险分级**：高风险（60～79）。", unitIds: ["l"], claims: [] },
+    { subtopic: "s", text: "每组最多12人。", unitIds: ["g"], claims: [] },
+  ], problems: [
+    "\"采用系统自动分配同期小组（滚动制），而非用户主动…\" states the range 6-10 that no cited unit states as a range; keep each number as its source gives it",
+    "\"- **风险分级**：系统根据时间、诱因、保护因…\" states the range 60-79 that no cited unit states as a range; keep each number as its source gives it",
+    "\"每组最多12人。…\" has numbers its units do not state: 12",
+  ] } as unknown as WikiDraftChapter;
+  expect(refreshedClaimProblems([draft], new Map([["a", unitOf("a", "采用系统自动分配同期小组。", [])], ["g", group], ["l", levels]]))).toBe(2);
+  // A number no cited unit gives still stands.
+  expect(draft.problems).toEqual(["\"每组最多12人。…\" has numbers its units do not state: 12"]);
+});
+
+it("turns down a restatement of a refused option, keeping an unrelated point and the user's own words", () => {
+  const refused = ledgerUnit("refused", "自动小组按戒断天数匹配五人小组，每晚统一打卡复盘。", "assistant", 3);
+  const again = ledgerUnit("again", "自动小组会按戒断天数匹配五人小组，并在每晚统一打卡。", "assistant", 8);
+  const own = ledgerUnit("own", "自动小组按戒断天数匹配五人小组，每晚统一打卡。", "user", 9);
+  const other = ledgerUnit("other", "首页采用混合模式，而非纯聊天界面。", "assistant", 10);
+  const question = { id: "q", about: "自动小组", ask: "是否做自动小组？", unitIds: ["refused", "again", "other"], organization: 0,
+    options: [{ id: "o", label: "不做", actions: [{ do: "reject", units: ["refused"] }] }] } as unknown as WikiWritingQuestion;
+  const ledger = { batches: [{ sourceIds: [], status: "ok", units: [refused, again, own, other] }], writingQuestions: [question],
+    userAnswers: [{ questionId: "q", optionId: "o", unitIds: question.unitIds, question: question.ask, answer: "不做", at: 12 }],
+    decisions: { refused: { verdict: "rejected", at: 12 } } } as unknown as WikiKnowledgeLedger;
+  const read = withTurnedDownRestatements(ledger);
+  expect(read.decisions!.again).toEqual({ verdict: "rejected", at: 12 });
+  expect(read.decisions!.own).toBeUndefined();
+  expect(read.decisions!.other).toBeUndefined();
+  expect(ledger.decisions!.again).toBeUndefined();
+});
+
+it("moves a subject sharing no word with its subtopic to the subtopic named for it, following one that moves first", () => {
+  const subject = (id: string, name: string): [string, WikiSubject] => [id, { id, name, aliases: [], unitIds: [id] }];
+  const subjects = new Map([subject("home", "首页架构与布局"), subject("road", "开发路线图与迭代规划"), subject("data", "急救会话数据模型"), subject("plan", "版本迭代规划"), subject("keep", "用户留存现状"), subject("trial", "三个月验证计划"), subject("ui", "底部导航设计")]);
+  const pages = [
+    { title: "界面交互设计", group: "", question: "", sectionIds: ["ui"], subtopics: [{ title: "首页架构布局", question: "", sectionIds: ["ui"] }] },
+    { title: "算法数据技术", group: "", question: "", sectionIds: ["data", "home", "road"], subtopics: [{ title: "数据结构规范", question: "", sectionIds: ["data", "home", "road"] }] },
+    { title: "增长规划路线", group: "", question: "", sectionIds: ["keep", "plan", "trial"], subtopics: [{ title: "留存现状指标", question: "", sectionIds: ["keep", "plan"] }, { title: "版本迭代计划", question: "", sectionIds: ["trial"] }] },
+  ];
+  moveSubtopicNamedSubjects(pages, subjects, {});
+  expect(pages[0].subtopics[0].sectionIds).toEqual(["ui", "home"]);
+  expect(pages[1].subtopics[0].sectionIds).toEqual(["data"]);
+  expect(pages[2].subtopics[0].sectionIds).toEqual(["keep"]);
+  expect(pages[2].subtopics[1].sectionIds).toEqual(["trial", "plan", "road"]);
+});
+
+it("turns down restatements of a refused point when the ledger keeps its decisions but not the question", () => {
+  const refused = ledgerUnit("refused", "用户开始计划后由系统自动分配匿名小组，不再提供手动创建入口。", "assistant", 3);
+  const again = ledgerUnit("again", "用户开始计划后自动分配至守护小组，作为每日回访的社交理由。", "assistant", 8);
+  const other = ledgerUnit("other", "首页采用混合模式，而非纯聊天界面。", "assistant", 10);
+  const organization = { subjects: [{ id: "s", name: "互助小组", aliases: [], unitIds: ["refused", "again", "other"] }] };
+  const ledger = { batches: [{ sourceIds: [], status: "ok", units: [refused, again, other] }], organization, decisions: { refused: { verdict: "rejected", at: 12 } } } as unknown as WikiKnowledgeLedger;
+  const read = withTurnedDownRestatements(ledger);
+  expect(read.decisions!.again).toEqual({ verdict: "rejected", at: 12 });
+  expect(read.decisions!.other).toBeUndefined();
+});
+
+it("keeps a competitor subject in the comparison chapter when placing by content", () => {
+  const subject = (name: string): WikiSubject => ({ id: name, name, aliases: [], unitIds: [] });
+  const titles = ["产品定位与用户", "市场竞品分析", "增长规划路线"];
+  expect(contentMoveAllowed(subject("克己-戒色助手 竞品分析"), "市场竞品分析", "产品定位与用户", titles)).toBe(false);
+  expect(contentMoveAllowed(subject("获客渠道"), "市场竞品分析", "增长规划路线", titles)).toBe(true);
+});
+
+it("routes a figure of use out of the interface, another product's fact to the comparison chapter, and a weighted score to the algorithm", async () => {
+  const { routeWikiUnits } = await import("./wiki-unit-routing");
+  const make = (id: string, kind: string, subject: string, statement: string, facet?: string) => ({ id, subject, ...(facet ? { facet } : {}), statement, kind, details: [], adoption: { status: "unknown" }, delivery: "unknown", evidence: { evidenceId: id, conversationId: "c", messageId: id, messageIndex: 1, role: "assistant", pasted: false, quote: statement } }) as unknown as WikiKnowledgeUnit;
+  const list = [
+    make("m", "fact", "视觉规范", "当前日活稳定在22人，其中15人为连续使用的核心用户。"),
+    make("a", "mechanism", "挑战营冷启动处理", "系统根据时间、诱因、保护因素加权计算风险分数，分为四个等级。"),
+    make("v", "decision", "视觉规范", "采用莫兰迪色系。"),
+    make("r", "fact", "竞品分析", "海外存在DAWG和Stirden等专门围绕男性自律成长的产品。", "外部参考"),
+    make("p", "decision", "产品定位", "产品定位为个人行为恢复系统。"),
+    make("d", "fact", "留存", "小程序目前每天稳定在22人。"),
+    make("k", "fact", "克己", "国内已出现克己等竞品。"),
+    make("f", "mechanism", "风险模型", "新用户初期使用全体用户的匿名规律进行预测。"),
+  ];
+  const subject = (id: string, name: string, unitIds: string[]): WikiSubject => ({ id, name, aliases: [], unitIds });
+  const organization = { subjects: [subject("s1", "视觉规范与风格", ["m", "a", "v"]), subject("s2", "产品定位策略", ["r", "p"]), subject("s3", "用户留存现状", ["d"]), subject("s4", "克己竞品", ["k"]), subject("s5", "风险预测", ["f"])], relations: [], chapters: [
+    { id: "ui", title: "界面设计", question: "", subtopics: [{ title: "视觉风格定义", subjectIds: ["s1"] }] },
+    { id: "pos", title: "产品定位", question: "", subtopics: [{ title: "核心定义与目标", subjectIds: ["s2"] }] },
+    { id: "grow", title: "增长运营", question: "", subtopics: [{ title: "留存提升手段", subjectIds: ["s3"] }] },
+    { id: "ref", title: "竞品参考", question: "", subtopics: [{ title: "国内竞品现状", subjectIds: ["s4"] }] },
+    { id: "algo", title: "算法技术", question: "", subtopics: [{ title: "风险预测模型", subjectIds: ["s5"] }] },
+  ] } as unknown as WikiKnowledgeOrganization;
+  const routed = routeWikiUnits(organization, new Map(list.map(unit => [unit.id, unit])));
+  const holder = (id: string) => routed.subjects.find(item => item.unitIds.includes(id))?.id;
+  expect([holder("m"), holder("r"), holder("v"), holder("p")]).toEqual(["s3", "s4", "s1", "s2"]);
+  expect(routed.chapters.find(chapter => chapter.id === "algo")!.subtopics.flatMap(topic => topic.subjectIds)).toContain(holder("a"));
+});
+
+it("reads a screen's architecture as its layout, not the system's", () => {
+  expect(technicalSubject({ id: "s", name: "首页架构与布局", aliases: [], unitIds: [] })).toBe(false);
+  expect(technicalSubject({ id: "s", name: "技术架构原则", aliases: [], unitIds: [] })).toBe(true);
+});
+
+it("reads the user's earlier figure, replaced by a later one, as earlier rather than open", () => {
+  const make = (id: string, statement: string) => ({ id, subject: "留存", statement, kind: "report", details: [], adoption: { status: "unknown" }, delivery: "user_reported", evidence: { evidenceId: id, conversationId: "c", messageId: id, messageIndex: 1, role: "user", pasted: false, quote: statement } }) as unknown as WikiKnowledgeUnit;
+  const statuses = wikiUnitStatuses([make("old", "小程序目前每天稳定在22人，其中15个为稳定用户。"), make("new", "当前小程序日活约40，付费率较低。")], { relations: [{ older: "old", newer: "new", kind: "replaces", status: "unresolved" }] } as unknown as WikiKnowledgeOrganization);
+  expect(statuses.get("old")).toBe("history");
+  expect(statuses.get("new")).not.toBe("open");
+});
+
+it("lets a claim follow its sentence's new end, and binds a sentence naming what replaced an earlier version to that version", () => {
+  const unitOf = (id: string, statement: string) => ({ id, subject: "s", statement, kind: "plan", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: id, conversationId: "x", messageId: id, messageIndex: 1, role: "assistant", pasted: false, quote: statement } }) as unknown as WikiKnowledgeUnit;
+  const groups = unitOf("g", "用户开始计划后自动分配至守护小组，作为每日回访的社交理由。");
+  const card = unitOf("old", "将分散模块合并为单一的“今日任务”卡片。"), now = unitOf("now", "将“今日任务”升级为“今天只做这一件事”，由AI根据状态推荐1-3个具体行动。");
+  const draft = { id: "c", title: "界面", question: "", group: "", body: "", paragraphs: [
+    { subtopic: "早先版本", text: "你否定了以下早期方案：用户开始计划后自动分配至守护小组，作为每日回访的社交理由。", unitIds: ["g"], claims: [{ text: "你否定了以下早期方案：用户开始计划后自动分配至守护小组，作为每日回访的社交理由；", unitIds: ["g"] }] },
+    { subtopic: "早先版本", text: "此前曾提出将分散模块合并为单一的“今日任务”卡片。当前规划将“今日任务”升级为“今天只做这一件事”，由AI根据状态推荐1-3个具体行动。", unitIds: ["old"], claims: [{ text: "此前曾提出将分散模块合并为单一的“今日任务”卡片。", unitIds: ["old"] }] },
+  ], problems: [
+    "claim \"你否定了以下早期方案：用户开始计划后自动分配至守护小组，作为每日…\" not in the paragraph",
+    "\"当前规划将“今日任务”升级为“今天只做这一件事”…\" has no claim naming the units it states; add a claim for each decided, done, figure or change sentence",
+  ] } as unknown as WikiDraftChapter;
+  const topics = [{ id: "t", name: "任务", current: ["now"], earlier: ["old"], open: false }];
+  expect(refreshedClaimProblems([draft], new Map([["g", groups], ["old", card], ["now", now]]), topics)).toBe(2);
+  expect(draft.paragraphs[0].claims![0].text.endsWith("社交理由")).toBe(true);
+  expect(draft.paragraphs[1].claims!.at(-1)!.unitIds).toEqual(["now"]);
+  expect(draft.paragraphs[1].unitIds).toContain("now");
 });

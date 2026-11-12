@@ -1,5 +1,5 @@
 import {wikiNarration} from "./wiki-narration";
-import {isSourceCaption,readableSourceCaptions} from "./wiki-source-code";
+import {isSourceCaption,readableSourceCaptions,readableUiSketches,withoutPlaceholderFences} from "./wiki-source-code";
 import {unified} from "unified";
 import remarkParse from "remark-parse";
 import type {FocusSection} from "./focus-session";
@@ -102,7 +102,8 @@ function promotePseudoHeadings(body:string):string {
  * become sub-headings, long paragraphs split. Saved text and personal chapters
  * are unchanged. */
 export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin">):string {
- if(section.userEdited||section.origin)return body;
+ // Personal text stays as written; only block captions, which are labels and not its words, read like the rest.
+ if(section.userEdited||section.origin)return readableSourceCaptions(body);
  // Narration cleanup runs here too, so exports read like the Reader ("AI发现了", not "AI建议发现了"; no "据讨论，" lead-ins).
- return readableSourceCaptions(splitLongParagraphs(promotePseudoHeadings(dropRepeatedParagraphs(wikiNarration(aiAdvicePresentation(extractHistoryNotes(body).body))))));
+ return readableUiSketches(readableSourceCaptions(splitLongParagraphs(promotePseudoHeadings(dropRepeatedParagraphs(wikiNarration(aiAdvicePresentation(extractHistoryNotes(withoutPlaceholderFences(body)).body)))))));
 }

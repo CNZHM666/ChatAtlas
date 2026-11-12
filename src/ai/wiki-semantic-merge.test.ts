@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { expect, it } from "vitest";
 import { placeByContent, semanticClusters, unitVectors, vectorSimilarity } from "./wiki-semantic-merge";
 import type { EmbeddingProvider } from "./embedding-provider";
@@ -38,4 +39,15 @@ it("moves a subject to the chapter its statements are clearly closer to, never e
   // Its emptied subtopic goes; the lone related-project chapter keeps its subject.
   expect(chapters[1].subtopics.map(topic => topic.title)).toEqual(["存储"]);
   expect(chapters[2].subtopics[0].subjectIds).toEqual(["s6"]);
+});
+
+it("keeps statement vectors between runs, so a regenerated Wiki embeds only statements it has not seen", async () => {
+  const kept = unit(7, "首页只保留一个主按钮"), added = unit(8, "复盘控制在三十秒内");
+  await unitVectors([kept], provider({ [kept.statement]: [0, 1, 0] }), new AbortController().signal, {});
+  const report: Record<string, number> = {}, asked: string[] = [];
+  const counting: EmbeddingProvider = { modelKey: "fake", embedText: async () => [0], embedBatch: async texts => { asked.push(...texts); return texts.map(() => [1, 0, 0]); } };
+  const vectors = (await unitVectors([kept, added], counting, new AbortController().signal, report))!;
+  expect(asked).toEqual([added.statement]);
+  expect(vectors.get(kept.id)?.[1]).toBeCloseTo(1);
+  expect(report).toMatchObject({ semantic_reused: 1, semantic_requests: 1, semantic_units: 2 });
 });

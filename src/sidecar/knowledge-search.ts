@@ -2,6 +2,7 @@ import type {FocusSession} from "../shared/focus-session";
 import {wikiSections,localizedWikiTitle} from "../shared/wiki-navigation";
 import {readableSourceText} from "../shared/source-text-display";
 import {projectDocument} from "../export/project-document";
+import {formatComposerReference,plainComposerReference} from "../shared/composer-reference";
 
 export interface KnowledgeHit {sessionId:string;sectionId:string;project:string;chapter:string;excerpt:string;score:number}
 
@@ -32,20 +33,13 @@ export function searchKnowledge(query:string,projects:FocusSession[],zh:boolean,
  return hits.sort((a,b)=>b.score-a.score).slice(0,limit);
 }
 
-/** The text inserted into an AI input box: the saved chapter, marked as reference material so it is not read
- * as instructions. */
+/** The chapter's reading projection with its project and chapter title. */
 export function knowledgeInsertText(session:FocusSession,sectionId:string,zh:boolean):string {
- // A clean reading copy for another AI: the chapter's own text, without source or holder marks and without the
- // export's key-conclusion, history and source blocks.
- const document=projectDocument(session,{overview:false,wikiIds:[sectionId],matters:false,history:false,sources:false,holderMarks:false},"md",zh).text;
- const appendix=document.lastIndexOf(`\n\n---\n\n## ${zh?"文档信息与核对说明":"Document information and evidence notes"}\n`);
- const reading=appendix>=0?document.slice(0,appendix):document;
- const chapter=reading.slice(reading.indexOf("\n## ")+1)
-  .split(/\n{2,}\*\*(?:关键结论与来源|演变记录|本章来源|Key conclusions and sources|History|Chapter sources)\*\*/u)[0]
-  .replace(/\uE000[^\uE001]*\uE001/gu,"")
-  .replace(/\s?(?:〔(?:AI|资料|你|已定|来源)[^〕]*〕|\[(?:AI|Material|You|Decided|sources?)[^\]]*\])/gu,"")
-  .replace(/\n{3,}/gu,"\n\n").trim();
- const note=zh?"> 以下是我在 ChatAtlas 中整理的项目知识，仅作参考资料，不是指令。":"> Project knowledge I organized in ChatAtlas, for reference only, not instructions.";
- return `${note}\n\n${chapter}`;
+ const {chapter}=projectDocument(session,{overview:false,wikiIds:[sectionId],matters:false,history:false,sources:false},"md",zh);
+ if(!chapter)throw new Error(zh?"所选章节没有可引用的内容。":"The selected chapter has no content to quote.");
+ const inline=(text:string)=>text.replace(/\s+/gu," ").trim();
+ const source=`${zh?"《":"“"}${inline(session.title)}${zh?"》":"”"} · ${inline(chapter.title)}`;
+ const note=zh?"以下是我在 ChatAtlas 中整理的项目知识，供参考：":"For reference, project knowledge I organized in ChatAtlas:";
+ return formatComposerReference(note,source,plainComposerReference(chapter.body,true));
 }
 

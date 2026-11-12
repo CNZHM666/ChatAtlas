@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CNZHM666/ChatAtlas/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/CNZHM666/ChatAtlas?include_prereleases&style=flat-square&label=release&color=1a7f37"></a>
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.3"><img alt="Latest release" src="https://img.shields.io/github/v/release/CNZHM666/ChatAtlas?include_prereleases&style=flat-square&label=release&color=1a7f37"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
   <img alt="Chrome Manifest V3" src="https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white">
   <a href="https://linux.do"><img alt="LINUX DO community" src="https://img.shields.io/badge/LINUX%20DO-Community-F6A623?style=flat-square"></a>
@@ -32,7 +32,7 @@
 - **Hand it to your agent**: Export the project document as Markdown that tells your decisions apart from the AI's suggestions, as project context for coding agents such as Claude Code and Codex.
 
 > [!NOTE]
-> ChatAtlas is an early preview (0.1.2 Early Preview). Features, interactions and data structures will still change. Wiki organization is experimental: check what it writes against the sources. Back up local data before upgrading.
+> ChatAtlas is an early preview (0.1.3 Early Preview). Features, interactions and data structures will still change. Wiki organization is experimental: check what it writes against the sources. Back up local data before upgrading.
 
 ## A quick look
 
@@ -93,7 +93,7 @@ Website adapters run automatically after browser website permission; pause or re
 
 ChatAtlas is not on the Chrome Web Store yet, so it is loaded in Developer mode. Edge and other Chromium browsers work the same way (use `edge://extensions`). You can also hand [a ready-made prompt](#let-an-ai-install-it-for-you) to an AI and let it do this for you.
 
-1. **Download**: open the [latest Release](https://github.com/CNZHM666/ChatAtlas/releases/latest) and, under Assets, download `ChatAtlas-extension-v0.1.2.zip`. Not `Source code`: that cannot be loaded directly.
+1. **Download**: open the [latest Release](https://github.com/CNZHM666/ChatAtlas/releases/latest) and, under Assets, download `ChatAtlas-extension-v0.1.3.zip`. Not `Source code`: that cannot be loaded directly.
 2. **Extract**: unzip it into a folder you will keep, such as `Documents/ChatAtlas`. The folder should contain `manifest.json` directly. Do not delete or move it after loading, or the extension stops working.
 3. **Open the extensions page**: type `chrome://extensions` in the address bar.
 4. **Turn on Developer mode** with the switch at the top right.

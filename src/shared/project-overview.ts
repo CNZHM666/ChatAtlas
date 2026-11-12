@@ -8,6 +8,7 @@ import {completeProjectIntroduction,introductionPriority,projectPurposeText} fro
 import {aiAdvicePresentation} from "./ai-advice-presentation";
 import {readingEmphasisMarkdown} from "./reading-emphasis";
 import {currentWikiOverview} from "./wiki-overview";
+import {qualifyWikiOverviewClaims} from "../ai/wiki-claim-review";
 
 /** A common emphasis projection for overview UI and every export. */
 export function projectOverviewReadingText(session:FocusSession,overview=projectOverviewContent(session)){
@@ -35,10 +36,11 @@ export function projectOverviewText(session:FocusSession) {
 /** A connected overview in natural paragraphs, without a dashboard of headings
  * or another model summary. Complete saved facts retain their source pointers. */
 export function projectOverviewContent(session:FocusSession){
- const intro=projectIntroduction(session),base=projectOverviewText(session);
- if(intro.source==="personal")return {text:base,evidenceIds:intro.evidenceIds};
+ const intro=projectIntroduction(session),saved=projectOverviewText(session);
+ if(intro.source==="personal")return {text:saved,evidenceIds:intro.evidenceIds};
+ const base=qualifyWikiOverviewClaims(saved,session);
  const generated=currentWikiOverview(session);
- if(generated)return {text:aiAdvicePresentation(generated.text),evidenceIds:generated.evidenceIds};
+ if(generated)return {text:aiAdvicePresentation(base),evidenceIds:generated.evidenceIds};
  const parts=base.trim()?[base.trim().replace(/\s*\n\s*/gu," ")]:[],ids=new Set(intro.evidenceIds);
  const sentence=(part:string)=>/[。！？.!?]$/u.test(part)?part:part+(session.locale==="en"?".":"。");
  const blocks=projectSnapshot(session);

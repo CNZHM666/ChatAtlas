@@ -159,7 +159,7 @@ it("keeps from an answer's rejection a unit with other rules, the other mode the
   next = withWritingAnswer(next, ask("q2", "比价", "当前阶段是否包含“直接询问购买清单、提供比价推荐及链接”的功能？", "包含，需实现比价和链接推荐", [wish.id], [bom.id, missing.id, early.id]), "o1");
   next = withWritingAnswer(next, ask("q3", "定位", "项目核心定位是“AI Hardware Canvas”工作台，还是通用的“AI辅助硬件设计工具”？", "定位为 AI Hardware Canvas", [chosen.id], [same.id, other.id]), "o1");
   const verdict = (id: string) => next.decisions?.[id]?.verdict;
-  expect([light, wish, chosen].map(item => verdict(item.id))).toEqual(["confirmed", "confirmed", "confirmed"]);
+  expect([light, wish, chosen].map(item => verdict(item.id))).toEqual([undefined, "confirmed", "confirmed"]);
   expect([early, other].map(item => verdict(item.id))).toEqual(["rejected", "rejected"]);
   // Kept: the dark mode the answer keeps, the BOM rule, the rule closing on a limit, the same positioning in other words.
   expect([dark, bom, missing, same].map(item => verdict(item.id))).toEqual([undefined, undefined, undefined, undefined]);
@@ -172,7 +172,7 @@ it("applies saved answers again with the checks, but leaves a decision the user 
   const question = { id: "q1", about: "首页视觉", ask: "首页采用浅色（#FAFAFA）还是深色（#0D0D0D）作为默认主背景？", unitIds: [light.id, dark.id], organization: 1, options: [{ id: "o1", label: "浅色为主，支持切换深色", actions: [{ do: "confirm" as const, units: [light.id] }, { do: "reject" as const, units: [dark.id] }] }, { id: "o2", label: "暂不确定", actions: [] }] };
   const at = 1000;
   const saved = { ...book(), batches: [{ sourceIds: [], status: "ok" as const, units: [light, dark], rejected: {} }], writingQuestions: [question], userAnswers: [{ questionId: "q1", unitIds: [light.id, dark.id], question: question.ask, answer: question.options[0].label, optionId: "o1", at }], decisions: { [light.id]: { verdict: "confirmed" as const, at }, [dark.id]: { verdict: "rejected" as const, at } } };
-  expect(withAnswersRevisited(saved).decisions).toEqual({ [light.id]: expect.objectContaining({ verdict: "confirmed" }) });
+  expect(withAnswersRevisited(saved).decisions).toEqual({});
   const byHand = { ...saved, decisions: { ...saved.decisions, [dark.id]: { verdict: "rejected" as const, at: at + 60_000 } } };
   expect(withAnswersRevisited(byHand)).toBe(byHand);
 });

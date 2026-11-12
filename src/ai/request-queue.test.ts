@@ -65,3 +65,13 @@ it("lets a high-limit host ramp to ten parallel requests while an unknown gatewa
  expect(await started(`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions?${crypto.randomUUID()}`)).toBe(10);
  expect(await started(`https://gateway-${crypto.randomUUID()}.example/v1/chat/completions`)).toBe(6);
 });
+
+it("starts a high-limit host at six parallel requests and an unknown gateway at two",async()=>{
+ const started=async(url:string)=>{
+  const queue=providerQueue(url);
+  let running=0;for(let i=0;i<12;i++)void queue.acquire().then(()=>{running++;});
+  await new Promise(resolve=>setTimeout(resolve,0));return running;
+ };
+ expect(await started(`https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions`)).toBe(6);
+ expect(await started(`https://gateway-${crypto.randomUUID()}.example/v1/chat/completions`)).toBe(2);
+});

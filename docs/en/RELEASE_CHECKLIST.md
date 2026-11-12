@@ -2,7 +2,7 @@
 
 [简体中文](../RELEASE_CHECKLIST.md) · **English**
 
-Target: public frontend source and an unpacked Chrome extension for **0.1.2 Early Preview**, without a shared backend. This checklist does not certify live acceptance.
+Target: public frontend source and an unpacked Chrome extension for **0.1.3 Early Preview**, without a shared backend. This checklist does not certify live acceptance.
 
 Distinguish multi-platform file import, ChatGPT bulk history sync and native sidebar, and optional Beta page capture for Claude/Gemini/DeepSeek. Context reuse and BYOK selection do not establish website integration.
 
@@ -57,7 +57,7 @@ Mocked tests cannot replace these measurements. Without evidence, do not adverti
 1. Commit only files in the public manifest, including MIT and third-party notices. Do not upload the entire local workspace.
 2. Run `npm run check:public` before the first push and inspect staging. `.gitignore` does not remove tracked files.
 3. Wait for actual GitHub Actions success, then create a Release matching the source version.
-4. Attach `ChatAtlas-extension-v0.1.2.zip`, optional source ZIP, SHA256 checksums and actual validation notes.
+4. Attach `ChatAtlas-extension-v0.1.3.zip`, optional source ZIP, SHA256 checksums and actual validation notes.
 5. State Early Preview, ChatGPT native features and optional Beta capture, BYOK, local data and known limitations.
 
 Local preparation does not mean pushing, publishing, live CI execution or paid model acceptance has happened.

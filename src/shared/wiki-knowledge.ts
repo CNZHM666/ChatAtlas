@@ -17,6 +17,8 @@ export interface WikiKnowledgeUnit {
   kind: WikiUnitKind;
   /** Numbers, versions, modes, identifiers and exceptions copied from the original. */
   details: string[];
+  /** Literal prerequisites and applicability limits from the unit's own quote. */
+  conditions?: string[];
   /** conversationSpan: when its conversation was held, by the platform's own times (wikiSaidLater reads it). */
   evidence: { evidenceId: string; conversationId: string; messageId: string; messageIndex: number; role: "user" | "assistant"; pasted: boolean; quote: string; conversationSpan?: WikiConversationSpan; /** The heading its quote stands under in its message (首页 Header), when the statement does not name it. */ section?: string; /** The code block its quote stands in or introduces (a file tree, a schema), as written. */ code?: { language: string; text: string }; /** A learning record's exercise: code the learner wrote, in their message or quoted back by the AI marking it. */ learnerCode?: true; /** The AI's review of that exercise, from the message quoting it: what it said of the code, and the code it gave instead. */ review?: { said: string; code?: { language: string; text: string }; /** A block the AI's words lead into ("这样不行，因为："). */ shows?: { language: string; text: string } }; /** The task the exercise answers, as the AI set it: its rule, and the data it gave. */ task?: { said: string; code?: { language: string; text: string } } };
   adoption: { status: WikiUnitAdoption; approval?: { evidenceId: string; messageId: string; quote: string } };
@@ -37,6 +39,8 @@ export interface WikiUnitBatch {
   /** The batch's request content (texts, roles, pasted flags, the replies judging adoption);
    * an update reuses the batch while it is unchanged. Absent on older ledgers. */
   signature?: string;
+  /** Extraction rules used for this batch, separate from its combined input signature. */
+  extractRules?: number;
   status: "ok" | "failed";
   /** The user chose to leave this material out: it was not read. */
   skipped?: true;
@@ -57,6 +61,9 @@ export interface WikiUnitBatch {
   /** The version of the cover check this batch passed: the user's own messages it left without a unit were read once
    * more. A reused batch without it is checked on the next run. */
   coverChecked?: number;
+  /** The version of the statement check this batch passed: statements saying more than their source (a stronger rule,
+   * a figure, a length) were asked to be told in the source's terms once. */
+  fidelityChecked?: number;
   /** Such sentences still without a unit after that request, counted. */
   uncoveredSentences?: number;
 }
@@ -184,7 +191,7 @@ export function withUserAnswers(source: WikiKnowledgeLedger): WikiKnowledgeLedge
   return { ...ledger, organization: { ...organization, subjects: subjects.filter(subject => live.has(subject.id)), chapters } };
 }
 /** open: the user said the point is not settled yet; it is written as still open. */
-export interface WikiUserDecision { verdict: "confirmed" | "rejected" | "open"; at: number }
+export interface WikiUserDecision { verdict: "confirmed" | "rejected" | "open"; at: number; wholeUnit?: true }
 /** The ledger's relations with the user's answers applied: versions the user said both hold coexist. */
 export function withUserRelations(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
   if (!ledger.coexisting?.length || !ledger.organization) return ledger;
@@ -249,7 +256,10 @@ export interface WikiDraftQuality { sources: "complete" | "partial"; failedBatch
 /** What the project is doing now, leaves out now, and counts as done, from the units the draft shows: what a reader
  * continuing the work needs first. holder: decided (the user confirmed it) or user (the user said it); none for a suggestion. */
 export interface WikiBaselineItem { part: "now" | "notNow" | "done"; text: string; unitIds: string[]; holder?: "decided" | "user" }
-export interface WikiUnitDraft { version: 1; generatedAt: number; status: "complete" | "partial"; chapters: WikiDraftChapter[]; report: Record<string, number>; quality?: WikiDraftQuality; baseline?: WikiBaselineItem[] }
+/** A document-wide check that failed: a point written without part of it, an earlier version told as current, the
+ * user's words told as the assistant's (or the reverse), one point told in two chapters. */
+export interface WikiInvariantIssue { kind: "coverage" | "missing" | "earlier_as_current" | "user_as_ai" | "ai_as_user" | "rejected_as_current" | "declined_overstated" | "repeat"; chapterId: string; unitIds: string[]; text: string }
+export interface WikiUnitDraft { version: 1; generatedAt: number; status: "complete" | "partial"; chapters: WikiDraftChapter[]; report: Record<string, number>; quality?: WikiDraftQuality; baseline?: WikiBaselineItem[]; invariants?: WikiInvariantIssue[] }
 
 /** Planned chapters that failed writing remain visible in completeness reporting,
  * even though empty prose never becomes a saved Wiki page. */
@@ -293,7 +303,7 @@ export function scopedWikiDraft(source: WikiKnowledgeLedger): WikiUnitDraft | un
   return { ...draft, status: "partial", chapters, baseline, report: { ...draft.report, scope_filtered: filtered }, ...(draft.quality ? { quality: { ...draft.quality, passed: false } } : {}) };
 }
 /** A local check failure that makes a claim unreliable: a borrowed decision, a wrong holder, a number or change no source states. */
-export const CRITICAL_PROBLEM = /says 已决定|borrows|credits the user|states as decided|numbers its units do not state|states the range|drops the negation of|done what only|tells a change|has no claim|claim .* not in the paragraph|has no supported source|changes the counted object|could not be written|a project you left out|you confirmed is not written/u;
+export const CRITICAL_PROBLEM = /says 已决定|borrows|credits the user|states as decided|numbers its units do not state|states the range|drops the negation of|drops a source condition|done what only|tells a change|has no claim|claim .* not in the paragraph|has no supported source|changes the counted object|could not be written|a project you left out|you confirmed is not written|required source block is missing/u;
 
 /** ChatGPT's inline markers, kept by its export: U+E200 kind U+E202 argument … U+E201. A link (url, entity)
  * reads as its name; a search citation or any other marker says nothing to a reader and goes. */
@@ -477,9 +487,20 @@ export interface WikiKnowledgeOrganization {
   groups?: WikiExplanationGroup[];
   /** Groups split or joined by an update: the ids before and after. */
   groupMoves?: Array<{ from: string[]; to: string[] }>;
+  /** Version chains: points from any subject that settle one thing, which of them holds now, which came before and
+   * whether the discussion left it open. Absent on older ledgers, where relations alone tell versions apart. */
+  topics?: WikiTopicChain[];
+  /** Points the chapter check found misplaced without being sure where they go: left where they are, for the user. */
+  placementDoubts?: WikiPlacementDoubt[];
   /** Request counts and local repairs, for diagnostics. */
   report: Record<string, number>;
 }
+
+/** One thing the discussion settled more than once (the first screen's layout, how long a review takes): current holds
+ * now, earlier came before and no longer holds; open: no user word settled between the versions. */
+export interface WikiTopicChain { id: string; name: string; current: string[]; earlier: string[]; open: boolean }
+/** A point a chapter check read as belonging elsewhere, with the chapter and subtopic it suggested. */
+export interface WikiPlacementDoubt { unitId: string; from: string; to: string; subtopic?: string }
 
 /** A user message the user pasted rather than wrote: long structured text such
  * as a report, another AI's answer or an exported document. It can report the
@@ -637,6 +658,48 @@ function foldedTerms(text: string, whole: boolean): Set<string> {
 export function statesCore(core: string, sentence: string) {
   const terms = foldedTerms(core, false), own = foldedTerms(sentence, true);
   return terms.size >= 4 && [...terms].filter(term => own.has(term)).length / terms.size >= .6;
+}
+const conditionKey = (text: string) => detailKey(text.replace(/[*`]/gu, "").trim().replace(/[，,。.;；:：]+$/u, ""));
+const CONDITION_PREFIX = /^(?:如果|假如|若(?!干)|倘若|只要|只有|仅当|除非|一旦|待(?=.{2,70}(?:后|通过|验证))|if\b|only if\b|unless\b|provided that\b|as long as\b|once\b)/iu;
+const CONDITION_LIMIT = /^(?:仅限|仅适用|只适用|限于|only (?:for|in|on)\b|limited to\b)/iu;
+function conditionClaimMatches(statement: string, said: string) {
+  const own = conditionKey(statement), candidate = conditionKey(said);
+  if (!own || !candidate) return false;
+  if (candidate.includes(own) || statesCore(statement, said)) return true;
+  // A long verbatim phrase can be the common core when the extraction added
+  // more clauses than the qualified source sentence (e.g. a product name).
+  return (candidate.match(/\p{Script=Han}{8,}/gu) ?? []).some(run =>
+    Array.from({ length: run.length - 7 }, (_, i) => run.slice(i, i + 8)).some(fragment => own.includes(fragment)));
+}
+/** Older ledgers can recover a literal, leading condition when the rest of the
+ * same sentence states the unit. Never borrow a condition from a nearby sentence. */
+export function wikiUnitConditions(unit: WikiKnowledgeUnit): string[] {
+  const quote = unit.evidence.quote;
+  const validated = (unit.conditions ?? []).filter(condition => {
+    const key = conditionKey(condition);
+    return key && conditionKey(quote).includes(key);
+  });
+  if (validated.length) return [...new Map(validated.map(condition => [conditionKey(condition), condition])).values()];
+  return quote.split(/(?<=[。！？.!?])(?=\s|\p{Script=Han})|\n/u).flatMap(line => {
+    const value = line.trim().replace(/^(?:[>\-*]+\s*)+/u, "");
+    const match = value.match(/^([^，,。！？!?]{3,100})[，,]\s*(.+)$/u);
+    if (!match || !(CONDITION_PREFIX.test(match[1]) || CONDITION_LIMIT.test(match[1])) || !conditionClaimMatches(unit.statement, match[2])) return [];
+    return [match[1]];
+  }).slice(0, 2);
+}
+export function missingWikiConditions(unit: WikiKnowledgeUnit, text: string): string[] {
+  const key = conditionKey(text);
+  return wikiUnitConditions(unit).filter(condition => !key.includes(conditionKey(condition)));
+}
+/** Report omissions only where the text actually states the conditional claim. */
+export function droppedWikiConditions(unit: WikiKnowledgeUnit, text: string): string[] {
+  const missing = missingWikiConditions(unit, text);
+  return missing.length && conditionClaimMatches(unit.statement, text) ? missing : [];
+}
+export function wikiStatementWithConditions(unit: WikiKnowledgeUnit, zh: boolean): string {
+  const missing = missingWikiConditions(unit, unit.statement);
+  if (!missing.length) return unit.statement;
+  return zh ? `${unit.statement}（原文限定：${missing.join("；")}）` : `${unit.statement} (source conditions: ${missing.join("; ")})`;
 }
 /** A condition written in a text: half of its terms (or its words, when short) and every number it gives. */
 export function conditionKept(condition: string, text: string) {

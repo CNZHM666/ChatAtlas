@@ -47,8 +47,9 @@ export type AtlasMessage =
   | { type: "ATLAS_LOCATE_MESSAGE"; conversationId: string; identity: NativeMessageIdentity }
   | { type: "ATLAS_SIDECAR_SYNC"; conversationId: string }
   | { type: "ATLAS_SIDECAR_CAPTURE"; conversationId: string }
-  | { type: "ATLAS_SIDECAR_HANDOFF"; conversationId: string; text: string }
-  | { type: "ATLAS_FILL_COMPOSER"; conversationId: string; text: string }
+  /** undo: clear the input box again, only while it still holds exactly this text. */
+  | { type: "ATLAS_SIDECAR_HANDOFF"; conversationId: string; text: string; undo?: boolean }
+  | { type: "ATLAS_FILL_COMPOSER"; conversationId: string; text: string; undo?: boolean }
   | { type: "ATLAS_SIDECAR_DATA"; conversationId: string }
   | { type: "ATLAS_NAVIGATOR_DATA"; conversationId: string }
   | { type: "ATLAS_PING" }

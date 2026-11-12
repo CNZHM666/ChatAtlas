@@ -634,7 +634,7 @@ it("asks an attach window cut off at the output limit again as two halves, with 
   expect(calls.length).toBeGreaterThan(0);
 });
 
-it("asks a naming window that broke off for another reason again in halves, once", async () => {
+it("asks a naming window that broke off for another reason again in halves, twice at most", async () => {
   const units = Array.from({ length: 60 }, (_, index) => unit(`话题${index}`, `第 ${index} 个话题的结论。`, { index: 30_000 + index }));
   const sizes: number[] = [];
   const { ai } = model({
@@ -644,9 +644,10 @@ it("asks a naming window that broke off for another reason again in halves, once
     wiki_unit_merge: noMerges, wiki_subject_plan: oneChapterPerSubject, wiki_subject_attach: () => ({ attach: [] }), wiki_subject_split: () => ({ parts: [] }), wiki_subject_same: () => ({ same: [] }), wiki_subject_place: () => ({ placements: [] }),
   });
   const result = await organizeWikiKnowledge({ ledger: ledger(units), ai, locale: "zh-CN", signal, names: ["Atlas"], conversations: 1 });
-  // The whole window, then its halves; the first half breaks off again and is not split further.
+  // The whole window, then its halves, then the failing half's halves; the quarter breaking off again is not split further.
   expect(sizes.slice(0, 3)).toEqual([60, 30, 30]);
-  expect(result.report).toMatchObject({ subject_halved: 1, subject_failed: 1, subject_unassigned: 30 });
+  expect(sizes).toContain(15);
+  expect(result.report).toMatchObject({ subject_halved: 2, subject_failed: 1, subject_unassigned: 15 });
 });
 
 it("reads a statement saying not to use what a decision switches to as the approach it left", () => {

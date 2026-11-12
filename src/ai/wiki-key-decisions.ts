@@ -2,6 +2,8 @@ import { DECIDING_KINDS, aboutNameKey, wikiLedgerUnits, type WikiScopeAnswer, ty
 import { roadmaps, wikiUnitStatuses } from "./wiki-knowledge-write";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
 import { wikiByDiscussion } from "../shared/wiki-sources";
+import { differingPlans } from "../shared/wiki-differing-plans";
+import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 
 /** A key point the user can confirm as a decision or set aside: one point however often it was restated. */
 export interface WikiDecisionCandidate {
@@ -9,12 +11,14 @@ export interface WikiDecisionCandidate {
   id: string; statement: string; subject: string; chapter?: string;
   /** Every unit stating this point: a verdict applies to all of them. */
   unitIds: string[]; status: WikiUnitStatus; verdict?: WikiUserDecision["verdict"];
+  /** How much the answer changes the document: how often the point came back, a decision, left open. */
+  weight?: number;
 }
 
 const bigramsOf = (text: string) => { const chars = Array.from(text.normalize("NFKC").toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, "")); return new Set(chars.slice(1).map((char, index) => chars[index] + char)); };
 const namesOf = (text: string) => new Set(text.normalize("NFKC").toLocaleLowerCase().match(/\d+(?:\.\d+)?|[a-z][a-z0-9-]*/gu) ?? []);
 
-interface DecisionCluster { units: WikiKnowledgeUnit[]; status: WikiUnitStatus; subject: string; chapter?: string }
+interface DecisionCluster { units: WikiKnowledgeUnit[]; status: WikiUnitStatus; subject: string; chapter?: string; weight: number }
 /** The points and their restatements, worked out once per extraction and organization: a verdict changes neither, so
  * confirming a point only re-reads the verdicts (the clustering compared every pair and made each click slow). */
 const clusterCache = new WeakMap<object, DecisionCluster[]>();
@@ -42,7 +46,7 @@ function decisionClusters(ledger: WikiKnowledgeLedger): DecisionCluster[] {
   const groups: WikiKnowledgeUnit[][] = [];
   for (const unit of open) { const home = groups.find(group => group.some(member => restates(unit, member) || restates(member, unit))); if (home) home.push(unit); else groups.push([unit]); }
   const weight = (group: WikiKnowledgeUnit[]) => group.length + (group.some(unit => unit.kind === "decision") ? 2 : 0) + (group.some(unit => plain.get(unit.id) === "open") ? 1 : 0);
-  const clusters = groups.sort((a, b) => weight(b) - weight(a)).map(group => ({ units: group, status: plain.get(group[0].id)!, subject: subjectOf.get(group[0].id) ?? group[0].subject, ...(chapterOf.get(group[0].id) ? { chapter: chapterOf.get(group[0].id) } : {}) }));
+  const clusters = groups.sort((a, b) => weight(b) - weight(a)).map(group => ({ units: group, weight: weight(group), status: plain.get(group[0].id)!, subject: subjectOf.get(group[0].id) ?? group[0].subject, ...(chapterOf.get(group[0].id) ? { chapter: chapterOf.get(group[0].id) } : {}) }));
   clusterCache.set(organization, clusters);
   return clusters;
 }
@@ -54,15 +58,21 @@ export function wikiDecisionCandidates(ledger: WikiKnowledgeLedger | undefined, 
   if (!ledger?.organization) return [];
   return decisionClusters(ledger).slice(0, limit).map(cluster => {
     const latest = cluster.units[0], verdict = cluster.units.map(unit => ledger.decisions?.[unit.id]?.verdict).find(Boolean);
-    return { id: latest.id, statement: latest.statement, subject: cluster.subject, ...(cluster.chapter ? { chapter: cluster.chapter } : {}), unitIds: cluster.units.map(unit => unit.id), status: verdict === "confirmed" ? "confirmed" : verdict === "rejected" ? "history" : cluster.status, ...(verdict ? { verdict } : {}) };
+    return { id: latest.id, statement: latest.statement, subject: cluster.subject, ...(cluster.chapter ? { chapter: cluster.chapter } : {}), unitIds: cluster.units.map(unit => unit.id), weight: cluster.weight, status: verdict === "confirmed" ? "confirmed" : verdict === "rejected" ? "history" : cluster.status, ...(verdict ? { verdict } : {}) };
   });
 }
 
 /** The ledger with the user's verdict on a point (all its units), or the verdict removed. */
-export function withDecision(ledger: WikiKnowledgeLedger, unitIds: string[], verdict: WikiUserDecision["verdict"] | undefined): WikiKnowledgeLedger {
+export function withDecision(ledger: WikiKnowledgeLedger, unitIds: string[], verdict: WikiUserDecision["verdict"] | undefined, at = Date.now(), shown: readonly string[] = []): WikiKnowledgeLedger {
   const decisions = { ...ledger.decisions };
-  for (const id of unitIds) { if (verdict) decisions[id] = { verdict, at: Date.now() }; else delete decisions[id]; }
-  return { ...ledger, decisions, decisionsAt: Date.now() };
+  const wholeUnits = verdict === "confirmed" && shown.length
+    ? new Set(wikiLedgerUnits(ledger).filter(unit => shown.includes(unit.statement)).map(unit => unit.id))
+    : undefined;
+  for (const id of unitIds) {
+    if (verdict) decisions[id] = { verdict, at, ...(wholeUnits?.has(id) ? { wholeUnit: true } : {}) };
+    else delete decisions[id];
+  }
+  return { ...ledger, decisions, decisionsAt: at };
 }
 
 /** Verdicts given or withdrawn since the draft was written: the document does not show them yet. */
@@ -71,9 +81,11 @@ export function ledgerDecisionsPending(ledger: WikiKnowledgeLedger | undefined):
 }
 
 /** A choice of which version holds now: between roadmaps of one scope, or two versions of one point. */
-export interface WikiVersionOption { id: string; label: string; unitIds: string[] }
+export interface WikiVersionOption { id: string; label: string; unitIds: string[]; /** For a topic: whether the version holds now or came before. */ tag?: "current" | "earlier" }
 export interface WikiVersionQuestion {
-  id: string; kind: "roadmap" | "versions"; question: string; chapter?: string; options: WikiVersionOption[];
+  id: string; kind: "roadmap" | "versions" | "topic"; question: string; chapter?: string; options: WikiVersionOption[];
+  /** How much the answer changes the document, for the order questions are asked in. */
+  impact?: number;
   /** The two units of a versions question, "older>newer", which both may hold. */
   pair?: string;
   /** The answer the ledger holds: an option's id, "both" or "open". */
@@ -91,7 +103,10 @@ const STEP_AXES: Array<[string, RegExp]> = [
 /** The axis most of a plan's steps are named on: a weekly plan that ends in "v0.1 Beta" still counts weeks. */
 const stepAxis = (text: string) => STEP_AXES.map(([axis, pattern]) => [axis, text.match(pattern)?.length ?? 0] as const).filter(([, count]) => count).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
 
-const VERSION_QUESTIONS = 2, ROADMAP_OPTIONS = 4, OPTION_LINE = 64;
+const ROADMAP_OPTIONS = 4, OPTION_LINE = 64;
+/** How much an answer changes the document. A topic: its base, more when left open, one per chapter it is told in and
+ * more when the user's own idea is among its versions. A roadmap decides a chapter; two versions of one point a line. */
+const TOPIC_IMPACT = 3, OPEN_IMPACT = 3, OWN_IMPACT = 2, ROADMAP_IMPACT = 6, PAIR_IMPACT = 4;
 const line = (text: string) => { const plain = text.replace(/\s+/gu, " ").trim().replace(/[。.]$/u, ""); return plain.length <= OPTION_LINE ? plain : `${plain.slice(0, OPTION_LINE - 1).trim()}…`; };
 const versionCache = new WeakMap<object, Array<Omit<WikiVersionQuestion, "answer">>>();
 
@@ -136,6 +151,23 @@ export function wikiVersionQuestions(ledger: WikiKnowledgeLedger | undefined, zh
     const chapterOf = new Map<string, string>();
     for (const chapter of organization.chapters) for (const topic of chapter.subtopics) for (const id of topic.subjectIds) for (const unitId of subjects.get(id)?.unitIds ?? []) chapterOf.set(unitId, chapter.title);
     const asked = new Set<string>();
+    // Things settled more than once (the version chains): each one left open, and each whose version now is only a
+    // suggestion told in more than one chapter. 「首屏」 confirmed one way and proposed two other ways was never asked: its
+    // versions sat under three subjects, and only relations within one subject were.
+    for (const topic of organization.topics ?? []) {
+      const members = [...topic.current, ...topic.earlier].flatMap(id => byId.get(id) ?? []);
+      if (members.length < 2 || members.some(unit => planned.has(unit.id) || asked.has(unit.id))) continue;
+      const chapters = [...new Set(members.flatMap(unit => chapterOf.get(unit.id) ?? []))];
+      const suggestedOnly = topic.current.every(id => { const unit = byId.get(id); return !unit || unit.evidence.role !== "user" && unit.adoption.status !== "user_adopted" && ledger.decisions?.[id]?.verdict !== "confirmed"; });
+      if (!topic.open && !(suggestedOnly && chapters.length >= 2)) continue;
+      const own = members.some(unit => unit.evidence.role === "user" && !unit.evidence.pasted);
+      const options = [...topic.current.map(id => ({ id, tag: "current" as const })), ...topic.earlier.slice(-2).map(id => ({ id, tag: "earlier" as const }))]
+        .flatMap(({ id, tag }) => byId.get(id) ? [{ id, label: byId.get(id)!.statement, unitIds: [id], tag }] : []).slice(0, ROADMAP_OPTIONS);
+      if (options.length < 2) continue;
+      members.forEach(unit => asked.add(unit.id));
+      questions.push({ id: `topic:${options.map(option => option.id).join("|")}`, kind: "topic", impact: TOPIC_IMPACT + (topic.open ? OPEN_IMPACT : 0) + chapters.length + (own ? OWN_IMPACT : 0), ...(chapters[0] ? { chapter: chapters.join("、") } : {}),
+        question: zh ? `「${topic.name}」现在按哪一个？` : `Which holds now for “${topic.name}”?`, options });
+    }
     const pairs = organization.relations.filter(relation => (relation.kind === "replaces" || relation.kind === "rejects") && relation.status === "unresolved")
       .flatMap(relation => { const older = byId.get(relation.older), newer = byId.get(relation.newer); return older && newer && exclusiveWikiVersions(older, newer) && !planned.has(older.id) && !planned.has(newer.id) && older.kind !== "question" && newer.kind !== "question" ? [{ older, newer }] : []; })
       .sort((a, b) => wikiByDiscussion(b.newer, a.newer));
@@ -147,7 +179,22 @@ export function wikiVersionQuestions(ledger: WikiKnowledgeLedger | undefined, zh
         question: zh ? `「${subject}」先后有两种说法，现在用哪个？` : `“${subject}” was said two ways. Which holds now?`,
         options: [{ id: "older", label: older.statement, unitIds: [older.id] }, { id: "newer", label: newer.statement, unitIds: [newer.id] }] });
     }
-    questions = [...questions.filter(item => item.kind === "roadmap"), ...questions.filter(item => item.kind === "versions")].slice(0, VERSION_QUESTIONS);
+    // Each 版本未定 note the document would show, asked first: 「首页中央按钮的用法」 (the user's + button opening the AI page
+    // beside the AI's 守护 button) stood as unsettled in one chapter while another told 「采纳中间按钮跳转AI」 as the plan.
+    const statuses = wikiUnitStatuses(units, organization, ledger.decisions);
+    for (const note of differingPlans(units, id => statuses.get(id), zh, wikiDecidedTopics(organization.topics, ledger.decisions))) {
+      const members = note.unitIds.flatMap(id => byId.get(id) ?? []);
+      if (members.length < 2 || members.some(unit => asked.has(unit.id) || planned.has(unit.id))) continue;
+      members.forEach(unit => asked.add(unit.id));
+      const chapters = [...new Set(members.flatMap(unit => chapterOf.get(unit.id) ?? []))], own = members.some(unit => unit.evidence.role === "user" && !unit.evidence.pasted);
+      const head = note.note.split(/[：:]/u)[0].trim();
+      questions.push({ id: `topic:${members.map(unit => unit.id).join("|")}`, kind: "topic", impact: TOPIC_IMPACT + OPEN_IMPACT + chapters.length + (own ? OWN_IMPACT : 0), ...(chapters[0] ? { chapter: chapters.join("、") } : {}),
+        question: zh ? `${/两种|说法|写法|改法|用法/u.test(head) ? head : `「${head}」`}，现在按哪一个？` : `Which holds now for “${head}”?`,
+        options: members.slice(0, ROADMAP_OPTIONS).map(unit => ({ id: unit.id, label: unit.statement, unitIds: [unit.id] })) });
+    }
+    // By how much of the document each answer changes: a roadmap decides a chapter, two versions of one point a line.
+    questions = [...questions.filter(item => item.kind === "topic"), ...questions.filter(item => item.kind === "roadmap").map(item => ({ ...item, impact: ROADMAP_IMPACT })), ...questions.filter(item => item.kind === "versions").map(item => ({ ...item, impact: PAIR_IMPACT }))]
+      .sort((a, b) => (b.impact ?? 0) - (a.impact ?? 0));
     versionCache.set(organization, questions);
   }
   return questions.map(question => {
@@ -169,17 +216,17 @@ export function withVersionAnswer(ledger: WikiKnowledgeLedger, question: WikiVer
   if (chosenOption && question.kind === "versions") {
     const units = new Map(wikiLedgerUnits(ledger).map(unit => [unit.id, unit]));
     const pair = question.options.map(option => units.get(option.unitIds[0]));
-    if (pair.length === 2 && pair[0] && pair[1] && !exclusiveWikiVersions(pair[0], pair[1])) return withDecision(ledger, chosenOption.unitIds, "confirmed");
+    if (pair.length === 2 && pair[0] && pair[1] && !exclusiveWikiVersions(pair[0], pair[1])) return withDecision(ledger, chosenOption.unitIds, "confirmed", undefined, [chosenOption.label]);
   }
   const ids = question.options.flatMap(option => option.unitIds);
   let next = withDecision(ledger, ids, undefined);
   next = { ...next, coexisting: (next.coexisting ?? []).filter(pair => pair !== question.pair) };
   if (!next.coexisting?.length) delete next.coexisting;
   if (answer === "open") return withDecision(next, ids, "open");
-  if (answer === "both") return { ...withDecision(next, ids, "confirmed"), ...(question.pair ? { coexisting: [...next.coexisting ?? [], question.pair] } : {}) };
+  if (answer === "both") return { ...withDecision(next, ids, "confirmed", undefined, question.options.map(option => option.label)), ...(question.pair ? { coexisting: [...next.coexisting ?? [], question.pair] } : {}) };
   const chosen = question.options.find(option => option.id === answer);
   if (!chosen) return next;
-  next = withDecision(next, chosen.unitIds, "confirmed");
+  next = withDecision(next, chosen.unitIds, "confirmed", undefined, [chosen.label]);
   return withDecision(next, ids.filter(id => !chosen.unitIds.includes(id)), "rejected");
 }
 
@@ -256,16 +303,21 @@ export function withSameAnswer(ledger: WikiKnowledgeLedger, question: WikiSameQu
 }
 
 /** Questions are asked only where the answer changes what is written: where a project's points go, whether a point
- * spread over chapters is told once, which version holds, and whether a point the discussion kept returning to (or
- * left open) is the user's decision. A suggestion mentioned once changes one label and is not asked; at most six. */
-const DECISION_QUESTIONS = 2, MAX_QUESTIONS = 6;
-export function wikiDecisionQuestions(ledger: WikiKnowledgeLedger | undefined, zh: boolean, versions = true): { scope: WikiScopeQuestion[]; same: WikiSameQuestion[]; versions: WikiVersionQuestion[]; candidates: WikiDecisionCandidate[] } {
+ * spread over chapters is told once, which version of a thing holds, and whether a point the discussion kept returning
+ * to (or left open) is the user's decision. A suggestion mentioned once changes one label and is not asked: it stays
+ * marked as a suggestion, to change later in the ledger.
+ * No count drops a question: every one whose answer changes the document is asked before writing, in order of how much
+ * it changes. shown: how many stand open at once, a few more for a longer document; the rest wait folded below them.
+ * A fixed six, two of them decisions, left 「首屏」, 「复盘时长」 and 「付费时机」 to the ledger after writing. */
+const SHOWN_BASE = 4, SHOWN_PER_CHAPTER = .5, SHOWN_MOST = 10, ASKED_MOST = 24, LEDGER_CANDIDATES = 8;
+export function wikiDecisionQuestions(ledger: WikiKnowledgeLedger | undefined, zh: boolean, versions = true): { scope: WikiScopeQuestion[]; same: WikiSameQuestion[]; versions: WikiVersionQuestion[]; candidates: WikiDecisionCandidate[]; shown: number } {
   const scope = versions ? wikiScopeQuestions(ledger, zh) : [], same = versions ? wikiSameQuestions(ledger, zh) : [];
-  const questions = versions ? wikiVersionQuestions(ledger, zh).filter(question => question.answer || !question.options.some(option => option.unitIds.some(id => (ledger?.writingQuestions ?? []).some(asked => asked.unitIds.includes(id))))) : [];
+  const questions = versions ? wikiVersionQuestions(ledger, zh).filter(question => question.answer || !question.options.some(option => option.unitIds.some(id => (ledger?.writingQuestions ?? []).some(asked => asked.unitIds.includes(id))))).slice(0, ASKED_MOST) : [];
   // Points the user was asked about before or while writing (answered or skipped) are not asked again here.
   const before = new Set([...(ledger?.writingQuestions ?? []).flatMap(question => question.unitIds), ...(ledger?.userAnswers ?? []).flatMap(answer => answer.unitIds)]);
   const asked = new Set([...before, ...questions.flatMap(question => question.options.flatMap(option => option.unitIds))]);
-  const left = Math.max(0, MAX_QUESTIONS - scope.length - same.length - questions.length);
-  const candidates = wikiDecisionCandidates(ledger).filter(item => !item.unitIds.some(id => asked.has(id)) && (item.verdict || item.unitIds.length > 1 || item.status === "open"));
-  return { scope, same, versions: questions, candidates: candidates.slice(0, versions ? Math.min(DECISION_QUESTIONS, left) : 8) };
+  const candidates = wikiDecisionCandidates(ledger, versions ? ASKED_MOST : LEDGER_CANDIDATES).filter(item => !item.unitIds.some(id => asked.has(id)) && (item.verdict || item.unitIds.length > 1 || item.status === "open"));
+  const chapters = ledger?.organization?.chapters.length ?? 0;
+  const shown = versions ? Math.min(SHOWN_MOST, Math.round(SHOWN_BASE + chapters * SHOWN_PER_CHAPTER)) : LEDGER_CANDIDATES;
+  return { scope, same, versions: questions, candidates: candidates.slice(0, Math.max(0, (versions ? ASKED_MOST : LEDGER_CANDIDATES) - questions.length)), shown };
 }

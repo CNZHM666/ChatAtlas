@@ -1,3 +1,5 @@
+import { leftOutClause } from "../shared/wiki-left-out";
+import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { ITERATION_EN, ITERATION_ZH, PHASE } from "../shared/stage-words";
 import { LEAVES_OUT } from "../shared/negation";
 import { knowledgeTerms } from "../shared/knowledge-subject";
@@ -6,7 +8,7 @@ import { stageWord } from "./wiki-draft-checks";
 import { wikiUserChooses } from "../shared/wiki-user-choice";
 import { assistantRequest, DECIDING_KINDS, personalDirection, STATE_KINDS, type WikiKnowledgeUnit, type WikiKnowledgeOrganization, type WikiKnowledgeLedger, type WikiUnitStatus, type WikiDraftChapter, type WikiBaselineItem } from "../shared/wiki-knowledge";
 import { wikiDiscussionOrder, wikiSaidLater } from "../shared/wiki-sources";
-import { UNDECIDED } from "../shared/wiki-section-status";
+import { UNDECIDED, wikiMeasure } from "../shared/wiki-section-status";
 import { wikiSaidInQuote } from "../shared/wiki-said-in-quote";
 
 const ANALYSIS_KINDS: WikiKnowledgeUnit["kind"][] = ["fact", "report", "history", "question"];
@@ -24,10 +26,15 @@ export function quotesMaterial(unit: WikiKnowledgeUnit): boolean {
 // A user's own decision says what to do; an observation or a question checking understanding does not.
 // Liking one of the shown designs ("我喜欢这种设计") or settling on it ("就这个") chooses it too.
 /** A confirmed point: a deciding kind, accepted from a proposal or chosen in the user's own words. */
-const decides = (unit: WikiKnowledgeUnit) => !unit.about && DECIDING_KINDS.includes(unit.kind) && (unit.adoption.status === "user_adopted" || unit.adoption.status === "user_decision" && wikiUserChooses(unit.evidence.quote));
+const decides = (unit: WikiKnowledgeUnit) => {
+  if (unit.about || unit.evidence.pasted || !DECIDING_KINDS.includes(unit.kind)) return false;
+  const { status, approval } = unit.adoption;
+  if (status === "user_adopted") return unit.evidence.role === "assistant" && Boolean(approval?.evidenceId && approval.messageId && approval.messageId !== unit.evidence.messageId && approval.quote?.trim());
+  return status === "user_decision" && unit.evidence.role === "user" && wikiUserChooses(unit.evidence.quote);
+};
 
 /** A unit's status from its own adoption and the checked relations. */
-export function wikiUnitStatuses(units: WikiKnowledgeUnit[], organization: Pick<WikiKnowledgeOrganization, "relations">, decisions: WikiKnowledgeLedger["decisions"] = {}) {
+export function wikiUnitStatuses(units: WikiKnowledgeUnit[], organization: Pick<WikiKnowledgeOrganization, "relations"> & Partial<Pick<WikiKnowledgeOrganization, "topics">>, decisions: WikiKnowledgeLedger["decisions"] = {}) {
   const history = new Set<string>(), open = new Set<string>();
   const byId = new Map(units.map(unit => [unit.id, unit])), own = (id: string) => byId.get(id)?.evidence.role === "user" && !byId.get(id)?.evidence.pasted;
   for (const relation of organization.relations) {
@@ -35,6 +42,11 @@ export function wikiUnitStatuses(units: WikiKnowledgeUnit[], organization: Pick<
     // A change the user's verdict set aside replaces nothing: after the user chose 25/5 over "改为 50/10", the 25/5 point
     // read as earlier.
     if (relation.status === "resolved") { if (decisions?.[relation.newer]?.verdict !== "rejected") history.add(relation.older); }
+    // Two figures the user reported, the later replacing the earlier, are a change over time, not an open question:
+    // 「小程序目前每天稳定在22人」 before 「当前小程序日活约40」 read as 〔未定〕 on the user's own report.
+    // So with one of them the AI's retelling of the user's figure (「你现在每天稳定22人……」 before the user's 「当前日活32人」):
+    // the figures changed, nothing is left to decide.
+    else if ((own(relation.older) || own(relation.newer)) && [relation.older, relation.newer].every(id => byId.get(id) && wikiMeasure(byId.get(id)!))) history.add(relation.older);
     // An assistant rewording its own suggestion is not an open question; a change touching the user's words is.
     else if (own(relation.older) || own(relation.newer)) { open.add(relation.older); open.add(relation.newer); }
   }
@@ -46,11 +58,22 @@ export function wikiUnitStatuses(units: WikiKnowledgeUnit[], organization: Pick<
     if ((relation.kind === "replaces" || relation.kind === "rejects") && relation.status === "unresolved" && decided.has(relation.older) && decided.has(relation.newer)) { contested.add(relation.older); contested.add(relation.newer); continue; }
     open.delete(relation.older); open.delete(relation.newer);
   }
+  // The version chains, across subjects: an earlier version holds no longer, and versions left open are open. A
+  // version the user confirmed settles its chain: the chain's other versions are earlier.
+  const chainEarlier = new Set<string>(), chainOpen = new Set<string>();
+  for (const topic of wikiDecidedTopics(organization.topics, decisions)) {
+    const members = [...topic.current, ...topic.earlier], settled = members.filter(id => decisions[id]?.verdict === "confirmed" || byId.get(id) && decides(byId.get(id)!));
+    for (const id of topic.earlier) if (!settled.includes(id) && (settled.length || topic.current.some(other => byId.get(other)))) chainEarlier.add(id);
+    if (topic.open && !settled.length) topic.current.forEach(id => chainOpen.add(id));
+    if (topic.open && settled.some(id => decisions[id]?.verdict === "confirmed")) topic.current.filter(id => !settled.includes(id)).forEach(id => chainEarlier.add(id));
+  }
   return new Map(units.map(unit => [unit.id, ((): WikiUnitStatus => {
     // The user's own verdict in the ledger outranks what the conversation shows.
     if (decisions[unit.id]?.verdict === "confirmed") return "confirmed";
     if (decisions[unit.id]?.verdict === "rejected") return "history";
     if (decisions[unit.id]?.verdict === "open") return "open";
+    if (chainEarlier.has(unit.id) && !decides(unit)) return "history";
+    if (chainOpen.has(unit.id) && !decides(unit)) return "open";
     if (history.has(unit.id) || unit.adoption.status === "rejected") return "history";
     if (contested.has(unit.id)) return "contested";
     // A phase restriction does not withdraw adoption of the broader direction.
@@ -139,7 +162,7 @@ export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string
       // export is assigned to Milestone 2." stood in place of "Milestone 2 includes CSV export …" [You].
       if (same) { if (!same.item.holder && holder(unit).holder) { Object.assign(same.item, { text: unit.statement.trim(), unitIds: [unit.id], ...holder(unit) }); same.terms = bareTerms(unit.statement); taken.add(unit.id); } continue; }
       taken.add(unit.id);
-      const item: WikiBaselineItem = { part, text: unit.statement.trim(), unitIds: [unit.id], ...holder(unit) };
+      const item: WikiBaselineItem = { part, text: part === "notNow" ? leftOutClause(unit.statement) : unit.statement.trim(), unitIds: [unit.id], ...holder(unit) };
       said.push({ terms: bareTerms(unit.statement), item });
       items.push(item);
     }

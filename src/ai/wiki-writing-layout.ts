@@ -1,4 +1,5 @@
 import type {WikiDraftClaim,WikiKnowledgeUnit} from "../shared/wiki-knowledge";
+import {rowFields} from "../shared/wiki-row-sentence";
 
 interface WritingBlock {text:string;unitIds:string[];claims:WikiDraftClaim[]}
 const record=(value:unknown):Record<string,unknown>=>value&&typeof value==="object"?value as Record<string,unknown>:{};
@@ -26,6 +27,21 @@ const ROLE=/(?:^|[，,；;：:、\s])([^，,；;：:、。\s「」（）()]{2,16
 const roleHolders=(units:WikiKnowledgeUnit[])=>new Set(units.flatMap(unit=>[...unit.statement.matchAll(ROLE)].map(match=>match[1].toLocaleLowerCase())));
 const PARALLEL_KINDS:Array<WikiKnowledgeUnit["kind"]>=["constraint","mechanism","fact"],PARALLEL_MIN=4;
 const TABLE_MIN=3,OPEN_MIN=2,MAX_STAGES=8,STAGE_LABEL=16,LIST_LABEL=12;
+/** A column of the version a newer one replaced ("早期版本", "此前方案", "Earlier option"), and a cell already telling itself as before. */
+const EARLIER_COLUMN=/^(?:早期|此前|之前|原先|原来|旧版?|最初|早先|过去|以前|earlier|previous|old|original|initial|former)/iu,EARLIER_TOLD_CELL=/^(?:早期|此前|之前|原先|曾|最初|早先|previously|earlier|initially)/iu;
+/** Two fields in a row ("日活 (DAU)：约40；留存/其他指标：……"): a form, not a sentence. */
+const FIELD_RUN=/(?:^|[；;]\s*)(?:\*\*)?[^：:；;\n*。，,]{1,16}(?:\*\*)?[：:][^；;\n]+[；;]\s*(?:\*\*)?[^：:；;\n*。，,]{1,16}(?:\*\*)?[：:]\s*\S/u;
+const LAYOUT_LINE=/^(?:[-*+]\s|\d+[.)]\s|\||#{1,6}\s)/u;
+/** Lines of a paragraph block laid out as a list, a table, a heading or a run of fields. The layout is the blocks'
+ * job: the writer gives it as a list or comparison block, which code renders the same way every time, and a paragraph
+ * laid out by hand came back a different shape each run. Code kept as written is left alone. */
+export function proseLayoutBreaks(text:string):string[]{
+ let fenced=false;
+ return text.split("\n").map(line=>line.trim()).filter(line=>{
+  if(line.startsWith("```")){fenced=!fenced;return false;}
+  return !fenced&&Boolean(line)&&(LAYOUT_LINE.test(line)||FIELD_RUN.test(line));
+ });
+}
 /** A short label for a stage or list item, markdown marks stripped; one too long or empty is left off. */
 // Too long, it is shortened first: "Phase A (Pipeline Hardening)" left the step unlabelled; "Phase A" names it.
 const labelOf=(value:unknown,max:number)=>{
@@ -144,14 +160,25 @@ export function readWikiWritingBlock(value:unknown,known:Set<string>):WritingBlo
   // With its columns, each cell keeps its column's name: "Core Functionality / 10-second logging / Bank integrations"
   // did not say which were in and which out.
   const names=Array.isArray(block.columns)&&block.columns.every(singleLine)?(block.columns as string[]).map(name=>name.trim()):[];
-  rows=lines.map(value=>{
+  rows=lines.flatMap(value=>{
    const row=record(value),raw=Array.isArray(row.cells)?row.cells:[];
    const cells=raw.flatMap((cell,index)=>typeof cell==="string"&&cell.trim()?[{text:cell.replace(/\s+/gu," ").trim(),index}]:[]);
    const bound=item({text:cells.map(cell=>cell.text).join(" / "),unitIds:row.unitIds});
-   if(names.length!==raw.length||cells.length<2||cells[0].index!==0)return bound;
+   if(names.length!==raw.length||cells.length<2||cells[0].index!==0)return [bound];
    // Two columns need no names: the second says what the first is.
-   const rest=cells.slice(1).map(cell=>names.length>2?`${names[cell.index]}: ${cell.text}`:cell.text).join("; ");
-   return {...bound,text:`**${cells[0].text}**：${rest}`,claims:cells.map(cell=>({text:cell.text,unitIds:bound.unitIds}))};
+   // In Chinese, Chinese marks, and a cell's own full stop gives way to the separator ("……300万美元。; 备注: ……" read as two
+   // marks in a row).
+   const zh=/\p{Script=Han}/u.test(cells.map(cell=>cell.text).join("")),bare=(text:string)=>zh?text.replace(/[。；;]+$/u,""):text;
+   // A column of the earlier version beside the current one ("项目 | 当前建议 | 早期版本"): one item told both, 「急救流程：当前
+   // 建议：……；早期版本：……」, and one mark covered the two. The earlier cell is an item of its own, told as before.
+   const earlier=cells.slice(1).filter(cell=>EARLIER_COLUMN.test(names[cell.index])),now=cells.slice(1).filter(cell=>!earlier.includes(cell));
+   const split=earlier.length>0&&now.length>0,told=split?now:cells.slice(1),named=names.length>2&&(!split||told.length>1);
+   // One way for every row told as text (wiki-row-sentence): a row reads as a sentence, not a form.
+   const rest=rowFields(told.map(cell=>named?names[cell.index]:undefined),told.map(cell=>cell.text),zh);
+   const main={...bound,text:`**${cells[0].text}**：${rest}`,claims:[cells[0],...told].map((cell,at)=>({text:at?bare(cell.text):cell.text,unitIds:bound.unitIds}))};
+   if(!split)return [main];
+   const before=earlier.map(cell=>bare(cell.text)).join(zh?"；":"; "),said=EARLIER_TOLD_CELL.test(before)?before:zh?`此前${before}`:`Previously: ${before}`;
+   return [main,{...bound,text:`**${cells[0].text}**：${said}`,claims:[{text:said,unitIds:bound.unitIds}]}];
   });
   text=rows.map(row=>`- ${row.text}`).join("\n");
  }else if(block.type==="comparison"){

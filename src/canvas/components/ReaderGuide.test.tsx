@@ -262,3 +262,29 @@ it("folds a knowledge card's recall question, its answer a click away",()=>{
  expect(recall.querySelector(".wiki-recall-answer")?.textContent).toContain("遇到第一个 True 即停止");
  expect(container.querySelector("blockquote")).toBeNull();
 });
+it("shows a block's caption as a header bar naming only what it is, with a tag only when it is not just AI's",()=>{
+ const view=render(<ReaderGuide content={"*界面草图 · 首页布局引导 · AI 建议*\n\n```text\n今日任务 0/1\n[我已完成]\n```\n\n*只是强调的一句话*"} zh complete/>);
+ const bar=view.container.querySelector(".wiki-block-caption")!;
+ expect(bar.querySelector(".wiki-block-caption-kind")).toHaveTextContent("界面草图");
+ expect(bar).toHaveTextContent(/^界面草图$/);
+ expect(view.container.querySelector(".wiki-block-caption-place, .wiki-block-caption-whose")).toBeNull();
+ // Emphasis that is no caption stays emphasis.
+ expect(view.container.querySelectorAll(".wiki-block-caption")).toHaveLength(1);
+});
+it("still shows the caption bar when the chapter view linked its section name",()=>{
+ const view=render(<ReaderGuide content={"*目录结构 · [AI Agent逻辑](#x) · AI建议*\n\n```text\nsrc/\n  agent.ts\n```"} zh complete/>);
+ const bar=view.container.querySelector(".wiki-block-caption")!;
+ expect(bar.querySelector(".wiki-block-caption-kind")).toHaveTextContent("目录结构");
+ expect(bar).toHaveTextContent(/^目录结构$/);
+});
+it("tags a block you confirmed in its caption bar",()=>{
+ const view=render(<ReaderGuide content={"*界面文案 · 首页 · 你确认*\n\n```text\n今日任务\n```"} zh complete/>);
+ expect(view.container.querySelector(".wiki-block-caption-whose.is-mine")).toHaveTextContent("你确认");
+});
+it("reads a caption saved as the block's kind alone, and leaves other lone emphasis before a block alone",()=>{
+ const view=render(<ReaderGuide content={"*流程*\n\n```text\n免费评估\n→ 付费解锁\n```\n\n*代码 · 你确认 · 以你后来的决定为准：只支持美元*\n\n```ts\nconst a = 1;\n```\n\n*看下面这段*\n\n```text\nx\n```"} zh complete/>);
+ const bars=view.container.querySelectorAll(".wiki-block-caption");
+ expect(bars).toHaveLength(2);
+ expect(bars[0]).toHaveTextContent(/^流程$/);
+ expect(bars[1].querySelector(".wiki-block-caption-note")).toHaveTextContent("以你后来的决定为准：只支持美元");
+});

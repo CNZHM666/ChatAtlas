@@ -26,6 +26,8 @@ export const DEFAULT_CONCURRENCY = 3;
 // High-limit hosts: reading 55 batches at six requests left each batch queued
 // about 22 s of its 49 s; a rate limit still halves and holds the level.
 export const MAX_CONCURRENCY = 10;
+/** Where a high-limit host starts, below its ceiling so a rate limit still has room to show. */
+export const HIGH_LIMIT_START = 6;
 
 export function providerConcurrencyCeiling(baseUrl: string): number {
   try { const host = new URL(baseUrl).hostname; return HIGH_LIMIT_HOSTS.includes(host) || host.endsWith(".maas.aliyuncs.com") ? MAX_CONCURRENCY : DEFAULT_CONCURRENCY; } catch { return DEFAULT_CONCURRENCY; }
@@ -37,7 +39,9 @@ export class AdaptiveConcurrency {
   private level: number;
   private streak = 0;
   private holdUntil = 0;
-  constructor(readonly ceiling: number, private readonly growAfter = 2) { this.level = Math.min(DEFAULT_CONCURRENCY, ceiling); }
+  // A host known to take ten requests starts at six: from three, one run's first ten reading batches queued up to 63 s
+  // each (583 s in all) while the level climbed, though nothing was ever rate limited.
+  constructor(readonly ceiling: number, private readonly growAfter = 2) { this.level = Math.min(ceiling >= MAX_CONCURRENCY ? HIGH_LIMIT_START : DEFAULT_CONCURRENCY, ceiling); }
   current(now = Date.now()) { return now < this.holdUntil ? 1 : this.level; }
   success() { if (++this.streak >= this.growAfter && this.level < this.ceiling) { this.level++; this.streak = 0; } }
   rateLimited(now = Date.now()) { this.level = Math.max(1, Math.floor(this.level / 2)); this.streak = 0; this.holdUntil = now + 60_000; }

@@ -7,7 +7,8 @@ import {evidencePresentation} from "./evidence-presentation";
 import {generatedCitationPresentation} from "./generated-citation-presentation";
 
 const parser=unified().use(remarkParse).use(remarkGfm, GFM_OPTIONS);
-const text=(node:RootContent):string=>"value" in node?node.value:"children" in node?node.children.map(child=>text(child as RootContent)).join(""):"";
+/** A row may hold fewer cells than its header: the missing cell reads empty. */
+const text=(node:RootContent|undefined):string=>!node?"":"value" in node?node.value:"children" in node?node.children.map(child=>text(child as RootContent)).join(""):"";
 const reference=/^(?:\s*\[?e\d+(?::\d+)?\]?\s*[,，、;；]?)+$/iu;
 const states:Record<string,string>={proposal:"讨论提出以下设计：",proposed:"讨论提出以下设计：",planned:"以下为计划内容：",uncertain:"以下内容尚未确定：",documented:"以下为讨论记录："};
 

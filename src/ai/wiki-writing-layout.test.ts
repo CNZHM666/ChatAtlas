@@ -1,5 +1,5 @@
 import {expect,it} from "vitest";
-import {claimSentence,readWikiWritingBlock,readWikiWritingBlocks,wikiWritingLayout} from "./wiki-writing-layout";
+import {claimSentence,proseLayoutBreaks,readWikiWritingBlock,readWikiWritingBlocks,wikiWritingLayout} from "./wiki-writing-layout";
 import type {WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 
 it("rejects a whole comparison when any row cites unavailable evidence rather than silently omitting it",()=>{
@@ -150,4 +150,21 @@ it("halves a list or table past the size limit instead of refusing the answer", 
  expect(tables.every(block=>block.text.startsWith("| 事项 | 第一版 |"))).toBe(true);
  // One item too large on its own is still refused.
  expect(()=>readWikiWritingBlocks({type:"list",items:[{text:"必须保留完整条件。".repeat(200),unitIds:["k1"]},{text:"短。",unitIds:["k1"]}]},known)).toThrow("writing_block_too_large");
+});
+
+it("writes the earlier-version column of a comparison read as a list as an item of its own", () => {
+ const block={type:"comparison",columns:["项目","当前建议","早期版本"],rows:[{cells:["急救流程","支持三档强度","干预前选强度"],unitIds:["k1"]}]};
+ const result=readWikiWritingBlock(block,new Set(["k1"]));
+ expect(result.text).toBe("- **急救流程**：支持三档强度\n- **急救流程**：此前干预前选强度");
+});
+
+it("tells a Chinese row it cannot show as a table as one sentence: no catch-all column name, a short figure after its name, a full stop",()=>{
+ const block={type:"comparison",columns:["阶段","日活 (DAU)","留存/其他指标"],rows:[{cells:["当前","约40","活跃留存率略高于40%，付费率较低"],unitIds:["k1"]}]};
+ expect(readWikiWritingBlock(block,new Set(["k1"])).text).toBe("- **当前**：日活 (DAU)约40；活跃留存率略高于40%，付费率较低。");
+});
+
+it("finds a paragraph block laid out by hand: list lines, table lines and runs of fields, not code or sentences",()=>{
+ expect(proseLayoutBreaks("日活 (DAU)：约40；留存/其他指标：活跃留存率略高于40%")).toHaveLength(1);
+ expect(proseLayoutBreaks("先说结论。\n- 第一条\n| a | b |")).toEqual(["- 第一条","| a | b |"]);
+ expect(proseLayoutBreaks("当前日活约40（8月18日），付费率较低；此前每天稳定在22人。\n```\n- x：1；y：2\n```")).toEqual([]);
 });

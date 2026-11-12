@@ -41,18 +41,31 @@ it("writes a new project document from the knowledge-unit ledger, keeping the le
   const result = await generate("ledger-doc");
   expect(synthesizeCoveredFocus).not.toHaveBeenCalled();
   const units = result.wikiKnowledge!.batches.flatMap(batch => batch.units);
-  // One chapter from the ledger's directory; its paragraph cites the unit's message as evidence, with a claim.
+  // The chapter keeps the proposal and the separate user reply that confirms it.
   expect(result.sections).toHaveLength(1);
   expect(result.sections[0]).toMatchObject({ title: "检索", wikiQuestion: "如何检索？", wikiSubtopics: [{ title: "全文索引" }] });
   expect(result.sections[0].body).toContain("### 全文索引");
-  expect(result.evidence).toEqual([expect.objectContaining({ id: "u1", conversationId: "ledger-doc", messageId: "ledger-doc-0", title: "硬件项目" })]);
-  expect(result.sections[0].evidenceIds).toEqual(["u1"]);
+  expect(result.evidence).toEqual([
+    expect.objectContaining({ id: "u1", conversationId: "ledger-doc", messageId: "ledger-doc-0", title: "硬件项目" }),
+    expect.objectContaining({ id: "u2", conversationId: "ledger-doc", messageId: "ledger-doc-1", excerpt: "好，就这样。" }),
+  ]);
+  expect(result.sections[0].evidenceIds).toEqual(["u1", "u2"]);
   expect(result.sections[0].claims?.[0]).toMatchObject({ text: "全文索引使用 Orama。", evidenceIds: ["u1"] });
   expect(result).toMatchObject({ wikiEdition: "current-v2", wikiKnowledge: { draft: { status: "complete" } } });
   // No one named the project: the directory plan names it, not the request text.
   expect(result.title).toBe("Orama 检索器");
   expect(result.wikiKnowledge!.organization!.projectName).toBe("Orama 检索器");
   expect(units).toHaveLength(1);
+});
+
+it("regenerates a document with zero extraction requests when its saved batches still match", async () => {
+  const first = await generate("ledger-regenerate");
+  expect(extractions()).toBe(1);
+  generateStructured.mockClear();
+  const second = await generate("ledger-regenerate", { wikiPreviousLedger: first.wikiKnowledge });
+  expect(extractions()).toBe(0);
+  expect(second.wikiKnowledge?.batches.map(batch => batch.units.map(unit => unit.id))).toEqual(first.wikiKnowledge?.batches.map(batch => batch.units.map(unit => unit.id)));
+  expect(second.wikiKnowledge?.draft?.status).toBe("complete");
 });
 
 it("writes with the earlier pipeline behind the fallback switch, reading no ledger", async () => {

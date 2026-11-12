@@ -25,3 +25,10 @@ it("retains substantive branches, top-level scopes, source quotes, code, tables 
  ];
  for(const body of examples)expect(wikiReadingLayout(body)).toBe(body);
 });
+
+it("lays an open note out as its topic and one line per version, each labelled by who holds it",()=>{
+ const note="> 版本未定：首页中央按钮的用法：你提议将加号按钮点击后直接跳转至AI界面；AI 建议中央AI按钮在高危时段变为橙色“守护”状态（另有 2 条类似建议）。";
+ expect(wikiReadingLayout(`开头。\n\n${note}\n\n结尾。`)).toBe("开头。\n\n> **版本未定 · 首页中央按钮的用法**\n>\n> - **你的提议**：将加号按钮点击后直接跳转至AI界面\n> - **AI 的建议**：中央AI按钮在高危时段变为橙色“守护”状态（另有 2 条类似建议）\n\n结尾。");
+ expect(wikiReadingLayout("> 版本未定：「复盘」的时长有两种说法：30秒复盘；60秒复盘。")).toBe("> **版本未定 · 「复盘」的时长有两种说法**\n>\n> - 30秒复盘\n> - 60秒复盘");
+ expect(wikiReadingLayout("> 版本未定：此处「默认」是较早的说法，需要你确认。")).toBe("> **版本未定**：此处「默认」是较早的说法，需要你确认。");
+});

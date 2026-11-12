@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { comparedProducts, discussedProjects, droppedExceptions, movedCodes, extractWikiKnowledge, fittingQuote, ownNamesTaggedAsOthers, wikiUnitBatches, wikiUnitRequest, droppedFigures, uncoveredSentences } from "./wiki-knowledge-units";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
-import { pastedUserText, quotedDetails, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { missingWikiConditions, pastedUserText, quotedDetails, wikiUnitConditions, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
 
@@ -10,6 +10,51 @@ const signal = new AbortController().signal;
 const proposal = "我建议第一版用 Orama 做全文索引，每 30 秒增量更新一次。";
 const reply = (batch: CoverageMaterial[], all: CoverageMaterial[], value: unknown) => wikiUnitRequest(batch, all, "zh-CN", signal, material => pastedUserText(material.text)).validate(value);
 const unit = (extra: Record<string, unknown>) => ({ subject: "全文索引", statement: "全文索引使用 Orama，每 30 秒增量更新。", kind: "decision", details: ["30 秒"], quoteKey: "p1:1", adoption: "proposal", delivery: "unknown", ...extra });
+
+it("preserves a literal condition with the claim it qualifies, and rejects a condition absent from its quote", () => {
+  const condition = "如果本地性能验证通过", statement = "第一版使用 Orama 建立全文索引。";
+  const all = [material(0, "assistant", `${condition}，${statement}`)];
+  const result = reply(all, all, { units: [unit({ statement, details: [], conditions: [condition, "仅限企业版"] })] });
+  const found = result.units[0];
+  expect(found.conditions).toEqual([condition]);
+  expect(result.rejected.condition_not_in_quote).toBe(1);
+  expect(missingWikiConditions(found, statement)).toEqual([condition]);
+  expect(missingWikiConditions(found, `${condition}，${statement}`)).toEqual([]);
+  // An older ledger with the same quote can still supply the prerequisite.
+  expect(wikiUnitConditions({ ...found, conditions: undefined })).toEqual([condition]);
+  expect(wikiUnitConditions({ ...found, conditions: undefined, evidence: { ...found.evidence, quote: `如果用户登录，开启导出。${statement}` } })).toEqual([]);
+});
+
+it("recovers a separate conditional proposal quoted with an experiment, including on cache hits", async () => {
+  const condition="如果这个假设被验证";
+  const experiment="建议在首页增加状态模块，测试用户是否会记录睡眠。";
+  const result=`${condition}，我会非常支持你把整个产品从“戒色 AI”升级成“男性状态恢复与成长 AI”。`;
+  const quote=`${experiment}${result}`;
+  const materials=[material(0,"assistant",quote)];
+  const ledger=(await extractWikiKnowledge({materials,locale:"zh-CN",signal,ai:{generateStructured:async request=>request.validate({units:[unit({
+    statement:experiment,kind:"plan",details:[],quoteKey:"p1:1",
+  })]})}})).ledger;
+  expect(ledger.batches[0].units).toEqual(expect.arrayContaining([
+    expect.objectContaining({statement:experiment}),
+    expect.objectContaining({conditions:[condition],adoption:{status:"proposal"},evidence:expect.objectContaining({quote:result})}),
+  ]));
+  const old={...ledger,batches:ledger.batches.map(batch=>({...batch,units:batch.units.filter(point=>!point.conditions?.length)}))};
+  const reused=await extractWikiKnowledge({materials,locale:"zh-CN",signal,previous:old,ai:{generateStructured:async()=>{throw new Error("unexpected extraction");}}});
+  expect(reused.report).toMatchObject({requests:0,reused:1,conditionalSuggestionsRecovered:1});
+  expect(reused.ledger.batches[0].units.map(point=>point.id)).toEqual(ledger.batches[0].units.map(point=>point.id));
+});
+
+it("restores a narrowed limit from a cached unit without a fresh extraction", async () => {
+  const quote = "仅限 CSV 导入，单文件上限 20 MB。";
+  const materials = [material(0, "assistant", quote)];
+  const { ledger } = await extractWikiKnowledge({ materials, locale: "zh-CN", signal, ai: { generateStructured: async request => request.validate({ units: [unit({ statement: quote, kind: "constraint", details: [] })] }) } });
+  const point = ledger.batches[0].units[0];
+  const broadened = { ...point, statement: "所有文件导入的单文件上限 20 MB。" };
+  const previous = { ...ledger, batches: [{ ...ledger.batches[0], units: [broadened] }] };
+  const reused = await extractWikiKnowledge({ materials, locale: "zh-CN", signal, previous, ai: { generateStructured: async () => { throw new Error("unexpected extraction"); } } });
+  expect(reused.report).toMatchObject({ requests: 0, reused: 1 });
+  expect(reused.ledger.batches[0].units[0]).toMatchObject({ id: point.id, statement: quote });
+});
 
 it("accepts an adoption only from a later, unpasted user reply to that single proposal", () => {
   const all = [material(0, "assistant", proposal), material(1, "user", "好，就这样。")];
@@ -122,6 +167,8 @@ it("rereads only the batches whose material changed when a conversation continue
   const first = [0, 1, 2].map(index => long(index, "c1")), second = [0, 1, 2].map(index => long(index, "c2"));
   let calls = 0;
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    // The statement check's repair request is not a reading of material.
+    if (JSON.parse(request.prompt).presentation === "wiki_unit_fidelity") throw new Error("not counted");
     calls++;
     const passages = JSON.parse(request.prompt).passages as Array<{ id: string; context?: boolean }>;
     return request.validate({ units: passages.filter(passage => !passage.context).map(passage => unit({ quoteKey: `${passage.id}:1`, details: [] })) });
@@ -136,7 +183,7 @@ it("rereads only the batches whose material changed when a conversation continue
   expect(calls).toBe(1);
   // The user's answers on other projects and repeated points survive the rerun.
   expect(after.ledger).toMatchObject({ scopeAnswers: { chatatlas: "exclude" }, sameGroups: ["g1"], separateGroups: ["g2"] });
-  expect(after.report).toMatchObject({ requests: 1, reused: 3 });
+  expect(after.report).toMatchObject({ requests: 1, reused: 3, rereadBatchChanged: 1 });
   expect(after.ledger.batches[0].units).toEqual(before.ledger.batches[0].units);
   // A ledger saved before signatures existed is reused when its quotes still stand.
   calls = 0;
@@ -146,8 +193,13 @@ it("rereads only the batches whose material changed when a conversation continue
   // An edited message is read again.
   const edited = [material(0, "assistant", `改为 SQLite FTS。${"细节".repeat(2900)}`, "c1"), ...first.slice(1)];
   calls = 0;
-  await extractWikiKnowledge({ materials: [...edited, ...second], locale: "zh-CN", signal, ai, previous: before.ledger });
+  const refreshed = await extractWikiKnowledge({ materials: [...edited, ...second], locale: "zh-CN", signal, ai, previous: before.ledger });
   expect(calls).toBe(1);
+  expect(refreshed.report).toMatchObject({ reused: 3, rereadInputChanged: 1 });
+  // Identical text reimported under a different message ID cannot keep stale citations.
+  const replaced = first.map((item, index) => index === 1 ? { ...item, id: "replacement", messageId: "replacement" } : item);
+  const reimport = await extractWikiKnowledge({ materials: [...replaced, ...second], locale: "zh-CN", signal, ai, previous: before.ledger });
+  expect(reimport.report).toMatchObject({ reused: 3, rereadBatchChanged: 1 });
 });
 
 it("records what a unit is about when it is not this project, and never takes it as this project's decision", () => {
@@ -212,8 +264,9 @@ it("reads the user's own words that produced no unit once more, and records what
   expect(result.report).toMatchObject({ requests: 1, coverRetries: 1, uncoveredMessages: 1 });
   // Read again with the earlier ledger, it is not asked a third time.
   prompts.length = 0;
-  await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai, previous: result.ledger });
+  const reused = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai, previous: result.ledger });
   expect(prompts).toHaveLength(0);
+  expect(reused.report).toMatchObject({ firstPassUncoveredMessages: 0, uncoveredMessages: 1 });
 });
 
 it("keeps what the user's uncovered message gives when read again, with the batch it belongs to", async () => {
@@ -223,7 +276,7 @@ it("keeps what the user's uncovered message gives when read again, with the batc
   const result = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
   expect(result.ledger.batches[0].units.map(item => item.statement)).toContain("首屏展示类似 ChatGPT 的欢迎页。");
   expect(result.ledger.batches[0].uncovered).toBeUndefined();
-  expect(result.report).toMatchObject({ coverRetries: 1, coverUnits: 1 });
+  expect(result.report).toMatchObject({ coverRetries: 1, coverUnits: 1, firstPassUncoveredMessages: 1, uncoveredMessages: 0 });
 });
 
 it("reads material put to the user last, leaves out what the user skips, and keeps the skips for later updates", async () => {
@@ -242,7 +295,7 @@ it("reads material put to the user last, leaves out what the user skips, and kee
   // Messages 0 and 2 are read together; message 1 is deferred to its own last batch and then skipped.
   expect(read).toHaveLength(2);
   expect(ledger.batches.map(batch => Boolean(batch.skipped))).toEqual([false, true]);
-  expect(report).toMatchObject({ requests: 2, skippedMaterials: 1 });
+  expect(report).toMatchObject({ requests: 1, rereadNoLedger: 1, skippedMaterials: 1 });
   expect(report.skippedCharacters).toBeGreaterThan(5000);
   expect(ledger).toMatchObject({ skippedMessages: ["c1:m1"], sourceChoices: { "paste:c1:m1": "skip" } });
   // An update without a question leaves the same message out.

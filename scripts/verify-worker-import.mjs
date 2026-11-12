@@ -143,5 +143,28 @@ assert.ok((await read("messages")).some(message=>message.content==="Optional pag
 assert.equal((await optionalCommand({type:"ATLAS_WEB_CAPTURE_SET",platform:"claude",enabled:false})).ok,true);
 assert.equal(registeredReaders.size,0);
 assert.equal((await optionalCommand({type:"ATLAS_CAPTURE_BATCH",capture:optionalCapture},optionalSender)).ok,false);
+
+const analysisEntry = (await readdir(resolve(root, "assets"))).find(name => /^project-analysis-worker-.+\.js$/u.test(name));
+assert.ok(analysisEntry, "The production project analysis worker must exist");
+const analysis = await moduleAt(resolve(root, "assets", analysisEntry));
+await analysis.link(linker); await analysis.evaluate();
+const runId = "worker-project-run", otherRunId = "worker-other-run";
+const records = db.transaction(["organizationRuns", "aiUsageEvents", "focusSessions"], "readwrite");
+records.objectStore("organizationRuns").put({ id: runId, title: "Project", targetType: "conversation", targetIds: [conversationId], startedAt: 1, updatedAt: 1, status: "completed", stage: "proposal_ready", progress: 100, events: [] });
+records.objectStore("aiUsageEvents").put({ id: otherRunId, runId: otherRunId, createdAt: 2, taskType: "other", providerId: "test", modelId: "test", conversationIds: [], inputTokens: 0, outputTokens: 0, tokenSource: "provider", status: "completed", attempt: 1 });
+records.objectStore("focusSessions").put({ id: "worker-project", runId, title: "Project", goal: "Project", mode: "work", locale: "en", sourceConversationIds: [conversationId], createdAt: 1, updatedAt: 1,
+  activeSectionId: "one", completedSectionIds: [], notes: "", evidence: [], sections: [{ id: "one", title: "Workflow", kind: "finding", body: "A named character reference &copy; in a saved chapter.", evidenceIds: [] }] });
+await new Promise((resolveWrite, reject) => { records.oncomplete = resolveWrite; records.onabort = () => reject(records.error); });
+let analysisTimer;
+try {
+  const result = await new Promise((resolveAnalysis, reject) => {
+    context.postMessage = resolveAnalysis;
+    analysisTimer = setTimeout(() => reject(new Error("Project analysis worker did not reply")), 5000);
+    context.onmessage({ data: { runId, sourceConversationIds: [conversationId] } });
+  });
+  assert.equal(result.error, undefined);
+  assert.ok(result.csv?.includes(`"${runId}"`));
+  assert.ok(!result.csv.includes(otherRunId));
+} finally { clearTimeout(analysisTimer); }
 db.close();
-console.info("ATLAS_WORKER_IMPORT_OK: production capture updated without duplicates, optional reader registered and persisted then rejected writes after disable, JSON import passed; no document/window or user data accessed.");
+console.info("ATLAS_WORKER_IMPORT_OK: production capture, optional reader, JSON import and scoped analysis CSV passed without a DOM or user data.");

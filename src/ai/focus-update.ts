@@ -1,4 +1,4 @@
-import { ledgerDecisionsPending } from "./wiki-key-decisions";
+import { ledgerRewriteNeeded } from "./wiki-draft-fit";
 import {savedWikiProjectBoundary} from "../shared/wiki-project-boundary";
 import type { Conversation, ConversationMessage } from "../shared/types";
 import type { FocusScope, FocusSession } from "../shared/focus-session";
@@ -214,8 +214,9 @@ export async function generateFocusUpdate(previous: FocusSession, sources: Conve
   if (sources.some(source => !messages.some(item => item.conversationId === source.id && item.content.trim() && !isInternalSearchQueryMessage(item)))) throw new Error(locale === "zh-CN" ? "部分项目来源已没有正文，请重新确认材料。原稿和笔记仍保留。" : "Some project sources have no text. Confirm materials again; your original and notes are preserved.");
   const plan = planWikiEditionUpdate(previous,messages,planFocusUpdate(previous, messages));
   if (previous.mode === "work" && previous.wikiKnowledge?.draft && ledgerPipelineEnabled()) {
-    // Nothing new in the sources, but verdicts the user gave since the draft: only the chapters they touch are rewritten.
-    if (!plan.changed && !ledgerDecisionsPending(previous.wikiKnowledge)) return { ...previous, id: crypto.randomUUID(), runId, createdAt: Date.now(), updatedAt: Date.now() };
+    // Nothing new in the sources, but verdicts the user gave since the draft, or chapters written for another layout (the
+    // routing changed since): only the chapters they touch are rewritten.
+    if (!plan.changed && !ledgerRewriteNeeded(previous.wikiKnowledge)) return { ...previous, id: crypto.randomUUID(), runId, createdAt: Date.now(), updatedAt: Date.now() };
     return ledgerUpdate(previous, sources, messages, allMessages, plan, locale, signal, onState, runId, onProgress, !plan.changed);
   }
   if (!plan.changed) {

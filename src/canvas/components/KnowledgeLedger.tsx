@@ -6,6 +6,7 @@ import { type WikiKnowledgeUnit, type WikiUnitStatus, type WikiUserDecision } fr
 import { resolveWikiReading } from "../../ai/wiki-knowledge-reading";
 import { roadmaps } from "../../ai/wiki-knowledge-write";
 import { ledgerDecisionsPending, withDecision } from "../../ai/wiki-key-decisions";
+import { wikiDraftOutOfPlace } from "../../ai/wiki-draft-fit";
 import { ProjectKnowledgeActions } from "../project-knowledge-actions";
 import { KeyDecisions } from "./KeyDecisions";
 
@@ -29,6 +30,8 @@ export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions }: { s
   const actions = useContext(ProjectKnowledgeActions);
   const ledger = session.wikiKnowledge;
   const [filter, setFilter] = useState("all"), [query, setQuery] = useState(""), [shown, setShown] = useState<Record<string, number>>({});
+  // The point whose original is open beside the ledger stays marked, so the reader sees which one they are checking.
+  const [checking, setChecking] = useState<string>();
   const data = useMemo(() => {
     if (!ledger?.organization) return undefined;
     const { organization: effective, units: all, statuses } = resolveWikiReading(ledger);
@@ -55,6 +58,8 @@ export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions }: { s
     for (const unit of units) if (!merged.has(unit.id)) counts.set(shownStatus.get(unit.id)!, (counts.get(shownStatus.get(unit.id)!) ?? 0) + 1);
     return { chapters, statuses: shownStatus, total: units.filter(unit => !merged.has(unit.id)).length, counts };
   }, [ledger, zh]);
+  // Chapters written for another layout than the ledger's now: their points read in the wrong chapter until rewritten.
+  const misplaced = useMemo(() => wikiDraftOutOfPlace(ledger), [ledger]);
   if (!ledger || !data) return null;
   const active = FILTERS.find(item => item.id === filter)!, needle = query.trim().toLocaleLowerCase();
   const visible = (unit: WikiKnowledgeUnit) => (!active.statuses || active.statuses.includes(data.statuses.get(unit.id)!)) && (!needle || `${unit.statement} ${unit.subject}`.toLocaleLowerCase().includes(needle));
@@ -62,15 +67,16 @@ export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions }: { s
   // their own place, and clicking another while the panel is open moves the panel to it.
   const open = (unit: WikiKnowledgeUnit) => {
     const ref = session.evidence.find(ref => ref.conversationId === unit.evidence.conversationId && ref.messageId === unit.evidence.messageId) ?? { id: `unit:${unit.id}`, conversationId: unit.evidence.conversationId, messageId: unit.evidence.messageId, title: unit.subject, excerpt: unit.evidence.quote };
+    setChecking(unit.id);
     onLocate(ref, { references: [ref], quote: unit.evidence.quote, claim: unit.statement, mode: "view" });
   };
-  const decide = async (unitIds: string[], verdict: WikiUserDecision["verdict"] | undefined) => { if (actions) await actions.save(current => current.wikiKnowledge ? { ...current, wikiKnowledge: withDecision(current.wikiKnowledge, unitIds, verdict) } : current); };
+  const decide = async (unitIds: string[], verdict: WikiUserDecision["verdict"] | undefined, statement: string) => { if (actions) await actions.save(current => current.wikiKnowledge ? { ...current, wikiKnowledge: withDecision(current.wikiKnowledge, unitIds, verdict, undefined, [statement]) } : current); };
   const count = (statuses: LedgerStatus[]) => statuses.reduce((sum, status) => sum + (data.counts.get(status) ?? 0), 0);
   const pending = ledgerDecisionsPending(ledger);
   return <section className="knowledge-ledger" aria-label={zh ? "知识点账本" : "Knowledge ledger"}>
     <h2><BookMarked size={18} aria-hidden="true" />{zh ? "知识点账本" : "Knowledge ledger"}<small>{zh ? `${data.total} 个知识点 · 你的决定 ${count(["confirmed"])} · AI 建议 ${count(["proposal", "analysis"])}` : `${data.total} points · yours ${count(["confirmed"])} · AI ${count(["proposal", "analysis"])}`}</small></h2>
     {actions ? <KeyDecisions ledger={ledger} zh={zh} onDecide={decide} onLedger={change => actions.save(current => current.wikiKnowledge ? { ...current, wikiKnowledge: change(current.wikiKnowledge) } : current)} open={false}
-      footer={pending && onApplyDecisions ? <div className="key-decisions-apply"><span>{zh ? "文档还没有按你的确认改写。" : "The document does not reflect your verdicts yet."}</span><button type="button" className="primary" onClick={onApplyDecisions}>{zh ? "按确认更新文档 · 先预览" : "Update the document · Preview"}</button></div> : undefined}/> : null}
+      footer={(pending || misplaced.length) && onApplyDecisions ? <div className="key-decisions-apply"><span>{pending ? zh ? "文档还没有按你的确认改写。" : "The document does not reflect your verdicts yet." : zh ? `「${misplaced.join("」「")}」里有内容不在它所属的章节，需要按当前目录重写。` : `Some points in ${misplaced.join(", ")} sit outside the chapter they belong to and need rewriting for the current layout.`}</span><button type="button" className="primary" onClick={onApplyDecisions}>{pending ? zh ? "按确认更新文档 · 先预览" : "Update the document · Preview" : zh ? "重写这些章节 · 先预览" : "Rewrite these chapters · Preview"}</button></div> : undefined}/> : null}
     <div className="knowledge-ledger-tools">
       <div role="tablist" aria-label={zh ? "按来源筛选" : "Filter by holder"}>{FILTERS.filter(item => !item.statuses || count(item.statuses) > 0 || filter === item.id).map(item => <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} title={item.title?.[zh ? 0 : 1]} onClick={() => setFilter(item.id)}>{item.label[zh ? 0 : 1]}{item.statuses ? <small>{count(item.statuses)}</small> : null}</button>)}</div>
       <label><Search size={14} aria-hidden="true" /><input type="search" value={query} placeholder={zh ? "搜索知识点" : "Search points"} aria-label={zh ? "搜索知识点" : "Search points"} onChange={event => setQuery(event.target.value)} /></label>
@@ -83,7 +89,7 @@ export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions }: { s
         <summary><strong>{chapter.title}</strong><small>{rows.length}</small></summary>
         <ul>{rows.slice(0, limit).map(({ subject, unit }, index) => <li key={unit.id}>
           {index === 0 || rows[index - 1].subject !== subject ? <h3>{subject}</h3> : null}
-          <button type="button" title={zh ? "查看原文" : "Read the original"} onClick={() => open(unit)}><span className={`knowledge-ledger-status is-${data.statuses.get(unit.id)}`}>{LABELS[data.statuses.get(unit.id)!][zh ? 0 : 1]}</span><span>{unit.statement}</span></button>
+          <button type="button" className={checking === unit.id ? "is-checking" : undefined} aria-current={checking === unit.id ? "true" : undefined} title={zh ? "查看原文" : "Read the original"} onClick={() => open(unit)}><span className={`knowledge-ledger-status is-${data.statuses.get(unit.id)}`}>{LABELS[data.statuses.get(unit.id)!][zh ? 0 : 1]}</span><span>{unit.statement}</span></button>
         </li>)}</ul>
         {rows.length > limit ? <button type="button" className="knowledge-ledger-more" onClick={() => setShown(current => ({ ...current, [chapter.id]: limit + PAGE }))}>{zh ? `再显示 ${Math.min(PAGE, rows.length - limit)} 条（共 ${rows.length}）` : `Show ${Math.min(PAGE, rows.length - limit)} more (${rows.length})`}</button> : null}
       </details>;

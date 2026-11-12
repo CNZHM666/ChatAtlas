@@ -9,9 +9,11 @@ import {wikiStatusProse} from "./wiki-status-prose";
 import {wikiReadingCleanup} from "./wiki-reading-cleanup";
 import {wikiDisplayMath} from "./wiki-display-math";
 import {wikiReadingFormat} from "./wiki-reading-format";
-import {wikiChapterLinks} from "./wiki-chapter-links";
+import {wikiChapterLinks,wikiUnitChapterHomes} from "./wiki-chapter-links";
+import {qualifyWikiPriceTables} from "./wiki-document-blocks";
 import {wikiSections} from "./wiki-navigation";
 import {knowledgeOverlap} from "./knowledge-subject";
+import {reviewWikiChapter} from "../ai/wiki-claim-review";
 export type {ProjectKnowledgeFact} from "./project-knowledge-facts";
 
 /** Topic-local navigation from already saved facts. Whole rows only, bounded
@@ -119,6 +121,7 @@ export function projectKnowledgeIntroduction(session:FocusSession){return projec
  * remain intact. A chosen plan is never evidence that its code was delivered. */
 export function projectKnowledgeSection(section:FocusSection,session:FocusSession,view=projectKnowledgeView(session)):FocusSection {
  if(section.origin||section.userEdited)return section;
+ section=reviewWikiChapter(section,session);
  const facts=view.facts.filter(fact=>fact.sectionId===section.id),learning=session.wikiKnowledge?.documentType==="learning";
  const replacements=new Map<string,string>();
  for(const fact of facts){
@@ -132,14 +135,17 @@ export function projectKnowledgeSection(section:FocusSection,session:FocusSessio
  // The chapter status line states "mostly unconfirmed AI proposals" once; prose need not repeat it.
  // Batch-written chapters also repeat introductions and near-identical paragraphs.
  const zh=session.locale!=="en",cleaned=wikiReadingCleanup(zh?wikiStatusProse(body,section):body,section);
- return {...section,body:cleaned};
+ const accepted=new Set(facts.filter(fact=>fact.adoption==="accepted"&&!fact.historical&&!fact.contested&&!fact.scopeConflict&&!fact.sourceChanged&&fact.status!=="uncertain").map(fact=>fact.claim));
+ return {...section,body:learning?cleaned:qualifyWikiPriceTables(cleaned,section.claims??[],accepted,zh)};
 }
 
 /** The chapter as read in Reader and exports: history gathered per section, long
  * paragraphs split, and a paragraph an earlier chapter already explains becomes a
  * link to that chapter. Context packs keep the full projection instead. */
-export function projectKnowledgeReading(section:FocusSection,session:FocusSession,view=projectKnowledgeView(session)):FocusSection {
+export function projectKnowledgeReading(section:FocusSection,session:FocusSession,view=projectKnowledgeView(session),chapters=wikiSections(session)):FocusSection {
  const projected=projectKnowledgeSection(section,session,view);
  if(section.origin||section.userEdited)return projected;
- return {...projected,body:wikiChapterLinks(wikiReadingFormat(projected.body,section),section,wikiSections(session),session.locale!=="en")};
+ const homes=session.wikiKnowledge?wikiUnitChapterHomes(session.wikiKnowledge.organization):undefined;
+ const reviewed=chapters.map(chapter=>reviewWikiChapter(chapter,session));
+ return {...projected,body:wikiChapterLinks(wikiReadingFormat(projected.body,projected),projected,reviewed,session.locale!=="en",homes)};
 }

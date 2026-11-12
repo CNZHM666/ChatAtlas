@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defaultClientConditions, defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { crx } from "@crxjs/vite-plugin";
 import { createManifest } from "./manifest.config";
@@ -6,6 +6,9 @@ import { createManifest } from "./manifest.config";
 export default defineConfig(({ command }) => ({
   plugins: [react(), crx({ manifest: createManifest() })],
   define: { "import.meta.env.VITE_ATLAS_API_BASE_URL": JSON.stringify("") },
+  // The extension shares Markdown rendering with dedicated workers. Prefer
+  // worker-safe dependency exports when a package offers both browser variants.
+  resolve: { conditions: ["worker", ...defaultClientConditions] },
   worker: { format: "es" },
   build: {
     // CRXJS writes its development loader into the build directory. Keep that

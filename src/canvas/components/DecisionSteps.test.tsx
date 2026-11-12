@@ -110,6 +110,7 @@ it("shows the writer's questions as they come while writing, and says writing go
   view.rerender(<DecisionSteps ledger={ledger} zh writing busy questions={[ask("w1", "开发路线"), ask("w2", "里程碑数量")]} onChange={change => { saved = change(saved); }} onDone={onDone} />);
   expect(screen.getByText("1 / 2")).toBeVisible();
   fireEvent.click(screen.getByRole("radio", { name: /Phase/u }));
-  expect(saved.decisions).toMatchObject({ u1: { verdict: "confirmed" } });
+  expect(saved.userAnswers?.[0]).toMatchObject({ questionId: "w1", answer: "Phase" });
+  expect(saved.decisions?.u1).toBeUndefined();
   expect(screen.getByText("2 / 2")).toBeVisible();
 });

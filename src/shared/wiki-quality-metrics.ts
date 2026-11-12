@@ -19,6 +19,9 @@ const APPENDIX=/^(?:关键结论与来源|演变记录|本章来源|Key conclusi
 // The source reference after a listed conclusion: 〔来源 3〕, [3], or the unresolved token.
 const KEY_MARKER=/〔[^〕]*〕|\[\d+\]|SRC:[^]*/gu;
 const overviewTitle=(title:string)=>/^(?:项目总览|Project overview)$/iu.test(title.trim());
+const exportMetadata=/^(?:(?:本章来源(?:对话)?|Chapter sources|Chapter conversations|Source conversations for this chapter)\s*[：:]|(?:AI 提出的定价方案|原文中的 AI 定价建议|讨论中的定价方案)，具体价格待确认。|(?:Pricing proposed by AI|Pricing discussed)\. Specific prices require confirmation\.)/iu;
+const exportAppendixTitle=/^(?:引用定位|Citation locators|来源索引|Source index|文档信息与核对说明|Document information and evidence notes)$/u;
+const sourceCaption=/^(?:对照表|命令|数据结构|代码示例|代码|界面草图|规则逻辑|事件清单|目录结构|提示词|计算规则|示例数据|界面文案|流程|对照|清单|Table|Commands|Data structure|Code example|Code|UI sketch|Rules|Event list|File layout|Prompt|Scoring|Sample data|UI copy|Flow|Mapping|List)(?:\s*·[^\n]*)?$/iu;
 
 /** ## chapters and ### subtopics in an exported document. Project overview is
  * measured separately, not counted as a Wiki chapter. Fenced code/quotes are not prose.
@@ -40,12 +43,17 @@ export function wikiQualityMetrics(markdown:string,terms:readonly string[]=WIKI_
   if(node.type==="paragraph"||node.type==="tableCell")return [{text:textOf(node),listed}];
   return "children" in node?node.children.flatMap(child=>collect(child as RootContent,listed||node.type==="list")):[];
  };
- for(const node of parser.parse(markdown).children){
+ const nodes=parser.parse(markdown).children;
+ for(const [position,node] of nodes.entries()){
   // Export metadata is not a knowledge chapter or a source of writing-quality counts.
-  if(node.type==="heading"&&node.depth===2&&/^(?:文档信息与核对说明|Document information and evidence notes)$/u.test(textOf(node).trim()))break;
+  if(node.type==="heading"&&node.depth===2&&exportAppendixTitle.test(textOf(node).trim()))break;
   scanBold(node);
   if(node.type==="heading"&&node.depth===2){current={title:textOf(node).trim(),subtopics:[],paragraphs:[],sentences:[],subtopicProse:[],leadParagraphs:0,appendix:false,keyItems:[],prose:[]};chapters.push(current);continue;}
   if(!current)continue;
+  if(node.type==="paragraph"){
+   const label=textOf(node).trim(),next=nodes[position+1];
+   if(exportMetadata.test(label)||sourceCaption.test(label)&&(next?.type==="table"||next?.type==="code"))continue;
+  }
   if(node.type==="heading"&&node.depth===3){current.subtopics.push(textOf(node));current.subtopicProse.push(0);current.appendix=false;}
   // The blocks after a chapter's prose (key conclusions, history, sources) repeat its sentences by design.
   if(node.type==="paragraph"&&node.children[0]?.type==="strong"){const label=textOf(node.children[0]).trim();if(APPENDIX.test(label))current.appendix=KEY_CONCLUSIONS.test(label)?"key":"other";}
@@ -54,7 +62,7 @@ export function wikiQualityMetrics(markdown:string,terms:readonly string[]=WIKI_
   const prose=collect(node);current.paragraphs.push(...prose.map(item=>item.text));
   // List items (key conclusions, history entries) restate the prose; only running prose counts as repeated.
   if(!current.appendix)current.prose.push(...prose.map(item=>item.text));
-  if(!current.appendix)current.sentences.push(...prose.filter(item=>!item.listed).flatMap(item=>sentences(item.text)));
+  if(!current.appendix&&node.type==="paragraph")current.sentences.push(...prose.filter(item=>!item.listed).flatMap(item=>sentences(item.text)));
   if(current.subtopics.length)current.subtopicProse[current.subtopicProse.length-1]+=prose.reduce((sum,item)=>sum+Array.from(normalize(item.text)).length,0);
   else if(node.type==="paragraph")current.leadParagraphs++;
  }

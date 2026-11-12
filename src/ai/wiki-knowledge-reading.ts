@@ -1,7 +1,7 @@
 import { preserveMergedWikiDecisions } from "./wiki-decision-coverage";
 import { retitleMisnamedChapters, routeOutOfReferences, routeWikiUnits } from "./wiki-unit-routing";
 import { withDiscussedProjects } from "./wiki-knowledge-units";
-import { withAnswerScope, withAnsweredOpenPoints, withSettledByAnswer, withAnsweredChoices, withDeclinedProposals, withSoundAnswers } from "./wiki-question-parse";
+import { withAnswerScope, withAnsweredOpenPoints, withSettledByAnswer, withAnsweredChoices, withDeclinedProposals, withTurnedDownRestatements, withSetAsideAlternatives, withSetAsideOffers, withSoundAnswers } from "./wiki-question-parse";
 import { stageMoveReplacements, withQuotedMoves } from "./wiki-stage-moves";
 import { scopedWikiDraft, statementsConflict, withoutOwnProjectAnswers, withUserAnswers, withUserRelations, wikiLedgerUnits, type WikiKnowledgeLedger } from "../shared/wiki-knowledge";
 import { explicitSwitches, gatherAcrossStages, gatherNamedItems, gatherPositioning, gatherTwins, gatherVersions, placeUnitsByKind } from "./wiki-knowledge-organize";
@@ -10,7 +10,9 @@ import { laterSettings } from "./wiki-later-settings";
 import { chooseGroupHomes } from "./wiki-knowledge-groups";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
 import { wikiUserChooses } from "../shared/wiki-user-choice";
+import { withUnsaidPlansOut } from "../shared/wiki-unsaid-plan";
 import { wikiSaidLater } from "../shared/wiki-sources";
+import { answeredTogether, explicitExclusions, withUserQuestionsAsked } from "./wiki-user-questions";
 
 /** One reversible interpretation for writing, reading and export. The source ledger and
  * the user's answers remain untouched; never store these deductions as user verdicts. */
@@ -27,7 +29,7 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
   // An answer confirming only an account of facts is the user's choice in its own words (withAnsweredChoices).
   // And a move the user's decision quotes, which extraction left out, is a decision of its own (withQuotedMoves).
   const report: Record<string, number> = {};
-  const source = withQuotedMoves(withAnsweredOpenPoints(withSettledByAnswer(withDeclinedProposals(withAnsweredChoices(withAnswerScope(withoutOwnProjectAnswers(withSoundAnswers(stored))))))), report);
+  const source = withQuotedMoves(withAnsweredOpenPoints(withSettledByAnswer(withSetAsideAlternatives(withSetAsideOffers(withTurnedDownRestatements(withDeclinedProposals(withAnsweredChoices(withAnswerScope(withoutOwnProjectAnswers(withSoundAnswers(withUserQuestionsAsked(withUnsaidPlansOut(stored), report))))))))))), report);
   const answered = withUserAnswers(withUserRelations(withDiscussedProjects(source)));
   const units = wikiLedgerUnits(answered), known = new Map(units.map(unit => [unit.id, unit]));
   const answeredIds = new Set((source.userAnswers ?? []).flatMap(answer => answer.unitIds));
@@ -46,7 +48,9 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
     report.compatible_relations = (report.compatible_relations ?? 0) + 1;
     return { ...relation, kind: "coexists" as const, status: "resolved" as const };
   }) } : undefined;
-  let organization = checked ? explicitSwitches(scopedWishes(gatherPositioning(gatherNamedItems(gatherVersions(gatherTwins(gatherAcrossStages(placeUnitsByKind(checked, known, report), known, report), known, report), known, report), known, report), known, report), known, report), known, report) : undefined;
+  // A later point ruling out what an earlier one proposed ("……而非青少年") replaces it.
+  const excluding = checked ? explicitExclusions(checked, known, report) : undefined;
+  let organization = excluding ? explicitSwitches(scopedWishes(gatherPositioning(gatherNamedItems(gatherVersions(gatherTwins(gatherAcrossStages(placeUnitsByKind(excluding, known, report), known, report), known, report), known, report), known, report), known, report), known, report), known, report) : undefined;
   if (organization) {
     // A setting given again later with another value: the earlier value is the earlier version (600～720px → 760~800px).
     // Not one the user answered about or decided.
@@ -57,8 +61,10 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
     // Named for what it holds first, so the plans routed next find the plan chapter.
     // A learning record's 学习路线 chapter is what it is about, not a project's misnamed plan.
     if (source.documentType !== "learning") organization = retitleMisnamedChapters(organization, known, report);
+    const unrouted = organization;
     organization = routeWikiUnits(organization, known, report);
     organization = routeOutOfReferences(organization, known, report);
+    organization = answeredTogether(unrouted, organization, source.userAnswers, report, source.decisions, known);
   }
   if (organization?.groups?.length) organization = { ...organization, groups: chooseGroupHomes(organization.groups, organization.subjects, units, organization.groups, report) };
   const ledger = { ...answered, ...(organization ? { organization } : {}), ...(source.draft ? { draft: scopedWikiDraft(source) } : {}) };

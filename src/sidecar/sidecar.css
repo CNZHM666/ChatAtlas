@@ -47,11 +47,14 @@ html,body,#root { height:100%; margin:0; }
 .sidecar-link-picker > label { display:flex; align-items:center; gap:7px; padding:5px 8px; border:1px solid var(--border); border-radius:7px; color:var(--muted); }
 .sidecar-link-picker input { width:100%; min-width:0; padding:0; background:transparent; border:0; outline:none; font-size:12px; }
 .sidecar-link-picker-list { max-height:220px; overflow:auto; overscroll-behavior:contain; margin-top:5px; }
-.sidecar-link-picker-list > button { display:flex; align-items:center; gap:8px; width:100%; padding:8px; border:0; text-align:left; font-size:12px; }
-.sidecar-link-picker-list > button:hover { background:var(--surface-muted); }
-.sidecar-link-picker-list > button > svg { flex:none; color:var(--muted); }
-.sidecar-link-picker-list > button > span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.sidecar-link-row { display:flex; align-items:center; }
+.sidecar-link-row > .sidecar-link-choose { display:flex; align-items:center; gap:8px; width:100%; padding:8px; border:0; text-align:left; font-size:12px; }
+.sidecar-link-row > button:hover:not(:disabled) { background:var(--surface-muted); }
+.sidecar-link-choose > svg { flex:none; color:var(--muted); }
+.sidecar-link-choose > span { flex:1; min-width:0; overflow-wrap:anywhere; }
 .sidecar-link-picker-list small { display:flex; align-items:center; gap:3px; flex:none; font-size:11px; }
+.sidecar-link-undo { flex:none; display:grid; place-items:center; width:28px; height:28px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--muted); }
+.sidecar-link-undo:disabled, .sidecar-link-undo[aria-disabled="true"] { opacity:.4; }
 .sidecar-link-picker > p { margin:10px 6px; color:var(--muted); font-size:12px; }
 .sidecar-current-bar .sidecar-current-title { margin-top:3px; gap:8px; }
 .sidecar-current-bar .sidecar-current-title > strong { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -575,7 +578,9 @@ html,body,#root { height:100%; margin:0; }
 .sidecar-project .memory-source-card .memory-source-more { display:block; width:100%; min-height:0; padding:6px 12px; border:0; border-top:1px solid var(--border); border-radius:0; background:transparent; color:var(--muted); font:inherit; font-size:11.5px; text-align:left; cursor:pointer; }
 .sidecar-project .memory-source-card .memory-source-more:hover { color:var(--text); }
 .memory-source-matches { display:grid; margin:0; padding:0 0 4px; list-style:none; }
-.sidecar-project .memory-source-matches button { display:block; width:100%; min-height:0; padding:6px 12px; border:0; border-radius:0; background:transparent; color:color-mix(in srgb, var(--text) 78%, var(--muted)); font:inherit; font-size:12px; line-height:1.55; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+.sidecar-project .memory-source-matches button { display:block; width:100%; min-height:0; padding:6px 12px; border:0; border-radius:0; background:transparent; color:color-mix(in srgb, var(--text) 78%, var(--muted)); font:inherit; font-size:12px; line-height:1.55; text-align:left; white-space:normal; cursor:pointer; }
+/* Two lines, wrapped anywhere: a button does not draw a one-line ellipsis, so a single nowrap line was cut at the edge. */
+.sidecar-project .memory-source-matches button > span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
 .sidecar-project .memory-source-matches button:hover { background:var(--surface-muted); color:var(--text); }
 :root[data-theme="dark"] .memory-source-card mark { background:color-mix(in srgb, #facc15 30%, transparent); }
 .memory-previous-turn { border-bottom:1px solid var(--border); padding:0 0 12px; margin-bottom:18px; }
@@ -653,6 +658,9 @@ html,body,#root { height:100%; margin:0; }
 .memory-knowledge-main p { margin:0; color:color-mix(in srgb, var(--text) 78%, var(--muted)); font-size:12.5px; line-height:1.6; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .sidecar-project .memory-knowledge-card .memory-knowledge-insert { position:absolute; top:8px; right:8px; display:grid; place-items:center; width:26px; height:26px; min-height:0; padding:0; border:0; border-radius:7px; background:transparent; color:var(--muted); cursor:pointer; }
 .sidecar-project .memory-knowledge-card .memory-knowledge-insert:hover { background:var(--surface-muted); color:var(--text); }
+.memory-knowledge-notice { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin-top:6px; }
+.sidecar-project .memory-knowledge-notice > button { min-height:0; padding:2px 5px; border:0; background:transparent; color:var(--accent); font:inherit; font-weight:600; cursor:pointer; }
+.sidecar-project .memory-knowledge-notice > button:hover { text-decoration:underline; }
 /* The single nudge back to the workspace. */
 .sidecar-pending-update { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:8px 0 0; padding:8px 10px; border-radius:8px; background:var(--accent-soft); color:var(--text); font-size:12px; line-height:1.5; }
 .sidecar-pending-update > span { min-width:0; overflow-wrap:anywhere; }
@@ -661,3 +669,64 @@ html,body,#root { height:100%; margin:0; }
 .sidecar-project-status > span { flex:1; min-width:0; }
 .sidecar-project-status > button { flex:none; display:grid; place-items:center; width:20px; height:20px; padding:0; border:0; border-radius:5px; background:transparent; color:var(--muted); cursor:pointer; }
 .sidecar-project-status > button:hover { color:var(--text); background:var(--surface-solid); }
+
+/* A search result read in the sidebar: header and actions stay put, the question turn scrolls between them. */
+/* The reading view takes the whole panel, over the knowledge results, the search box and the header. */
+.sidecar-reading { position:fixed; inset:0; z-index:80; display:flex; flex-direction:column; min-width:0; padding:12px 16px 10px; background:var(--page); color:var(--text); outline:none; animation:sidecar-reading-in .14s ease-out; }
+@keyframes sidecar-reading-in { from { opacity:0; transform:translateX(12px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce) { .sidecar-reading { animation:none; } }
+.sidecar-reading-head { display:grid; gap:3px; flex-shrink:0; padding:0 0 12px; border-bottom:1px solid var(--sidecar-divider); }
+.sidecar-reading-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+.sidecar-project .sidecar-reading-back { display:inline-flex; align-items:center; gap:4px; min-height:0; margin-left:-6px; padding:4px 8px 4px 6px; border:0; border-radius:7px; background:transparent; color:var(--muted); font:inherit; font-size:12px; cursor:pointer; }
+.sidecar-project .sidecar-reading-back:hover { background:var(--surface-muted); color:var(--text); }
+.sidecar-reading-matches { display:inline-flex; align-items:center; gap:2px; color:var(--muted); font-size:11.5px; font-variant-numeric:tabular-nums; }
+.sidecar-project .sidecar-reading-matches > button { display:grid; place-items:center; width:24px; height:24px; min-height:0; padding:0; border:0; border-radius:6px; background:transparent; color:var(--muted); cursor:pointer; }
+.sidecar-project .sidecar-reading-matches > button:hover:not(:disabled) { background:var(--surface-muted); color:var(--text); }
+.sidecar-project .sidecar-reading-matches > button:disabled { opacity:.35; cursor:default; }
+.sidecar-reading-head > strong { display:-webkit-box; overflow:hidden; font-size:15px; font-weight:650; line-height:1.45; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
+.sidecar-reading-head > small { color:var(--muted); font-size:11.5px; }
+.sidecar-reading-body { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; padding:16px 4px 24px 0; scrollbar-width:thin; font-size:14px; line-height:1.8; overflow-wrap:anywhere; }
+.sidecar-reading-body > article { margin:0 0 18px; }
+.sidecar-reading-body > article > small { display:block; margin-bottom:4px; color:var(--muted); font-size:11px; letter-spacing:.02em; }
+.sidecar-reading-body > article[data-role=user] { padding:9px 12px 10px; border-radius:10px; background:var(--surface-muted); }
+.sidecar-reading-match-label { color:color-mix(in srgb, #ca8a04 80%, var(--text)); }
+.sidecar-reading-content > :first-child { margin-top:0; }
+.sidecar-reading-content > :last-child { margin-bottom:0; }
+.sidecar-reading-content p, .sidecar-reading-content :is(ul,ol) { margin:7px 0; }
+.sidecar-reading-content :is(ul,ol) { padding-left:20px; }
+.sidecar-reading-content :is(h1,h2,h3,h4) { margin:14px 0 6px; font-size:14px; line-height:1.5; }
+.sidecar-reading-content pre { max-width:100%; margin:8px 0; padding:10px 12px; overflow:auto; border:1px solid var(--border); border-radius:8px; background:var(--surface-muted); font-size:12px; line-height:1.6; }
+/* A small copy button over the block's corner, shown on hover or focus: it took a row of its own in a narrow panel. */
+.sidecar-reading-content .reader-code-block.has-copy > pre { padding-top:10px; }
+.sidecar-reading-content .reader-code-block { position:relative; max-width:100%; }
+.sidecar-reading-content .reader-code-block pre code { font-family:ui-monospace,"Cascadia Mono",Consolas,monospace; white-space:pre; }
+.sidecar-project .sidecar-reading-content .reader-code-block > button { position:absolute; z-index:1; top:5px; right:5px; min-height:0; padding:1px 7px; border:1px solid var(--border); border-radius:5px; background:var(--surface-solid); color:var(--muted); font-size:11px; line-height:18px; opacity:0; transition:opacity .12s; }
+.sidecar-reading-content .reader-code-block:is(:hover,:focus-within) > button { opacity:1; }
+.sidecar-project .sidecar-reading-content .reader-code-block > button:hover { color:var(--text); }
+@media (hover:none) { .sidecar-reading-content .reader-code-block > button { opacity:1; } }
+.sidecar-reading-content :not(pre) > code { padding:1px 4px; border-radius:4px; background:var(--surface-muted); font-size:.92em; }
+.sidecar-reading-content table { display:block; max-width:100%; overflow:auto; border-collapse:collapse; font-size:12.5px; }
+.sidecar-reading-content :is(th,td) { padding:5px 8px; border:1px solid var(--border); white-space:nowrap; }
+.sidecar-reading-content :is(img,video) { max-width:100%; height:auto; }
+.sidecar-reading-content blockquote { margin:8px 0; padding-left:10px; border-left:3px solid var(--border); color:var(--muted); }
+.sidecar-reading-empty { margin:24px 0; color:var(--muted); font-size:12.5px; text-align:center; }
+::highlight(atlas-reading-match) { background-color:rgb(250 204 21 / .42); }
+:root[data-theme="dark"] ::highlight(atlas-reading-match) { background-color:rgb(250 204 21 / .3); }
+.sidecar-reading-foot { flex-shrink:0; padding:8px 0 4px; border-top:1px solid var(--sidecar-divider); }
+.sidecar-reading-turns { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-bottom:6px; }
+.sidecar-project .sidecar-reading-turns > button, .sidecar-project .sidecar-reading-actions > button { display:inline-flex; align-items:center; gap:4px; min-height:0; padding:5px 8px; border:0; border-radius:7px; background:transparent; color:var(--muted); font:inherit; font-size:12px; white-space:nowrap; cursor:pointer; }
+.sidecar-project .sidecar-reading-turns > button:hover:not(:disabled), .sidecar-project .sidecar-reading-actions > button:hover:not(:disabled) { background:var(--surface-muted); color:var(--text); }
+.sidecar-project .sidecar-reading-turns > button:disabled, .sidecar-project .sidecar-reading-actions > button:disabled { opacity:.35; cursor:default; }
+.sidecar-project .sidecar-reading-turns > .sidecar-reading-to-match { color:color-mix(in srgb, #ca8a04 80%, var(--text)); }
+.sidecar-reading-actions { display:flex; flex-wrap:wrap; gap:2px 4px; }
+.sidecar-reading-foot { position:relative; }
+/* What the last quote did floats over the actions: a line under them pushed the reading up and stayed. */
+.sidecar-reading-toast { position:absolute; left:0; right:0; bottom:calc(100% + 8px); z-index:2; display:flex; align-items:center; gap:8px; padding:8px 8px 8px 12px; border-radius:10px; background:color-mix(in srgb, var(--text) 88%, transparent); color:var(--page); font-size:12.5px; line-height:1.5; box-shadow:0 6px 20px rgb(0 0 0 / .16); animation:sidecar-toast-in .16s ease-out; }
+.sidecar-reading-toast[data-failed] { background:color-mix(in srgb, #b45309 92%, var(--text)); color:#fff; }
+.sidecar-reading-toast > span { flex:1; min-width:0; }
+.sidecar-project .sidecar-reading-toast > button { display:inline-flex; align-items:center; min-height:0; padding:3px 8px; border:0; border-radius:6px; background:transparent; color:inherit; font:inherit; font-weight:600; cursor:pointer; }
+.sidecar-project .sidecar-reading-toast > button:hover { background:rgb(255 255 255 / .16); }
+.sidecar-project .sidecar-reading-toast > .sidecar-reading-toast-close { padding:4px; font-weight:400; opacity:.8; }
+@keyframes sidecar-toast-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion:reduce) { .sidecar-reading-toast { animation:none; } }
+.sidecar-project .sidecar-reading-actions > button.is-selection { color:var(--accent); background:color-mix(in srgb, var(--accent) 9%, transparent); }

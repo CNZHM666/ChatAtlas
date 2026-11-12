@@ -1,5 +1,8 @@
 import { UNDECIDED } from "../shared/open-words";
+import { wikiMeasure } from "../shared/wiki-section-status";
+import { knowledgeTerms } from "../shared/knowledge-subject";
 import type { WikiAnswerAction, WikiKnowledgeLedger, WikiKnowledgeUnit, WikiScopeAnswer, WikiWritingQuestion } from "../shared/wiki-knowledge";
+import { wikiConfirmationCovers, wikiUnitConfirmationDetails } from "./wiki-confirmation-scope";
 
 /** Questions a model asks the user about the material, read from its answer: ids it was sent, answers from the actions
  * the ledger keeps, at least two answers each, nothing asked twice. Never throws: no questions is a valid answer.
@@ -58,12 +61,39 @@ export function labelContradicts(label: string, statement: string): boolean {
   return [...marks(label)].some(([kind, values]) => { const other = held.get(kind); return Boolean(other) && ![...values].some(value => other!.has(value)); });
 }
 const confirmedBy = (option: WikiWritingQuestion["options"][number]) => option.actions.flatMap(action => action.do === "confirm" || action.do === "both" ? action.units : []);
+
+/** Link the effective verdict to the action that set it. An answer's unitIds
+ * include other options, so they cannot establish confirmation by themselves. */
+export function wikiLocalConfirmation(stored: WikiKnowledgeLedger, reading: WikiKnowledgeLedger, unitId: string): "choice" | "verdict" | undefined {
+  const verdict = reading.decisions?.[unitId];
+  if (verdict?.verdict !== "confirmed") return;
+  const answer = (reading.userAnswers ?? []).find(answer => {
+    if (answer.at !== verdict.at) return false;
+    const option = reading.writingQuestions?.find(question => question.id === answer.questionId)?.options.find(option => option.id === answer.optionId);
+    return option && (unitId === `answer:${answer.questionId}:${option.id}` || confirmedBy(option).includes(unitId));
+  });
+  if (answer) return "choice";
+  if (stored.decisions?.[unitId]?.verdict === "confirmed" && stored.decisions[unitId].at === verdict.at) return "verdict";
+}
+/** A later answer on a broader question cannot turn an earlier selected
+ * option's unconfirmed details into an inferred rejection. */
+function selectedAnswerUnits(ledger: WikiKnowledgeLedger): Set<string> {
+  const questions = new Map(ledger.writingQuestions?.map(question => [question.id, question]));
+  return new Set((ledger.userAnswers ?? []).flatMap(answer => {
+    const chosen = questions.get(answer.questionId)?.options.find(option => option.id === answer.optionId);
+    return chosen ? confirmedBy(chosen) : [];
+  }));
+}
 const ownerKey = (name: string) => name.normalize("NFKC").toLocaleLowerCase().replace(/\s+/gu, "");
 
 /** A question as it can be put to the user: an owner answer naming the project itself does nothing (the project is
  * not another project), an answer contradicting the point it confirms goes, and a question left with one answer is
  * not asked: both its points said the same. undefined: not a question. */
-export function soundQuestion(question: WikiWritingQuestion, statementOf: (id: string) => string | undefined, project?: string): WikiWritingQuestion | undefined {
+export function soundQuestion(question: WikiWritingQuestion, statementOf: (id: string) => string | undefined, project?: string, unitOf?: (id: string) => WikiKnowledgeUnit | undefined): WikiWritingQuestion | undefined {
+  // Figures of the project said on different days ("日活只有25", "每天稳定在22人", "日活卡在40了") are its history, not two
+  // versions to choose from: asked "当前日活是25人、30人还是40人？", the answer turned one figure into a decision 〔已定〕 and
+  // rejected the others, which the chapters still told with their dates.
+  if (unitOf && question.unitIds.length >= 2 && question.unitIds.every(id => { const unit = unitOf(id); return Boolean(unit && wikiMeasure(unit)); })) return undefined;
   const own = project ? ownerKey(project) : "";
   const options = question.options.flatMap(option => {
     if (confirmedBy(option).some(id => { const statement = statementOf(id); return statement !== undefined && labelContradicts(option.label, statement); })) return [];
@@ -78,9 +108,9 @@ export function soundQuestion(question: WikiWritingQuestion, statementOf: (id: s
  * offered is not taken, and the decisions it made, unless changed since, are withdrawn. The stored ledger stays. */
 export function withSoundAnswers(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
   if (!ledger.writingQuestions?.length) return ledger;
-  const statements = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit.statement] as const)));
+  const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
   const project = ledger.organization?.projectName, sound = new Map<string, WikiWritingQuestion | undefined>();
-  for (const question of ledger.writingQuestions) sound.set(question.id, soundQuestion(question, id => statements.get(id), project));
+  for (const question of ledger.writingQuestions) sound.set(question.id, soundQuestion(question, id => units.get(id)?.statement, project, id => units.get(id)));
   if ([...sound].every(([id, question]) => question === ledger.writingQuestions!.find(item => item.id === id))) return ledger;
   const decisions = { ...ledger.decisions };
   const userAnswers = (ledger.userAnswers ?? []).filter(answer => {
@@ -112,12 +142,17 @@ export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeL
   if (!ledger.userAnswers?.length || !ledger.writingQuestions?.length) return ledger;
   const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
   const decisions = { ...ledger.decisions }, added = new Map<string, WikiKnowledgeUnit>();
-  for (const answer of ledger.userAnswers) {
+  for (const answer of [...ledger.userAnswers].sort((a, b) => b.at - a.at)) {
     const question: WikiWritingQuestion | undefined = (ledger.writingQuestions ?? []).find(item => item.id === answer.questionId);
     const option: WikiWritingQuestion["options"][number] | undefined = question?.options.find(item => item.id === answer.optionId);
     if (!question || !option) continue;
-    const confirmed = option.actions.flatMap(action => action.do === "confirm" ? action.units : []).flatMap(id => units.get(id) ?? []);
-    if (!confirmed.length || confirmed.some(unit => DECIDING.includes(unit.kind))) continue;
+    const confirmed = option.actions.flatMap(action => action.do === "confirm" ? action.units : []).flatMap(id => {
+      const unit = units.get(id), verdict = decisions[id];
+      return unit && (!verdict || verdict.verdict === "confirmed") ? [unit] : [];
+    });
+    const scoped = confirmed.some(unit => !decisions[unit.id] && answerLeavesDetailsOpen(unit, question, answer.answer));
+    if (!confirmed.length || confirmed.some(unit => DECIDING.includes(unit.kind) && (!scoped || decisions[unit.id]?.verdict === "confirmed"))) continue;
+    if (added.has(confirmed[0].id)) continue;
     for (const unit of confirmed) if (decisions[unit.id]?.verdict === "confirmed" && decisions[unit.id]?.at === answer.at) delete decisions[unit.id];
     const leftOpen = option.actions.flatMap(action => action.do === "open" ? action.units : []).flatMap(unitId => units.get(unitId) ?? []).filter(unit => LEFT_OPEN.test(unit.statement));
     for (const unit of leftOpen) if (decisions[unit.id]?.at === answer.at) decisions[unit.id] = { ...decisions[unit.id], verdict: "rejected" };
@@ -140,7 +175,7 @@ export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeL
     const about = question.about?.trim(), bare = !words && label.length <= 16 && about && !label.includes(about);
     const said = bare ? `${about}${/\p{Script=Han}/u.test(about!) ? "：" : ": "}${label}` : label, han = /\p{Script=Han}/u.test(said);
     const statement = /[.!?。！？]$/u.test(said) ? said : `${said}${han ? "。" : "."}`;
-    added.set(anchor.id, { ...anchor, id: answerId, statement, kind: "decision", details: [], adoption: { status: "user_decision" }, delivery: "unknown", about: undefined, relation: undefined,
+    added.set(anchor.id, { ...anchor, id: answerId, statement, kind: "decision", details: [], conditions: undefined, adoption: { status: "user_decision" }, delivery: "unknown", about: undefined, relation: undefined,
       evidence: { ...anchor.evidence, evidenceId: `${anchor.evidence.evidenceId}:${answerId}`, pasted: false, code: undefined } });
     decisions[answerId] = { verdict: "confirmed", at: answer.at };
   }
@@ -227,26 +262,134 @@ export function withAnsweredOpenPoints(ledger: WikiKnowledgeLedger): WikiKnowled
   return decisions ? { ...ledger, decisions } : ledger;
 }
 
-/** An answer confirms what it answers, for reading: "25分钟专注，5分钟休息" confirmed three points, one of them
- * "第一版默认专注25分钟，短休息5分钟，每4轮后休息15分钟", and the long break, never asked about, read as decided while the
- * chapter called it undecided. A confirmed point with a clause giving only numbers the question and answer never name is
- * left as it was, when another point the answer confirmed says no more than the answer. The stored ledger stays. */
+/** Version names ("V0.1") are not values. Compare clauses separately so a
+ * 25/5 choice does not approve the same plan's separate 15-minute break. */
+export function answerLeavesDetailsOpen(unit: WikiKnowledgeUnit, question: WikiWritingQuestion, answer: string) {
+  const details = wikiUnitConfirmationDetails(unit);
+  if (!details.length) return false;
+  const yes = /^(?:是|确认|同意|可以|采用|yes|confirm|approved?|agree)[。.!！]?$/iu.test(answer.trim()) && !/还是|或者|\b(?:or|versus|vs\.?)\b/iu.test(question.ask);
+  return !wikiConfirmationCovers(`${question.about} ${answer}${yes ? ` ${question.ask}` : ""}`, details);
+}
+
+/** Remove confirmation the answer assigned to an entire compound point when
+ * its specific numbers were never offered. withAnsweredChoices then records
+ * the user's actual choice if no narrower deciding unit represents it. */
 export function withAnswerScope(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
   if (!ledger.userAnswers?.length || !ledger.decisions) return ledger;
   const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
-  // Version names ("V0.1版本") are no values.
-  const numbers = (text: string) => text.replace(/\bv\d+(?:\.\d+)*/giu, "").match(/\d+(?:\.\d+)?/gu) ?? [];
+  let decisions: WikiKnowledgeLedger["decisions"] | undefined;
+  const reviewed = new Set<string>();
+  for (const answer of [...ledger.userAnswers].sort((a, b) => b.at - a.at)) {
+    const question = ledger.writingQuestions?.find(item => item.id === answer.questionId), chosen = question?.options.find(option => option.id === answer.optionId);
+    if (!question || !chosen) continue;
+    for (const id of chosen.actions.flatMap(action => action.do === "confirm" ? action.units : [])) {
+      if (reviewed.has(id)) continue;
+      reviewed.add(id);
+      const unit = units.get(id), verdict = ledger.decisions[id];
+      if (!unit || verdict?.verdict !== "confirmed" || verdict.wholeUnit && verdict.at >= answer.at
+        || !answerLeavesDetailsOpen(unit, question, answer.answer)) continue;
+      decisions ??= { ...ledger.decisions };
+      delete decisions[id];
+    }
+  }
+  return decisions ? { ...ledger, decisions } : ledger;
+}
+
+/** A named offer in a point the answer turned down: "一次性“30天AI守护计划”付费模式". */
+const NAMED_OFFER = /[“「"]([^”」"\n]{4,16})[”」"]/gu;
+const offerKey = (text: string) => text.normalize("NFKC").replace(/\s+/gu, "").replace(/ai/giu, "").toLowerCase();
+/** The suggestions built on what an answer turned down set aside with it, for reading: asked "初期采用一次性买断制还是订阅制？",
+ * the user chose 基础免费+高级AI服务订阅 over the one-off “30天AI守护计划”, and its prices (¥19.9 的 30 天守护计划), its
+ * paywall flow ("→ 付费解锁30天AI守护计划") and its comparison table still stood as current suggestions. A point of the
+ * assistant naming the offer the rejected point names, which neither the chosen answer nor what it confirms names, is
+ * an earlier option too. A point the user decided, or their own words, is left as it is. The stored ledger stays. */
+export function withSetAsideOffers(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  if (!ledger.userAnswers?.length || !ledger.decisions) return ledger;
+  const units = ledger.batches.flatMap(batch => batch.units), byId = new Map(units.map(unit => [unit.id, unit] as const));
+  const selected = selectedAnswerUnits(ledger);
   let decisions: WikiKnowledgeLedger["decisions"] | undefined;
   for (const answer of ledger.userAnswers) {
     const question = ledger.writingQuestions?.find(item => item.id === answer.questionId), chosen = question?.options.find(option => option.id === answer.optionId);
     if (!question || !chosen) continue;
-    const asked = new Set(numbers(`${question.about} ${question.ask} ${chosen.label}`));
-    const confirmed = chosen.actions.flatMap(action => action.do === "confirm" ? action.units : []).filter(id => ledger.decisions?.[id]?.verdict === "confirmed" && ledger.decisions[id].at === answer.at && units.has(id));
-    const beyond = (id: string) => units.get(id)!.statement.split(/[，,；;。]/u).some(clause => { const given = numbers(clause); return given.length > 0 && given.every(value => !asked.has(value)); });
-    const wider = confirmed.filter(beyond);
-    if (!wider.length || wider.length === confirmed.length) continue;
-    decisions ??= { ...ledger.decisions };
-    for (const id of wider) delete decisions[id];
+    const kept = offerKey(`${chosen.label} ${confirmedBy(chosen).map(id => byId.get(id)?.statement ?? "").join(" ")}`);
+    const rejected = chosen.actions.flatMap(action => action.do === "reject" ? action.units : []).filter(id => ledger.decisions?.[id]?.verdict === "rejected" && ledger.decisions[id].at === answer.at);
+    const offers = [...new Set(rejected.flatMap(id => [...(byId.get(id)?.statement ?? "").matchAll(NAMED_OFFER)].map(match => offerKey(match[1]))))].filter(key => key.length >= 4 && !kept.includes(key));
+    if (!offers.length) continue;
+    for (const unit of units) {
+      if (selected.has(unit.id) || ledger.decisions[unit.id] || decisions?.[unit.id] || unit.evidence.role !== "assistant" || unit.adoption.status === "user_decision" || unit.adoption.status === "user_adopted") continue;
+      if (offers.some(key => offerKey(unit.statement).includes(key))) (decisions ??= { ...ledger.decisions })[unit.id] = { verdict: "rejected", at: answer.at };
+    }
+  }
+  return decisions ? { ...ledger, decisions } : ledger;
+}
+
+/** Another way of doing what an answer decided, from the subject the answer's points sat in, set aside with the option
+ * the answer turned down, for reading: asked "首页……保留左侧布局……，还是……100% AI Agent驾驶舱？", the user kept the left
+ * layout, and "首页采用‘AI Agent指挥台+原数据与成长功能’的混合模式", which the question left out, still opened the
+ * technical chapter, unmarked. A suggestion (decision or plan, the assistant's, undecided) of the same subject as a
+ * point the answer rejected, naming what the question asks about, and nearer the rejected point than any it confirmed.
+ * The stored ledger stays. */
+const ALTERNATIVE_KINDS: Array<WikiKnowledgeUnit["kind"]> = ["decision", "plan"];
+export function withSetAsideAlternatives(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  if (!ledger.userAnswers?.length || !ledger.decisions || !ledger.organization) return ledger;
+  const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
+  const subjectOf = new Map(ledger.organization.subjects.flatMap(subject => subject.unitIds.map(id => [id, subject] as const)));
+  const selected = selectedAnswerUnits(ledger);
+  let decisions: WikiKnowledgeLedger["decisions"] | undefined;
+  for (const answer of ledger.userAnswers) {
+    const question = ledger.writingQuestions?.find(item => item.id === answer.questionId), chosen = question?.options.find(option => option.id === answer.optionId);
+    if (!question || !chosen) continue;
+    const confirmed = confirmedBy(chosen).flatMap(id => units.get(id) ?? []);
+    const rejected = chosen.actions.flatMap(action => action.do === "reject" ? action.units : []).filter(id => ledger.decisions?.[id]?.verdict === "rejected" && ledger.decisions[id].at === answer.at).flatMap(id => units.get(id) ?? []);
+    if (!confirmed.length || !rejected.length) continue;
+    const asked = knowledgeTerms(`${question.about} ${question.ask}`), shared = (a: WikiKnowledgeUnit, b: WikiKnowledgeUnit) => { const theirs = knowledgeTerms(b.statement); return [...knowledgeTerms(a.statement)].filter(term => theirs.has(term)).length; };
+    for (const old of rejected) for (const id of subjectOf.get(old.id)?.unitIds ?? []) {
+      const unit = units.get(id);
+      if (!unit || selected.has(id) || question.unitIds.includes(id) || ledger.decisions[id] || decisions?.[id] || unit.evidence.role !== "assistant" || !ALTERNATIVE_KINDS.includes(unit.kind) || ["user_decision", "user_adopted"].includes(unit.adoption.status)) continue;
+      if (![...knowledgeTerms(unit.statement)].some(term => asked.has(term))) continue;
+      const near = shared(unit, old);
+      if (near >= 2 && confirmed.every(other => shared(unit, other) < near)) (decisions ??= { ...ledger.decisions })[id] = { verdict: "rejected", at: answer.at };
+    }
+  }
+  return decisions ? { ...ledger, decisions } : ledger;
+}
+
+/** Content words two statements of one choice share, past which a point restates the one an answer turned down. */
+const RESTATES_TURNED_DOWN = 4;
+/** Points restating what an answer turned down, for reading: 「互助小组是系统自动分配且禁止手动创建，还是允许用户主动寻找战友？」
+ * answered 「保留手动寻找或创建入口」 turned down the two points the option named, while 「群组入口应从“寻找组织”改为展示自动
+ * 分配后的真实小组进度」, asked about in the same question, and 「用户开始计划后自动分配至守护小组」, under the same subject, still
+ * read as the plan. A point with no verdict of its own, asked about with a turned-down point or under its subject, sharing
+ * several of its words, is turned down with it. The stored ledger stays. */
+export function withTurnedDownRestatements(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  if (!ledger.decisions) return ledger;
+  const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
+  const subjectOf = new Map((ledger.organization?.subjects ?? []).flatMap(subject => subject.unitIds.map(id => [id, subject.id] as const)));
+  const selected = selectedAnswerUnits(ledger);
+  let decisions: WikiKnowledgeLedger["decisions"] | undefined;
+  // Each answer's refused points, and, for decisions whose answer is not kept (a regenerated ledger carries the decisions,
+  // not the questions), the points refused at one time: 「用户开始计划后自动分配至守护小组」 read as today's plan beside the
+  // refused 「由系统自动分配匿名小组，不再提供手动创建入口」 once the questions were gone.
+  const answered = new Set(ledger.userAnswers?.map(answer => answer.at) ?? []);
+  const unanswered = [...new Set(Object.values(ledger.decisions).filter(decision => decision.verdict === "rejected" && !answered.has(decision.at)).map(decision => decision.at))]
+    .map(at => ({ at, unitIds: Object.entries(ledger.decisions!).filter(([, decision]) => decision.verdict === "rejected" && decision.at === at).map(([id]) => id), asked: false }));
+  const turns = [...(ledger.userAnswers ?? []).map(answer => {
+    const question = ledger.writingQuestions?.find(item => item.id === answer.questionId);
+    return { at: answer.at, unitIds: answer.unitIds ?? question?.options.flatMap(option => option.actions.flatMap(action => action.units)) ?? [], asked: Boolean(answer.unitIds) };
+  }), ...unanswered];
+  for (const turn of turns) {
+    const refused = turn.unitIds.flatMap(id => ledger.decisions?.[id]?.verdict === "rejected" && ledger.decisions[id].at === turn.at && units.get(id) ? [units.get(id)!] : []);
+    if (!refused.length) continue;
+    const answer = { at: turn.at };
+    const asked = new Set(turn.asked ? turn.unitIds : []), places = new Set(refused.flatMap(unit => subjectOf.get(unit.id) ?? []));
+    const words = refused.map(unit => knowledgeTerms(unit.statement));
+    for (const unit of units.values()) {
+      // The chosen option may have confirmed only the core of this point.
+      // Removing an overbroad confirmation does not turn its details down.
+      if (selected.has(unit.id) || ledger.decisions[unit.id] || decisions?.[unit.id] || unit.evidence.role === "user" || !(asked.has(unit.id) || places.has(subjectOf.get(unit.id) ?? ""))) continue;
+      const own = knowledgeTerms(unit.statement);
+      if (words.some(other => [...own].filter(term => other.has(term)).length >= RESTATES_TURNED_DOWN)) (decisions ??= { ...ledger.decisions })[unit.id] = { verdict: "rejected", at: answer.at };
+    }
   }
   return decisions ? { ...ledger, decisions } : ledger;
 }

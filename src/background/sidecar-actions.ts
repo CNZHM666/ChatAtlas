@@ -32,7 +32,7 @@ export async function executeSidecarAction(message: SidecarAction, sender: chrom
     const frameConversation = new URL(sender.url!).searchParams.get("conversation") ?? "";
     if (!native&&frameConversation !== message.conversationId || !handoffPageMatches(tab.url, message.conversationId)) throw new Error("当前对话已切换，请重新打开侧栏。");
     if (typeof message.text !== "string" || !message.text.trim() || message.text.length > 1_000_000) throw new Error("交接内容不可用，请调整后重试。");
-    return chrome.tabs.sendMessage(tabId, { type: "ATLAS_FILL_COMPOSER", conversationId: message.conversationId, text: message.text } satisfies AtlasMessage);
+    return chrome.tabs.sendMessage(tabId, { type: "ATLAS_FILL_COMPOSER", conversationId: message.conversationId, text: message.text, ...(message.undo ? { undo: true } : {}) } satisfies AtlasMessage);
   }
   if (!isCurrentNativeConversation(tab.url, message.conversationId)) throw new Error("当前对话已切换，请重新打开侧栏。");
   if (!native&&new URL(sender.url!).searchParams.get("conversation") !== message.conversationId) throw new Error("侧栏与当前对话不一致，请重新打开。");

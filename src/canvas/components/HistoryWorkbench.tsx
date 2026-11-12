@@ -91,18 +91,21 @@ export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSou
   };
   return <div className="history-workbench">
     <form className="goal-composer is-simple history-composer" onSubmit={event => { event.preventDefault(); search(); }}>
-      {materials.length ? <div className="history-source-attachments" role="group" aria-label={zh ? "已选材料" : "Selected materials"}>
-        {materials.slice(0, allMaterials ? undefined : 4).map(({id, source}) => {
+      {materials.length ? <div className={`history-source-attachments${allMaterials ? " is-expanded" : ""}`} role="group" aria-label={zh ? "已选材料" : "Selected materials"}>
+        <div className="history-source-chips">{materials.slice(0, allMaterials ? undefined : 4).map(({id, source}) => {
           const title = source?.title || (zh ? "不可用的对话" : "Unavailable conversation");
           return <div className="history-source-attachment" key={id}>
-            <MessageSquare size={16} aria-hidden="true" /><span title={title}>{title}</span>
+            <MessageSquare size={13} aria-hidden="true" /><span title={title}>{title}</span>
             {!source || !isCurrentHydrationComplete(source) ? <small>{zh ? source ? "待同步" : "不可用" : source ? "Needs sync" : "Unavailable"}</small> : null}
-            <button type="button" disabled={!onSelectedIds} aria-label={zh ? `移除材料：${title}` : `Remove material: ${title}`} onClick={() => onSelectedIds?.(new Set([...selectedIds ?? []].filter(value => value !== id)))}><X size={13} /></button>
+            <button type="button" disabled={!onSelectedIds} aria-label={zh ? `移除材料：${title}` : `Remove material: ${title}`} onClick={() => onSelectedIds?.(new Set([...selectedIds ?? []].filter(value => value !== id)))}><X size={12} /></button>
           </div>;
-        })}
+        })}</div>
+        {/* The row's tools stay together at its end, on its first line even when every material is shown. */}
+        <div className="history-source-tools">
         {materials.length > 4 ? <button type="button" className="history-source-toggle" onClick={() => setAllMaterials(!allMaterials)}>{allMaterials ? zh ? "收起" : "Show less" : zh ? `+ ${materials.length - 4} 条` : `+ ${materials.length - 4} more`}</button> : null}
-        <button type="button" className="history-source-toggle" onClick={() => onSelectedIds?.(new Set())}>{zh ? "清空材料" : "Clear materials"}</button>
-        <button type="button" className="history-source-add" onClick={onSources} aria-label={zh ? "添加材料" : "Add materials"} title={zh ? "添加材料" : "Add materials"}><Plus size={16} /></button>
+        <button type="button" className="history-source-add" onClick={onSources} aria-label={zh ? "添加材料" : "Add materials"} title={zh ? "添加材料" : "Add materials"}><Plus size={14} /></button>
+        <button type="button" className="history-source-clear" aria-label={zh ? "清空材料" : "Clear materials"} title={zh ? "清空材料" : "Clear materials"} onClick={() => onSelectedIds?.(new Set())}>{zh ? "清空" : "Clear"}</button>
+        </div>
       </div> : null}
       <label><span className="sr-only">{zh ? "搜索或整理历史对话" : "Search or organize past conversations"}</span>
         <textarea ref={input} rows={2} maxLength={500} value={goal}

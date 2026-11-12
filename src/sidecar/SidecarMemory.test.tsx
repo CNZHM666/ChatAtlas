@@ -31,7 +31,7 @@ it("opens a search result in Reader without marking or bookmarking it", async ()
   vi.spyOn(memory,"searchMemory").mockResolvedValue({hits:[{id:messages[1].id,conversation:highlightSource,message:messages[1],excerpt:messages[1].content}],ai:false});
   render(<SidecarMemory conversations={[highlightSource]} conversationId={highlightSource.id} zh view="home" onView={vi.fn()} onOpen={open}/>);
   fireEvent.change(screen.getByRole("searchbox"),{target:{value:"方案"}});fireEvent.click(screen.getByRole("button",{name:"查找历史"}));
-  fireEvent.click(await screen.findByRole("button",{name:/^在 Reader 阅读：/u}));
+  fireEvent.click(await screen.findByRole("button",{name:/^在完整 Reader 中打开：/u}));
   expect(open).toHaveBeenCalledWith(highlightSource,messages[1],undefined,expect.objectContaining({hits:expect.arrayContaining([expect.objectContaining({messageId:messages[1].id})])}));
   expect(await db.get("discussionHighlights",id)).toMatchObject({title:"我的原有标题",category:"个人分类",hidden:true});
   expect(screen.queryByRole("button",{name:"快速预览"})).toBeNull();expect(await db.count("contextFavorites")).toBe(0);
@@ -42,10 +42,10 @@ it("keeps the search and its results when the open tab changes to the workbench 
   const props = { conversations: [highlightSource], zh: true, view: "home" as const, onView: vi.fn(), onOpen: open };
   const view = render(<SidecarMemory {...props} conversationId={highlightSource.id} />);
   fireEvent.change(screen.getByRole("searchbox"), { target: { value: "方案" } }); fireEvent.click(screen.getByRole("button", { name: "查找历史" }));
-  await screen.findByRole("button", { name: /^在原平台定位：/u });
+  await screen.findByRole("button", { name: /^在侧栏阅读：/u });
   // The workbench tab has no chat; another chat is a different one: neither clears what was found.
   view.rerender(<SidecarMemory {...props} conversationId="" />);
-  expect(screen.getByRole("searchbox")).toHaveValue("方案"); expect(screen.getByRole("button", { name: /^在原平台定位：/u })).toBeVisible();
+  expect(screen.getByRole("searchbox")).toHaveValue("方案"); expect(screen.getByRole("button", { name: /^在侧栏阅读：/u })).toBeVisible();
   view.rerender(<SidecarMemory {...props} conversationId="another-chat" />);
-  expect(screen.getByRole("searchbox")).toHaveValue("方案"); expect(screen.getByRole("button", { name: /^在原平台定位：/u })).toBeVisible();
+  expect(screen.getByRole("searchbox")).toHaveValue("方案"); expect(screen.getByRole("button", { name: /^在侧栏阅读：/u })).toBeVisible();
 });

@@ -1,15 +1,43 @@
-import {unified} from "unified";
-import remarkParse from "remark-parse";
 import type {FocusSection} from "./focus-session";
+import type {WikiClaim} from "./wiki-claims";
+import type {WikiKnowledgeOrganization} from "./wiki-knowledge";
+import {wikiDocumentBlocks} from "./wiki-document-blocks";
 import {wikiCoverageMatcher,wikiExplanatorySentenceCount} from "./wiki-cross-duplicates";
 
-const parser=unified().use(remarkParse);
 /** In-document chapter link target; the Reader opens the chapter, export prints the title. */
 export const WIKI_CHAPTER_LINK="#atlas-chapter-";
 /** Window event the Reader dispatches for an in-text chapter link; the workspace opens it. */
 export const WIKI_OPEN_CHAPTER_EVENT="atlas:open-chapter";
 const MIN_REPEAT=60;
-const claimIdentity=(claim:{quote:string;evidenceIds:string[]})=>JSON.stringify([claim.quote.normalize("NFKC").replace(/\s+/gu,""),[...claim.evidenceIds].sort()]);
+const MIN_SOURCED_REPEAT=20;
+const exactText=(text:string)=>text.normalize("NFKC").replace(/\*\*|__/gu,"").replace(/\s+/gu," ").trim();
+const claimIdentity=(claim:WikiClaim)=>JSON.stringify([
+ exactText(claim.text),claim.quote,[...claim.evidenceIds].sort(),[...claim.unitIds??[]].sort(),
+ claim.scope,claim.holder,claim.userDecided,claim.workStatus,claim.verification,claim.markOnly,claim.relation,
+]);
+const SCOPED=/\d|如果|假如|只有|仅|除非|否则|未|禁止|\b(?:if|unless|except|only|never|not|without)\b/iu;
+
+/** Unambiguous planned home of each point. Shared or unassigned units still
+ * use the first eligible chapter in reading order. */
+export function wikiUnitChapterHomes(organization:WikiKnowledgeOrganization|undefined){
+ const subjects=new Map(organization?.subjects.map(subject=>[subject.id,subject.unitIds]));
+ const homes=new Map<string,string>(),ambiguous=new Set<string>(),subjectChapters=new Map<string,Set<string>>();
+ for(const chapter of organization?.chapters??[]) for(const topic of chapter.subtopics) for(const subject of topic.subjectIds){
+  const owners=subjectChapters.get(subject)??new Set<string>();
+  owners.add(chapter.id);
+  subjectChapters.set(subject,owners);
+  for(const id of subjects.get(subject)??[]){
+   if(homes.has(id)&&homes.get(id)!==chapter.id)ambiguous.add(id);
+   homes.set(id,chapter.id);
+  }
+ }
+ for(const id of ambiguous)homes.delete(id);
+ for(const group of organization?.groups??[]){
+  const owners=subjectChapters.get(group.homeSubjectId);
+  if(owners?.size===1)for(const member of group.members)homes.set(member.unitId,[...owners][0]);
+ }
+ return homes;
+}
 
 const link=(chapter:Pick<FocusSection,"id"|"title">,zh:boolean)=>zh?`[「${chapter.title}」](${WIKI_CHAPTER_LINK}${encodeURIComponent(chapter.id)})`:`[“${chapter.title}”](${WIKI_CHAPTER_LINK}${encodeURIComponent(chapter.id)})`;
 
@@ -19,44 +47,45 @@ const link=(chapter:Pick<FocusSection,"id"|"title">,zh:boolean)=>zh?`[「${chapt
  * stays and one "see also" line closes it, so a pointer never stands in front of
  * text that is new. Saved text, personal chapters, lists, code, quotations and a
  * claim found nowhere else in this chapter are unchanged. */
-export function wikiChapterLinks(body:string,section:Pick<FocusSection,"id"|"claims"|"userEdited"|"origin">,chapters:Array<Pick<FocusSection,"id"|"title"|"body">&{claims?:FocusSection["claims"]}>,zh=true):string {
+export function wikiChapterLinks(body:string,section:Pick<FocusSection,"id"|"claims"|"userEdited"|"origin">,chapters:Array<Pick<FocusSection,"id"|"title"|"body"|"claims"|"userEdited"|"origin">>,zh=true,homes?:ReadonlyMap<string,string>):string {
  if(section.userEdited||section.origin)return body;
  const index=chapters.findIndex(chapter=>chapter.id===section.id);
- const earlier=chapters.slice(0,index<0?0:index).map(chapter=>({chapter,covers:wikiCoverageMatcher(chapter.body,.9)}));
- if(!earlier.length)return body;
- const nodes=parser.parse(body).children,text=(node:typeof nodes[number])=>body.slice(node.position!.start.offset!,node.position!.end.offset!);
- const claims=(section.claims??[]).flatMap(claim=>[claim.text,...claim.formulations??[]]).filter(Boolean);
+ if(index<0||chapters.length<2)return body;
+ const candidates=chapters.flatMap((chapter,at)=>chapter.id===section.id||chapter.userEdited||chapter.origin?[]:[{
+  chapter,at,blocks:wikiDocumentBlocks(chapter.body,chapter.claims),covers:wikiCoverageMatcher(chapter.body,.9),
+ }]);
+ const nodes=wikiDocumentBlocks(body,section.claims);
  const owner=new Map<number,Pick<FocusSection,"id"|"title">>();
  nodes.forEach((node,at)=>{
-  if(node.type!=="paragraph")return;
-  const value=text(node);
-  if(value.length<MIN_REPEAT||!wikiExplanatorySentenceCount(value))return;
-  // The line over a table or code block says whose it is: one run's "…; your later decision takes precedence: USD only"
-  // read as told in an earlier chapter, and the AI's milestone table stood without it.
-  const next=nodes[at+1];
-  if(node.children.length===1&&node.children[0].type==="emphasis"&&(next?.type==="table"||next?.type==="code"||next?.type==="paragraph"&&text(next).startsWith("|")))return;
-  const match=earlier.find(item=>item.covers(value)===1);
-  // A claim stated only here is protected unless the explaining chapter already
-  // carries the same claim (same original quote and evidence): then the pointer
-  // loses nothing citable.
-  const carried=(claim:string)=>Boolean(match&&(section.claims??[]).some(item=>[item.text,...item.formulations??[]].includes(claim)&&(match.chapter.claims??[]).some(other=>claimIdentity(other)===claimIdentity(item))));
-  if(claims.some(claim=>value.includes(claim)&&!nodes.some((other,i)=>i!==at&&text(other).includes(claim))&&!carried(claim)))return;
+  if(node.kind!=="paragraph"||node.standaloneLabel||node.text.length<(node.claims.length?MIN_SOURCED_REPEAT:MIN_REPEAT)||!wikiExplanatorySentenceCount(node.text))return;
+  const claimIds=node.claims.flatMap(claim=>claim.unitIds??[]);
+  const planned=claimIds.length?homes?.get(claimIds[0]):undefined;
+  const home=planned&&claimIds.every(id=>homes?.get(id)===planned)?planned:undefined;
+  if(home===section.id)return;
+  const literal=Boolean(homes)||node.claims.length>0||SCOPED.test(node.text);
+  const identity=new Set(node.claims.map(claimIdentity));
+  const equivalent=(other:typeof node)=>other.kind==="paragraph"&&!other.standaloneLabel
+   && exactText(node.text)===exactText(other.text) && identity.size===new Set(other.claims.map(claimIdentity)).size
+   && other.claims.every(claim=>identity.has(claimIdentity(claim)));
+  const eligible=candidates.filter(item=>home?item.chapter.id===home:item.at<index);
+  const match=eligible.find(item=>literal?item.blocks.some(equivalent):item.covers(node.text)===1&&item.blocks.some(other=>
+   other.kind==="paragraph"&&!other.claims.length&&!SCOPED.test(other.text)&&wikiCoverageMatcher(other.text,.9)(node.text)===1&&wikiCoverageMatcher(node.text,.9)(other.text)===1));
   if(match)owner.set(at,match.chapter);
  });
  if(!owner.size)return body;
  // Subsections: the nodes after each heading (the lead before the first heading is one too).
  const groups:number[][]=[[]];
- nodes.forEach((node,at)=>{if(node.type==="heading")groups.push([]);else groups.at(-1)!.push(at);});
+ nodes.forEach((node,at)=>{if(node.kind==="heading")groups.push([]);else groups.at(-1)!.push(at);});
  const edits:Array<{start:number;end:number;text:string}>=[];
  for(const group of groups){
   const owned=group.filter(at=>owner.has(at));if(!owned.length)continue;
   const chapters=[...new Map(owned.map(at=>[owner.get(at)!.id,owner.get(at)!])).values()];
-  const start=nodes[group[0]].position!.start.offset!,end=nodes[group.at(-1)!].position!.end.offset!;
+  const start=nodes[group[0]].start,end=nodes[group.at(-1)!].end;
   if(owned.length===group.length&&chapters.length===1){
    edits.push({start,end,text:zh?`> 这部分已在${link(chapters[0],zh)}中说明。`:`> Already explained in ${link(chapters[0],zh)}.`});
    continue;
   }
-  for(const at of owned)edits.push({start:nodes[at].position!.start.offset!,end:nodes[at].position!.end.offset!,text:""});
+  for(const at of owned)edits.push({start:nodes[at].start,end:nodes[at].end,text:""});
   const also=chapters.map(chapter=>link(chapter,zh)).join(zh?"、":", ");
   edits.push({start:end,end,text:zh?`\n\n> 相关内容另见${also}。`:`\n\n> See also ${also}.`});
  }

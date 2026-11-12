@@ -11,7 +11,7 @@ import type {AtlasMessage,CaptureCommandResponse,NavigationResponse} from "../sh
 import type {MessageSourceRange,ReaderSearchContext} from "../shared/message-location";
 import {getDatabase} from "../storage/db";
 import {listFocusSessions} from "../storage/focus-sessions";
-import {linkSidecarProject} from "../storage/sidecar-links";
+import {linkSidecarProject,unlinkSidecarProject} from "../storage/sidecar-links";
 import {savedSidecarProjects} from "./project-model";
 import {isCurrentHydrationComplete} from "../sync/import-state";
 import {observeMessageSearchEvents} from "../search/message-search-events";
@@ -99,11 +99,21 @@ export function SidecarProject({conversationId,conversationTitle="",zh,platformL
     } catch (failure) { if (alive.current && currentConversationId.current === conversationId) setError(failure instanceof Error ? failure.message : String(failure)); return false; }
     finally { sending.current = false; if (alive.current) setBusy(false); }
   };
+  // A link made by mistake is undone here while the project has not organized the conversation.
+  const unlink = async (item: FocusSession) => {
+    if (sending.current || !conversationId) return false;
+    sending.current = true; setBusy(true); setError(""); setStatus("");
+    try {
+      if (!await unlinkSidecarProject(item.id, conversationId)) return false;
+      if (alive.current && currentConversationId.current === conversationId) { if (selected === item.id) setSelected(undefined); setStatus(label(`已取消与「${item.title}」的关联`, `Unlinked from “${item.title}”`)); await refresh(); }
+      return true;
+    } finally { sending.current = false; if (alive.current) setBusy(false); }
+  };
   return <main className="sidecar-project" onKeyDown={event=>{if(event.key!=="Escape")return;if(view!=="home")setView("home");else if(parent!==window)parent.postMessage({type:"ATLAS_SIDECAR_COLLAPSE"},"https://chatgpt.com");}}>
     {conversationId?<section className="sidecar-current sidecar-current-bar" aria-label={label("当前对话", "Current conversation")}>
       <div className="sidecar-current-title"><MessageSquare size={16}/><div className="sidecar-current-copy">{current?<button className="sidecar-current-name" title={title} aria-label={label("阅读当前对话","Read current conversation")} onClick={()=>void open(current)}><strong>{title}</strong></button>:<strong title={title}>{title}</strong>}<small>{platformLabel||(current?platformName(current.platform,zh?"zh-CN":"en"):"")||(conversationId?"ChatGPT":label("未识别当前对话","No conversation detected"))}{conversationId?` · ${currentImported?label("已导入","Imported"):label("未同步","Not synced")}`:""}</small></div><button className={`sidecar-update-button${currentImported?" is-imported":""}`} aria-busy={busy} aria-label={busy?label("正在同步对话","Syncing conversation"):currentImported?label("更新对话","Update chat"):label("导入当前对话","Import this chat")} title={currentImported?label("更新对话","Update chat"):label("导入当前对话","Import this chat")} disabled={busy||!loaded||!conversationId} onClick={()=>void updateConversation()}>{currentImported?<RefreshCw size={15}/>:<Download size={15}/>}</button>{onToggleLanguage?<SidecarHeader zh={zh} onToggleLanguage={onToggleLanguage} showBrand={false}/>:null}</div>
       {pending&&project?<p className="sidecar-pending-update" role="status"><span>{pending.count<0?label(`已关联「${project.title}」，尚未整理进文档`,`Linked to "${project.title}", not organized yet`):label(`「${project.title}」有 ${pending.count} 条新消息未整理`,`"${project.title}" has ${pending.count} new messages to organize`)}</span><button type="button" className="sidecar-text-button" onClick={()=>void organize(pending.sessionId)}>{label("去整理","Organize")}</button></p>:null}
-      <div className="sidecar-project-association" hidden={!projects.length}><SidecarProjectLinker key={conversationId} zh={zh} projects={projects} linkedIds={related.map(item=>item.id)} selectedId={selected} disabled={busy||!loaded||!conversationId} onChoose={async item=>{if(isLinked(item)){setSelected(item.id);return true;}return link(item.id);}}/></div>
+      <div className="sidecar-project-association" hidden={!projects.length}><SidecarProjectLinker key={conversationId} zh={zh} projects={projects} linkedIds={related.map(item=>item.id)} organizedIds={related.filter(item=>item.sourceConversationIds.includes(conversationId)).map(item=>item.id)} onUnlink={unlink} selectedId={selected} disabled={busy||!loaded||!conversationId} onChoose={async item=>{if(isLinked(item)){setSelected(item.id);return true;}return link(item.id);}}/></div>
     </section>:null}
  <div className="sidecar-project-body">{!loaded?<p role="status">{label("读取本地知识…","Loading local knowledge…")}</p>:null}<SidecarMemory conversations={conversations} conversationId={conversationId} zh={zh} view={view} onView={setView} projects={projects} projectId={project?.id} canInsert={canInsert} onOpen={(source,message,range,search)=>void open(source,message,range,search)} projectConversationIds={project?[...new Set([...project.sourceConversationIds,...project.sidecarConversationIds??[]])]:[]} toolbarActions={!conversationId&&onToggleLanguage?<SidecarHeader zh={zh} onToggleLanguage={onToggleLanguage} showBrand={false}/>:undefined}/>{error?<p role="alert" className="sidecar-project-error">{error}</p>:null}{status?<p role="status" className="sidecar-project-status"><span>{status}</span><button type="button" aria-label={label("关闭提示","Dismiss")} onClick={()=>setStatus("")}><X size={14} aria-hidden="true"/></button></p>:null}</div><SidecarLibraryFooter zh={zh} count={conversations.filter(item=>isCurrentHydrationComplete(item)).length} onOpen={()=>void open()}/></main>;
 }

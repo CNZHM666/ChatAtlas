@@ -25,3 +25,24 @@ it("reads a decision after a leading mark, and neither an undecided point nor a 
   expect(wikiUserChooses("确定：第一版不做账号系统。存储方案先不定。")).toBe(true);
   expect(wikiUserChooses("存储方案和弹窗宽度我先不定，两个方案都留着。")).toBe(false);
 });
+
+it("reads a hedged line as a thought, not a decision", () => {
+  expect(wikiUserChooses("考虑将侧重点放在晚间高风险时段的守护上。")).toBe(false);
+  expect(wikiUserChooses("也许可以用番茄钟代替打卡。")).toBe(false);
+  expect(wikiUserChooses("建议首页只保留一个按钮。")).toBe(false);
+  expect(wikiUserChooses("可以先做小程序版本，App 以后再说。")).toBe(false);
+  expect(wikiUserChooses("Maybe we could use Stripe for payments.")).toBe(false);
+  expect(wikiUserChooses("I'm considering dropping the leaderboard.")).toBe(false);
+  expect(wikiUserChooses("We might keep the free tier for now.")).toBe(false);
+  // A refusal, a plain yes and a decision said beside a hedge still choose.
+  expect(wikiUserChooses("不可以显示排行榜。")).toBe(true);
+  expect(wikiUserChooses("我考虑了一下，决定只做微信小程序。")).toBe(true);
+  expect(wikiUserChooses("Decided: we use Stripe, maybe PayPal later.")).toBe(true);
+  expect(wikiUserChooses("不要排行榜。")).toBe(true);
+});
+
+it("reads 是不是 and a line ending in 吗 as a question", () => {
+  expect(wikiUserChooses("是不是小程序和戒色限制了上限，应该侧重点放到帮助青少年男性找回自信和自律的方向？这个方向竞争怎么样前景怎么样")).toBe(false);
+  expect(wikiUserChooses("首页应该只保留一个按钮吗")).toBe(false);
+  expect(wikiUserChooses("首页应该只保留一个按钮。")).toBe(true);
+});

@@ -1,6 +1,8 @@
+import { valuesDifferSaid } from "../shared/wiki-values-differ";
 import { wikiQuantityConflicts } from "../shared/wiki-quantities";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { wikiUnitDetails, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { sourceScopeConflict } from "./wiki-source-scope";
 
 const digits = (text: string) => text.replace(/^[ \t]*(?:[-*+]\s+)?\d{1,2}[.)、]\s*/gmu, "");
 const HAN_DIGITS: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
@@ -25,7 +27,14 @@ function lentBy(value: string, ofRange: boolean, text: string, units: WikiKnowle
   return segments.some(segment => (ofRange ? ranges(segment) : numbers(segment)).includes(value)
     && units.some(unit => { const own = unitClaimText(unit), mine = bareTerms(own); return (ofRange ? ranges(own) : numbers(own)).includes(value) && [...bareTerms(segment)].some(term => mine.has(term)); }));
 }
-export function claimSupported(text: string, units: WikiKnowledgeUnit[]): boolean {
+/** A day or span a figure is dated by, in brackets: （6月14日—7月7日）, (Jun 14–Jul 7). */
+const SAID_ON = /[（(]\s*\d{1,2}月\d{1,2}日(?:\s*[—–-]\s*\d{1,2}月\d{1,2}日)?\s*[）)]|[（(](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(?:\s*[–-]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2})?[）)]/gu;
+export function claimSupported(said: string, units: WikiKnowledgeUnit[]): boolean {
+  // The day a figure was said, added after it from its conversation ("每天稳定在22人（6月14日—7月7日）"): no unit states that
+  // day in its words, and its numbers read as unsourced. The user's report lost 〔你〕 for it.
+  const text = said.replace(SAID_ON, "");
+  if (sourceScopeConflict(text, units)) return false;
+  if (valuesDifferSaid(text, units.map(unit => [unitClaimText(unit), unit.evidence.quote].join(" ")))) return true;
   const terms = bareTerms(text);
   // A palette row ("Dark / #0F0F10 / #111112 / #151516 / #27272A") says its colours, which no word list holds: two of
   // them in the unit are the unit stating it.
@@ -54,12 +63,23 @@ export function claimSupported(text: string, units: WikiKnowledgeUnit[]): boolea
     && ranges(text).every(range => known.some(source => ranges(source).includes(range)) || lent(range, true));
 }
 
+/** A table row: supported whole, or cell by cell where every cell giving a value is: a row joining two points
+ * ("日活用户数 | 约30人（近期降至22人） | 其中15人为连续使用核心用户，占比约68%") shares too little with either read whole,
+ * and was reported as having no source. */
+export function rowSupported(cells: string[], units: WikiKnowledgeUnit[]): boolean {
+  const valued = cells.filter(cell => /\d/u.test(cell));
+  return claimSupported(cells.join("，"), units) || valued.length > 0 && valued.every(cell => claimSupported(cell, units));
+}
+
 /** Repair a stale binding only when one point in this chapter clearly states the
  * sentence. Ambiguous or absent support is left for review, never borrowed from
  * the preceding sentence or an unrelated project. */
 export function claimSourceUnits(text: string, listed: WikiKnowledgeUnit[], candidates: WikiKnowledgeUnit[]): WikiKnowledgeUnit[] {
   if (claimSupported(text, listed)) return listed;
   const terms = knowledgeTerms(text);
+  // A bare label (a table's "日活 (DAU)" cell) says no point of its own: re-bound, it took the mark of whichever later
+  // point named the same metric, and the earlier row's value read as that conversation's.
+  if (listed.length && !/\d/u.test(text) && terms.size <= 2) return listed;
   const owner = (unit: WikiKnowledgeUnit) => unit.about ? `${unit.about.role}:${unit.about.name}` : "self";
   const owners = new Set(listed.map(owner));
   const matches = candidates.filter(unit => owners.has(owner(unit)) && claimSupported(text, [unit])).map(unit => {

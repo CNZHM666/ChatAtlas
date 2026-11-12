@@ -51,7 +51,8 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   const sourceIds=new Set([...section.evidenceIds,...(section.claims??[]).flatMap(claim=>claim.evidenceIds)]);
   const sources=session.evidence.filter(ref=>sourceIds.has(ref.id));
   const location=review?section.origin==="user"?zh?"我的理解":"My understanding":section.kind==="proposal"?zh?"AI 建议":"AI proposal":section.kind==="open_question"?zh?"待确认":"Open question":zh?"复习章节":"Review chapter":wikiReadingLocation(section,zh);
-  const page=useMemo(()=>wikiDocument(projectKnowledgeReading(section,session).body,!section.userEdited&&!section.origin,session.evidence.filter(ref=>section.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt),section.claims?.flatMap(claim=>[claim.text,...claim.formulations??[]])),[section,session]),content=useRef<HTMLDivElement>(null);
+  const reading=useMemo(()=>projectKnowledgeReading(section,session),[section,session]);
+  const page=useMemo(()=>wikiDocument(reading.body,!section.userEdited&&!section.origin,session.evidence.filter(ref=>section.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt),reading.claims?.flatMap(claim=>[claim.text,...claim.formulations??[]])),[reading,section,session]),content=useRef<HTMLDivElement>(null);
   // Point-by-point evidence: each claim found in the prose gets a marker; the panel
   // steps through markers in reading order, then through claims with no position.
   const generated=!section.userEdited&&!section.origin;
@@ -61,11 +62,11 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   const points=useMemo(()=>{
    if(!generated||editor)return [];
    // One point per sentence and holder: a chapter saved with two claims on one sentence showed two 已定 marks after it.
-   const seen=new Set<string>(),claims=wikiEvidencePoints(section,session.evidence,zh).filter(point=>{const key=`${point.claim}\u0000${point.holder??""}`;if(seen.has(key))return false;seen.add(key);return true;});
+   const seen=new Set<string>(),claims=wikiEvidencePoints(reading,session.evidence,zh).filter(point=>{const key=`${point.claim}\u0000${point.holder??""}`;if(seen.has(key))return false;seen.add(key);return true;});
    // Chapters saved without claim records still get points, matched locally and labelled as approximate.
-   const prose=claims.length?claims:wikiApproximatePoints(section,session.evidence,projectKnowledgeReading(section,session).body,zh);
+   const prose=claims.length?claims:wikiApproximatePoints(reading,session.evidence,reading.body,zh);
    return [...prose,...historyPoints.points];
-  },[generated,editor,section,session,zh,historyPoints]);
+  },[generated,editor,reading,session,zh,historyPoints]);
   const {rootRef:articleRef,claimMarkers,ordered,open:openPoint,markerContext}=useEvidencePoints(points,onLocate,zh,[page,editor,section.wikiDiagram]);
   // Source marks (你, 资料) and the colour each mark tints its text with stay out of the prose until the reader turns
   // them on, checking included: the check highlights only the sentence it is on. 已定, 未定 and 此前 always show.

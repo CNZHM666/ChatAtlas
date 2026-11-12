@@ -1276,8 +1276,18 @@
 .chapter-phase > summary strong { flex: 1; font-weight: 500; }
 .chapter-phase > summary:hover { background: var(--surface-muted); }
 .chapter-phase > .conversation-outline-chapter { margin-left: 8px; }
-.source-update-notice { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 12px 16px; margin-bottom: 20px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface-solid); font-size: var(--text-sm); }
+/* As wide as the reading column under it (the overview, the ledger, a chapter: 720px), not the wider page around them. */
+.source-update-notice { box-sizing: border-box; width: 100%; max-width: 720px; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 12px 16px; margin-bottom: 20px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface-solid); font-size: var(--text-sm); }
 .source-update-notice strong { font-size: var(--text-base); }
+.source-update-notice.is-pending-project-sources { align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--accent) 6%, var(--surface-solid)); }
+.source-update-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.is-pending-project-sources > p { flex: 1; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; line-height: 1.5; }
+.is-pending-project-sources > p strong { font-size: var(--text-sm); font-weight: 600; color: var(--text); }
+.is-pending-project-sources > p span { font-size: var(--text-sm); color: var(--muted); }
+/* Tinted, not filled: white on the dark theme's light green read poorly. */
+.source-update-notice > .source-update-action { flex: none; padding: 5px 12px; border: 0; border-radius: 7px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-weight: 600; cursor: pointer; }
+.source-update-notice > .source-update-action:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.source-update-notice > .source-update-action:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
 .source-update-notice details { margin-top: 6px; color: var(--muted); }
 .source-update-notice summary { cursor: pointer; }
 .source-update-notice ul { padding: 0; list-style: none; display: grid; gap: 10px; }
@@ -2983,8 +2993,9 @@
 .workbench-sync-joined { color: var(--muted); font-size: var(--text-xs); }
 @media (max-width: 640px) { .workbench-sync-join { flex-wrap: wrap; } .workbench-sync-join select { flex: 1 1 100%; } }
 /* The claim the evidence panel shows, marked in the prose like a highlighter pen. */
-::highlight(atlas-claim) { background-color: rgba(250, 204, 21, .32); }
-:root[data-theme="dark"] ::highlight(atlas-claim) { background-color: rgba(250, 204, 21, .24); }
+/* Solid, not see-through: over a source colour (已定 green, 你 purple) a translucent yellow mixed into a third colour. */
+::highlight(atlas-claim) { background-color: #fde68a; color: #1c1917; }
+:root[data-theme="dark"] ::highlight(atlas-claim) { background-color: #facc15; color: #1c1917; }
 .wiki-claim-marker[data-claim-highlighted] { background: rgba(250, 204, 21, .45); }
 
 /* After jumping to a stance sentence: decide on it right there. */
@@ -3126,3 +3137,20 @@
 .chapter-text-editor > textarea { box-sizing: border-box; width: 100%; height: min(70vh, 720px); min-height: 280px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 14.5px; line-height: 1.8; resize: vertical; scroll-padding-block: 40px; }
 .chapter-text-editor > textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
 .chapter-text-editor > textarea::selection { background: color-mix(in srgb, #facc15 55%, transparent); }
+
+/* The editor's own bar, kept in view: undo and redo, revert, whether there is a draft, and leaving with or without it. */
+.chapter-text-editor-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 6px; padding: 8px 0; background: var(--page, var(--surface-solid)); border-bottom: 1px solid var(--border); }
+.focus-workspace .chapter-text-editor-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 30px; min-height: 0; margin: 0; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-solid); color: var(--text); font-size: 13px; }
+.focus-workspace .chapter-text-editor-bar > button:is(:first-child, :nth-child(2)) { width: 30px; padding: 0; }
+.focus-workspace .chapter-text-editor-bar button:disabled { opacity: .4; cursor: default; }
+.focus-workspace .chapter-text-editor-bar button:not(:disabled):hover { background: var(--surface-muted); }
+.focus-workspace .chapter-text-editor-bar .chapter-text-editor-revert { border-color: transparent; background: transparent; color: var(--muted); }
+.focus-workspace .chapter-text-editor-bar button.primary { border-color: var(--text); background: var(--text); color: var(--page, #fff); font-weight: 600; }
+.focus-workspace .chapter-text-editor-bar button.primary:not(:disabled):hover { background: var(--text); opacity: .88; }
+.chapter-text-editor-state { flex: 1; min-width: 0; margin-left: 4px; overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.chapter-text-editor-state.is-dirty::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 6px 1px 0; border-radius: 50%; background: #d97706; vertical-align: middle; }
+.chapter-text-editor-state.is-failed { color: #b91c1c; }
+.chapter-text-editor-confirm { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-size: 13px; white-space: nowrap; }
+.focus-workspace .chapter-text-editor-confirm button.is-danger { border-color: #dc2626; background: #dc2626; color: #fff; }
+.focus-workspace .chapter-text-editor-confirm button.is-danger:hover { background: #b91c1c; }
+@media (max-width: 600px) { .chapter-text-editor-bar { flex-wrap: wrap; } .chapter-text-editor-state { flex-basis: 100%; order: 9; margin: 0; } }

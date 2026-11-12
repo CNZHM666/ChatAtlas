@@ -4,7 +4,7 @@ import { buildConversationCapture } from "./capture-builder";
 import { WebChatAdapter } from "./web-chat-adapter";
 import { PageCapture } from "./page-capture";
 import {locateDiscussion} from "./locate-discussion";
-import {fillProjectComposer} from "./project-handoff";
+import {clearProjectComposer,fillProjectComposer} from "./project-handoff";
 import {webChatEntry} from "./web-chat-entry";
 import {readWebChatHistory} from "./web-chat-history";
 import {pageTheme,watchPageTheme} from "./page-theme";
@@ -39,7 +39,7 @@ if (site) {
     if(value.type==="ATLAS_PAGE_THEME"){reply({theme:pageTheme()});return false;}
     if(value.type==="ATLAS_PING"){reply({ready:enabled,conversation:adapter.detectConversation()});return false;}
     if(value.type==="ATLAS_WEB_HISTORY_PAGE"){reply(enabled?readWebChatHistory():{entries:[],scope:"loaded"});return false;}
-    if(value.type==="ATLAS_FILL_COMPOSER"){if(!enabled){reply({ok:false,reason:"unavailable"});return false;}void fillProjectComposer(value.text,value.conversationId,location.href,()=>adapter.composer()).then(reply).catch(()=>reply({ok:false,reason:"failed"}));return true;}
+    if(value.type==="ATLAS_FILL_COMPOSER"){if(!enabled){reply({ok:false,reason:"unavailable"});return false;}void (value.undo?clearProjectComposer(value.text,value.conversationId,location.href,()=>adapter.composer()):fillProjectComposer(value.text,value.conversationId,location.href,()=>adapter.composer())).then(reply).catch(()=>reply({ok:false,reason:"failed"}));return true;}
     if(value.type==="ATLAS_LOCATE_MESSAGE"){
       if(!enabled){reply({ok:false});return false;}
       void locateDiscussion(adapter,value.conversationId,value.identity).then(ok=>reply({ok})).catch(()=>reply({ok:false}));return true;

@@ -53,11 +53,18 @@ it("exports the knowledge ledger as its own JSON file when ticked, with no note 
 it("exports this project's generation record as a CSV when ticked",async()=>{
  const create=vi.fn().mockReturnValue("blob:fixture");vi.stubGlobal("URL",class extends URL{static createObjectURL=create;static revokeObjectURL=vi.fn();});
  const names:string[]=[];vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(function(this:HTMLAnchorElement){names.push(this.download);});
- const csv=await import("../project-analysis-csv");vi.spyOn(csv,"projectAnalysisCsv").mockResolvedValue("\uFEFFrun_id\r\nrun-1\r\n");
+ const terminate=vi.fn();
+ let receive: ((event: { data: { csv: string } }) => void) | undefined;
+ const post=vi.fn();
+ vi.stubGlobal("Worker",class{set onmessage(callback: typeof receive){receive=callback;} postMessage=post;terminate=terminate;});
  const session={...contextKnowledge().session,title:"AI电路生成平台",runId:"run-1"} as Parameters<typeof ProjectExportDialog>[0]["session"];
  render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
  fireEvent.click(screen.getByRole("checkbox",{name:/生成记录/}));
  fireEvent.click(screen.getByRole("button",{name:"导出"}));
+ expect(screen.getByText("正在准备生成记录…")).toBeInTheDocument();
+ expect(post).toHaveBeenCalledWith({runId:"run-1",sourceConversationIds:session.sourceConversationIds});
+ receive?.({data:{csv:"\uFEFFrun_id\r\nrun-1\r\n"}});
  await screen.findByText("文件和生成记录已导出");
  expect(names.some(name=>name.endsWith("-analysis.csv"))).toBe(true);
+ expect(terminate).toHaveBeenCalledOnce();
 });

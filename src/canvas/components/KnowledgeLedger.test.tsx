@@ -42,4 +42,7 @@ it("opens each point at its own words, so a second point of the same message mov
   fireEvent.click(screen.getByText("索引改放 IndexedDB。"));
   expect(onLocate.mock.calls.map(call => call[1].quote)).toEqual(["索引放在内存里。", "索引改放 IndexedDB。"]);
   expect(onLocate.mock.calls[1][1]).toMatchObject({ claim: "索引改放 IndexedDB。", mode: "view" });
+  // The point being checked stays marked; the one before it no longer is.
+  expect(screen.getByText("索引改放 IndexedDB。").closest("button")).toHaveAttribute("aria-current", "true");
+  expect(screen.getByText("索引放在内存里。").closest("button")).not.toHaveAttribute("aria-current");
 });

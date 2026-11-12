@@ -1,6 +1,6 @@
 import {expect,it} from "vitest";
 import {projectSession} from "../test/project-fixture";
-import {generateWikiOverview} from "./wiki-overview";
+import {generateWikiOverview,withoutUnreportedProgress} from "./wiki-overview";
 import {requestBudget} from "./request-policy";
 import {projectOverviewContent} from "../shared/project-overview";
 import {introductionPriority} from "../shared/project-introduction-text";
@@ -195,4 +195,10 @@ it("introduces the project by what the chapters say it is, though that sentence 
  await generateWikiOverview(current,model,signal);
  const positioning=JSON.parse(calls[0].prompt).facts.filter((fact:{kind:string})=>fact.kind==="positioning").map((fact:{text:string})=>fact.text);
  expect(positioning).toEqual([statement]);
+});
+
+it("drops work told as under way that no fact reports", () => {
+  expect(withoutUnreportedProgress("项目核心在于算法驱动的个性化守护，目前正推进首屏交互优化及黑白模式等功能落地。第一版不训练模型。")).toBe("项目核心在于算法驱动的个性化守护。第一版不训练模型。");
+  expect(withoutUnreportedProgress("目前正在开发急救流程。产品定位为守护系统。")).toBe("产品定位为守护系统。");
+  expect(withoutUnreportedProgress("产品定位为守护系统，正视用户的羞耻感。")).toBe("产品定位为守护系统，正视用户的羞耻感。");
 });

@@ -50,8 +50,8 @@ it("drops paragraphs an earlier chapter already explains and closes the subsecti
  const shared="Chrome MV3 Service Worker 可能在空闲后终止，内存中的状态会丢失，因此必须把索引数据持久化到 IndexedDB 并支持中断恢复。";
  const chapters=[{id:"a",title:"系统架构",body:`## 约束\n\n${shared}`},{id:"b",title:"设计约束",body:`## 安全\n\n${shared}\n\n${shared.replace("Chrome","浏览器 Chrome")}\n\n独有的说明：侧栏只覆盖已经导入的对话，没有索引的数据不能假装能被找到。`}];
  const linked=wikiChapterLinks(chapters[1].body,{id:"b",claims:[]},chapters);
- // The pointer never stands in front of the subsection's own, new explanation.
- expect(linked).toBe("## 安全\n\n独有的说明：侧栏只覆盖已经导入的对话，没有索引的数据不能假装能被找到。\n\n> 相关内容另见[「系统架构」](#atlas-chapter-a)。");
+ // Fold the exact copy and leave the reworded, ungrounded technical statement in place.
+ expect(linked).toBe(`## 安全\n\n${shared.replace("Chrome","浏览器 Chrome")}\n\n独有的说明：侧栏只覆盖已经导入的对话，没有索引的数据不能假装能被找到。\n\n> 相关内容另见[「系统架构」](#atlas-chapter-a)。`);
  expect(wikiChapterLinks(chapters[0].body,{id:"a",claims:[]},chapters)).toBe(chapters[0].body);
  expect(wikiChapterLinksAsText(linked)).toContain("> 相关内容另见「系统架构」。");
  // A subsection that only repeats one earlier chapter keeps its heading and becomes one pointer.
@@ -63,4 +63,11 @@ it("keeps structural bold labels while re-selecting emphasis",()=>{
  const body="## 规划\n\n**智能书签与混合检索**\n\n书签备注可以在全文检索中更容易匹配实际词汇，也能减少需要分析的长篇原文。\n\n**记忆层借鉴**。建议借鉴事实提取与去重机制，但不直接引入整个框架。";
  const result=readingEmphasisMarkdown(body,{sectioned:true});
  expect(result).toContain("**智能书签与混合检索**");expect(result).toContain("**记忆层借鉴**。");
+});
+
+it("leaves no empty block where a generated chapter copied a block's summary as a fence; a chapter edited by hand keeps its text",()=>{
+ const body="仓库首页列出最近的构建。\n\n```text, 2 lines\n```\n点击一行查看日志。\n\n*讨论中的原文代码 · AI 建议，未确认*\n\n```text\n构建 #12  通过\n构建 #11  失败\n```";
+ const shown=wikiReadingFormat(body,{});
+ expect(shown).not.toMatch(/```text, 2 lines|```\n```/u);expect(shown).toContain("点击一行查看日志。");expect(shown).toContain("构建 #12  通过");
+ expect(wikiReadingFormat(body,{userEdited:true})).toContain("```text, 2 lines");
 });

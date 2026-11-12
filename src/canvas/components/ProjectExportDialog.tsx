@@ -4,8 +4,8 @@ import type {FocusSession} from "../../shared/focus-session";
 import {wikiSections} from "../../shared/wiki-navigation";
 import {projectMatters} from "../../shared/project-matters";
 import {evolutionRecords} from "../../shared/product-evolution";
-import {projectDocument,projectLedgerFile,type ProjectExportFormat,type ProjectExportSelection} from "../../export/project-document";
-import {projectAnalysisCsv} from "../project-analysis-csv";
+import {projectAnalysisFilename,projectDocument,projectLedgerFile,type ProjectExportFormat,type ProjectExportSelection} from "../../export/project-document";
+import {projectAnalysisInBackground} from "../project-analysis-background";
 
 export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;zh:boolean;onClose:()=>void}){
  const l=(cn:string,en:string)=>zh?cn:en,root=useRef<HTMLDivElement>(null),wikiCheckbox=useRef<HTMLInputElement>(null);
@@ -22,13 +22,13 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
  const parts=Number(selection.overview)+selection.wikiIds.length+Number(selection.matters)+Number(selection.history),count=parts+Number(ledger&&hasLedger)+Number(analysis&&hasRun);
  useEffect(()=>{const previous=document.activeElement as HTMLElement|null;root.current?.querySelector<HTMLButtonElement>("button")?.focus();return()=>{if(previous?.isConnected)previous.focus({preventScroll:true});};},[]);
  const download=async()=>{
-  setError("");setStatus("");
+  setError("");setStatus("");setBusy(true);
   const save=(text:string,filename:string,mime:string)=>{const url=URL.createObjectURL(new Blob([text],{type:mime}));try{const a=document.createElement("a");a.href=url;a.download=filename;a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}};
   try{
    if(parts){const file=projectDocument(session,selection,format,zh);save(file.text,file.filename,file.mime);}
    if(ledger&&session.wikiKnowledge){const file=projectLedgerFile(session);save(file.text,file.filename,file.mime);}
    let missing=false;
-   if(analysis&&hasRun){setBusy(true);const csv=await projectAnalysisCsv(session);if(csv)save(csv,projectLedgerFile(session).filename.replace(/-ledger\.json$/u,"-analysis.csv"),"text/csv;charset=utf-8");else missing=true;}
+   if(analysis&&hasRun){const csv=await projectAnalysisInBackground(session);if(csv)save(csv,projectAnalysisFilename(session),"text/csv;charset=utf-8");else missing=true;}
    const done=[parts?l("文件","Files"):"",ledger&&hasLedger?l("账本","ledger"):"",analysis&&hasRun&&!missing?l("生成记录","generation record"):""].filter(Boolean);
    setStatus(missing&&!done.length?l("这个项目没有可导出的生成记录","This project has no generation record to export"):`${done.join(l("和"," and "))}${l("已导出"," exported")}${missing?l("；这个项目没有可导出的生成记录","; this project has no generation record"):""}`);
   }
@@ -55,6 +55,6 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
    </fieldset>
    <div className="project-export-options"><label className="project-export-format">{l("文件格式","File format")}<select value={format} onChange={event=>setFormat(event.target.value as ProjectExportFormat)}><option value="html">{l("网页（可打印 PDF）","HTML (print to PDF)")}</option><option value="md">Markdown</option><option value="txt">{l("纯文本","Plain text")}</option><option value="json">JSON</option></select></label><label className="project-export-source"><input type="checkbox" checked={selection.sources} onChange={event=>setSelection({...selection,sources:event.target.checked})}/>{l("附来源摘录","Include source excerpts")}</label></div>
   </div>
-  <footer><span className="project-export-status" data-state={error?"error":status?"success":undefined} role={error?"alert":"status"}>{error||status||l(`已选 ${count} 项`,`${count} selected`)}</span><button type="button" className="primary" disabled={!count||busy} onClick={()=>void download()}><Download size={16}/>{l("导出","Export")}</button></footer>
+  <footer><span className="project-export-status" data-state={error?"error":status?"success":undefined} role={error?"alert":"status"}>{error||status||(busy?l("正在准备生成记录…","Preparing generation record…"):l(`已选 ${count} 项`,`${count} selected`))}</span><button type="button" className="primary" disabled={!count||busy} onClick={()=>void download()}><Download size={16}/>{l("导出","Export")}</button></footer>
  </div></div>;
 }

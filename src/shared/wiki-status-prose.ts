@@ -24,6 +24,7 @@ const unwrapAdvice=(text:string)=>text
  * named, so the sentence reads as a plain recommendation. Never inside quotes or
  * code, never before 的/了 (a noun phrase or a reported act). */
 const REPEATED_ACTOR=/(^|[。！？；]\s*)AI\s?建议(?![的了]|发现|指出|认为|评估|起草|强调|分析|解释|警告|筛选|提出|对)(?![^。！？\n]{0,8}了)/gu;
+const USER_ACTOR=/(?:^|[。！？]\s*)(?:你曾提议|你提议|你的提议|你计划|你报告)|〔你(?:\s·[^〕]*)?〕/u;
 function thinActor(text:string,named:{value:boolean}):string {
  const quoted=[...text.matchAll(/“[^”]*”|「[^」]*」|`[^`\n]*`|"[^"\n]*"/gu)].map(match=>({start:match.index!,end:match.index!+match[0].length}));
  return text.replace(REPEATED_ACTOR,(match,before:string,at:number)=>{
@@ -59,6 +60,9 @@ export function wikiStatusProse(body:string,section:Pick<FocusSection,"claims"|"
   if(fenced||/^\s*(?:#|>|\|)/u.test(text)||!text.trim())return text;
   const marker=text.match(/^\s*(?:[-*+]|\d+[.)])\s+/u)?.[0]??"";
   const rest=line(text.slice(marker.length),claims,named);
+  // A line naming the user as its actor (「你曾提议：……〔你〕」) between two of the AI's: the next one names the AI again, or
+  // its bare 「建议：」 read as the user's.
+  if(USER_ACTOR.test(rest))named.value=false;
   return rest.trim()?marker+rest:"";
  });
  // A paragraph that was only a disclaimer leaves no blank run behind.

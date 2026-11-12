@@ -1,5 +1,6 @@
 /* Source selection stays at home; lookup and answers use the task workspace. */
-.review-home { overflow-y: auto; }
+/* The scrollbar keeps its room: collapsing a section once made it vanish, the page widened and everything shifted. */
+.review-home { overflow-y: auto; scrollbar-gutter: stable; }
 .review-home-inner { height: auto; min-height: 100%; }
 .review-home-content { flex: none; overflow: visible; }
 .history-workbench { min-width: 0; }
@@ -11,16 +12,30 @@
 .history-shortcuts button:disabled { opacity:.5; cursor:default; }
 .review-home .history-composer .history-selection-summary { display:inline-flex; align-items:center; gap:5px; min-height:36px; padding:4px 0; border:0; background:transparent; color:var(--muted); font-size:var(--text-xs); }
 .history-composer .history-selection-summary + .goal-composer-actions { margin-left:auto; }
-.history-source-attachments { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 14px; }
-.review-home .goal-composer.is-simple .history-source-attachments { margin:0; padding:16px 24px 0; }
-.review-home .goal-composer.is-simple .history-source-attachments + label { padding-top:14px; }
-.history-source-attachment { display:flex; align-items:center; gap:7px; max-width:100%; min-height:34px; padding:5px 7px 5px 10px; border:1px solid var(--border); border-radius:9px; background:var(--surface-muted); color:var(--text); }
+/* The chosen materials sit on one quiet row above the question: small pills that shorten their titles to stay on one
+   line, and the row's tools (the count of the rest, add, 清空) kept together at its right end. Shown in full, the pills
+   wrap beneath while the tools stay on the first line. */
+.history-source-attachments { display:flex; align-items:flex-start; gap:8px; min-width:0; margin:0 0 10px; }
+.review-home .goal-composer.is-simple .history-source-attachments { margin:0; padding:14px 16px 0 20px; }
+.review-home .goal-composer.is-simple .history-source-attachments + label { padding-top:8px; }
+.history-source-chips { display:flex; flex:1 1 auto; flex-wrap:nowrap; align-items:center; gap:6px; min-width:0; overflow:hidden; }
+.history-source-attachments.is-expanded .history-source-chips { flex-wrap:wrap; max-height:132px; overflow-y:auto; }
+.history-source-attachment { display:flex; align-items:center; gap:5px; flex:0 1 auto; min-width:72px; max-width:200px; height:28px; padding:0 3px 0 9px; border:1px solid var(--border); border-radius:999px; background:var(--surface-muted); color:var(--text); }
+.history-source-attachments.is-expanded .history-source-attachment { flex:0 0 auto; }
 .history-source-attachment > svg { flex:none; color:var(--muted); }
-.history-source-attachment > span { min-width:0; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-xs); }
-.history-source-attachment small { flex:none; font-size:var(--text-xs); }
-.review-home .history-composer .history-source-attachment button { display:inline-flex; align-items:center; justify-content:center; flex:none; width:24px; height:24px; min-height:0; border:0; border-radius:5px; padding:0; color:var(--muted); background:transparent; }
+.history-source-attachment > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12.5px; line-height:1; }
+.history-source-attachment small { flex:none; font-size:11px; color:var(--muted); }
+.review-home .history-composer .history-source-attachment button { display:inline-flex; align-items:center; justify-content:center; flex:none; width:20px; height:20px; min-height:0; border:0; border-radius:999px; padding:0; color:var(--muted); background:transparent; opacity:.7; }
+.review-home .history-composer .history-source-attachment:hover button { opacity:1; }
 .review-home .history-composer .history-source-attachment button:hover { color:var(--text); background:var(--border); }
-.review-home .history-composer :is(.history-source-toggle,.history-source-add) { display:inline-flex; align-items:center; justify-content:center; min-height:34px; border:1px solid var(--border); border-radius:9px; padding:5px 9px; background:transparent; color:var(--muted); font-size:var(--text-xs); }
+.history-source-tools { display:flex; flex:none; align-items:center; gap:2px; height:28px; }
+.review-home .history-composer .history-source-toggle { display:inline-flex; align-items:center; flex:none; height:26px; min-height:0; border:0; border-radius:999px; padding:0 8px; background:transparent; color:var(--muted); font-size:12.5px; white-space:nowrap; }
+.review-home .history-composer .history-source-add { display:inline-flex; align-items:center; justify-content:center; flex:none; width:26px; height:26px; min-height:0; padding:0; border:0; border-radius:999px; background:transparent; color:var(--muted); }
+.review-home .history-composer .history-source-clear { flex:none; height:26px; min-height:0; margin-left:4px; padding:0 4px 0 10px; border:0; border-left:1px solid var(--border); border-radius:0; background:transparent; color:var(--muted); font-size:12.5px; white-space:nowrap; }
+.review-home .history-composer :is(.history-source-toggle,.history-source-add):hover { color:var(--text); background:var(--surface-muted); }
+.review-home .history-composer .history-source-clear:hover { color:var(--danger, #dc2626); background:transparent; }
+/* With materials above it, the question needs no tall empty box. */
+.review-home .goal-composer.is-simple .history-source-attachments + label textarea { min-height:56px; }
 .history-workbench :is(.history-results,.history-discovery) { margin-top: 26px; }
 .history-workbench header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .history-workbench :is(h2,h3) { margin: 0; line-height: 1.5; }
@@ -53,7 +68,8 @@
 .conversation-answer-markdown pre code span { font-family: inherit; }
 .conversation-answer-markdown pre { min-width: 0; max-width: 100%; overflow-x: auto; }
 @media (max-width: 600px) {
-  .review-home .goal-composer.is-simple .history-source-attachments { padding:14px 18px 0; }
+  .review-home .goal-composer.is-simple .history-source-attachments { padding:12px 12px 0 16px; }
+  .history-source-attachment { max-width:150px; }
   .history-candidates > button { gap:10px; }
   .history-shortcuts { gap: 7px; }
   .history-shortcuts button { font-size: var(--text-xs); padding-inline: 10px; }
@@ -268,3 +284,29 @@
 .document-type-picker button { min-height: 28px; padding: 3px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: var(--text-xs); cursor: pointer; }
 .document-type-picker button[aria-checked="true"] { background: var(--surface-solid); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 8%); }
 .document-type-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The composer's footer as one quiet row of equal height: the document type as a small segmented switch, the model and
+   its settings joined in one control, and the start button. Nothing in it is louder than the start button. */
+.review-home .history-composer .goal-composer-footer { align-items:center; gap:10px; margin-top:12px; }
+.review-home .history-composer .document-type-picker { gap:0; padding:2px; border:0; border-radius:8px; background:var(--surface-muted); }
+.review-home .history-composer .document-type-picker button { min-height:28px; padding:0 11px; border-radius:6px; font-size:12.5px; line-height:28px; }
+.review-home .history-composer .document-type-picker button:not([aria-checked="true"]):hover { color:var(--text); }
+.review-home .history-composer .goal-composer-actions { gap:8px; }
+.review-home .history-composer .goal-composer-actions .ai-quick-select { flex-wrap:nowrap; align-items:center; gap:0; height:32px; border:1px solid var(--border); border-radius:8px; background:var(--surface-solid); }
+.review-home .history-composer .goal-composer-actions .ai-quick-select:hover { border-color:color-mix(in srgb, var(--text) 22%, var(--border)); }
+.review-home .history-composer .goal-composer-actions .ai-quick-select select { field-sizing:content; width:auto !important; max-width:220px; min-width:96px; height:30px; min-height:0; padding:0 22px 0 10px; border:0; border-radius:8px 0 0 8px; background-color:transparent; color:var(--text); font-size:12.5px; cursor:pointer; }
+.review-home .history-composer .goal-composer-actions .ai-quick-select select:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.review-home .history-composer .goal-composer-actions .ai-quick-manage { display:inline-flex; align-items:center; justify-content:center; width:32px; height:30px; min-height:0; padding:0; border:0; border-left:1px solid var(--border); border-radius:0 8px 8px 0; background:transparent; color:var(--muted); }
+.review-home .history-composer .goal-composer-actions .ai-quick-manage:hover { color:var(--text); background:var(--surface-muted); }
+.review-home .history-composer .goal-composer-actions .ai-quick-manage svg { width:15px; height:15px; }
+.review-home .history-composer .goal-composer-actions .ai-quick-connect { height:32px; min-height:0; padding:0 12px; font-size:12.5px; }
+.review-home .history-composer .goal-composer-actions .ai-quick-error { position:absolute; margin-top:38px; font-size:12px; }
+.review-home .history-composer .goal-composer-footer .primary { gap:6px; height:32px; min-height:0; padding:0 14px; border-radius:8px; font-size:13px; }
+.review-home .history-composer .goal-composer-footer .primary svg { width:14px; height:14px; }
+@media (max-width: 600px) {
+  .review-home .history-composer .goal-composer-footer { gap:8px; }
+  .review-home .history-composer .goal-composer-actions { flex:1 1 100%; }
+  .review-home .history-composer .goal-composer-actions .ai-quick-select { flex:1 1 auto; min-width:0; }
+  .review-home .history-composer .goal-composer-actions .ai-quick-select > label { flex:1; min-width:0; }
+  .review-home .history-composer .goal-composer-actions .ai-quick-select select { width:100% !important; max-width:none; }
+}

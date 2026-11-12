@@ -27,3 +27,16 @@ export function removeParagraph(body: string, text: string): string {
   const start = body.slice(Math.max(0, at - 2), at) === "\n\n" ? at - 2 : at;
   return body.slice(0, start) + body.slice(at + text.length);
 }
+
+/** A table row's cells, without its outer bars. */
+export const tableCells = (line: string) => line.trim().replace(/^\||\|$/gu, "").split("|").map(cell => cell.trim());
+/** text with the table rows that match taken out, while the table keeps a row; unchanged otherwise. */
+export function withoutTableRows(text: string, matches: (cells: string[]) => boolean): string {
+  const lines = text.split("\n"), head = lines.findIndex((line, at) => line.trim().startsWith("|") && /^\s*\|?\s*:?-{3,}/u.test(lines[at + 1] ?? ""));
+  if (head < 0) return text;
+  let end = head + 2;
+  while (end < lines.length && lines[end].trim().startsWith("|")) end++;
+  const rows = lines.slice(head + 2, end), kept = rows.filter(line => !matches(tableCells(line)));
+  if (kept.length === rows.length || !kept.length) return text;
+  return [...lines.slice(0, head + 2), ...kept, ...lines.slice(end)].join("\n");
+}

@@ -1,6 +1,7 @@
 import { currentBaseline, laterTakenUp } from "./wiki-knowledge-state";
 import { assistantRequest, exactDetail, personalDirection, similarStatements, wikiLedgerUnits, wikiUnitDetails, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
 import { knowledgeTerms } from "../shared/knowledge-subject";
+import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { englishText } from "../shared/wiki-sentences";
 
 /** Characters of English that say what one character of Chinese does: the length budgets below were set on Chinese
@@ -146,7 +147,11 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
     const key = `${unit.evidence.code!.language}\n${unit.evidence.code!.text}`;
     if (!blocks.has(key)) { blocks.add(key); carriers.add(unit.id); }
   }
-  const must = (unit: WikiKnowledgeUnit) => carriers.has(unit.id) || baseline.has(unit.id) || MUST.includes(statuses.get(unit.id)!) || unit.evidence.role === "user" && !unit.evidence.pasted
+  // What holds now of a thing the discussion settled more than once: left out, its earlier versions told the change
+  // without its end (顶部大卡改为今日状态 nowhere, 必须严格区分四个指标 written as replaced).
+  const holdsNow = new Set(wikiDecidedTopics(organization.topics, ledger.decisions).flatMap(topic => topic.current));
+  const must = (unit: WikiKnowledgeUnit) => carriers.has(unit.id) || baseline.has(unit.id) || holdsNow.has(unit.id) || MUST.includes(statuses.get(unit.id)!) || unit.evidence.role === "user" && !unit.evidence.pasted
+    || unit.kind === "plan" && statuses.get(unit.id) === "proposal" && Boolean(unit.conditions?.length)
     || (echoes.get(unit.id) ?? 0) >= ECHOED_MUST || RULE_KINDS.includes(unit.kind) && MEASURE.test(unit.statement) || wikiSafetyRule(unit) || [...RULE_KINDS, "plan"].includes(unit.kind) && COUNTED_TARGET.test(unit.statement) || IDENTIFIER.test(`${unit.statement} ${unit.details.join(" ")}`);
   const points: Point[] = [], grouped = new Set<string>(), elsewhere = new Map<string, Array<{ core: string; home: string }>>();
   for (const group of organization.groups ?? []) {

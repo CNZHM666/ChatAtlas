@@ -1,13 +1,16 @@
 import { LEAVES_OUT } from "../shared/negation";
 import { PHASE } from "../shared/stage-words";
 import { knowledgeTerms } from "../shared/knowledge-subject";
+import { wikiMeasure } from "../shared/wiki-section-status";
 import { personalDirection, statesCore, type WikiKnowledgeOrganization, type WikiKnowledgeUnit, type WikiSubject } from "../shared/wiki-knowledge";
 
-type Lane = "purpose" | "interface" | "technical" | "security" | "documentation" | "progress" | "stage" | "roadmap" | "quality" | "example";
+type Lane = "purpose" | "interface" | "technical" | "security" | "documentation" | "progress" | "stage" | "roadmap" | "quality" | "example" | "commerce" | "algorithm";
 const TITLE: Record<Lane, RegExp> = {
   purpose: /定位|用户价值|核心价值|positioning|purpose/iu,
   interface: /界面|交互|视觉|interface|interaction|visual/iu,
-  technical: /技术|架构|数据模型|机制|architecture|technical|data model/iu,
+  // Not 机制 alone: 干预机制 or 激励机制 is how a feature of the product works, not its technology. Read as technical,
+  // 干预机制 took the architecture points (「采用“半Agent”架构……」) ahead of 算法技术, under a 实现机制 of its own.
+  technical: /技术|架构|数据模型|实现机制|技术机制|系统机制|architecture|technical|data model/iu,
   security: /安全|security/iu,
   // 开发规划 is the development plan too: README rules sat under 采购 for want of a chapter called 开发计划.
   documentation: /文档|维护|开发(?:计划|规划)|发布|documentation|maintenance|development|release/iu,
@@ -18,12 +21,25 @@ const TITLE: Record<Lane, RegExp> = {
   quality: /测试|质量|验收|计划|规划|test|quality|validation|plan/iu,
   // Not 交互: a requirement example ("温度超过 28℃ 时蜂鸣器提醒") went to 界面设计与交互体验 for that word.
   example: /工作流|流程|示例|workflow|example/iu,
+  // Matched against a subtopic's title as well: "商业化模式" sits under 市场增长与竞品.
+  commerce: /商业化|商业模式|变现|定价|盈利|付费|收费|monetiz|pricing|business model|revenue/iu,
+  algorithm: /算法|algorithm/iu,
 };
-const LABEL: Record<Lane, [string, string]> = { purpose: ["产品定位", "Product purpose"], interface: ["界面交互", "Interface"], technical: ["实现机制", "Implementation"], security: ["安全边界", "Security"], documentation: ["文档与维护", "Documentation"], progress: ["实现进度", "Progress"], stage: ["阶段安排", "Stages"], roadmap: ["开发路线", "Roadmap"], quality: ["验证与验收", "Validation"], example: ["使用示例", "Usage examples"] };
+const LABEL: Record<Lane, [string, string]> = { purpose: ["产品定位", "Product purpose"], interface: ["界面交互", "Interface"], technical: ["实现机制", "Implementation"], security: ["安全边界", "Security"], documentation: ["文档与维护", "Documentation"], progress: ["实现进度", "Progress"], stage: ["阶段安排", "Stages"], roadmap: ["开发路线", "Roadmap"], quality: ["验证与验收", "Validation"], example: ["使用示例", "Usage examples"], commerce: ["商业模式与定价", "Business model and pricing"], algorithm: ["算法机制", "Algorithms"] };
+/** What is sold and how it is paid for: a store, a price, a membership. Its words in the label, and a sale in the point. */
+const COMMERCE_LABEL = /商店|商城|商品|定价|价格|付费|支付|收费|会员|订阅|SKU|商业化|变现|pricing|payment|monetiz|subscription|\bstore\b/iu;
+const COMMERCE_TEXT = /售卖|出售|销售|商品|SKU|付费|支付|价格|定价|会员|收费|订阅|变现|\d+\s*元|[¥￥]\s*\d|\b(?:sell|price|pay|paid|subscription)\b/iu;
+/** How the product scores, ranks or predicts: a formula, weights, a recommendation order. */
+const ALGORITHM_LABEL = /算法|评分公式|推荐(?:分数|排序|模型|逻辑|权重)|排序规则|权重|algorithm|scoring|ranking/iu;
 /** A statement laying out a whole roadmap: so many phases or milestones, or three or more of them named in order. */
 const ROADMAP_COUNT = /(?:分|按|共)\s*\d+\s*个\s*(?:Phase|阶段|里程碑|Milestone)/iu, ROADMAP_STEP = /(?:\bPhase\s*|\bM\s*|Milestone ?|第)\d+(?:\s*阶段)?/giu;
 /** A roadmap subtopic, and a subtopic for tests, within one chapter. */
 const ROADMAP_TOPIC = /路线图|里程碑|版本规划|开发路线|roadmap|milestone/iu, TESTS_TITLE = /测试|验收|质量|基准|test|quality|benchmark/iu;
+/** A point telling what other products are or have: one about a named product, or a fact filed as a competitor or an
+ * outside reference. */
+const otherProducts = (unit: WikiKnowledgeUnit) => ["fact", "report", "history"].includes(unit.kind) && (Boolean(unit.about) || /竞品|外部参考|对标|competitor|outside reference/iu.test(`${unit.subject} ${unit.facet ?? ""}`));
+/** A subtopic telling how the product is used: its users, retention, daily actives or other figures. */
+const MEASURE_TOPIC = /留存|日活|DAU|活跃|用户数|数据指标|运营现状|增长现状|瓶颈|retention|active users|metrics/iu;
 /** A screen of the product, named as one. */
 const SCREEN = /首页|落地页|欢迎页|Landing\s*Page|Welcome\s*Screen|Hero|页面布局|\bpage\b/iu;
 export const wikiRoadmap = (text: string) => ROADMAP_COUNT.test(text) || (text.match(ROADMAP_STEP) ?? []).length >= 3;
@@ -35,6 +51,9 @@ export function wikiUnitLane(unit: WikiKnowledgeUnit): Lane | undefined {
   if (/进度|实现状态|已完成功能|completed features|project status/iu.test(identity) && /已完成|已实现|已通过|完成了|\b(?:implemented|completed|passed)\b/iu.test(text)) return "progress";
   // Tests and delivery rules ("开发工作流要求 · 交付标准", "视觉识别测试规范", "End-to-End HardwareBench"), wherever they were filed.
   if (/基准测试|验收|质量保障|成功标准|交付标准|开发工作流|测试规范|测试集|测试用例|benchmark|acceptance|quality assurance|definition of done/iu.test(identity) || /[A-Z][a-z]*Bench\b/u.test(identity)) return "quality";
+  // A shop's own positioning ("商店策略 · 定位与原则": 定位为“守护工具箱”，售卖……SKU) is how the product earns, not what it
+  // is: read as purpose, one run's SKU rule stood under 核心价值主张, beside the same paid flow under 商业化模式.
+  if (COMMERCE_LABEL.test(identity) && COMMERCE_TEXT.test(text) && ["decision", "constraint", "plan", "mechanism"].includes(unit.kind)) return "commerce";
   if (TITLE.purpose.test(identity) && /定位|面向|服务|目标用户|核心价值|positioned|targets|built for/iu.test(text)) return "purpose";
   // A whole roadmap ("分 7 个 Phase：1.Foundation…", "开发按 7 个里程碑推进：静态 Canvas、……") belongs with the plans from any
   // chapter: one run told three of them, in the interface, architecture and plan chapters, none saying which holds.
@@ -52,8 +71,33 @@ export function wikiUnitLane(unit: WikiKnowledgeUnit): Lane | undefined {
   // A page's layout ("Landing Page · 视觉极简主义": 极简 Hero、输入框宽度) is the interface's.
   if (SCREEN.test(identity) && /布局|视觉|极简|宽度|居中|Hero|输入框|按钮|留白|layout/iu.test(`${unit.facet ?? ""} ${text}`) && ["constraint", "decision", "mechanism"].includes(unit.kind)) return "interface";
   // The code's layout ("项目目录结构": Next.js App Router, app/api, components) is the architecture's.
-  if (/数据模型|状态管理|密钥管理|存储|架构|目录结构|技术栈|tech stack|directory structure|schema|data model|key management|storage|architecture/iu.test(identity)
+  // A screen's structure ("首页架构": 首页设计为“AI Agent指挥台……”的混合模式) is the interface's, not the architecture's.
+  if (/数据模型|状态管理|密钥管理|存储|架构|目录结构|技术栈|tech stack|directory structure|schema|data model|key management|storage|architecture/iu.test(identity) && !SCREEN.test(identity)
     || unit.kind === "mechanism" && /\b(?:[a-z]+[A-Z]\w*|[A-Z]\w*(?:Adapter|Provider|Config|Store))\b/u.test(text)) return "technical";
+  // A scoring formula or its rules ("个性化推荐算法 · 评分公式": 推荐分数由……加权计算) belongs with the algorithms: one run
+  // put it, with its ActionEffectiveness structure, under 首页与导航设计.
+  if (ALGORITHM_LABEL.test(identity) && ["mechanism", "constraint", "decision"].includes(unit.kind)) return "algorithm";
+  // A score computed from weighted inputs (「系统根据时间、诱因、保护因素加权计算风险分数，分为……四个等级」) is the algorithm's,
+  // whatever its subject: filed under 挑战营冷启动处理, it stood in the interface chapter beside the formula told again there.
+  if (["mechanism", "constraint"].includes(unit.kind) && /加权计算|计算公式|评分公式|(?:风险|推荐)(?:分数|值|分)(?:由|按|的)?计算|计算(?:风险|推荐)(?:分数|值|分)/u.test(text)) return "algorithm";
+}
+
+/** The subtopic opened for what is sold, in the chapter already holding most of it that is not about the screens, the
+ * technology or the algorithms; the one opened before, once there is one. */
+function commerceHome(chapters: WikiKnowledgeOrganization["chapters"], subjects: WikiSubject[], units: Map<string, WikiKnowledgeUnit>, home: Map<string, WikiKnowledgeOrganization["chapters"][number]>): WikiSubject | undefined {
+  const opened = subjects.find(subject => subject.id.endsWith(":role:commerce"));
+  if (opened) return opened;
+  const count = (chapter: WikiKnowledgeOrganization["chapters"][number]) => chapter.subtopics.flatMap(topic => topic.subjectIds).flatMap(id => subjects.find(subject => subject.id === id)?.unitIds ?? []).filter(id => { const unit = units.get(id); return unit && wikiUnitLane(unit) === "commerce"; }).length;
+  const to = chapters.filter(chapter => !TITLE.interface.test(chapter.title) && !TITLE.technical.test(chapter.title) && !TITLE.algorithm.test(chapter.title) && !/相关项目|外部参考|参考项目|related project|outside reference/iu.test(chapter.title))
+    .map(chapter => ({ chapter, held: count(chapter) })).filter(item => item.held > 0).sort((a, b) => b.held - a.held)[0]?.chapter;
+  if (!to) return undefined;
+  const id = `${to.id}:role:commerce`, label = LABEL.commerce[/\p{Script=Han}/u.test(to.title) ? 0 : 1];
+  const target: WikiSubject = { id, name: label, aliases: [], unitIds: [] };
+  subjects.push(target); home.set(id, to);
+  // Ahead of the chapters' other products, after what the project does itself.
+  const others = to.subtopics.findIndex(topic => /竞品|竞争|参考|competitor|alternative/iu.test(topic.title));
+  to.subtopics.splice(others < 0 ? to.subtopics.length : others, 0, { title: label, subjectIds: [id] });
+  return target;
 }
 
 /** Route individual points by their own role. A broad subject or explanation
@@ -65,7 +109,15 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
   let moved = 0;
   for (const subject of [...subjects]) for (const id of [...subject.unitIds]) {
     const unit = units.get(id), from = home.get(subject.id), lane = unit && wikiUnitLane(unit);
-    if (!unit || unit.about || !from || !lane || /相关项目|外部参考|参考项目|related project|outside reference/iu.test(from.title)) continue;
+    const reference = unit && !REFERENCE_CHAPTER.test(from?.title ?? "") && otherProducts(unit) ? chapters.find(chapter => chapter !== from && REFERENCE_CHAPTER.test(chapter.title)) : undefined;
+    // What another product has (「海外存在DAWG和Stirden等……」, filed as 外部参考) joins the chapter on other products:
+    // under the positioning it stood among the project's own points, apart from the competitors it was told with.
+    if (unit && from && reference) {
+      const into = fittingTopic(reference, unit, subjects, units) ?? reference.subtopics.find(topic => !topic.subjectIds.some(other => other.includes(":role:")));
+      const target = into && subjects.find(other => other.id === into.subjectIds[0]);
+      if (target) { subject.unitIds = subject.unitIds.filter(other => other !== id); target.unitIds.push(id); moved++; report.references_routed = (report.references_routed ?? 0) + 1; continue; }
+    }
+    if (!unit || unit.about || !from || !lane && !wikiMeasure(unit) || /相关项目|外部参考|参考项目|related project|outside reference/iu.test(from.title)) continue;
     // A test plan under the chapter's roadmap ("1. Phase 1…… 4. Benchmark 建设…… 6. E2E Benchmark……") joins the chapter's
     // testing subtopic: listed as roadmap steps, test suites read as stages of the product.
     if (lane === "quality" && TITLE.quality.test(from.title)) {
@@ -74,7 +126,32 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
       if (topic && ROADMAP_TOPIC.test(topic.title) && into) { subject.unitIds = subject.unitIds.filter(other => other !== id); into.unitIds.push(id); moved++; }
       continue;
     }
+    // A figure of use (「当前日活稳定在22人，其中15人为连续使用的核心用户」, 「新增用户留存率为19%」) under the interface
+    // joins the subtopic that tells such figures: filed with the palette, it opened 「视觉风格定义」.
+    if (TITLE.interface.test(from.title) && wikiMeasure(unit)) {
+      const topic = from.subtopics.find(item => item.subjectIds.includes(subject.id));
+      const measures = (item: typeof from.subtopics[number]) => item.subjectIds.flatMap(other => subjects.find(each => each.id === other)?.unitIds ?? []).filter(other => { const told = units.get(other); return told ? wikiMeasure(told) : false; }).length;
+      const into = chapters.filter(chapter => !TITLE.interface.test(chapter.title)).flatMap(chapter => chapter.subtopics).filter(item => MEASURE_TOPIC.test(item.title) && !item.subjectIds.some(other => other.includes(":role:"))).sort((a, b) => measures(b) - measures(a))[0];
+      const target = topic && into && subjects.find(other => other.id === into.subjectIds[0]);
+      if (target) { subject.unitIds = subject.unitIds.filter(other => other !== id); target.unitIds.push(id); moved++; report.measures_routed = (report.measures_routed ?? 0) + 1; }
+      continue;
+    }
+    if (!lane) continue;
+    // What is sold and paid for joins the subtopic about earning, wherever that sits ("市场增长与竞品 › 商业化模式").
+    if (lane === "commerce") {
+      const topic = from.subtopics.find(item => item.subjectIds.includes(subject.id));
+      if (!topic || TITLE.commerce.test(topic.title) || TITLE.commerce.test(from.title)) continue;
+      const into = chapters.flatMap(chapter => chapter.subtopics).find(item => item !== topic && TITLE.commerce.test(item.title) && !item.subjectIds.some(other => other.includes(":role:")));
+      let target = into && subjects.find(other => other.id === into.subjectIds[0]);
+      // With no subtopic about earning, one is opened where most of what is sold already sits: the price plans and the
+      // free/paid split stood under 首页信息架构 and AI Agent引擎, the confirmed subscription under 获客与裂变策略.
+      if (!target) target = commerceHome(chapters, subjects, units, home);
+      if (target && target !== subject) { subject.unitIds = subject.unitIds.filter(other => other !== id); target.unitIds.push(id); moved++; report.commerce_routed = (report.commerce_routed ?? 0) + 1; }
+      continue;
+    }
     if (TITLE[lane].test(from.title) && !(lane === "technical" && TITLE.purpose.test(from.title))) continue;
+    // A formula told under the architecture is where the reader of the technology looks already.
+    if (lane === "algorithm" && TITLE.technical.test(from.title)) continue;
     // A stage told under a technical or validation chapter may be that part's own milestone (Milestone 3.1 · BYOK): only
     // the interface and positioning chapters never hold one.
     if (lane === "stage" && !TITLE.interface.test(from.title) && !TITLE.purpose.test(from.title)) continue;
@@ -176,7 +253,12 @@ const REFERENCE_CHAPTER = /竞品|参考项目|外部参考|开源参考|competi
 export function routeOutOfReferences(organization: WikiKnowledgeOrganization, units: Map<string, WikiKnowledgeUnit>, report: Record<string, number> = {}): WikiKnowledgeOrganization {
   const from = organization.chapters.find(chapter => REFERENCE_CHAPTER.test(chapter.title));
   if (!from) return organization;
-  const inFrom = new Set(from.subtopics.flatMap(topic => topic.subjectIds));
+  // A chapter only partly about other products ("增长运营与竞品参考") gives up points only from its comparison subtopics:
+  // read whole, its retention, community and roadmap sections were scattered over the interface and algorithm chapters.
+  const parts = from.title.split(/\s*(?:与|和|及|、|&|\band\b)\s*/iu).filter(Boolean);
+  const mixed = parts.some(part => !REFERENCE_CHAPTER.test(part) && !COMPARES.test(part));
+  const inFrom = new Set(from.subtopics.filter(topic => !mixed || REFERENCE_CHAPTER.test(topic.title) || COMPARES.test(topic.title)).flatMap(topic => topic.subjectIds));
+  if (!inFrom.size) return organization;
   const products = [...new Set([...units.values()].flatMap(unit => unit.about && unit.about.role !== "other_project" ? unit.about.name.split(/[,，、/]/u).map(name => name.trim()).filter(name => name.length >= 2) : []))];
   const subjects = organization.subjects.map(subject => ({ ...subject, unitIds: [...subject.unitIds] }));
   const chapterOf = new Map(organization.chapters.flatMap(chapter => chapter.subtopics.flatMap(topic => topic.subjectIds.map(id => [id, chapter] as const))));

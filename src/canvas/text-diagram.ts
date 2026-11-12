@@ -44,14 +44,38 @@ function padBarTo(line: string, column: number, skipLast: boolean): string {
  * Never delete content, guess missing borders or alter the stored/copyable source.
  * Writers often count Chinese or emoji as one column, so bars drift; side notes after the frame are kept and lined up. */
 function framedRows(lines: string[]): string[] {
-  const first = lines.findIndex(line => line.trim());
-  const last = lines.length - 1 - [...lines].reverse().findIndex(line => line.trim());
   const parts = lines.map(withNote);
-  if (!/^\s*┌[─┬]+┐$/u.test(parts[first]?.frame ?? "") || !/^\s*└[─┴]+┘$/u.test(parts[last]?.frame ?? "")) return lines;
-  const width = columns(parts[first].frame);
-  if (columns(parts[last].frame) !== width) return lines;
+  // The frame may sit below lines of its own (a greeting over a card): its top corner starts it, the bottom corner
+  // in the same column ends it.
+  // A top border may carry a title ("┌ 不导 · 今日守护      今晚风险：中 ┐"), drawn as wide as the writer guessed.
+  const first = parts.findIndex(part => /^\s*┌[─┬]+┐$/u.test(part.frame) || /^\s*┌[^┐│└┘]*[\p{L}\p{N}][^┐│└┘]*┐$/u.test(part.frame));
+  if (first < 0) return lines;
+  const indent = parts[first].frame.length - parts[first].frame.trimStart().length;
+  const last = parts.findIndex((part, index) => index > first && /^\s*└[─┴]+┘$/u.test(part.frame) && part.frame.length - part.frame.trimStart().length === indent);
+  if (last < 0) return lines;
+  let width = columns(parts[first].frame);
+  const titled = !/^\s*┌[─┬]+┐$/u.test(parts[first].frame);
+  if (!titled && columns(parts[last].frame) !== width) return lines;
   const inner = parts.slice(first + 1, last).map(part => part.frame);
   if (!inner.every(line => /^\s*[│├].*[│┤]$/u.test(line))) return lines;
+  // Text wider than a plain frame widens it: a writer counting each Chinese character as one column drew the top
+  // border half the width of the card's lines, and every right bar stood somewhere else.
+  const plain = (titled || /^\s*┌─+┐$/u.test(parts[first].frame)) && /^\s*└─+┘$/u.test(parts[last].frame) && inner.every(line => !/[├┤┬┴┼┌┐└┘]/u.test(line));
+  if (titled && !plain) return lines;
+  const needed = (line: string) => { const cells = diagramCells(line); return columns(text(cells.slice(0, -1)).trimEnd()) + 2; };
+  // A titled top is drawn as a line with its words set into it ("┌─ 不导 · 今日守护 ───── 今晚风险：中 ─┐"): written with
+  // spaces, it showed only its two corners, and the box had no top.
+  const pad = " ".repeat(indent);
+  const words = titled ? parts[first].frame.trim().slice(1, -1).split(/\s*─+\s*|\s{2,}/u).map(word => word.trim()).filter(Boolean) : [];
+  const head = `${pad}┌─ ${words[0] ?? ""}`, tail = words.length > 1 ? ` ${words.slice(1).join(" ─ ")} ─┐` : "┐";
+  const titledTop = (size: number) => `${head} ${"─".repeat(Math.max(1, size - columns(head) - 1 - columns(tail)))}${tail}`;
+  const widest = Math.max(...inner.map(needed), titled ? columns(titledTop(0)) : 0);
+  if (plain && (widest > width || titled) && widest - width <= 80) {
+    width = Math.max(width, widest);
+    const top = titled ? titledTop(width) : `${pad}┌${"─".repeat(width - indent - 2)}┐`;
+    parts[first] = { ...parts[first], frame: top };
+    parts[last] = { ...parts[last], frame: `${pad}└${"─".repeat(width - indent - 2)}┘` };
+  }
   // Boxes nested inside the frame (a button, a card): their right bars follow their own top corner.
   for (let row = 0; row < inner.length; row++) {
     const cells = diagramCells(inner[row]);

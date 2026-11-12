@@ -20,6 +20,11 @@ it("handles empty exports, repeated sentences within one chapter and custom term
  expect(wikiQualityMetrics("## 一\n\n甲乙。\n\n## 二\n\n甲乙。").cross_chapter_duplicates).toEqual([]);
  expect(result.cross_chapter_duplicates).toEqual([]);expect(result.repeated_terms).toEqual([{term:"重复",chapters:1,occurrences:2}]);
 });
+it("excludes repeated source captions, tables and locator sections from prose duplication",()=>{
+ const boilerplate="**本章来源对话**：ChatGPT 1、ChatGPT 2\n\n**界面草图**\n\n```text\nUI\n```\n\n| 方案 | 建议价格 |\n| --- | --- |\n| 体验 | 免费开放七天体验 |";
+ const markdown=`## 界面\n\n${boilerplate}\n\n## 商业化\n\n${boilerplate}\n\n## 引用定位\n\n本章来源对话：ChatGPT 1、ChatGPT 2`;
+ expect(wikiQualityMetrics(markdown)).toMatchObject({chapter_count:2,cross_chapter_duplicates:[]});
+});
 it("counts repeats within a chapter, surviving wire IDs, actorless proposals and double openings",()=>{
  const markdown=[
   "## 定位","",

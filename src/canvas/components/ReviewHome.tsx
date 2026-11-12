@@ -2,7 +2,8 @@ import {focusTaskResult} from "../../shared/focus-task-result";
 import {isPendingOrganizationTask} from "./task-sidebar-visibility";
 import {experimentalHomeGoal} from "../../shared/home-experiments";
 import { HomeRecentProjects } from "./HomeRecentProjects";
-import { ChevronDown, ArrowRight, History, Search, FolderGit2, Copy } from "lucide-react";
+import { ChevronDown, History, Search, FolderGit2, Copy, BookOpen, CircleAlert, RotateCw } from "lucide-react";
+import { relativeDay } from "../relative-day";
 import type { AtlasCanvas, Conversation, ImportJob, OrganizationRun } from "../../shared/types";
 import type { FocusMode, FocusScope, FocusSession } from "../../shared/focus-session";
 import { isCurrentHydrationComplete } from "../../sync/import-state";
@@ -17,13 +18,16 @@ import { linkConversationsToProject } from "../../storage/sidecar-links";
 import { usePreferences } from "../preferences";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { groupFocusVersions } from "../focus-versions";
-import { resumeContext, reviewLead } from "../review-presentation";
+import { resumeContext } from "../review-presentation";
 import { FocusVersions } from "./FocusVersions";
 import { useStableCallback } from "../hooks/useStableCallback";
 import type { FocusGenerationTask } from "../../storage/focus-generation-tasks";
 import { WorkspaceLayoutExample } from "./WorkspaceLayoutExample";
 import { platformName } from "../../shared/platforms";
 import "../workbench-home.css";
+
+/** How many rows 继续上次 shows before 查看全部. */
+const CONTINUE_SHOWN = 4;
 
 export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, experimentalActions = false, conversations, organizationRuns = [], focusTasks = [], onContinueTask, onTask, importJob, importSource, selectedIds, onSelectedIds, syncSelectedIds, onSyncSelectedIds, onPrioritize, draft, onDraft, recentReading, onStart, onContinueProject, resumeTask, onSession, onResume, onScan, onHydrate, onZip, onPause, onResumeImport, onConnect, onConfigureAI, onDiscover, onReadConversation, onProjectsChanged, sourcesRequest }: {
   /** Changes whenever the conversation list is asked for: the source materials open and come into view. */
@@ -97,26 +101,38 @@ export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, expe
     <div className="review-home-content-inner">
     <div ref={recentProjectsRef}><HomeRecentProjects sessions={sessions} zh={zh} onOpen={onSession}/></div>
     <div ref={sourcesRef} className="home-section home-materials">
-      <header><div className="home-materials-heading"><h2>{importFirst ? zh ? "导入你的第一批对话" : "Import your first conversations" : <button type="button" className="home-materials-toggle" aria-expanded={materialsExpanded} aria-controls="home-source-materials" onClick={() => setMaterialsOpen(!materialsExpanded)}><span>{zh ? "来源材料与同步" : "Source materials and sync"}</span><ChevronDown size={16} aria-hidden="true" /></button>}</h2>
-        {importFirst && conversations.length ? <p className="home-import-pending">{zh ? `已发现 ${conversations.length} 条对话，同步正文后即可全文搜索。` : `${conversations.length} conversations found. Sync messages to search the full text.`}</p> : !importFirst ? <p className="home-source-inventory">{zh ? `${conversations.length} 条对话${conversations.length>readyCount?` · ${conversations.length-readyCount} 条待同步`:""} · ${[...new Set(conversations.map(source=>platformName(source.platform,"zh-CN")))].join(" / ")}` : `${conversations.length} conversations`}</p> : null}
+      <header><div className="home-materials-heading"><h2>{importFirst ? zh ? "导入你的第一批对话" : "Import your first conversations" : <button type="button" className="home-materials-toggle" aria-expanded={materialsExpanded} aria-controls="home-source-materials" onClick={() => { const opening = !materialsExpanded; setMaterialsOpen(opening);
+        // Collapsing from inside the list would leave the reader below where the section now ends: bring its heading back.
+        if (!opening) window.setTimeout(() => { const box = sourcesRef.current; if (box && box.getBoundingClientRect().top < 0) box.scrollIntoView({ block: "start" }); }, 0); }}><span>{zh ? "来源材料与同步" : "Source materials and sync"}</span><ChevronDown size={16} aria-hidden="true" /></button>}</h2>
+        {importFirst && conversations.length ? <p className="home-import-pending">{zh ? `已发现 ${conversations.length} 条对话，同步正文后即可全文搜索。` : `${conversations.length} conversations found. Sync messages to search the full text.`}</p> : !importFirst ? <p className="home-source-inventory">{zh ? `${conversations.length} 条对话${conversations.length>readyCount?` · ${conversations.length-readyCount} 条待同步`:""}${materialsExpanded?"":` · ${[...new Set(conversations.map(source=>platformName(source.platform,"zh-CN")))].join(" / ")}`}` : `${conversations.length} conversations`}</p> : null}
       </div>{conversations.length?<span className="home-materials-actions" ref={setMaterialActions}/>:null}</header>
       {importFirst && conversations.length ? <div className="home-import-meta" ref={setMaterialStatus}/> : null}
       <div id="home-source-materials" className="workbench-materials"><WorkbenchSyncPanel controlsHost={conversations.length?materialActions:null} statusHost={importFirst&&conversations.length?materialStatus:null} initialImport={importFirst} expanded={materialsExpanded} compact conversations={conversations} importJob={importJob} importSource={importSource} selectedIds={syncSelectedIds ?? selectedIds} onSelectedIds={onSyncSelectedIds ?? onSelectedIds} onUseSources={ids => { onSelectedIds(new Set([...selectedIds, ...ids])); goalRef.current?.scrollIntoView?.({ block: "center" }); }} onPrioritize={onPrioritize} onScan={onScan} onHydrate={onHydrate} onZip={onZip} onPause={onPause} onResume={onResumeImport} onConnect={onConnect} sessions={sessions} onOpen={onReadConversation ? (id, message, sourceRange) => onReadConversation(id, message, sourceRange) : undefined} onOpenProject={onSession} onLinkProject={async (projectId, ids) => { await linkConversationsToProject(projectId, ids); await onProjectsChanged?.(); }} /></div>
       {importFirst ? <p className="home-import-privacy">{zh ? "对话保存在本地。" : "Conversations stay local."}</p> : null}
     </div>
     {importFirst ? <div className="home-value-path"><p>{zh ? "导入后，你可以：" : "After importing:"}</p><ul><li><Search size={18} /><span>{zh ? "找回历史讨论" : "Search past discussions"}</span></li><li><FolderGit2 size={18} /><span>{zh ? "整理为项目文档" : "Organize into a project"}</span></li><li><Copy size={18} /><span>{zh ? "导出文档，在其他 AI 中继续" : "Export and continue in another AI"}</span></li></ul></div> : null}
-    {showContinue ? <section ref={continuedRef} className="home-section"><h2>{zh ? "继续上次" : "Continue where you left off"}</h2><div className="reading-list">
-      {onContinueTask ? pendingFocus.map(task => <button key={task.id} onClick={() => onContinueTask(task)}><span><strong>{task.goal || (zh ? "未完成整理" : "Unfinished organization")}</strong><small>{task.needsConfirmation ? zh ? "需确认需求与来源" : "Confirm goal and sources" : task.status === "failed" ? zh ? "生成失败" : "Generation failed" : zh ? "生成未完成" : "Generation unfinished"}{task.progress ? ` · ${task.progress.processedSegments}/${task.progress.totalSegments} ${zh ? "段已处理" : "passages read"}` : ""}</small></span><span>{task.needsConfirmation ? zh ? "继续" : "Continue" : zh ? "继续生成" : "Continue generation"}</span></button>) : null}
-      {onTask ? pendingOrganization.map(run => <button key={run.id} onClick={() => onTask(run.id)}><span><strong>{run.title}</strong><small>{run.status === "waiting_review" ? zh ? "待确认预览" : "Preview ready" : run.status === "failed" ? zh ? "生成失败" : "Generation failed" : zh ? "生成未完成" : "Generation unfinished"}</small></span><span>{zh ? "继续" : "Continue"}</span></button>) : null}
-      {readingGroups.slice(0, allSessions ? undefined : 5).map((group) => {
-        const session = group.latest, resume = resumeContext(session);
-        const status = session.status === "preview" ? zh ? "待确认" : "Preview ready" : "";
-        const lastChapter = session.status !== "preview" && session.mode !== "work" ? resume.section?.title : undefined;
-        return <div key={group.id} className={`focus-result-group${group.versions.length > 1 ? " has-history" : ""}`}>
-          <button onClick={() => onSession(session.id)}><span><strong title={session.title}>{session.title}</strong><span className="resume-metadata"><small>{session.mode === "work" ? zh ? "项目方案" : "Project plan" : session.mode === "answer" ? zh ? "找回答案" : "Answer" : zh ? "历史内容" : "Saved content"}{session.mode === "work" ? ` · ${new Date(session.updatedAt).toLocaleDateString(zh ? "zh-CN" : "en")}` : ` · ${session.completedSectionIds.length}/${session.sections.length}`}</small>{status ? <small className="resume-state">{status}</small> : null}{lastChapter ? <small className="resume-last-chapter" title={`${zh ? "上次读到：" : "Last chapter: "}${lastChapter}`}>{lastChapter}</small> : null}</span>{resume.question || resume.note ? <small className="resume-question">{zh ? resume.question ? "留下的问题：" : "我的理解：" : resume.question ? "Open question: " : "My note: "}{reviewLead(resume.question ?? resume.note ?? "")}</small> : null}</span><span className="resume-action" aria-hidden="true"><ArrowRight size={16} /></span></button>
-          <FocusVersions compact group={group} zh={zh} onOpen={onSession} />
-        </div>;
-      })}{recentReading.slice(0, 3).map((entry) => <button key={`${entry.canvasId}:${entry.cardId}`} onClick={() => onResume(entry)}><span><strong>{entry.title}</strong><small>{entry.spaceTitle}</small></span><span aria-hidden="true">→</span></button>)}</div>{readingGroups.length > 5 ? <button onClick={() => setAllSessions(!allSessions)}>{allSessions ? zh ? "收起" : "Show less" : zh ? `查看全部 ${readingGroups.length} 条阅读` : `View all ${readingGroups.length} readings`}</button> : null}</section> : null}
+    {showContinue ? (() => {
+      // One list, unfinished work first: each row names what it is, where it stands, and when it was last touched.
+      const rows = [
+        ...(onContinueTask ? pendingFocus.map(task => { const failed = task.status === "failed"; return <div key={`task:${task.id}`} className="home-list-item"><button type="button" className="home-list-row is-task" onClick={() => onContinueTask(task)}>{failed ? <CircleAlert size={16} aria-hidden="true" /> : <RotateCw size={16} aria-hidden="true" />}<strong title={task.goal}>{task.goal || (zh ? "未完成整理" : "Unfinished organization")}</strong><span className="home-list-meta"><small className={`home-list-state ${failed ? "is-failed" : "is-pending"}`}>{task.needsConfirmation ? zh ? "需确认需求与来源" : "Confirm goal and sources" : failed ? zh ? "生成失败" : "Generation failed" : zh ? "生成未完成" : "Generation unfinished"}{task.progress ? ` · ${task.progress.processedSegments}/${task.progress.totalSegments}` : ""}</small><small className="home-list-action">{task.needsConfirmation ? zh ? "继续" : "Continue" : zh ? "继续生成" : "Continue generation"}</small></span></button></div>; }) : []),
+        ...(onTask ? pendingOrganization.map(run => { const failed = run.status === "failed"; return <div key={`run:${run.id}`} className="home-list-item"><button type="button" className="home-list-row is-task" onClick={() => onTask(run.id)}>{failed ? <CircleAlert size={16} aria-hidden="true" /> : <RotateCw size={16} aria-hidden="true" />}<strong title={run.title}>{run.title}</strong><span className="home-list-meta"><small className={`home-list-state ${failed ? "is-failed" : "is-pending"}`}>{run.status === "waiting_review" ? zh ? "待确认预览" : "Preview ready" : failed ? zh ? "生成失败" : "Generation failed" : zh ? "生成未完成" : "Generation unfinished"}</small><small className="home-list-action">{zh ? "继续" : "Continue"}</small></span></button></div>; }) : []),
+        ...readingGroups.map((group) => {
+          const session = group.latest, resume = resumeContext(session), updated = Math.max(...group.versions.map(item => item.updatedAt));
+          const lastChapter = session.status !== "preview" ? resume.section?.title : undefined, total = session.sections.length, done = session.completedSectionIds.length;
+          return <div key={group.id} className={`home-list-item${group.versions.length > 1 ? " has-history" : ""}`}>
+            <button type="button" className="home-list-row" onClick={() => onSession(session.id)}>{session.mode === "answer" ? <Search size={16} aria-hidden="true" /> : <BookOpen size={16} aria-hidden="true" />}<strong title={session.title}>{session.title}</strong>
+              <span className="home-list-meta">{lastChapter ? <small className="home-list-place" title={`${zh ? "上次读到：" : "Last chapter: "}${lastChapter}`}>{lastChapter}</small> : null}{session.status === "preview" ? <small className="home-list-state is-pending">{zh ? "待确认" : "Preview ready"}</small> : total ? <small className="home-list-progress" title={zh ? `已读 ${done}/${total} 章` : `${done} of ${total} chapters read`}><i aria-hidden="true"><span style={{ width: `${Math.round(done / total * 100)}%` }} /></i>{done}/{total}</small> : null}<small className="home-list-time" title={new Date(updated).toLocaleString(zh ? "zh-CN" : "en")}>{relativeDay(updated, zh)}</small></span></button>
+            <FocusVersions compact group={group} zh={zh} onOpen={onSession} />
+          </div>;
+        }),
+        ...recentReading.slice(0, 3).map((entry) => <div key={`card:${entry.canvasId}:${entry.cardId}`} className="home-list-item"><button type="button" className="home-list-row" onClick={() => onResume(entry)}><BookOpen size={16} aria-hidden="true" /><strong title={entry.title}>{entry.title}</strong><span className="home-list-meta"><small className="home-list-place">{entry.spaceTitle}</small></span></button></div>),
+      ];
+      return <section ref={continuedRef} className="home-section home-continue">
+        <header className="home-list-header"><h2>{zh ? "继续上次" : "Continue where you left off"}</h2><span className="home-list-count">{rows.length}</span>
+          {rows.length > CONTINUE_SHOWN ? <button type="button" className="home-list-toggle" onClick={() => setAllSessions(!allSessions)}>{allSessions ? zh ? "收起" : "Show less" : zh ? `查看全部 ${rows.length} 条` : `View all ${rows.length}`}</button> : null}</header>
+        <div className={`home-list${allSessions ? " is-all" : ""}`}>{allSessions ? rows : rows.slice(0, CONTINUE_SHOWN)}</div>
+      </section>;
+    })() : null}
     </div>
     </div>
   </div></main>{layoutExample ? <WorkspaceLayoutExample zh={zh} onClose={() => setLayoutExample(false)} /> : null}</>;

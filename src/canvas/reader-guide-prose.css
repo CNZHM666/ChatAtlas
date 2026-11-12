@@ -82,3 +82,22 @@
 .reader-guide-prose .wiki-recall[open] > summary small { visibility: hidden; }
 .reader-guide-prose .wiki-recall-answer { padding: 0 12px 8px; border-top: 1px solid var(--border); }
 .reader-guide-prose .wiki-recall-answer > p { margin: 8px 0 0; }
+
+/* Caption over a block from the discussion: what it is, its section, whose it is — one header bar joined to the block. */
+/* The seam between the bar and its block is pinned: chapter views set paragraph and block margins with longer selectors
+   (:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose > p) that split the two apart. */
+.conversation-answer-markdown.conversation-answer-markdown p:has(> .wiki-block-caption) { margin-top: 22px; margin-bottom: 0 !important; }
+.wiki-block-caption { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 5px 12px; border: 1px solid var(--border); border-bottom: 0; border-radius: 10px 10px 0 0; background: var(--surface-muted); font-style: normal; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.wiki-block-caption-kind { font-weight: 600; }
+.wiki-block-caption-place { color: var(--muted); }
+.wiki-block-caption-place::before { content: ""; display: inline-block; width: 3px; height: 3px; margin: 0 8px 2px 0; border-radius: 50%; background: currentColor; vertical-align: middle; opacity: .6; }
+.wiki-block-caption-whose { margin-left: auto; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.wiki-block-caption-whose.is-ai { background: color-mix(in srgb, var(--muted) 14%, transparent); color: var(--muted); }
+.wiki-block-caption-whose.is-mine { background: color-mix(in srgb, #16a34a 14%, transparent); color: #15803d; }
+.wiki-block-caption-whose.is-old { background: color-mix(in srgb, var(--muted) 10%, transparent); color: var(--muted); text-decoration: line-through; }
+.wiki-block-caption-note { flex-basis: 100%; color: var(--accent); font-size: 12px; }
+.conversation-answer-markdown.conversation-answer-markdown p:has(> .wiki-block-caption) + :is(pre, .reader-code-block, .reader-table-scroll, .reader-ui-preview) { margin-top: 0 !important; border-top-left-radius: 0; border-top-right-radius: 0; }
+.conversation-answer-markdown.conversation-answer-markdown p:has(> .wiki-block-caption) + .reader-code-block > pre { margin-top: 0 !important; border-top-left-radius: 0; border-top-right-radius: 0; }
+@media (prefers-color-scheme: dark) { .wiki-block-caption-whose.is-mine { color: #4ade80; } }
+/* A table has no frame for a bar to join: over one the caption is a small label instead. */
+.conversation-answer-markdown p:has(> .wiki-block-caption):has(+ .reader-table-scroll) .wiki-block-caption { padding: 0 0 6px; border: 0; border-radius: 0; background: transparent; }

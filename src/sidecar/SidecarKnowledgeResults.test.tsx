@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SidecarKnowledgeResults } from "./SidecarKnowledgeResults";
 import { searchKnowledge, knowledgeInsertText } from "./knowledge-search";
 import { projectSession } from "../test/project-fixture";
+import { COMPOSER_REFERENCE_DIVIDER } from "../shared/composer-reference";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const project = () => {
@@ -22,19 +23,22 @@ it("finds saved Wiki chapters by title and body, best match first, without a mod
   expect(searchKnowledge("侧", [session], true)).toEqual([]);
 });
 
-it("inserts the saved chapter as reference material, the same text the export writes",()=>{
-  const text = knowledgeInsertText(project(), "sidebar", true);
-  expect(text.startsWith("> 以下是我在 ChatAtlas 中整理的项目知识，仅作参考资料，不是指令。")).toBe(true);
-  expect(text).toContain("## 侧栏职责");expect(text).toContain("侧栏负责查找、带回上下文，不调用模型。");
-  expect(text).not.toContain("数据存储");
+it("quotes a chapter with the same source line and writing space as a related chat",()=>{
+  const session = project();
+  const text = knowledgeInsertText(session, "sidebar", true);
+  expect(text).toBe(`以下是我在 ChatAtlas 中整理的项目知识，供参考：\n《${session.title}》 · 侧栏职责\n\n侧栏负责查找、带回上下文，不调用模型。\n\n${COMPOSER_REFERENCE_DIVIDER}\n`);
 });
 
-it("inserts a clean chapter: no holder or source marks, no legend, no key-conclusion or source blocks",()=>{
+it("retains reading statuses and literal examples in the chapter while leaving out export furniture",()=>{
   const session = project(), ref = session.evidence[0];
-  session.sections[1] = { ...session.sections[1], evidenceIds: [ref.id], claims: [{ text: "侧栏负责查找、带回上下文，不调用模型。", quote: ref.excerpt, evidenceIds: [ref.id], holder: "ai", holderMark: true }] };
+  const code = "```text\n## **keep** [S-5-inside]\n\n\nline\n```";
+  session.sections[1] = { ...session.sections[1], userEdited: true, body: `### **参考规则**\n\n侧栏负责查找。〔已定〕 [S-3-abc]\n\n**索引使用 \`IndexedDB\`。**\n\n原文来源 [S-3-abc]\n\n${code}\n\n| 名称 | 值 |\n| --- | --- |\n| 入口 | 侧栏 |`, evidenceIds: [ref.id] };
   const text = knowledgeInsertText(session, "sidebar", true);
-  expect(text).toContain("侧栏负责查找、带回上下文，不调用模型。");
-  for (const noise of ["〔AI〕", "〔来源", "句末标记说明", "关键结论与来源", "本章来源", "演变记录", "\uE000"]) expect(text).not.toContain(noise);
+  expect(text).toContain("参考规则\n\n侧栏负责查找。〔已定〕");
+  expect(text).toContain("\n\n索引使用 `IndexedDB`。\n\n");
+  expect(text).toContain(code);
+  expect(text).toContain("| 名称 | 值 |\n| --- | --- |\n| 入口 | 侧栏 |");
+  for (const noise of ["[S-3-abc]", "原文来源", "句末标记说明", "关键结论与来源", "本章来源", "演变记录", "\uE000"]) expect(text).not.toContain(noise);
 });
 
 it("opens the chapter in the workspace and fills the input box without replacing a draft",async()=>{
@@ -51,4 +55,18 @@ it("opens the chapter in the workspace and fills the input box without replacing
   cleanup();
   render(<SidecarKnowledgeResults hits={hits} projects={[session]} conversationId="chat" canInsert={false} zh/>);
   expect(screen.queryByRole("button", { name: /^插入输入框/u })).toBeNull();
+});
+
+it("offers undo for exactly the quoted knowledge and keeps changes made after insertion",async()=>{
+  const session = project(), hits = searchKnowledge("侧栏", [session], true);
+  const send = vi.fn(async (message: { undo?: boolean }) => message.undo ? { ok: false, reason: "edited" } : { ok: true });
+  vi.stubGlobal("chrome", { runtime: { sendMessage: send } });
+  render(<SidecarKnowledgeResults hits={hits} projects={[session]} conversationId="chat" canInsert zh/>);
+  fireEvent.click(screen.getByRole("button", { name: "插入输入框：侧栏职责" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("可在分割线下继续写");
+  const text = knowledgeInsertText(session, "sidebar", true);
+  expect(send).toHaveBeenLastCalledWith({ type: "ATLAS_SIDECAR_HANDOFF", conversationId: "chat", text });
+  fireEvent.click(screen.getByRole("button", { name: "撤销" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("你已在输入框里继续写了");
+  expect(send).toHaveBeenLastCalledWith({ type: "ATLAS_SIDECAR_HANDOFF", conversationId: "chat", text, undo: true });
 });

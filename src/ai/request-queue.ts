@@ -1,11 +1,12 @@
-import { MAX_CONCURRENCY, providerConcurrencyCeiling } from "./model-routing";
+import { HIGH_LIMIT_START, MAX_CONCURRENCY, providerConcurrencyCeiling } from "./model-routing";
 
 type Entry = { priority: number; queuedAt: number; start: () => void; cancel: () => void };
 const MAX_ACTIVE = 6;
 /** Shared per service origin within this extension page, across AI instances and embeddings. */
 export class ProviderQueue {
-  /** maxActive: hosts known to accept many parallel requests ramp further than an unknown gateway. */
-  constructor(private readonly maxActive = MAX_ACTIVE) {}
+  /** maxActive: hosts known to accept many parallel requests ramp further than an unknown gateway. start: where the ramp
+   * begins; such a host starts higher, as the provider's own level does. */
+  constructor(private readonly maxActive = MAX_ACTIVE, private readonly start = 2) {}
   private active = 0;
   private queue: Entry[] = [];
   private limitedUntil = 0;
@@ -33,9 +34,9 @@ export class ProviderQueue {
     clearTimeout(this.timer);
     const remaining = this.limitedUntil - Date.now();
     if (remaining > 0) { if (this.queue.length) this.timer = setTimeout(() => this.drain(), remaining); return; }
-    // Start at two; every three successes allow one more, up to the host's limit.
+    // Start at two (six on a high-limit host); every three successes allow one more, up to the host's limit.
     // Any rate limit drops to one request for a minute and restarts the ramp.
-    while (this.active < (Date.now() < this.reducedUntil ? 1 : Math.min(this.maxActive, 2 + Math.floor(this.successes / 3))) && this.queue.length) {
+    while (this.active < (Date.now() < this.reducedUntil ? 1 : Math.min(this.maxActive, this.start + Math.floor(this.successes / 3))) && this.queue.length) {
       // Aging prevents background work from starving during repeated queries.
       const weight = (entry: Entry) => entry.priority + Math.floor((Date.now() - entry.queuedAt) / 30_000);
       this.queue.sort((a, b) => weight(b) - weight(a) || a.queuedAt - b.queuedAt);
@@ -47,7 +48,8 @@ const queues = new Map<string, ProviderQueue>();
 export function providerQueue(url: string): ProviderQueue {
   const origin = new URL(url).origin;
   let queue = queues.get(origin);
-  // Writing 15 chapters at six slots left each request queued 13-34 s on a high-limit host.
-  if (!queue) { queue = new ProviderQueue(providerConcurrencyCeiling(url) >= MAX_CONCURRENCY ? MAX_CONCURRENCY : MAX_ACTIVE); queues.set(origin, queue); }
+  // Writing 15 chapters at six slots left each request queued 13-34 s on a high-limit host. Starting such a host at two
+  // held one run's 16 reading batches to two to five at a time: the last waited 63 s to start, and reading took 117 s.
+  if (!queue) { const high = providerConcurrencyCeiling(url) >= MAX_CONCURRENCY; queue = new ProviderQueue(high ? MAX_CONCURRENCY : MAX_ACTIVE, high ? HIGH_LIMIT_START : 2); queues.set(origin, queue); }
   return queue;
 }

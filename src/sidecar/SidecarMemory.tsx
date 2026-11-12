@@ -111,7 +111,7 @@ export function SidecarMemory({active=true,conversations,conversationId,zh,view,
       <div className="memory-found">
        {semanticNotice&&!busy?<p className="memory-semantic-feedback" role="status">{semanticNotice}</p>:null}
        {knowledge.length&&query.trim()?<SidecarKnowledgeResults hits={knowledge} projects={projects} conversationId={conversationId} canInsert={canInsert} zh={zh}/>:null}
-       {hits&&query.trim()? <SidecarSearchResults key={JSON.stringify([query,appliedFilters])} hits={hits} conversationId={conversationId} zh={zh} onOpen={onOpen} order={order} query={query} compact/> : null}
+       {hits&&query.trim()? <SidecarSearchResults key={JSON.stringify([query,appliedFilters])} hits={hits} conversationId={conversationId} zh={zh} onOpen={onOpen} order={order} query={query} canInsert={canInsert} compact/> : null}
        {!query.trim()&&recent.length?<div className="memory-recent-list"><header><small>{l("最近查找","Recent searches")}</small><button type="button" className="sidecar-text-button" onClick={()=>void getDatabase().then(db=>db.clear("sidecarSearches")).then(reload).catch(failure=>setError(String(failure)))}>{l("清空","Clear")}</button></header>{recent.slice(0,6).map(item=><button type="button" key={item.id} onClick={()=>search(item.query)}><History size={14} aria-hidden="true"/><span>{item.query}</span></button>)}</div>:null}
       </div>
 </div>

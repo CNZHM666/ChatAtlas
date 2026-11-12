@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { BookOpen, LocateFixed, Search } from "lucide-react";
 import type { Conversation, ConversationMessage } from "../shared/types";
 import type { MessageSourceRange, ReaderSearchContext } from "../shared/message-location";
@@ -8,15 +8,16 @@ import { sendSidecarMessage } from "./host";
 import {memoryDiscussion} from "./context-engine";
 import {SidecarMessageContent} from "./SidecarMessageContent";
 import {isCurrentNativeConversation} from "../shared/native-discussion";
+import {nearMatch,queryPattern} from "./search-excerpt";
+import {SidecarReading} from "./SidecarReading";
 
 const originalTime=(hit:MemoryHit)=>{const value=hit.message.sourceCreatedAt;return typeof value==="number"&&Number.isFinite(value)&&value>0&&value<=8.64e15?value:undefined;};
 const canLocate=(hit:MemoryHit)=>hit.conversation.platform==="chatgpt"||isCurrentNativeConversation(hit.conversation.url,hit.conversation.id);
 
-/** An excerpt with the searched words marked: the whole query, then its words of two or more characters. */
+/** An excerpt with the searched words marked. */
 function marked(text:string,query:string):ReactNode{
-  const terms=[...new Set([query.trim(),...query.split(/[\s,，、。；;:：!?！？]+/u)])].filter(term=>Array.from(term).length>=2).sort((a,b)=>b.length-a.length);
-  if(!terms.length)return text;
-  const pattern=new RegExp(`(${terms.map(term=>term.replace(/[.*+?^${}()|[\]\\]/gu,"\\$&")).join("|")})`,"giu");
+  const pattern=queryPattern(query);
+  if(!pattern)return text;
   return text.split(pattern).map((part,index)=>index%2?<mark key={index}>{part}</mark>:part);
 }
 
@@ -35,8 +36,10 @@ function DiscussionPreview({hit,zh}:{hit:MemoryHit;zh:boolean}){
   </div>;
 }
 
-export function SidecarSearchResults({ hits, conversationId, zh, onOpen, order = "relevance",previewFirst=false,compact=false,query="" }: {
+export function SidecarSearchResults({ hits, conversationId, zh, onOpen, order = "relevance",previewFirst=false,compact=false,query="",canInsert=false }: {
   compact?:boolean;
+  /** The native input can take a question turn read in the sidebar. */
+  canInsert?:boolean;
   /** The searched words, marked in each excerpt. */
   query?:string;
   previewFirst?:boolean;
@@ -51,6 +54,10 @@ export function SidecarSearchResults({ hits, conversationId, zh, onOpen, order =
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const [selected, setSelected] = useState("");
   const [showOther,setShowOther]=useState(false),[expanded,setExpanded]=useState<string[]>([]);
+  // The match read in the sidebar, and where the list was scrolled, so returning lands on the same card.
+  const [reading,setReading]=useState<{id:string;at:number}>();
+  const list=useRef<HTMLDivElement>(null),listScroll=useRef(0);
+  useLayoutEffect(()=>{if(reading)return;const scroller=list.current?.closest<HTMLElement>(".memory-found");if(scroller)scroller.scrollTop=listScroll.current;},[reading]);
   const dated = [...hits].sort((a,b) => { if(order === "relevance")return 0; const x=originalTime(a), y=originalTime(b); if(!x)return y?1:0;if(!y)return -1;return order === "newest"?y-x:x-y; });
   const groups = new Map<string, MemoryHit[]>();
   for (const hit of dated) groups.set(hit.conversation.id, [...groups.get(hit.conversation.id) ?? [], hit]);
@@ -71,23 +78,26 @@ export function SidecarSearchResults({ hits, conversationId, zh, onOpen, order =
     } finally { if (live.current) setLocating(""); }
   };
   if (!hits.length) return <div className="memory-search-empty"><Search size={22} aria-hidden="true"/><strong>{l("未找到相关对话", "No matching conversations")}</strong></div>;
-  // One card per conversation: a click locates its best match on the original platform (Reader where that is not
-  // possible), and one icon reads it in Reader; a conversation's other matches are one line each and behave alike.
-  const go=(hit:MemoryHit)=>canLocate(hit)?void locate(hit):onOpen(hit.conversation,hit.message,hit.sourceRange,searchFor(hit));
-  if(compact)return <div className="memory-source-list">
+  // One card per conversation: a click reads its best match in the sidebar, beside the AI page, which stays where it
+  // is; a conversation's other matches are one line each and open alike. The full Reader is one icon away.
+  const read=(hit:MemoryHit)=>{const rows=groups.get(hit.conversation.id)??[hit];listScroll.current=list.current?.closest<HTMLElement>(".memory-found")?.scrollTop??0;setNotice("");setReading({id:hit.conversation.id,at:Math.max(0,rows.indexOf(hit))});};
+  const openReader=(hit:MemoryHit)=>onOpen(hit.conversation,hit.message,hit.sourceRange,searchFor(hit));
+  if(compact&&reading&&groups.has(reading.id))return <SidecarReading key={reading.id} hits={groups.get(reading.id)!} start={reading.at} query={query} zh={zh} canInsert={canInsert} conversationId={conversationId}
+    onBack={()=>setReading(undefined)} onOpenReader={openReader}/>;
+  if(compact)return <div className="memory-source-list" ref={list}>
     <small>{l("相关对话","Related chats")} · {groups.size}</small>
     {[...groups].slice(0,showOther?groups.size:5).map(([id,rows])=>{const [best,...more]=rows,open=expanded.includes(id),time=originalTime(best);return <article className="memory-source-card" key={id}>
       <div className="memory-source-head">
-        <button type="button" className="memory-source-main" aria-label={canLocate(best)?l(`在原平台定位：${best.conversation.title}`,`Locate on the original platform: ${best.conversation.title}`):l(`在 Reader 阅读：${best.conversation.title}`,`Read in Reader: ${best.conversation.title}`)} disabled={locating===best.id} aria-busy={locating===best.id||undefined} onClick={()=>go(best)}>
+        <button type="button" className="memory-source-main" aria-label={l(`在侧栏阅读：${best.conversation.title}`,`Read here: ${best.conversation.title}`)} onClick={()=>read(best)}>
           <strong>{best.conversation.title}</strong>
           <small>{[rows.length>1?l(`${rows.length} 处匹配`,`${rows.length} matches`):"",time?new Date(time).toLocaleDateString(zh?"zh-CN":"en"):""].filter(Boolean).join(" · ")}</small>
           <p>{marked(best.excerpt,query)}</p>
         </button>
-        {canLocate(best)?<button type="button" className="memory-source-locate" aria-label={l(`在 Reader 阅读：${best.conversation.title}`,`Read in Reader: ${best.conversation.title}`)} title={l("在 Reader 阅读","Read in Reader")} onClick={()=>onOpen(best.conversation,best.message,best.sourceRange,searchFor(best))}><BookOpen size={14} aria-hidden="true"/></button>:null}
+        <button type="button" className="memory-source-locate" aria-label={l(`在完整 Reader 中打开：${best.conversation.title}`,`Open in the full Reader: ${best.conversation.title}`)} title={l("在完整 Reader 中打开","Open in the full Reader")} onClick={()=>openReader(best)}><BookOpen size={14} aria-hidden="true"/></button>
       </div>
       {more.length?<>
         <button type="button" className="memory-source-more" aria-expanded={open} onClick={()=>setExpanded(open?expanded.filter(item=>item!==id):[...expanded,id])}>{open?l("收起","Show less"):l(`另有 ${more.length} 处`,`${more.length} more`)}</button>
-        {open?<ul className="memory-source-matches">{more.map(hit=><li key={hit.id}><button type="button" disabled={locating===hit.id} onClick={()=>go(hit)}>{marked(hit.excerpt,query)}</button></li>)}</ul>:null}
+        {open?<ul className="memory-source-matches">{more.map(hit=><li key={hit.id}><button type="button" onClick={()=>read(hit)}><span>{marked(nearMatch(hit.excerpt,query),query)}</span></button></li>)}</ul>:null}
       </>:null}
     </article>;})}
     {groups.size>5?<button type="button" className="sidecar-text-button" onClick={()=>setShowOther(value=>!value)}>{showOther?l("收起","Show less"):l(`更多对话（${groups.size-5}）`,`More chats (${groups.size-5})`)}</button>:null}

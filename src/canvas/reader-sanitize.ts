@@ -4,7 +4,7 @@ import { defaultSchema } from "rehype-sanitize";
 export const readerSanitizeSchema = {
   ...defaultSchema,
   // Presentation tags the Reader adds itself (reader-structure-presentation): no attributes, mapped to styled spans.
-  tagNames:[...defaultSchema.tagNames??[],"mark","atlas-flow","atlas-flow-step","atlas-flow-arrow","atlas-lead"],
+  tagNames:[...defaultSchema.tagNames??[],"mark","atlas-flow","atlas-flow-step","atlas-flow-arrow","atlas-lead","atlas-caption","atlas-caption-kind","atlas-caption-place","atlas-caption-ai","atlas-caption-mine","atlas-caption-old","atlas-caption-note"],
   attributes: {
     ...defaultSchema.attributes,
     code: [

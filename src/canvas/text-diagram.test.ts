@@ -19,9 +19,21 @@ describe("text diagrams", () => {
     expect(diagram.rows.map(row => row.at(-1)?.column)).toEqual([11, 11, 11, 11]);
     expect(source).toContain("│中文   │");
   });
-  it("does not squeeze long contents or repair incomplete frames", () => {
-    expect(textDiagram("┌──┐\n│内容超过宽度│\n└──┘")!.rows[1].at(-1)?.column).toBe(13);
+  it("widens a plain frame its text overflows, finds a frame under other lines, and does not repair incomplete frames", () => {
+    // Text wider than a plain frame widens the frame: its borders and bars end in one column.
+    expect(textDiagram("┌──┐\n│内容超过宽度│\n└──┘")!.rows.map(row => row.at(-1)?.column)).toEqual([14, 14, 14]);
+    // A card under a greeting, drawn half as wide as its Chinese lines, stands as one box.
+    const card = textDiagram("晚上好，卡夫卡\n\n┌──────────┐\n│ 不导 · 今日守护      │\n│                    │\n│ 根据你的记录，今晚21:30后风险较高。 │\n└──────────┘")!;
+    expect(new Set(card.rows.slice(2).map(row => row.at(-1)?.column)).size).toBe(1);
     expect(textDiagram("┌────┐\n│ A │\n│ B   │")!.rows[1].at(-1)?.column).toBe(4);
+  });
+  it("lines up a card whose top border carries its title, keeping the title's words", () => {
+    const source = "晚上好，卡夫卡\n┌ 不导 · 今日守护                  今晚风险：中 ┐\n│ 你今晚21:30后风险可能升高                    │\n│ [完成今晚准备]                               │\n│ 告诉不导你现在的情况……                 ↑    │\n└──────────────────────────┘\n\n今日计划";
+    const diagram = textDiagram(source)!;
+    expect(new Set(diagram.rows.slice(1, 6).map(row => row.at(-1)?.column)).size).toBe(1);
+    expect(diagram.rows[1].map(cell => cell.text).join("")).toContain("不导 · 今日守护");
+    // The top is a drawn line with the words set into it, not two corners with spaces between.
+    expect(diagram.rows[1].map(cell => cell.text).join("")).toMatch(/^┌─ 不导 · 今日守护 ─+ 今晚风险：中 ─┐$/u);
   });
   it("aligns the main divider only when matching header and footer junctions identify it", () => {
     const diagram = textDiagram("┌────────────────┐\n├───────┬────────┤\n│中文 │内容    │\n│🟢 AI  │说明  │\n└───────┴────────┘")!;

@@ -5,6 +5,7 @@ import { componentExceptions, componentParts, notePartExceptions } from "./wiki-
 import { currentCapabilityState, outdatedCapabilityReports, pastCapabilityWords } from "./wiki-capability-state";
 import { expect, it } from "vitest";
 import { claimSupported } from "./wiki-claim-support";
+import { reviewWikiChapter } from "./wiki-claim-review";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { currentBaseline, laterTakenUp, scopedWishes, wikiUnitStatuses } from "./wiki-knowledge-state";
 import { curateWikiUnits } from "./wiki-knowledge-select";
@@ -13,6 +14,7 @@ import { ledgerDocument } from "./wiki-ledger-document";
 import { wikiVersionQuestions, withVersionAnswer } from "./wiki-key-decisions";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
 import { foreignDetail, ownSection, wikiUnitDetails, CRITICAL_PROBLEM, scopedWikiDraft, wikiDraftMarkdown, type WikiDraftChapter, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiDraftClaim } from "../shared/wiki-knowledge";
+import { contextKnowledge } from "../test/context-fixture";
 
 const unit = (n: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${n}`, subject: "项目", statement, kind: "plan", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: `e${n}`, conversationId: "c", messageId: `m${n}`, messageIndex: n, role: "assistant", pasted: false, quote: statement }, ...extra });
 const book = (units: WikiKnowledgeUnit[]): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: units.length, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "项目", aliases: [], unitIds: units.map(unit => unit.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "项目", question: "如何继续？", group: "", subtopics: [{ title: "方案", subjectIds: ["s"] }] }] } });
@@ -45,6 +47,73 @@ it("keeps adoption independent of an assistant's narrower phase scope", () => {
   const organized = scopedWishes(ledger.organization!, new Map([wish, scope].map(unit => [unit.id, unit])));
   expect(organized.relations).toMatchObject([{ kind: "narrows" }]);
   expect(wikiUnitStatuses([wish, scope], organized).get(wish.id)).toBe("confirmed");
+});
+
+it("requires evidence for adoption and keeps a user asking about their own idea in proposal language", () => {
+  const idea = unit(1, "开始使用后自动分配到守护小组。", { kind: "decision", adoption: { status: "user_decision" } });
+  idea.evidence = { ...idea.evidence, role: "user", quote: "我的想法是开始使用后自动分配到守护小组，你觉得怎么样" };
+  const assistant = unit(2, "首次打卡后自动分配到守护小组。", { kind: "decision", adoption: { status: "user_adopted" } });
+  const units = [idea, assistant], ledger = withDraft(book(units), [chapter(units, `${idea.statement}${assistant.statement}`, units.map(point => ({ text: point.statement, unitIds: [point.id] })))]);
+  const statuses = resolveWikiReading(ledger).statuses;
+  expect(statuses.get(idea.id)).toBe("stated");
+  expect(statuses.get(assistant.id)).toBe("proposal");
+  const { sections: [read], evidence } = ledgerDocument(ledger, {});
+  expect(read.body).toContain(`你曾提议：${idea.statement}`);
+  expect(read.body).toContain(`AI 建议：${assistant.statement}`);
+  expect(read.claims?.some(claim => claim.holder === "decided")).toBe(false);
+  const session = { ...contextKnowledge().session, sourceConversationIds: ["c"], evidence, wikiKnowledge: ledger };
+  const saved = { ...read, body: `${idea.statement}\n\n${assistant.statement}`, claims: read.claims?.map(claim => ({ ...claim, text: claim.text.replace(/^(?:你曾提议|AI 建议)：/u, ""), holder: "decided" as const, userDecided: true })) };
+  const reviewed = reviewWikiChapter(saved, session);
+  expect(reviewed.body).toContain(`你曾提议：${idea.statement}`);
+  expect(reviewed.body).toContain(`AI 建议：${assistant.statement}`);
+  expect(reviewed.claims?.some(claim => claim.holder === "decided")).toBe(false);
+});
+
+it("dates a reported range and percentage in an opening with no figure bindings", () => {
+  const earlier = unit(1, "小程序日活约22-30人，整体留存率26.92%。", { kind: "report", delivery: "user_reported" });
+  earlier.evidence = { ...earlier.evidence, role: "user", conversationSpan: { start: Date.UTC(2026, 5, 14, 12), end: Date.UTC(2026, 6, 7, 12) } };
+  const later = unit(2, "小程序日活约40人。", { kind: "report", delivery: "user_reported" });
+  later.evidence = { ...later.evidence, role: "user", conversationId: "aug", conversationSpan: { start: Date.UTC(2026, 7, 18, 12) } };
+  const reports = chapter([earlier, later], earlier.statement, [{ text: earlier.statement, unitIds: [earlier.id] }]);
+  reports.body = `截至当前，小程序日活约22-30人，留存率26.92%，需关注付费转化。\n\n### 运营数据\n\n${earlier.statement}`;
+  const body = ledgerDocument(withDraft(book([earlier, later]), [reports]), {}).sections[0].body;
+  expect(body).toContain("用户在 6月14日—7月7日 的讨论中报告，小程序日活约22-30人，留存率26.92%");
+  expect(body).not.toContain("截至当前");
+});
+
+it("qualifies proposed flow timings and checks the trigger against the quoted action", () => {
+  const mismatch = unit(1, "首次打卡后自动分配到守护小组。");
+  mismatch.evidence.quote = "AI 建议在开始计划后自动分配到守护小组。";
+  const match = unit(2, "开始计划后自动分配到7天守护小组，支持退出。");
+  const offer = unit(3, "新用户前3天体验，第3天展示风险报告后引导付费。", { kind: "mechanism" });
+  offer.evidence.quote = "第1—3天体验。\n### 第3天\n显示风险报告。\n解锁完整计划。";
+  const points = [mismatch, match, offer], text = points.map(item => item.statement).join("\n\n");
+  const ledger = withDraft(book(points), [chapter(points, text, points.map(item => ({ text: item.statement, unitIds: [item.id] })))]);
+  const { sections: [section], evidence } = ledgerDocument(ledger, {});
+  const session = { ...contextKnowledge().session, sourceConversationIds: ["c"], evidence, wikiKnowledge: ledger };
+  const reviewed = reviewWikiChapter({ ...section, body: `AI 建议：${text}` }, session);
+  // The trigger the writer gave is not the quote's: the sentence takes the quote's, with no reviewer's note.
+  expect(reviewed.body).toContain("AI 建议：开始计划后自动分配到守护小组。");
+  expect(reviewed.body).not.toMatch(/首次打卡后自动分配|待核对/u);
+  expect(reviewed.body).toContain(`AI 建议：${match.statement}`);
+  expect(reviewed.body).toContain(`AI 对付费时机的建议：${offer.statement}`);
+  expect(reviewed.claims?.find(claim => claim.unitIds?.includes(mismatch.id))?.text).toBe("AI 建议：开始计划后自动分配到守护小组。");
+  expect(reviewWikiChapter(reviewed, session).body).toBe(reviewed.body);
+  expect(reviewWikiChapter({ ...section, userEdited: true }, session).body).toBe(section.body);
+});
+
+it("keeps the denominator with an assistant's calculation and the range with the user's report", () => {
+  const report = unit(1, "小程序日活约22-30人。", { kind: "report", delivery: "user_reported" });
+  report.evidence = { ...report.evidence, role: "user" };
+  const calculation = unit(2, "小程序日活稳定在22人，其中15人为连续使用的稳定用户，核心用户占比约68%。", { kind: "fact" });
+  calculation.evidence.quote = `${calculation.statement}\n> 15 ÷ 22 ≈ 68%`;
+  const text = "小程序日活约22（6月14日—7月7日）-30人，其中15人为连续使用的稳定用户，核心用户占比约68%。";
+  const ledger = withDraft(book([report, calculation]), [chapter([report, calculation], text)]);
+  const { sections: [section], evidence } = ledgerDocument(ledger, {});
+  const session = { ...contextKnowledge().session, sourceConversationIds: ["c"], evidence, wikiKnowledge: ledger };
+  const reviewed = reviewWikiChapter({ ...section, body: `### 运营\n\n- **日活规模**：${text}` }, session);
+  expect(reviewed.body).toContain("日活约22–30人（6月14日—7月7日）。AI 按日活22人的口径计算，15人为连续使用的稳定用户，核心用户占比约68%（15 ÷ 22）。");
+  expect(reviewed.claims?.filter(claim => claim.text.includes("68%")).map(claim => claim.unitIds)).toEqual([[calculation.id]]);
 });
 
 it("protects a later proposed phase even with a freeze and a very small editorial budget", () => {
@@ -109,6 +178,20 @@ it("checks presentation marks after final formatting and flags an unsupported nu
   const unsupported = chapter([style], "Header 高度为 900px。", [{ text: "Header 高度为 900px。", unitIds: [style.id], markOnly: true }]);
   validateFinalClaims([unsupported], new Map([[style.id, style]]));
   expect(unsupported.problems.some(problem => CRITICAL_PROBLEM.test(problem))).toBe(true);
+});
+
+it("keeps the supported offer as an AI proposal when final validation rejects a compound current-plan claim", () => {
+  const detail = "先免费开放7天Agent体验，随后销售¥19.9的30天守护计划，验证后再推季度和年度套餐。";
+  const offer = unit(1, `采用订阅模式：${detail}`, { kind: "plan" });
+  const text = `早期的¥999买断方案已被否定；现行策略为${detail}`;
+  const written = chapter([offer], text, [{ text, unitIds: [offer.id] }]);
+  written.body = `### 方案\n\n${text}`;
+  const report: Record<string, number> = {};
+  validateFinalClaims([written], new Map([[offer.id, offer]]), report, [], new Map([[offer.id, "proposal"]]));
+  expect(written.body).toBe(`### 方案\n\nAI 建议${detail}`);
+  expect(written.paragraphs[0].claims).toEqual([{ text: `AI 建议${detail}`, unitIds: [offer.id] }]);
+  expect(written.problems.some(problem => CRITICAL_PROBLEM.test(problem))).toBe(false);
+  expect(report.unsupported_plans_qualified).toBe(1);
 });
 
 it("gives own positioning its own subject when the positioning chapter only holds a competitor", () => {
@@ -284,6 +367,19 @@ it("routes whole roadmaps to the plan chapter and tells the positioning in one s
  expect([home(phases.id),home(milestones.id)]).toEqual(["d","d"]);
  expect(subjectOf(second.id)).toBe(subjectOf(first.id));
  expect(wikiUnitLane(panel)).not.toBe("roadmap");
+});
+
+it("keeps the own sections of a chapter only partly about competitors",()=>{
+ const rival=unit(1,"Quittr 宣称超过100万次下载。",{kind:"fact",about:{name:"Quittr",role:"competitor" as const}}),retention=unit(2,"小程序目前每天稳定在22人，其中15个为稳定用户。",{subject:"用户留存现状",kind:"fact"});
+ const ui=unit(3,"首页仅展示最近7天记录，完整月历移至二级页面。",{subject:"首页",kind:"decision"}),stray=unit(4,"小程序目前日活稳定，首页仅展示最近7天记录。",{kind:"fact"});
+ const units=[rival,retention,ui,stray],ledger=book(units);
+ ledger.organization!.subjects=[{id:"q",name:"Quittr竞品分析",aliases:[],unitIds:[rival.id,stray.id]},{id:"r",name:"用户留存现状",aliases:[],unitIds:[retention.id]},{id:"u",name:"首页",aliases:[],unitIds:[ui.id]}];
+ ledger.organization!.chapters=[{id:"a",title:"界面交互与视觉设计",question:"",group:"",subtopics:[{title:"首页布局",subjectIds:["u"]}]},{id:"b",title:"增长运营与竞品参考",question:"",group:"",subtopics:[{title:"开发迭代规划",subjectIds:["r"]},{title:"海外竞品分析",subjectIds:["q"]}]}];
+ const known=new Map(units.map(item=>[item.id,item]));
+ const routed=routeOutOfReferences(ledger.organization!,known);
+ // The retention section stays in its chapter; the comparison section still gives up a point of this project's own.
+ expect(routed.subjects.find(subject=>subject.id==="r")!.unitIds).toEqual([retention.id]);
+ expect(routed.subjects.find(subject=>subject.id==="q")!.unitIds).toEqual([rival.id]);
 });
 
 it("moves this project's own points out of the references chapter, and gathers one tool's plans in one place",()=>{

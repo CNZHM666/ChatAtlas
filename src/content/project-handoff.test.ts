@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { insertedAsText, fillProjectComposer } from "./project-handoff";
+import { insertedAsText, fillProjectComposer, clearProjectComposer } from "./project-handoff";
+import { COMPOSER_REFERENCE_DIVIDER, formatComposerReference } from "../shared/composer-reference";
 afterEach(() => { document.body.innerHTML=""; vi.restoreAllMocks(); });
 it("recognizes a rich editor that handles and cancels beforeinput without inserting twice",async()=>{
  document.body.innerHTML='<main><div id="prompt-textarea" contenteditable="true"></div></main>';
@@ -66,3 +67,34 @@ it("finds the ChatGPT input box when the page no longer places it inside main",a
  expect((document.getElementById("prompt-textarea") as HTMLTextAreaElement).value).toBe("context");
 });
 
+it("undoes an insertion only while the input box holds exactly what was inserted",async()=>{
+  const text=formatComposerReference("以下是我之前的一段讨论，供参考：","《首页》 · ChatGPT","【我问】\n首页怎么改？");
+  document.body.innerHTML='<main><textarea id="prompt-textarea"></textarea></main>';
+  const textarea=document.getElementById("prompt-textarea") as HTMLTextAreaElement;
+  expect(await fillProjectComposer(text,"","https://chatgpt.com/")).toEqual({ok:true});
+  expect(textarea.selectionStart).toBe(text.length);
+  expect(textarea.selectionEnd).toBe(text.length);
+  expect(await clearProjectComposer(text,"","https://chatgpt.com/")).toEqual({ok:true});expect(textarea.value).toBe("");
+  // Written under the line, it is the user's: nothing is removed.
+  textarea.value=`${text}那今晚的提醒怎么设？`;
+  expect(await clearProjectComposer(text,"","https://chatgpt.com/")).toEqual({ok:false,reason:"edited"});expect(textarea.value).toContain("那今晚的提醒怎么设？");
+  expect(await clearProjectComposer(text,"one","https://chatgpt.com/c/two")).toEqual({ok:false,reason:"changed"});
+});
+
+it("requires the writing divider even when a long editor response otherwise matches",()=>{
+  const text=formatComposerReference("Earlier material:","Project · Chapter","A long reference paragraph. ".repeat(80));
+  expect(insertedAsText(text.replace(COMPOSER_REFERENCE_DIVIDER,""),text)).toBe(false);
+  expect(insertedAsText(text.trimEnd(),text)).toBe(true);
+});
+
+it("places the caret after a multiline reference in a rich editor",async()=>{
+  document.body.innerHTML='<main><div id="prompt-textarea" contenteditable="true"></div></main>';
+  const composer=document.getElementById("prompt-textarea")!;
+  const text=formatComposerReference("Earlier material:","Project · Chapter","Contents");
+  expect(await fillProjectComposer(text,"","https://chatgpt.com/")).toEqual({ok:true});
+  const selection=window.getSelection()!;
+  expect(selection.isCollapsed).toBe(true);
+  expect(selection.anchorNode).toBe(composer);
+  expect(selection.anchorOffset).toBe(composer.childNodes.length);
+  expect(composer.textContent).toBe(text);
+});

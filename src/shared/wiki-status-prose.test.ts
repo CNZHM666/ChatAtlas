@@ -76,3 +76,8 @@ it("names the AI actor once per subsection in a mostly-proposal chapter",()=>{
  const mixed={claims:[{...claim,workStatus:"proposed" as const},{...claim,sourceReading:reading}]};
  expect(wikiStatusProse("AI建议采用混合检索。AI建议先建立索引。",mixed)).toBe("AI建议采用混合检索。AI建议先建立索引。");
 });
+
+it("names the AI again after a line naming the user, so a bare 建议 is never read as the user's",()=>{
+ const body="### 排班\n\nAI建议：夜班至少两人。\n\nAI建议：节假日轮换。\n\n你曾提议：周末只排一人。〔你 · 对话 2〕\n\nAI建议：交接班前十分钟到岗。";
+ expect(wikiStatusProse(body,proposals)).toBe("### 排班\n\nAI建议：夜班至少两人。\n\n建议：节假日轮换。\n\n你曾提议：周末只排一人。〔你 · 对话 2〕\n\nAI建议：交接班前十分钟到岗。");
+});

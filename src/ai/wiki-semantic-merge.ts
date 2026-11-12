@@ -1,5 +1,7 @@
 import type { EmbeddingProvider } from "./embedding-provider";
 import type { WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { sourceMessageSignature } from "../shared/source-signature";
+import { getDatabase } from "../storage/db";
 
 /** Semantic recall of knowledge units that state one point. Word overlap cannot tell a reworded restatement
  * (0.33–0.76 shared terms in one run's known repeats) from a different point (up to 0.71): a vector of each
@@ -8,6 +10,30 @@ import type { WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 
 /** Statements per embedding request, inside the batch limit of the usual OpenAI-compatible endpoints. */
 const BATCH = 10, CONCURRENCY = 4;
+/** Statement vectors kept between runs, the newest first: a regenerated Wiki embeds only statements it has not seen.
+ * One run spent 102 s on 22 embedding requests, each slower than the last (5 s to 28 s) for ten short statements. */
+const KEPT_VECTORS = 6000;
+const vectorId = (modelKey: string, statement: string) => `${modelKey}:wiki-unit:${sourceMessageSignature(statement)}`;
+
+/** Saved vectors of these statements, by statement. A browser without the store reads none. */
+async function savedVectors(modelKey: string, statements: string[]): Promise<Map<string, number[]>> {
+  const found = new Map<string, number[]>();
+  try {
+    const db = await getDatabase();
+    for (const statement of new Set(statements)) { const row = await db.get("semanticVectors", vectorId(modelKey, statement)); if (row?.textHash === statement) found.set(statement, row.values); }
+  } catch { /* No store: every statement is embedded. */ }
+  return found;
+}
+
+async function saveVectors(modelKey: string, rows: Array<[string, number[]]>) {
+  if (!rows.length) return;
+  try {
+    const db = await getDatabase(), now = Date.now();
+    for (const [statement, values] of rows) await db.put("semanticVectors", { id: vectorId(modelKey, statement), modelKey, textHash: statement, values, updatedAt: now });
+    const kept = (await db.getAll("semanticVectors")).filter(row => row.id.includes(":wiki-unit:")).sort((a, b) => b.updatedAt - a.updatedAt);
+    for (const row of kept.slice(KEPT_VECTORS)) await db.delete("semanticVectors", row.id);
+  } catch { /* Not kept: the next run embeds them again. */ }
+}
 /** Cosine at which two statements are asked about as one point, and at which the guard stops requiring shared
  * words (the model still has to call them one point). Calibrated by the Wiki evaluation, not by a model's scale. */
 export const SEMANTIC_CANDIDATE = .82, SEMANTIC_SAME = .9;
@@ -22,9 +48,11 @@ const dot = (a: Float32Array, b: Float32Array) => { let sum = 0; for (let i = 0;
 /** One vector per unit statement, unit length. Undefined when the provider fails: the organizer then recalls by
  * words, as it does with no provider, and the report says so. */
 export async function unitVectors(units: WikiKnowledgeUnit[], embeddings: EmbeddingProvider, signal: AbortSignal, report: Record<string, number>): Promise<UnitVectors | undefined> {
-  const batches: WikiKnowledgeUnit[][] = [];
-  for (let start = 0; start < units.length; start += BATCH) batches.push(units.slice(start, start + BATCH));
-  const vectors: UnitVectors = new Map();
+  const vectors: UnitVectors = new Map(), saved = await savedVectors(embeddings.modelKey, units.map(unit => unit.statement)), fresh: Array<[string, number[]]> = [];
+  for (const unit of units) { const values = saved.get(unit.statement); if (values) vectors.set(unit.id, normalized(values)); }
+  if (vectors.size) report.semantic_reused = vectors.size;
+  const left = units.filter(unit => !vectors.has(unit.id)), batches: WikiKnowledgeUnit[][] = [];
+  for (let start = 0; start < left.length; start += BATCH) batches.push(left.slice(start, start + BATCH));
   let next = 0;
   try {
     const worker = async () => {
@@ -33,7 +61,7 @@ export async function unitVectors(units: WikiKnowledgeUnit[], embeddings: Embedd
         signal.throwIfAborted();
         const values = await embeddings.embedBatch(batch.map(unit => unit.statement), signal);
         report.semantic_requests = (report.semantic_requests ?? 0) + 1;
-        batch.forEach((unit, index) => vectors.set(unit.id, normalized(values[index])));
+        batch.forEach((unit, index) => { vectors.set(unit.id, normalized(values[index])); fresh.push([unit.statement, values[index]]); });
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
@@ -43,6 +71,7 @@ export async function unitVectors(units: WikiKnowledgeUnit[], embeddings: Embedd
     return undefined;
   }
   report.semantic_units = vectors.size;
+  await saveVectors(embeddings.modelKey, fresh);
   return vectors;
 }
 

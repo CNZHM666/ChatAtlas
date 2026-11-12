@@ -62,11 +62,16 @@
 .workspace-source-notice, .workspace-source-unavailable > p { margin: 0 0 16px; font-size: 14px; color: var(--muted); line-height: 1.7; }
 .workspace-source-panel > footer { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
 .focus-workspace.has-original-panel > .project-reading-base > .reading-outline { flex-basis: 210px; }
-::highlight(atlas-original-proof) { background: #facc1540; color: inherit; text-decoration: none; }
-::highlight(atlas-original-context) { background: #facc1515; color: inherit; }
+/* Highlighter colours are solid, not see-through: a translucent yellow over the purple of the user's message mixed into
+   a third colour, and two marks over one word mixed again. Where marks overlap, the stronger one (by priority) shows. */
+:root { --atlas-mark: #fde68a; --atlas-mark-text: #1c1917; --atlas-mark-soft: #fef3c7; }
+:root[data-theme="dark"] { --atlas-mark: #facc15; --atlas-mark-text: #1c1917; --atlas-mark-soft: #3f3412; }
+::highlight(atlas-original-proof) { background: var(--atlas-mark); color: var(--atlas-mark-text); text-decoration: none; }
+::highlight(atlas-original-context) { background: var(--atlas-mark-soft); color: inherit; }
 ::highlight(atlas-original-related) { background: transparent; color: inherit; text-decoration: underline dashed #94a3b8; }
 .workspace-source-highlight.is-context { background:#facc1515; }
-.workspace-source-highlight.is-related { background:transparent; border-bottom:1px dashed #94a3b8; }
+.workspace-source-highlight.is-related { background:#facc1555; border-bottom:2px dashed #dc2626; }
+.workspace-source-highlight.is-support { background:transparent; border-bottom:1.5px dotted #94a3b8; }
 .workspace-source-claims { flex:0 0 auto; max-height:24vh; overflow:auto; padding:12px 20px; border-bottom:1px solid var(--border); }
 .workspace-source-claims p { margin:0 0 8px; font-size:13px; color:var(--muted); }
 .workspace-source-claims button { display:block; width:100%; margin-top:6px; text-align:left; }
@@ -298,11 +303,15 @@
 .workspace-source-panel > footer.workspace-source-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 .workspace-source-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .workspace-source-legend i { display: inline-block; width: 16px; height: 10px; border-radius: 2px; }
-.workspace-source-legend i.is-proof { background: #facc1566; }
-.workspace-source-legend i.is-similar { background: #facc151f; border-bottom: 2px dashed #d4a00a; border-radius: 0; }
+.workspace-source-legend i.is-proof { background: var(--atlas-mark); }
+.workspace-source-legend i.is-similar { background: var(--atlas-mark); border-bottom: 2px dashed #dc2626; border-radius: 2px 2px 0 0; }
+.workspace-source-legend i.is-support { background: transparent; border-bottom: 2px dotted #94a3b8; border-radius: 0; }
 .workspace-source-legend i.is-cue { background: transparent; border-bottom: 2px solid #dc2626; border-radius: 0; }
 .workspace-source-panel.is-card > .workspace-source-next-chapter { width: calc(100% - 32px); margin: 4px 16px 8px; }
-::highlight(atlas-original-proof) { background: #facc1566; }
-::highlight(atlas-original-similar) { background: #facc151f; color: inherit; text-decoration: underline dashed #d4a00a; text-underline-offset: 4px; }
+
+/* Close wording is filled like the quote, so it is easy to find, and underlined in dashed red, so it never reads as the
+   quote itself (a solid red line is the condition cue); the rest of the exchange is a faint dotted line. */
+::highlight(atlas-original-similar) { background: var(--atlas-mark); color: var(--atlas-mark-text); text-decoration: underline dashed #dc2626 2px; text-underline-offset: 4px; }
+::highlight(atlas-original-support) { background: transparent; color: inherit; text-decoration: underline dotted #94a3b8 1.5px; text-underline-offset: 4px; }
 ::highlight(atlas-original-cue) { color: inherit; text-decoration: underline solid #dc2626 2px; text-underline-offset: 4px; }
 .workspace-source-highlight.is-quote { background: #facc1566; }

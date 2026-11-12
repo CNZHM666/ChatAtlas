@@ -9,7 +9,7 @@ import { ChatGPTSyncAdapter, ChatGPTSyncError } from "../sync/chatgpt-sync-adapt
 import { ConversationNavigator } from "./conversation-navigator";
 import { pageTheme, watchPageTheme } from "./page-theme";
 import { locateDiscussion } from "./locate-discussion";
-import { fillProjectComposer } from "./project-handoff";
+import { clearProjectComposer, fillProjectComposer } from "./project-handoff";
 
 const adapter = new DOMChatGPTAdapter();
 const syncAdapter = new ChatGPTSyncAdapter();
@@ -22,7 +22,7 @@ const scheduleCapture = (delay = 650) => pageCapture.schedule(delay);
 
 chrome.runtime.onMessage.addListener((message: AtlasMessage, _sender, sendResponse) => {
   if (message.type === "ATLAS_FILL_COMPOSER") {
-    void fillProjectComposer(message.text, message.conversationId).then(sendResponse).catch(error => { console.warn("[ChatAtlas] insert", "error", error); sendResponse({ ok: false, reason: "failed" }); });
+    void (message.undo ? clearProjectComposer(message.text, message.conversationId) : fillProjectComposer(message.text, message.conversationId)).then(sendResponse).catch(error => { console.warn("[ChatAtlas] insert", "error", error); sendResponse({ ok: false, reason: "failed" }); });
     return true;
   }
   if (message.type === "ATLAS_LOCATE_MESSAGE") {

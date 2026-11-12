@@ -71,3 +71,9 @@ it("retains identical conditions in different deep subject scopes across repeate
  const body=`## 主流程\n\n#### 导入\n\n${paragraph}\n\n#### 导出\n\n${paragraph}`;
  const once=knowledgeArticlePresentation(body);expect(once.split(paragraph)).toHaveLength(3);expect(knowledgeArticlePresentation(once)).toBe(once);
 });
+
+it("reads a table row with fewer cells than its header without failing the whole page",()=>{
+ const body="| 功能 | 说明 | 状态 |\n| --- | --- | --- |\n| 冲动自救 | 关键时刻拉回用户 |\n| 打卡 | 每日记录 | planned |\n";
+ const out=knowledgeArticlePresentation(body);
+ expect(out).toContain("冲动自救");expect(out).toContain("打卡");
+});

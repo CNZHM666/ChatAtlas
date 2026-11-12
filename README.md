@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CNZHM666/ChatAtlas/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/CNZHM666/ChatAtlas?include_prereleases&style=flat-square&label=release&color=1a7f37"></a>
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.3"><img alt="最新版本" src="https://img.shields.io/github/v/release/CNZHM666/ChatAtlas?include_prereleases&style=flat-square&label=release&color=1a7f37"></a>
   <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-blue?style=flat-square"></a>
   <img alt="Chrome Manifest V3" src="https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square&logo=googlechrome&logoColor=white">
   <a href="https://linux.do"><img alt="LINUX DO 社区" src="https://img.shields.io/badge/LINUX%20DO-%E7%A4%BE%E5%8C%BA-F6A623?style=flat-square"></a>
@@ -36,7 +36,7 @@
 - **交给你的 agent**：把整理好的项目文档导出为 Markdown，分得清你定下的决定和 AI 的建议，可作为 Claude Code、Codex 等编码 agent 的项目上下文。
 
 > [!NOTE]
-> ChatAtlas 是早期预览版（0.1.2 Early Preview）。功能、交互和数据结构仍会调整；Wiki 整理属于实验功能，生成结果需要你对照来源核对。升级前请先备份本地数据。
+> ChatAtlas 是早期预览版（0.1.3 Early Preview）。功能、交互和数据结构仍会调整；Wiki 整理属于实验功能，生成结果需要你对照来源核对。升级前请先备份本地数据。
 
 ## 界面预览
 
@@ -97,7 +97,7 @@
 
 ChatAtlas 还没有上架 Chrome 应用商店，需要以「开发者模式」加载。Edge 等基于 Chromium 的浏览器步骤相同（地址换成 `edge://extensions`）。也可以把[一段提示词](#让-ai-帮你安装)交给 AI，让它帮你完成。
 
-1. **下载**：打开 [Releases 最新版本](https://github.com/CNZHM666/ChatAtlas/releases/latest)，在 Assets 里下载 `ChatAtlas-extension-v0.1.2.zip`。不要下载 `Source code`，那是源码，不能直接加载。
+1. **下载**：打开 [Releases 最新版本](https://github.com/CNZHM666/ChatAtlas/releases/latest)，在 Assets 里下载 `ChatAtlas-extension-v0.1.3.zip`。不要下载 `Source code`，那是源码，不能直接加载。
 2. **解压**：把 ZIP 解压到一个固定的文件夹，例如 `文档/ChatAtlas`。解压后的文件夹里应直接能看到 `manifest.json`。加载后不要删除或移动这个文件夹，否则扩展会失效。
 3. **打开扩展管理页**：在 Chrome 地址栏输入 `chrome://extensions` 并回车。
 4. **开启开发者模式**：打开页面右上角的「开发者模式」开关。

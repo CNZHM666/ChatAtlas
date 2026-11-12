@@ -171,3 +171,49 @@
   .review-home.is-import-first .ai-platform-more { width:100%; max-width:none; padding:4px 0 8px; }
   .review-home.is-import-first .ai-platform-more::before { display:none; }
 }
+
+/* 最近项目 and 继续上次 as one kind of compact list: a row per item with its title, where it stands and when it last
+   changed, a few rows shown and the rest one click away in a list that scrolls instead of stretching the home. */
+.review-home .home-list-header { display:flex; align-items:baseline; gap:8px; margin:0 0 10px; }
+.review-home .home-list-header h2 { margin:0; font-size:var(--text-base); font-weight:600; color:var(--text); }
+.home-list-count { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+.review-home .home-list-toggle { margin-left:auto; min-height:0; padding:2px 4px; border:0; background:transparent; color:var(--muted); font-size:12.5px; }
+.review-home .home-list-toggle:hover { color:var(--text); }
+.home-list-search { display:flex; align-items:center; gap:8px; margin:0 0 8px; padding:0 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface-solid); color:var(--muted); }
+.home-list-search input { flex:1; min-width:0; height:34px; border:0; background:transparent; color:var(--text); font:inherit; font-size:var(--text-sm); outline:none; }
+.home-list-search:focus-within { border-color:var(--accent); }
+.home-list { border:1px solid var(--border); border-radius:10px; background:var(--surface-solid); overflow:hidden; }
+.home-list.is-all { max-height:min(460px, 60vh); overflow-y:auto; }
+.home-list-item { position:relative; border-bottom:1px solid var(--border); }
+.home-list-item:last-child { border-bottom:0; }
+.review-home .home-list-row { display:flex; align-items:center; gap:10px; width:100%; min-height:46px; padding:10px 14px; border:0; border-radius:0; background:transparent; color:var(--text); text-align:left; }
+.review-home .home-list-row:hover { background:var(--surface-muted); }
+.review-home .home-list-item.has-history .home-list-row { padding-right:52px; }
+.home-list-row > svg { flex:none; color:var(--muted); }
+.home-list-row.is-task > svg { color:var(--accent); }
+.home-list-row:has(.is-failed) > svg { color:#dc2626; }
+.home-list-row > strong { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--text-sm); font-weight:550; line-height:1.5; }
+.home-list-meta { display:flex; flex:0 1 auto; align-items:center; justify-content:flex-end; gap:10px; min-width:0; }
+.home-list-meta small { flex:none; margin:0; color:var(--muted); font-size:12px; line-height:1.5; white-space:nowrap; }
+.home-list-meta .home-list-place { flex:0 1 auto; min-width:0; max-width:200px; overflow:hidden; text-overflow:ellipsis; }
+.home-list-time { min-width:44px; text-align:right; font-variant-numeric:tabular-nums; }
+.home-list-state { padding:1px 7px; border-radius:999px; background:var(--surface-muted); font-size:11.5px !important; }
+.home-list-state.is-pending { background:color-mix(in srgb, #d97706 14%, transparent); color:#b45309 !important; }
+.home-list-state.is-failed { background:color-mix(in srgb, #dc2626 12%, transparent); color:#b91c1c !important; }
+.home-list-action { color:var(--accent) !important; font-weight:600; }
+.home-list-progress { display:inline-flex; align-items:center; gap:6px; font-variant-numeric:tabular-nums; }
+.home-list-progress > i { display:block; width:40px; height:4px; overflow:hidden; border-radius:999px; background:var(--border); }
+.home-list-progress > i > span { display:block; height:100%; border-radius:inherit; background:var(--accent); }
+.home-list-empty { margin:0; padding:14px; color:var(--muted); font-size:var(--text-sm); }
+.review-home .home-list-item .focus-versions-compact { padding:0; }
+.review-home .home-list-item .focus-versions-compact > summary { top:9px; right:12px; }
+.review-home .home-list-item .focus-versions-compact > .focus-versions-list { padding:0 14px 12px 40px; }
+@media (prefers-color-scheme: dark) { .home-list-state.is-pending { color:#fbbf24 !important; } .home-list-state.is-failed { color:#f87171 !important; } }
+@media (max-width: 600px) { .home-list-meta .home-list-place, .home-list-progress { display:none !important; } }
+
+/* In the source list a synced row is the usual case and says nothing: its tag shows on hover only, so 待同步, 同步中
+   and 失败 stand out. The tag keeps its room, and the columns stay aligned. */
+.review-home .workbench-sync-item .workbench-source-state.is-ready { opacity:0; transition:opacity .12s ease; }
+.review-home .workbench-sync-item:hover .workbench-source-state.is-ready, .review-home .workbench-sync-item:focus-within .workbench-source-state.is-ready { opacity:.8; }
+.review-home .workbench-sync-item .workbench-source-state.is-pending { background:color-mix(in srgb, #d97706 12%, transparent); color:#b45309; }
+@media (prefers-color-scheme: dark) { .review-home .workbench-sync-item .workbench-source-state.is-pending { color:#fbbf24; } }

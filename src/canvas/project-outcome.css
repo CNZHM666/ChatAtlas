@@ -1199,6 +1199,8 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .key-decisions-verdict button { min-height: 26px; padding: 2px 6px; border-color: transparent; background: transparent; color: var(--muted); }
 .key-decisions-apply { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 0 16px 14px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); font-size: 13px; }
 .key-decisions-error { margin: 0 16px 12px; color: #b34d4d; font-size: 12.5px; }
+.key-decisions-more { display: block; margin: 0 16px 12px; padding: 4px 0; border: 0; background: none; color: var(--muted, #6b6b6b); font-size: 12.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.key-decisions-more:hover { color: inherit; }
 @media (max-width: 620px) { .key-decisions > ol > li { flex-direction: column; } }
 
 /* A chapter's changes against its earlier version, like a code review diff. */
@@ -1242,6 +1244,8 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .knowledge-ledger-chapter h3 { margin: 10px 0 4px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .knowledge-ledger-chapter li > button { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 13.5px; line-height: 1.6; text-align: left; cursor: pointer; }
 .knowledge-ledger-chapter li > button:hover { background: var(--surface-muted); }
+/* The point being checked against its original, open in the panel beside. */
+.knowledge-ledger-chapter li > button.is-checking, .knowledge-ledger-chapter li > button.is-checking:hover { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .knowledge-ledger-status { align-self: start; margin-top: 2px; padding: 0 6px; border-radius: 4px; background: var(--surface-muted); color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 .knowledge-ledger-status.is-confirmed, .knowledge-ledger-status.is-reported { background: var(--accent-soft); color: var(--accent); }
 .knowledge-ledger-status.is-open, .knowledge-ledger-status.is-contested { background: #fff7e6; color: #8a5300; }

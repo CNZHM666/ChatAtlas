@@ -28,6 +28,8 @@ export function aiAdvicePresentation(body:string,originalTexts:string[]=[]):stri
     const at=start+offset;if(quotations.some(range=>at>=range.start&&at<range.end))return match;
     // A product called 智能助手/客服助手 is not a narrator role.
     if(match.trim()==="助手"&&/(?:智能|客服|语音|编程|代码|学习|教学|小)$/u.test(body.slice(0,at)))return match;
+    // So is a product named with a dash ("克己-戒色助手", which read 克己-戒色AI), or a bold item label ending in 助手.
+    if(match.trim()==="助手"&&(/[-－—·][\p{L}\p{N}]{0,8}$/u.test(body.slice(0,at))||/\*\*[^*\n]{1,20}$/u.test(body.slice(0,at))&&body.slice(at+match.length).startsWith("**")))return match;
     const following=body.slice(at+match.length,at+match.length+30).replace(/^(?:\s|\*|_)+/u,"");
     return /^(?:(?:的)?(?:建议|方案|分析)|[：:]|推荐|认为|提出|解释|说明|指出|强调|回答|回复|补充|总结|给出|表示|提到|将其|据此|随后|进一步|把|对|在|曾|明确|提醒|评估|承认|修正|确认|基于|不建议|也|还|则|最终|后来|搜集|收集|举例|审阅|审查|支持|同时|反对|列出|比较|对比|分析了|生成了|评价|澄清|研究|的明确)/u.test(following)?"AI":match;
    });

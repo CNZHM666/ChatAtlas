@@ -7,6 +7,13 @@
 [简体中文](../../CHANGELOG.md) · **English**
 
 
+## 0.1.3 — Early Preview
+
+- Wiki checks keep thresholds tied to their original feature, audience and observation window. Unsupported claims are flagged in place.
+- Exports can restore scope from unambiguous evidence in saved drafts. Analysis CSVs are generated in the background.
+- Side panel insertion for organized knowledge uses the same layout and input divider as related conversations.
+
+
 ## 0.1.2 — Early Preview
 
 ### 2026-11-08 More readable project documents; learning mode (beta)

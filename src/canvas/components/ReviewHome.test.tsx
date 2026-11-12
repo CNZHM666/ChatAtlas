@@ -93,7 +93,8 @@ describe("workbench sync", () => {
     const project = projectSession();
     const props = base({ sessions: [project] });
     render(<PreferencesProvider><ReviewHome {...props} /></PreferencesProvider>);
-    expect(screen.getByText("已保存文档")).toBeVisible();
+    // A saved project needs no tag; only a preview still to confirm says so.
+    expect(screen.queryByText("待确认预览")).toBeNull();
     expect(screen.queryByText("方案草稿")).toBeNull();
     expect(screen.queryByText(/项待完成/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: new RegExp(project.title) }));

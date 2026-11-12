@@ -2,6 +2,7 @@ import type { WikiDraftChapter, WikiKnowledgeUnit } from "../shared/wiki-knowled
 import { replaceParagraph } from "../shared/wiki-body-text";
 import { claimSupported } from "./wiki-claim-support";
 import { knowledgeTerms } from "../shared/knowledge-subject";
+import { rowFields } from "../shared/wiki-row-sentence";
 
 const bare = (text: string) => text.toLowerCase().replace(/[\s*`"'“”‘’]/gu, "").replace(/[.。]$/u, "");
 
@@ -747,6 +748,19 @@ export function earlierVersionsLast(chapters: WikiDraftChapter[], statusOf: (id:
         chapter.body = replaceParagraph(chapter.body, paragraph.text, () => text);
         return [{ ...paragraph, text, claims: rest, unitIds: paragraph.unitIds.filter(id => rest.some(claim => claim.unitIds.includes(id)) || !gone.some(claim => claim.unitIds.includes(id))) }];
       }
+      if (!sourceBlock && !/^\s*(?:\||>|#|`{3}|~{3})/u.test(paragraph.text) && !/\n/u.test(paragraph.text.trim())) {
+        // A sentence of a prose paragraph telling only a replaced point, beside sentences of what holds now: 「首页最终采用左侧
+        // 布局作为功能结构……〔此前〕顶部大卡的核心指标……」 opened the homepage section with the layout the user set aside.
+        const gone = claims.filter(claim => { const said = claim.text.trim(); return said.length >= 12 && /[.!?。！？]$/u.test(said) && claim.unitIds.length > 0 && claim.unitIds.every(id => statusOf(id) === "history") && paragraph.text.includes(said); });
+        const rest = claims.filter(claim => !gone.includes(claim));
+        if (!gone.length || !rest.some(claim => claim.unitIds.some(id => statusOf(id) !== "history"))) return [paragraph];
+        const text = gone.reduce((left, claim) => left.replace(claim.text.trim(), ""), paragraph.text).replace(/\s{2,}/gu, " ").trim();
+        if (text.replace(/[\s*]/gu, "").length < 8) return [paragraph];
+        for (const claim of gone) earlier.push({ subtopic: heading, text: `- ${claim.text.trim()}`, unitIds: [...claim.unitIds], claims: [claim] });
+        moved += gone.length;
+        chapter.body = replaceParagraph(chapter.body, paragraph.text, () => text);
+        return [{ ...paragraph, text, claims: rest, unitIds: paragraph.unitIds.filter(id => rest.some(claim => claim.unitIds.includes(id)) || !gone.some(claim => claim.unitIds.includes(id))) }];
+      }
       if (sourceBlock || !/^\s*\|/u.test(paragraph.text)) return [paragraph];
       // A table of the writer's: its rows telling only replaced points.
       const lines = paragraph.text.trim().split("\n");
@@ -756,18 +770,35 @@ export function earlierVersionsLast(chapters: WikiDraftChapter[], statusOf: (id:
       const rowClaims = (line: string) => claims.filter(claim => claim.text.trim().length >= 2 && line.includes(claim.text.trim()));
       const old = lines.slice(2).filter(line => { const own = rowClaims(line); return own.length > 0 && own.every(claim => claim.unitIds.length > 0 && claim.unitIds.every(id => statusOf(id) === "history")); });
       if (!old.length) return [paragraph];
-      const kept = [...lines.slice(0, 2), ...lines.slice(2).filter(line => !old.includes(line))];
+      // A row left with no cell of its own (" |", what remained of the moved row) is no row: one table kept its header
+      // and that line alone, and the reader failed on the row shorter than its header.
+      const kept = [...lines.slice(0, 2), ...lines.slice(2).filter(line => !old.includes(line) && cells(line).some(Boolean))];
       const before = paragraph.text;
-      const rest = kept.length > 2 ? kept.join("\n") : "";
+      // A table of versions (「| 版本 | 主按钮状态逻辑 |」, rows 「此前」 and 「现行」): a row's name is the version, no name
+      // of its own. Moved, a row read 「- **此前** · 主按钮状态逻辑: ……」; the one left was a table of one row headed 现行.
+      // Each is told by what the column names: 「主按钮状态逻辑：……」.
+      // Rows named by when they held (「此前报告」, 「当前报告」 under 「时间点/状态」) are versions too, whatever the header.
+      const versioned = header.length >= 2 && lines.slice(2).every(line => /^(?:此前|早期|早先|原先|旧版|现行|当前|目前|最新|最终|新版|earlier|previous|current|now|latest|old|new)/iu.test(cells(line)[0] ?? ""));
+      const zh = /\p{Script=Han}/u.test(paragraph.text), colon = zh ? "：" : ": ";
+      // Told one way with every row turned into text (wiki-row-sentence): 「日活 (DAU)：约40；核心用户数：-；备注：……」 read as a form.
+      const told = (values: string[]) => `**${header[1]}**${colon}${rowFields([undefined, ...header.slice(2)], values, zh)}`;
+      const named = (line: string) => { const name = cells(line)[0]; return rowClaims(line).filter(claim => !versioned || claim.text.trim() !== name); };
+      let rest = kept.length > 2 ? kept.join("\n") : "";
+      let restClaims = claims.filter(claim => rest.includes(claim.text));
+      if (versioned && kept.length === 3) {
+        const [name, ...values] = cells(kept[2]);
+        rest = rowFields(header.slice(1), values, zh);
+        restClaims = claims.filter(claim => claim.text.trim() !== name && kept[2].includes(claim.text));
+      }
       for (const line of old) {
         const [name, ...values] = cells(line);
-        const text = `- **${name}** · ${values.map((value, index) => header[index + 1] ? `${header[index + 1]}: ${value}` : value).join("; ")}`;
-        earlier.push({ subtopic: heading, text, unitIds: [...new Set(rowClaims(line).flatMap(claim => claim.unitIds))], claims: rowClaims(line) });
+        const text = versioned ? `- ${told(values)}` : `- **${name}**${zh ? colon : " · "}${rowFields(header.slice(1), values, zh)}`;
+        earlier.push({ subtopic: heading, text, unitIds: [...new Set(named(line).flatMap(claim => claim.unitIds))], claims: named(line) });
         moved++;
       }
       if (!rest) { chapter.body = chapter.body.includes(`\n\n${before}`) ? chapter.body.replace(`\n\n${before}`, () => "") : replaceParagraph(chapter.body, before, () => ""); return []; }
       chapter.body = replaceParagraph(chapter.body, before, () => rest);
-      return [{ ...paragraph, text: rest, claims: claims.filter(claim => rest.includes(claim.text)), unitIds: paragraph.unitIds.filter(id => claims.some(claim => rest.includes(claim.text) && claim.unitIds.includes(id)) || !claims.some(claim => claim.unitIds.includes(id))) }];
+      return [{ ...paragraph, text: rest, claims: restClaims, unitIds: paragraph.unitIds.filter(id => claims.some(claim => rest.includes(claim.text) && claim.unitIds.includes(id)) || !claims.some(claim => claim.unitIds.includes(id))) }];
     });
     if (!earlier.length) continue;
     // Rows told one after another make one list.

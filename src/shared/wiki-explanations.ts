@@ -9,6 +9,7 @@ import {projectKnowledgeFacts,type ProjectKnowledgeFact} from "./project-knowled
 import {unsupportedAdoption} from "./project-knowledge-view";
 import {wikiSections} from "./wiki-navigation";
 import {knowledgeTerms} from "./knowledge-subject";
+import {wikiDocumentBlocks} from "./wiki-document-blocks";
 
 /** Bumped when explanation ownership, block issues or their repair change meaning.
  * Saved documents below it are upgraded only by an explicit update. */
@@ -31,15 +32,8 @@ export const wikiBlockId=(sectionId:string,text:string)=>`${sectionId}#${sourceM
 const plain=(text:string)=>text.replace(/\*\*|__/gu,"");
 
 export function wikiBlocks(section:Pick<FocusSection,"id"|"body"|"claims">):WikiBlock[]{
- const body=section.body;
- return parser.parse(body).children.flatMap(node=>{
-  if(node.type!=="paragraph")return [];
-  // A bold label line introduces a list; a pointer line is navigation.
-  if(node.children.length===1&&node.children[0].type==="strong")return [];
-  const start=node.position!.start.offset!,end=node.position!.end.offset!,text=body.slice(start,end);
-  const claims=(section.claims??[]).filter(claim=>[claim.text,...claim.formulations??[]].some(form=>form&&plain(text).includes(plain(form))));
-  return [{id:wikiBlockId(section.id,text),sectionId:section.id,start,end,text,claims}];
- });
+ return wikiDocumentBlocks(section.body,section.claims).filter(block=>block.kind==="paragraph"&&!block.standaloneLabel)
+  .map(({start,end,text,claims})=>({id:wikiBlockId(section.id,text),sectionId:section.id,start,end,text,claims}));
 }
 
 // Words that make one explanation say something another does not: numbers,

@@ -1,13 +1,18 @@
 import { chatGPTComposer } from "./chatgpt-adapter";
+import { COMPOSER_REFERENCE_DIVIDER } from "../shared/composer-reference";
 import { handoffPageMatches } from "../shared/handoff-page";
 
-export type ComposerResult = { ok: boolean; reason?: "draft" | "unavailable" | "changed" | "failed" };
+export type ComposerResult = { ok: boolean; reason?: "draft" | "unavailable" | "changed" | "failed" | "edited" };
 
 /** The text as the input box shows it once inserted: a rich editor turns Markdown into formatting as it is typed
  * ("## " a heading, "> " a quote, "- " a list) and a paragraph may show its line breaks as spaces, so markers and
  * spacing are not compared, only the words. */
 const words = (text: string) => text.replace(/(^|\s)(?:#{1,6}|>|[-*+]|\d+[.)])(?=[ \t])/gmu, "$1").replace(/[*_`~\u200b-\u200d\ufeff]|\s+/gu, "");
-export const insertedAsText = (shown: string, text: string) => { const own = words(shown), wanted = words(text); return own === wanted || own.length >= wanted.length * .97 && own.slice(0, 200) === wanted.slice(0, 200); };
+export const insertedAsText = (shown: string, text: string) => {
+  const own = words(shown), wanted = words(text);
+  if (wanted.endsWith(COMPOSER_REFERENCE_DIVIDER) && !own.endsWith(COMPOSER_REFERENCE_DIVIDER)) return false;
+  return own === wanted || own.length >= wanted.length * .97 && own.slice(0, 200) === wanted.slice(0, 200);
+};
 
 const frame = () => new Promise<void>(resolve => typeof requestAnimationFrame === "function" ? requestAnimationFrame(() => resolve()) : setTimeout(resolve, 16));
 const report = (step: string, detail: Record<string, unknown> = {}) => console.warn("[ChatAtlas] insert", step, detail);
@@ -26,12 +31,29 @@ export async function fillProjectComposer(text: string, conversationId: string, 
   composer.focus();
   if(location.href!==address)return {ok:false,reason:"changed"};
   if (!composer.isConnected || current().trim()) return { ok: false, reason: "draft" };
+  const reference = text.endsWith(`\n${COMPOSER_REFERENCE_DIVIDER}\n`);
+  const complete = () => {
+    const shown = current();
+    if (!composer.isConnected || !insertedAsText(shown, text)) return false;
+    if (reference && document.activeElement === composer && (shown === text || words(shown) === words(text))) {
+      if (composer instanceof HTMLTextAreaElement) composer.setSelectionRange(composer.value.length, composer.value.length);
+      else {
+        const range = document.createRange();
+        range.selectNodeContents(composer);
+        range.collapse(false);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
+    }
+    return true;
+  };
   // Something now shows: accept it only when it is this text, after the editor had a frame to render.
   const settled = async (step: string): Promise<ComposerResult> => {
-    if (composer.isConnected && insertedAsText(current(), text)) return { ok: true };
+    if (complete()) return { ok: true };
     await frame(); await frame();
-    if (composer.isConnected && insertedAsText(current(), text)) return { ok: true };
-    report("text differs", { step, shown: current().slice(0, 120), length: current().length, wanted: text.length });
+    if (complete()) return { ok: true };
+    report("text differs", { step, length: current().length, wanted: text.length });
     return { ok: false, reason: "failed" };
   };
   if (composer instanceof HTMLTextAreaElement) {
@@ -60,4 +82,26 @@ export async function fillProjectComposer(text: string, conversationId: string, 
   const paragraph = document.createElement("p"); paragraph.textContent = text; composer.replaceChildren(paragraph);
   composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
   return settled("paragraph");
+}
+
+/** Undo of an insertion, by an explicit user action: the input box is cleared only while it still shows this text and
+ * nothing else. Once the user wrote under it, it is theirs: nothing is removed. */
+export async function clearProjectComposer(text: string, conversationId: string, url = location.href, findComposer:()=>HTMLElement|null|undefined=chatGPTComposer): Promise<ComposerResult> {
+  if (!handoffPageMatches(url, conversationId)) return { ok: false, reason: "changed" };
+  const composer = findComposer();
+  if (!composer) return { ok: false, reason: "unavailable" };
+  const current = () => composer instanceof HTMLTextAreaElement ? composer.value : composer.innerText || composer.textContent || "";
+  if (!current().trim()) return { ok: true };
+  if (words(current()) !== words(text)) return { ok: false, reason: "edited" };
+  composer.focus();
+  if (composer instanceof HTMLTextAreaElement) {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(composer, "");
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+  } else {
+    const selection = window.getSelection(), range = document.createRange(); range.selectNodeContents(composer); selection?.removeAllRanges(); selection?.addRange(range);
+    if (!(typeof document.execCommand === "function" && document.execCommand("delete", false))) composer.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "deleteContentBackward" }));
+  }
+  if (!current().trim()) return { ok: true };
+  await frame(); await frame();
+  return current().trim() ? { ok: false, reason: "failed" } : { ok: true };
 }
