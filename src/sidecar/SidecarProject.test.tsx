@@ -1,16 +1,18 @@
 import "fake-indexeddb/auto";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SidecarProject } from "./SidecarProject";
 import { projectSession } from "../test/project-fixture";
 import { getDatabase } from "../storage/db";
 import { savedSidecarProjects } from "./project-model";
-import { sourceChanges } from "../canvas/source-freshness";
+import { currentSourceChange, type SourceChange } from "../canvas/source-freshness";
 import { invalidateStoredMessageSearchIndex } from "../storage/messages";
-vi.mock("../canvas/source-freshness",async original=>({...await original<typeof import("../canvas/source-freshness")>(),sourceChanges:vi.fn(async()=>[])}));
+vi.mock("../canvas/source-freshness",async original=>({...await original<typeof import("../canvas/source-freshness")>(),currentSourceChange:vi.fn()}));
+const unchanged:SourceChange={conversationId:"source",added:0,changed:0,removed:0,unknown:false};
 const send=vi.fn(), copy=vi.fn();
 beforeEach(async()=>{
-  vi.clearAllMocks(); vi.mocked(sourceChanges).mockResolvedValue([]);
+  vi.clearAllMocks(); vi.mocked(currentSourceChange).mockResolvedValue(unchanged);
+  localStorage.removeItem(`atlas-sidecar-update:${JSON.stringify([projectSession().id,"source"])}`);
   vi.stubGlobal("chrome",{runtime:{sendMessage:send,onMessage:{addListener:vi.fn(),removeListener:vi.fn()}}});
   Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:copy}}); copy.mockResolvedValue(undefined); send.mockResolvedValue({ok:true});
   const db=await getDatabase(); await db.clear("contextFavorites"); await db.clear("sidecarSearches"); await db.clear("aiSettings"); await db.clear("focusSessions"); await db.clear("conversations"); await db.clear("messages"); await db.clear("canvases"); invalidateStoredMessageSearchIndex();
@@ -36,10 +38,14 @@ it("does not select an unrelated project automatically and keeps saved candidate
  expect(screen.getByRole("button",{name:`关联到：${saved.title}`})).toBeVisible();
  expect(screen.queryByText(/使用已关联项目/)).toBeNull();expect(screen.queryByRole("button",{name:"复制上下文"})).toBeNull();
 });
-it("imports only the current conversation with one action and then updates the same stored conversation",async()=>{
+it("imports the current conversation and labels a repeated sync without calling it an update",async()=>{
   const db=await getDatabase();
   send.mockImplementation(async message=>{
-    if(message.type==="ATLAS_SIDECAR_SYNC")await db.put("conversations",{id:message.conversationId,title:"当前对话",platform:"chatgpt",url:`https://chatgpt.com/c/${message.conversationId}`,updatedAt:Date.now(),messageCount:2,hydrationState:"hydrated",importState:"complete"});
+    if(message.type==="ATLAS_SIDECAR_SYNC"){
+      const existing=await db.get("conversations",message.conversationId);
+      await db.put("conversations",{id:message.conversationId,title:"当前对话",platform:"chatgpt",url:`https://chatgpt.com/c/${message.conversationId}`,updatedAt:Date.now(),messageCount:2,hydrationState:"hydrated",importState:"complete"});
+      return {ok:true,summary:{change:existing?"unchanged":"imported"}};
+    }
     return {ok:true};
   });
   const {container}=render(<SidecarProject conversationId="source" zh/>);
@@ -54,9 +60,75 @@ it("imports only the current conversation with one action and then updates the s
   await waitFor(()=>expect(screen.getByRole("button",{name:"更新对话"})).toBeEnabled());
   expect(screen.queryByRole("button",{name:"导入当前对话"})).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button",{name:"更新对话"}));
-  await screen.findByText("当前对话已更新，可在工作台和对话库中查看。");
+  await screen.findByText("已检查，没有发现新内容。");
   expect(await db.count("conversations")).toBe(1);
   expect(send.mock.calls.map(call=>call[0])).toEqual([{type:"ATLAS_SIDECAR_SYNC",conversationId:"source"},{type:"ATLAS_SIDECAR_SYNC",conversationId:"source"}]);
+});
+
+it("reads the linked Wiki in the empty side panel and opens the selected chapter in the workspace",async()=>{
+ const db=await getDatabase(),project=projectSession();
+ project.sections.push({...project.sections[0],id:"next",title:"后续计划",body:"下一章保留已确认的实施步骤。"});
+ await db.put("focusSessions",project);
+ renderProject(<SidecarProject conversationId="source" zh/>);
+ const wiki=await screen.findByRole("region",{name:"项目 Wiki"});
+ expect(within(wiki).getByText(project.title)).toBeVisible();
+ expect(screen.getByRole("searchbox",{name:"搜索历史对话"})).toBeVisible();
+ fireEvent.click(within(wiki).getByRole("button",{name:"核心流程"}));
+ expect(await within(wiki).findByText(/需求采集提取目标与约束/)).toBeVisible();
+ expect(screen.queryByRole("searchbox",{name:"搜索历史对话"})).toBeNull();
+ expect(within(wiki).getByRole("button",{name:"上一章"})).toBeDisabled();
+ fireEvent.click(within(wiki).getByRole("button",{name:"下一章"}));
+ expect(await within(wiki).findByText("下一章保留已确认的实施步骤。")).toBeVisible();
+ fireEvent.click(within(wiki).getByRole("button",{name:"打开工作区"}));
+ expect(send).toHaveBeenLastCalledWith({type:"ATLAS_OPEN_REVIEW",sessionId:project.id,sectionId:"next"});
+ fireEvent.click(within(wiki).getByRole("button",{name:"章节目录"}));
+ expect(screen.getByRole("searchbox",{name:"搜索历史对话"})).toBeVisible();
+ fireEvent.change(screen.getByRole("searchbox",{name:"搜索历史对话"}),{target:{value:"计划"}});
+ expect(screen.queryByRole("region",{name:"项目 Wiki"})).toBeNull();
+});
+
+it("keeps the verified update notice during a fresh check and clears it when the source is current",async()=>{
+ const db=await getDatabase();
+ const conversation={id:"source",title:"当前对话",platform:"chatgpt" as const,url:"",updatedAt:1,messageCount:2,hydrationState:"hydrated" as const,importState:"complete" as const};
+ await db.put("conversations",conversation);
+ vi.mocked(currentSourceChange).mockResolvedValueOnce({...unchanged,changed:1});
+ renderProject(<SidecarProject conversationId="source" zh/>);
+ await screen.findByText("修改 1 条");
+ let finish!:(change:SourceChange)=>void;
+ vi.mocked(currentSourceChange).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ await db.put("conversations",{...conversation,rawRevision:"new-revision",updatedAt:2});
+ fireEvent.focus(window);
+ await waitFor(()=>expect(currentSourceChange).toHaveBeenCalledTimes(2));
+ expect(screen.getByText("修改 1 条")).toBeVisible();
+ await act(async()=>finish(unchanged));
+ await waitFor(()=>expect(screen.queryByText("修改 1 条")).toBeNull());
+});
+
+it("dismisses the current update across recapture and reopening, then shows a different update with the same count",async()=>{
+ const db=await getDatabase();
+ const conversation={id:"source",title:"当前对话",platform:"chatgpt" as const,url:"",updatedAt:1,messageCount:2,hydrationState:"hydrated" as const,importState:"complete" as const};
+ await db.put("conversations",conversation);
+ const first={...unchanged,changed:10,fingerprint:"first-changed-source"};
+ vi.mocked(currentSourceChange).mockResolvedValue(first);
+ const view=renderProject(<SidecarProject conversationId="source" zh/>);
+ fireEvent.click(await screen.findByRole("button",{name:"关闭更新提醒"}));
+ expect(screen.queryByText("修改 10 条")).toBeNull();
+ expect(send).not.toHaveBeenCalled();
+ expect((await db.get("focusSessions",projectSession().id))?.sourceConversationIds).toEqual(["source"]);
+ view.unmount();
+ renderProject(<SidecarProject conversationId="source" zh/>);
+ await waitFor(()=>expect(currentSourceChange).toHaveBeenCalledTimes(2));
+ expect(screen.queryByText("修改 10 条")).toBeNull();
+ await db.put("conversations",{...conversation,rawRevision:"current-capture",updatedAt:2});
+ fireEvent.focus(window);
+ await waitFor(()=>expect(currentSourceChange).toHaveBeenCalledTimes(3));
+ expect(screen.queryByText("修改 10 条")).toBeNull();
+ vi.mocked(currentSourceChange).mockResolvedValue({...first,fingerprint:"different-changed-source"});
+ await db.put("conversations",{...conversation,rawRevision:"different-capture",updatedAt:3});
+ fireEvent.focus(window);
+ expect(await screen.findByText("修改 10 条")).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"查看更新"}));
+ expect(send).toHaveBeenCalledExactlyOnceWith({type:"ATLAS_OPEN_REVIEW",sessionId:projectSession().id});
 });
 it("links an unsaved current conversation directly from the searchable picker and keeps manual knowledge",async()=>{
   const db=await getDatabase(), target={...projectSession(),id:"target",canvasId:"target-canvas",title:"ChatAtlas 目标项目"};

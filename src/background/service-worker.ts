@@ -127,12 +127,13 @@ async function openReview(sessionId: string, sectionId?: string, query = false):
 }
 
 async function persistCapture(capture: ConversationCapture): Promise<CaptureCommandResponse> {
-  await saveConversationCapture(capture, { replace: false });
+  const { change, messageCount } = await saveConversationCapture(capture, { replace: false });
   const summary: CaptureSummary = {
     conversationId: capture.conversation.id,
     title: capture.conversation.title,
-    messageCount: capture.messages.length,
+    messageCount,
     savedAt: capture.capturedAt,
+    change,
   };
   void chrome.runtime.sendMessage({ type: "ATLAS_CAPTURE_SAVED", summary } satisfies AtlasMessage).catch(() => undefined);
   return { ok: true, summary };

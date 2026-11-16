@@ -21,12 +21,12 @@ export type MemoryView="home"|"recent";
 /** Sidebar search: local only. Saved Wiki knowledge comes first, then the original
  * messages; both open in the workspace. No model answers here; semantic matching
  * stays an opt-in advanced setting that only embeds the query. */
-export function SidecarMemory({active=true,conversations,conversationId,zh,view,onView,onOpen,projects=[],projectId,canInsert=false,projectConversationIds=[],onFeedback,toolbarActions}: {
+export function SidecarMemory({active=true,conversations,conversationId,zh,view,onView,onOpen,projects=[],projectId,canInsert=false,projectConversationIds=[],onFeedback,toolbarActions,emptyContent,readingWiki=false}: {
  active?:boolean;conversations:Conversation[];conversationId:string;zh:boolean;view:MemoryView;onView:(view:MemoryView)=>void;
  onOpen:(conversation:Conversation,message?:ConversationMessage,range?:MessageSourceRange,search?:ReaderSearchContext)=>void;
  projects?:FocusSession[];projectId?:string;canInsert?:boolean;
  projectConversationIds?:string[];onFeedback?:(message:string)=>void;
- toolbarActions?:ReactNode;
+ toolbarActions?:ReactNode;emptyContent?:ReactNode;readingWiki?:boolean;
 }) {
  const l=(cn:string,en:string)=>zh?cn:en;
  const [query,setQuery]=useState(""),[hits,setHits]=useState<MemoryHit[]>(),[knowledge,setKnowledge]=useState<KnowledgeHit[]>([]);
@@ -101,18 +101,19 @@ export function SidecarMemory({active=true,conversations,conversationId,zh,view,
  return <section className="sidecar-memory">
  {toolbarActions?<nav className="memory-toolbar" aria-label={l("侧栏功能","Sidebar navigation")}><div>{toolbarActions}</div></nav>:null}
  <div className="memory-home">      <h1 className="sr-only">{l("查找历史", "Find history")}</h1>
-      <form className="memory-search memory-intent-search" onSubmit={event => { event.preventDefault(); search(); }}><textarea rows={2} maxLength={1200} role="searchbox" aria-label={l("搜索历史对话", "Search past conversations")} placeholder={l("查找已整理的知识和历史对话…", "Search organized knowledge and past chats…")} value={query} onChange={event => {controller.current?.abort();lastSearch.current="";setBusy(false);setProgress("");setQuery(event.target.value);if(!event.target.value.trim()){setHits(undefined);setKnowledge([]);}}} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); search(); } }}/>
+      {!readingWiki&&<form className="memory-search memory-intent-search" onSubmit={event => { event.preventDefault(); search(); }}><textarea rows={2} maxLength={1200} role="searchbox" aria-label={l("搜索历史对话", "Search past conversations")} placeholder={l("查找已整理的知识和历史对话…", "Search organized knowledge and past chats…")} value={query} onChange={event => {controller.current?.abort();lastSearch.current="";setBusy(false);setProgress("");setQuery(event.target.value);if(!event.target.value.trim()){setHits(undefined);setKnowledge([]);}}} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); search(); } }}/>
       <div className="memory-input-actions">
        <div className="memory-composer-tools"><button className="memory-scope-button" data-scope={source} type="button" aria-label={l("资料范围","Material scope")} aria-haspopup="dialog" aria-expanded={panel==="scope"} title={scopeTitle} onClick={()=>setPanel("scope")}><ScopeIcon size={14}/><span>{scopeLabel}</span><ChevronDown size={12}/></button><button className="memory-tool-button" type="button" aria-label={l("更多操作","More actions")} aria-haspopup="dialog" title={l("更多操作","More actions")} onClick={()=>setPanel("more")}><MoreHorizontal size={17}/></button></div>
        <div className="memory-send-tools"><button className="memory-send-button" aria-label={l("查找历史", "Find history")} disabled={busy || !query.trim()}><ArrowUp size={18}/></button></div>
-      </div></form>
-      {hasFilters?<div className="memory-search-utilities"><button className="memory-scope-trigger" type="button" aria-label={l("搜索范围与筛选","Search scope and filters")} title={scopeSummary} onClick={openFilters}>{scopeSummary}</button><button type="button" aria-label={l("清除搜索筛选","Clear search filters")} onClick={()=>applyFilters(emptyFilters())}><X size={14}/></button></div>:null}
+      </div></form>}
+      {hasFilters&&!readingWiki?<div className="memory-search-utilities"><button className="memory-scope-trigger" type="button" aria-label={l("搜索范围与筛选","Search scope and filters")} title={scopeSummary} onClick={openFilters}>{scopeSummary}</button><button type="button" aria-label={l("清除搜索筛选","Clear search filters")} onClick={()=>applyFilters(emptyFilters())}><X size={14}/></button></div>:null}
       {/* Everything found scrolls in one area above the search box, which stays in view. */}
       <div className="memory-found">
+       {view==="home"&&!query.trim()?emptyContent:null}
        {semanticNotice&&!busy?<p className="memory-semantic-feedback" role="status">{semanticNotice}</p>:null}
        {knowledge.length&&query.trim()?<SidecarKnowledgeResults hits={knowledge} projects={projects} conversationId={conversationId} canInsert={canInsert} zh={zh}/>:null}
        {hits&&query.trim()? <SidecarSearchResults key={JSON.stringify([query,appliedFilters])} hits={hits} conversationId={conversationId} zh={zh} onOpen={onOpen} order={order} query={query} canInsert={canInsert} compact/> : null}
-       {!query.trim()&&recent.length?<div className="memory-recent-list"><header><small>{l("最近查找","Recent searches")}</small><button type="button" className="sidecar-text-button" onClick={()=>void getDatabase().then(db=>db.clear("sidecarSearches")).then(reload).catch(failure=>setError(String(failure)))}>{l("清空","Clear")}</button></header>{recent.slice(0,6).map(item=><button type="button" key={item.id} onClick={()=>search(item.query)}><History size={14} aria-hidden="true"/><span>{item.query}</span></button>)}</div>:null}
+       {!readingWiki&&!query.trim()&&recent.length?<div className="memory-recent-list"><header><small>{l("最近查找","Recent searches")}</small><button type="button" className="sidecar-text-button" onClick={()=>void getDatabase().then(db=>db.clear("sidecarSearches")).then(reload).catch(failure=>setError(String(failure)))}>{l("清空","Clear")}</button></header>{recent.slice(0,6).map(item=><button type="button" key={item.id} onClick={()=>search(item.query)}><History size={14} aria-hidden="true"/><span>{item.query}</span></button>)}</div>:null}
       </div>
 </div>
     {panel==="scope"?<SidecarScopePicker zh={zh} source={source} conversationId={conversationId} conversations={conversations} hasProject={Boolean(projectConversationIds.length)} onChoose={value=>applyFilters({...appliedFilters,source:value,platform:""})} onClose={()=>setPanel(undefined)}/>:null}

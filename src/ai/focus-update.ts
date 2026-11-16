@@ -6,7 +6,8 @@ import { sourceMessageSignature } from "../shared/source-signature";
 import { isInternalSearchQueryMessage } from "../shared/conversation-text";
 import { getDatabase } from "../storage/db";
 import { carryReviewNotes } from "../canvas/review-notes";
-import { sourceChange } from "../canvas/source-freshness";
+import { loadSourceBaseline, sourceChangeDetails } from "../canvas/source-freshness";
+import { isCurrentHydrationComplete } from "../sync/import-state";
 import { asLearningDocument, generateFocusSession, ledgerDocumentSession, requireLedgerDirectory } from "./focus-session";
 import { learningUnitsOwn } from "./wiki-learning";
 import { keptLearnerCode } from "./wiki-learning-code";
@@ -38,25 +39,28 @@ export interface FocusUpdatePlan { fallback: boolean; changed: boolean; affected
 const key = (conversationId: string, messageId: string) => JSON.stringify([conversationId, messageId]);
 
 /** Revisit the changed chapter and subsequent discussion, including dependent corrections. */
-export function planFocusUpdate(previous: FocusSession, input: ConversationMessage[]): FocusUpdatePlan {
+export function planFocusUpdate(previous: FocusSession, input: ConversationMessage[], baselines: Record<string, ConversationMessage[] | undefined> = {}): FocusUpdatePlan {
   const messages = input.filter(item => item.content.trim() && !isInternalSearchQueryMessage(item)).sort((a, b) => a.messageIndex - b.messageIndex);
   const addedConversationIds = [...new Set(messages.map(item => item.conversationId))].filter(id => !previous.sourceConversationIds.includes(id));
-  const changes = previous.sourceConversationIds.map(id => sourceChange(previous, id, messages.filter(item => item.conversationId === id)));
-  const fallback = previous.scope?.kind === "goal" || previous.coverage?.method === "sampled" || !previous.coverage || changes.some(item => item.unknown) || previous.sourceConversationIds.some(id => !(previous.sourceMessageOrder?.[id] ?? previous.sourceOutlines?.find(outline => outline.conversationId === id)?.messageOrder) || !(previous.sourceRoles?.[id] ?? previous.sourceOutlines?.find(outline => outline.conversationId === id)?.messageRoles));
-  const changed = fallback || addedConversationIds.length > 0 || changes.some(item => item.added || item.changed || item.removed || item.reordered);
+  const changes = new Map(previous.sourceConversationIds.map(id => {
+    const retained = baselines[id], ids = new Set(previous.scope?.blocks?.filter(block => block.conversationId === id).flatMap(block => block.messageIds));
+    return [id, sourceChangeDetails(previous, id, input.filter(item => item.conversationId === id),
+      previous.scope?.kind === "goal" ? retained?.filter(item => ids.has(item.id)) : retained)];
+  }));
+  const fallback = previous.scope?.kind === "goal" || previous.coverage?.method === "sampled" || !previous.coverage || [...changes.values()].some(item => item.unknown) || previous.sourceConversationIds.some(id => !baselines[id] && (!(previous.sourceMessageOrder?.[id] ?? previous.sourceOutlines?.find(outline => outline.conversationId === id)?.messageOrder) || !(previous.sourceRoles?.[id] ?? previous.sourceOutlines?.find(outline => outline.conversationId === id)?.messageRoles)));
+  const changed = addedConversationIds.length > 0 || [...changes.values()].some(item => item.unknown || item.addedIds.length || item.changedIds.length || item.removedIds.length || item.reordered);
   const selected = new Set<string>(), removedKeys: string[] = [];
   const blocks = [...previous.sourceConversationIds, ...addedConversationIds].flatMap(conversationId => {
     const current = messages.filter(item => item.conversationId === conversationId);
-    const saved = previous.sourceSignatures?.[conversationId] ?? previous.sourceOutlines?.find(item => item.conversationId === conversationId)?.messageSignatures ?? {};
-    const roles = previous.sourceRoles?.[conversationId];
-    const removed = Object.keys(saved).filter(id => !current.some(item => item.id === id));
+    const change = changes.get(conversationId) ?? { addedIds: current.map(item => item.id), changedIds: [], removedIds: [], reordered: false };
+    const removed = change.removedIds;
     removedKeys.push(...removed.map(id => key(conversationId, id)));
-    const change = changes.find(item => item.conversationId === conversationId) ?? { added: current.length, changed: 0, removed: 0, reordered: false };
-    if (!fallback && !change.added && !change.changed && !change.removed && !change.reordered) return [];
+    if (!fallback && !change.addedIds.length && !change.changedIds.length && !removed.length && !change.reordered) return [];
     let start = 0;
-    if (!fallback && !change.reordered && previous.sourceMessageOrder?.[conversationId]) {
-      const touched = current.filter(item => !Object.hasOwn(saved, item.id) || saved[item.id] !== sourceMessageSignature(item.content) || roles?.[item.id] !== undefined && roles[item.id] !== item.role).map(item => item.messageIndex);
-      const oldOrder = previous.sourceMessageOrder[conversationId];
+    const oldOrder = baselines[conversationId]?.map(item => item.id) ?? previous.sourceMessageOrder?.[conversationId];
+    if (!fallback && !change.reordered && oldOrder) {
+      const ids = new Set([...change.addedIds, ...change.changedIds]);
+      const touched = current.filter(item => ids.has(item.id)).map(item => item.messageIndex);
       for (const id of removed) { const next = oldOrder.slice(oldOrder.indexOf(id) + 1).find(candidate => current.some(item => item.id === candidate)); touched.push(next ? current.find(item => item.id === next)!.messageIndex : current.at(-1)?.messageIndex ?? 0); }
       start = Math.min(...touched);
       const chapters = previous.sourceOutlines?.find(item => item.conversationId === conversationId)?.chapters ?? [];
@@ -70,7 +74,7 @@ export function planFocusUpdate(previous: FocusSession, input: ConversationMessa
     included.forEach(item => selected.add(key(conversationId, item.id)));
     return included.length ? [{ conversationId, title: "更新的讨论及后续上下文", messageIds: included.map(item => item.id), messageSignatures: Object.fromEntries(included.map(item => [item.id, sourceMessageSignature(item.content)])) }] : [];
   });
-  const affected = new Set([...selected, ...removedKeys]);
+  const affected = new Set([...selected, ...removedKeys, ...[...changes].flatMap(([id, change]) => change.changedOriginalIds.map(messageId => key(id, messageId)))]);
   const affectedSectionIds = previous.sections.filter(section => fallback || previous.evidence.some(ref => section.evidenceIds.includes(ref.id) && affected.has(key(ref.conversationId, ref.messageId)))).map(section => section.id);
   return { fallback, changed, affectedSectionIds, scope: { kind: "goal", blocks }, removedKeys, addedConversationIds };
 }
@@ -209,10 +213,15 @@ async function ledgerUpdate(previous: FocusSession, sources: Conversation[], mes
 
 export async function generateFocusUpdate(previous: FocusSession, sources: Conversation[], locale: string, signal: AbortSignal, onState?: Parameters<typeof generateFocusSession>[6], runId?: string, onProgress?: Parameters<typeof generateFocusSession>[8]): Promise<FocusSession> {
   sources = [...new Set([...previous.sourceConversationIds, ...sources.map(source => source.id)])].map(id => { const source = sources.find(item => item.id === id); if (!source) throw new Error("项目来源缺失，请重新确认材料 / Confirm missing project sources."); return source; });
-  const allMessages = (await Promise.all(sources.map(source => getMessagesForConversation(source.id)))).flat();
+  if (sources.some(source => !isCurrentHydrationComplete(source))) throw new Error(locale === "zh-CN" ? "部分项目来源正在同步，请在正文同步后重试。" : "Some project sources are still syncing. Retry after their messages are available.");
+  const [loadedMessages, baselines] = await Promise.all([
+    Promise.all(sources.map(source => getMessagesForConversation(source.id))),
+    Promise.all(previous.sourceConversationIds.map(async id => [id, await loadSourceBaseline(previous, id)] as const)),
+  ]);
+  const allMessages = loadedMessages.flat();
   const messages = allMessages.filter(message => previous.scope?.kind !== "goal" || !previous.sourceConversationIds.includes(message.conversationId) || previous.scope.blocks?.some(block => block.conversationId === message.conversationId && block.messageIds.includes(message.id)));
   if (sources.some(source => !messages.some(item => item.conversationId === source.id && item.content.trim() && !isInternalSearchQueryMessage(item)))) throw new Error(locale === "zh-CN" ? "部分项目来源已没有正文，请重新确认材料。原稿和笔记仍保留。" : "Some project sources have no text. Confirm materials again; your original and notes are preserved.");
-  const plan = planWikiEditionUpdate(previous,messages,planFocusUpdate(previous, messages));
+  const plan = planWikiEditionUpdate(previous,messages,planFocusUpdate(previous, messages,Object.fromEntries(baselines)));
   if (previous.mode === "work" && previous.wikiKnowledge?.draft && ledgerPipelineEnabled()) {
     // Nothing new in the sources, but verdicts the user gave since the draft, or chapters written for another layout (the
     // routing changed since): only the chapters they touch are rewritten.

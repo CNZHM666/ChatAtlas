@@ -15,9 +15,18 @@ export function NativeSidecar({zh:initialChinese,tabId}:{zh:boolean;tabId?:numbe
  const [tab,setTab]=useState<chrome.tabs.Tab>();
  useEffect(()=>{
   let live=true,revision=0,ownWindow:number|undefined;
-  const refresh=async()=>{const run=++revision;setNativeSidecarTab(undefined);let next:chrome.tabs.Tab|undefined;try{next=tabId===undefined?(await chrome.tabs.query({active:true,...(ownWindow===undefined?{currentWindow:true}:{windowId:ownWindow})}))[0]:await chrome.tabs.get(tabId);}catch{/* Restricted or closing tabs cannot receive actions. */}if(live&&run===revision){setNativeSidecarTab(isNativePanelSite(next?.url)?next?.id:undefined);setTab(next);}};
+  const apply=(next:chrome.tabs.Tab|undefined)=>{
+   setNativeSidecarTab(isNativePanelSite(next?.url)?next?.id:undefined);
+   setTab(previous=>previous?.id===next?.id&&previous?.url===next?.url&&previous?.title===next?.title?previous:next);
+  };
+  const refresh=async()=>{const run=++revision;setNativeSidecarTab(undefined);let next:chrome.tabs.Tab|undefined;try{next=tabId===undefined?(await chrome.tabs.query({active:true,...(ownWindow===undefined?{currentWindow:true}:{windowId:ownWindow})}))[0]:await chrome.tabs.get(tabId);}catch{/* Restricted or closing tabs cannot receive actions. */}if(live&&run===revision)apply(next);};
   const activated=(info:chrome.tabs.TabActiveInfo)=>{if(tabId===undefined&&info.windowId===ownWindow)void refresh();};
-  const updated=(id:number,change:chrome.tabs.TabChangeInfo,updatedTab:chrome.tabs.Tab)=>{if((tabId===undefined?updatedTab.windowId===ownWindow&&updatedTab.active:id===tabId)&&(change.url||change.title))void refresh();};
+  const updated=(id:number,change:chrome.tabs.TabChangeInfo,updatedTab:chrome.tabs.Tab)=>{
+   if((tabId===undefined?updatedTab.windowId===ownWindow&&updatedTab.active:id===tabId)&&(change.url||change.title)){
+    if(!updatedTab.url){void refresh();return;}
+    revision++;apply(updatedTab);
+   }
+  };
   if(tabId!==undefined)void refresh();
   else void chrome.windows.getCurrent().then(window=>{ownWindow=window.id;return refresh();}).catch(()=>{if(live){setNativeSidecarTab(undefined);setTab(undefined);}});
   chrome.tabs.onActivated.addListener(activated);chrome.tabs.onUpdated.addListener(updated);

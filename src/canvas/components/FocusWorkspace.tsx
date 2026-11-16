@@ -35,7 +35,8 @@ import { ReaderBackButton } from "./ReaderBackButton";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { carryReviewNotes } from "../review-notes";
-import { sourceChanges, type SourceChange } from "../source-freshness";
+import { hasSourceChange, sourceChanges, type SourceChange } from "../source-freshness";
+import { isCurrentHydrationComplete } from "../../sync/import-state";
 import { SourceUpdateNotice } from "./SourceUpdateNotice";
 import { LayoutDashboard, NotebookPen, FileText, X } from "lucide-react";
 import { ProjectSourceList } from "./ProjectSourceList";
@@ -237,11 +238,19 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   // The chapter the reader asked for first; the writing queue takes it next.
   const priorityOwner=useRef<string>(),[prioritized,setPrioritized]=useState<string>();
   const [analysisProgress, setAnalysisProgress] = useState<FocusAnalysisProgress>();
-  const [changes, setChanges] = useState<SourceChange[]>([]);
+  const [freshness, setFreshness] = useState<{sessionId:string;items:SourceChange[]}>();
+  const changes = freshness?.sessionId===session?.id ? freshness?.items??[] : [];
+  const checkingSources=useRef(false);
   const generationRun = useRef<string>();
   const activeGenerationTask = useRef<string>();
-  const freshnessRevision = conversations.map((item) => item.id + ":" + item.updatedAt).join("|");
-  useEffect(() => { let live = true; if (sessionRef.current) void sourceChanges(sessionRef.current).then((items) => { if (live) setChanges(items); }).catch(() => { if (live) setChanges([]); }); return () => { live = false; }; }, [session?.id, session?.sourceSignatures, session?.sourceOutlines, freshnessRevision]);
+  const freshnessRevision = JSON.stringify(conversations.filter(item=>session?.sourceConversationIds.includes(item.id)).map(item=>[item.id,item.rawRevision??item.updatedAt,item.hydrationState,item.sourceUpdatedAt,item.hydratedSourceUpdatedAt]));
+  useEffect(() => {
+    const saved=sessionRef.current;
+    if(!saved)return;
+    let live=true;
+    void sourceChanges(saved).then(items=>{if(live)setFreshness({sessionId:saved.id,items});}).catch(()=>undefined);
+    return()=>{live=false;};
+  },[session?.id,session?.sourceSignatures,session?.sourceOutlines,session?.sourceVersionIds,freshnessRevision]);
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const activeId = session?.activeSectionId;
@@ -602,9 +611,23 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
     {budgetFailure?<details><summary>{zh?"查看原因":"Why this happened"}<ChevronDown size={14}/></summary><p>{zh?`预计输入 ${budgetFailure.inputTokens.toLocaleString()} Token，当前单次调整上限 ${budgetFailure.maxInputTokens.toLocaleString()} Token；包含 ${budgetFailure.sourceMessages} 条关联原始消息。不是服务商额度不足，原样重试不会缩小材料。可先选择其他章节调整。`:`Estimated input: ${budgetFailure.inputTokens.toLocaleString()} tokens; local revision limit: ${budgetFailure.maxInputTokens.toLocaleString()} tokens, including ${budgetFailure.sourceMessages} original messages. This is not a provider quota error. Retrying unchanged input will not reduce it; you can revise other chapters first.`}</p></details>:null}
   </FocusOperationNotice> : null;
   // Reads only what changed in the sources, rewrites the chapters it touches and opens the result as a preview.
-  const updateProject = () => { if (!session) return; if (session.sidecarConversationIds?.some(id=>!session.sourceConversationIds.includes(id))) setSourcePickerOpen(true);
-    // Nothing new in the sources: no model call, only a word that the document is current.
-    else if (!changes.some(item => item.added || item.changed || item.removed || item.reordered || item.unknown) && !ledgerRewriteNeeded(session.wikiKnowledge)) setStatus(zh ? "来源没有新内容，文档已是最新。" : "No new source content; the document is current."); else if (session.scope?.kind === "goal") setPhase("scope"); else void generate(session.goal, session.sourceConversationIds, false, undefined, true); };
+  const updateProject = async () => {
+    if (!session || busy || checkingSources.current) return;
+    if (session.sidecarConversationIds?.some(id=>!session.sourceConversationIds.includes(id))) { setSourcePickerOpen(true); return; }
+    checkingSources.current=true;
+    try {
+      const items=await sourceChanges(session);
+      if(sessionRef.current!==session)return;
+      setFreshness({sessionId:session.id,items});
+      if (conversations.some(source=>session.sourceConversationIds.includes(source.id)&&!isCurrentHydrationComplete(source))) {
+        setStatus(zh ? "来源正在同步，稍后再检查。" : "Sources are syncing. Check again shortly.");
+      } else if (!items.some(item=>hasSourceChange(item)||item.unknown) && !ledgerRewriteNeeded(session.wikiKnowledge)) {
+        setStatus(zh ? "没有发现来源变化。" : "No source changes found.");
+      } else if (session.scope?.kind === "goal") setPhase("scope");
+      else void generate(session.goal, session.sourceConversationIds, false, undefined, true);
+    } catch { setStatus(zh?"暂时无法检查来源，请重试。":"Could not check sources. Try again."); }
+    finally { checkingSources.current=false; }
+  };
   const reorganize = () => { if (session) void generate(session.goal, session.sourceConversationIds, false, undefined, false, undefined, false, { includeKeys: [...session.wikiScopeReview?.includeKeys ?? []], excludeKeys: [...session.wikiScopeReview?.excludeKeys ?? []], ignoredKeys:[...session.wikiScopeReview?.ignoredKeys??[]] }); };
   const adjustSources = () => { void saves.flush().catch(() => undefined); onReturnToWorkbench((session && !session.sections.length ? revisionRequest?.instruction : undefined) ?? confirmed?.goal ?? session?.goal ?? request?.goal ?? "", confirmed?.ids ?? session?.scope?.sourceConversationIds ?? session?.sourceConversationIds ?? request?.sourceIds ?? [], session?.mode ?? confirmedMode.current); };
 

@@ -7,6 +7,8 @@ import { sourceVersion } from "./source-versions";
 import { invalidateMessageSearchReaders } from "../search/message-search-invalidation";
 import { imageLinks } from "../shared/conversation-images";
 import { materializeCaptureImages } from "../shared/capture-images";
+import { readableSourceMessages, sameSourceText, sourceMessageDelta } from "../shared/source-message-delta";
+import { sourceMessageSignature } from "../shared/source-signature";
 
 let indexVersion = 0;
 let rebuilding: Promise<number> | null = null;
@@ -97,7 +99,7 @@ export async function searchStoredDiscussions(query: string, conversationIds: Re
   return [...best.values()].sort((a, b) => b.score - a.score).map(item => item.match);
 }
 
-export async function saveConversationCapture(capture: ConversationCapture, options: { replace?: boolean; warmIndex?: boolean } = {}): Promise<void> {
+export async function saveConversationCapture(capture: ConversationCapture, options: { replace?: boolean; warmIndex?: boolean } = {}) {
   const db = await getDatabase();
   if (capture.messages.some(message => imageLinks(message.content).some(link => !/^atlas-image:sha256-/u.test(link.source)))) {
     const previous = await db.getAllFromIndex("messages", "by-conversation", capture.conversation.id);
@@ -123,22 +125,32 @@ export async function saveConversationCapture(capture: ConversationCapture, opti
   const existingByPosition = new Map(existingMessages.map((message) => [`${message.messageIndex}:${message.role}`, message]));
   const authoritativeOrder=capture.conversation.hydrationState==="hydrated"&&["chatgpt_live","chatgpt_export"].includes(capture.conversation.source??"");
   const visibleWebCapture=options.replace===false&&capture.conversation.platform!=="chatgpt"&&capture.conversation.source===`${capture.conversation.platform}_dom`;
+  const fromVisiblePage=options.replace===false&&!authoritativeOrder;
   const idRemap = new Map<string, string>();
   const normalizedMessages = capture.messages.map((message) => {
     const atPosition = existingByPosition.get(`${message.messageIndex}:${message.role}`);
-    const matched = existingById.get(message.id) ?? (!visibleWebCapture&&atPosition?.contentHash === message.contentHash ? atPosition : undefined);
+    const matched = existingById.get(message.id) ?? (!visibleWebCapture && atPosition
+      && (!atPosition.platformMessageId || !message.platformMessageId || atPosition.platformMessageId === message.platformMessageId)
+      && sameSourceText(atPosition, message) ? atPosition : undefined);
     if (matched && matched.id !== message.id) idRemap.set(message.id, matched.id);
     // A visible DOM capture may not contain the original widget payload. Do not erase it
     // when the corresponding article is unchanged; a changed article invalidates offsets.
     // A virtualized DOM capture numbers its visible subset from zero. Updating
     // a known ID must not move an imported late question to the transcript top.
-    const timestamped = { ...message, ...(options.replace===false&&matched&&!authoritativeOrder?{messageIndex:matched.messageIndex,...(matched.content===message.content&&matched.contentKind&&!message.contentKind?{contentKind:matched.contentKind}:{})}:{}),sourceCreatedAt: message.sourceCreatedAt ?? matched?.sourceCreatedAt };
+    if (fromVisiblePage && matched && sameSourceText(matched, message)) {
+      return { ...message, content: matched.content, preview: matched.preview, contentHash: matched.contentHash,
+        id: matched.id, platformMessageId: matched.platformMessageId ?? message.platformMessageId, messageIndex: matched.messageIndex,
+        replyToMessageId: matched.replyToMessageId ?? message.replyToMessageId, sourceCreatedAt: matched.sourceCreatedAt ?? message.sourceCreatedAt,
+        contentKind: matched.contentKind ?? message.contentKind,
+        uiParts: matched.content === message.content && message.uiParts?.length ? message.uiParts : matched.uiParts };
+    }
+    const timestamped = { ...message, ...(fromVisiblePage && matched ? { messageIndex: matched.messageIndex } : {}), sourceCreatedAt: message.sourceCreatedAt ?? matched?.sourceCreatedAt };
     const preserved = matched?.content === message.content && !message.uiParts?.length && matched.uiParts?.length ? { ...timestamped, uiParts: matched.uiParts } : timestamped;
     return matched && matched.id !== message.id ? { ...preserved, id: matched.id, platformMessageId: options.replace === false ? matched.platformMessageId ?? message.platformMessageId : message.platformMessageId ?? matched.platformMessageId } : preserved;
   }).map((message) => ({ ...message, replyToMessageId: message.replyToMessageId ? idRemap.get(message.replyToMessageId) ?? message.replyToMessageId : undefined }));
   const capturedIds = new Set(normalizedMessages.map((message) => message.id));
   let nextMessages = [...(options.replace === false ? existingMessages.filter(message => !capturedIds.has(message.id)) : []), ...normalizedMessages];
-  if(visibleWebCapture){
+  if(fromVisiblePage){
     // Visible windows restart their DOM index at zero. Use saved ID anchors to
     // insert newly loaded history/new replies, retaining every unseen message.
     const ordered=existingMessages.slice().sort((a,b)=>a.messageIndex-b.messageIndex).map(message=>message.id);
@@ -165,7 +177,7 @@ export async function saveConversationCapture(capture: ConversationCapture, opti
     ...(options.replace === false && existing?.nativeHistorySourceId ? { source: existing.source, sourceAccount: existing.sourceAccount, nativeHistorySourceId: existing.nativeHistorySourceId, historyCoverage: normalizedMessages.some(message => existingById.get(message.id)?.contentHash !== message.contentHash) ? "loaded" as const : existing.historyCoverage } : {}),
     createdAt: existing?.createdAt ?? capture.conversation.createdAt ?? capture.capturedAt,
     updatedAt: capture.capturedAt,
-    messageCount: visibleWebCapture?nextMessages.length:options.replace === false ? Math.max(existing?.messageCount ?? 0, capture.messages.length) : capture.messages.length,
+    messageCount: nextMessages.length,
     sourceCreatedAt: capture.conversation.sourceCreatedAt ?? existing?.sourceCreatedAt,
     sourceUpdatedAt: capture.conversation.sourceUpdatedAt ?? existing?.sourceUpdatedAt,
     hydratedSourceUpdatedAt: capture.conversation.sourceUpdatedAt ?? existing?.sourceUpdatedAt,
@@ -175,7 +187,7 @@ export async function saveConversationCapture(capture: ConversationCapture, opti
   });
   await Promise.all([
     ...(options.replace === false ? [] : existingMessages.filter((message) => !capturedIds.has(message.id)).map((message) => messageStore.delete(message.id))),
-    ...(visibleWebCapture?nextMessages:normalizedMessages).map((message) => messageStore.put({
+    ...(fromVisiblePage?nextMessages:normalizedMessages).map((message) => messageStore.put({
       ...message,
       createdAt: existingById.get(message.id)?.createdAt ?? message.createdAt,
     })),
@@ -187,4 +199,9 @@ export async function saveConversationCapture(capture: ConversationCapture, opti
   // Background imports have no DOM, and no visible reader to warm. Its later
   // page/worker search rebuilds on demand from committed originals and revisions.
   if (options.warmIndex !== false && typeof document !== "undefined") void import("../search/transcript-index").then(({ queueTranscriptIndexRefresh }) => queueTranscriptIndexRefresh(capture.conversation.id)).catch(() => undefined);
+  const previous = readableSourceMessages(existingMessages);
+  const signatures = Object.fromEntries(previous.map(message => [message.id, sourceMessageSignature(message.content)]));
+  const delta = sourceMessageDelta(nextMessages, signatures, undefined, previous.map(message => message.id), existingMessages);
+  const change = !previous.length ? "imported" : delta.addedIds.length || delta.changedIds.length || delta.removedIds.length || delta.reordered ? "updated" : "unchanged";
+  return { change, messageCount: nextMessages.length } as const;
 }

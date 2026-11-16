@@ -8,6 +8,7 @@ export interface CaptureSummary {
   title: string;
   messageCount: number;
   savedAt: number;
+  change?: "imported" | "updated" | "unchanged";
 }
 
 export interface CaptureCommandResponse {

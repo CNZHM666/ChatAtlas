@@ -7,6 +7,7 @@ import { generateFocusSession } from "../../ai/focus-session";
 import { DemoApiError } from "../../ai/demo-api";
 import { AIProviderResponseError, AIProviderValidationError } from "../../ai/provider";
 import { getDatabase } from "../../storage/db";
+import { sourceMessageSignature } from "../../shared/source-signature";
 import type { FocusSession } from "../../shared/focus-session";
 import type { Conversation } from "../../shared/types";
 import { StrictMode } from "react";
@@ -25,6 +26,20 @@ const session: FocusSession = { id: "s", goal: "Review poles", mode: "answer", t
 beforeEach(async () => { vi.clearAllMocks(); localStorage.setItem("atlas-locale", "en"); localStorage.removeItem("atlas-wiki-categories:s"); const db = await getDatabase(); await db.clear("canvases"); await db.clear("projectQueryThreads"); await db.clear("focusGenerationTasks"); await db.clear("focusSessions"); await db.clear("conversations"); await db.clear("aiSettings"); await db.put("aiSettings", { id: "ai-settings", mode: "byok", provider: "openai", baseUrl: "https://api.example/v1", apiKey: "fixture", model: "fixture", updatedAt: 1 }); await db.clear("messages"); await db.put("messages", { id: "m1", conversationId: "c", messageIndex: 0, role: "user", content: "Why poles?", preview: "Why poles?", contentHash: "hash", createdAt: 1, updatedAt: 1 }); });
 
 async function confirmDiscussionScope() { const button = await screen.findByRole("button", { name: "Generate preview" }); await waitFor(() => expect(screen.queryByText("Finding discussions…")).not.toBeInTheDocument()); if ((button as HTMLButtonElement).disabled) { fireEvent.click(screen.getByRole("button", { name: "Browse other discussions" })); fireEvent.click(screen.getAllByRole("checkbox")[0]); } fireEvent.click(button); }
+
+it("checks the local source before previewing an update and leaves the Wiki alone when text is unchanged",async()=>{
+ const db=await getDatabase(),canvas={id:"space",name:"Project",createdAt:1,updatedAt:1};
+ const project:FocusSession={...session,mode:"work",status:"ready",canvasId:canvas.id,
+  sourceSignatures:{c:{m1:sourceMessageSignature("Why poles?")}}};
+ await db.put("conversations",{...conversation,updatedAt:123});
+ await db.put("canvases",canvas);
+ await db.put("focusSessions",project);
+ render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[canvas]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+ fireEvent.click(screen.getByRole("button",{name:"Update"}));
+ expect(await screen.findByText("No source changes found.")).toBeVisible();
+ expect(screen.queryByText("Sources changed")).toBeNull();
+ expect(generateFocusSession).not.toHaveBeenCalled();
+});
 
 it("keeps the plan preview heading free of a version picker",()=>{
  const old:FocusSession={...session,mode:"work",id:"unsaved-old",createdAt:1,status:"ready"};
@@ -208,8 +223,9 @@ describe("goal reading workflow", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Your draft is retained");
     expect((await screen.findAllByText("Read the original explanation."))[0]).toBeVisible(); expect(screen.getByRole("button", {name:"Save and view"})).toBeEnabled();
     fireEvent.click(screen.getByRole("button", {name:"Save and view"}));
-    await waitFor(() => expect(screen.queryByText("Project plan preview")).toBeNull());
-    expect(save).toHaveBeenCalledTimes(2); expect(generateFocusSession).not.toHaveBeenCalled();
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", {name:"Save and view"})).toBeNull());
+    expect(generateFocusSession).not.toHaveBeenCalled();
   });
 
   it("keeps project More direct, removes duplicate source and chapter edit entries and keeps only conversation addition in source management",()=>{

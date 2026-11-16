@@ -136,6 +136,18 @@ describe("conversation capture storage", () => {
     expect(stored.map((item) => item.id)).toEqual(["stable-1", "stable-2"]);
   });
 
+  it("reports a repeated visible window as unchanged and keeps real new replies after the anchor", async () => {
+    const original = [message("old-1", 0, "Question", 1), message("old-2", 1, "Answer", 1),
+      message("last-q", 2, "Another question", 1), message("last-a", 3, "Answer with source \uE200cite\uE202turn0search0\uE201", 1)];
+    expect(await saveConversationCapture(capture(original, 1), { warmIndex: false })).toMatchObject({ change: "imported" });
+    const slice = [{ ...original[2], messageIndex: 0 }, { ...original[3], messageIndex: 1, content: "Answer with source" }];
+    expect(await saveConversationCapture(capture(slice, 2), { replace: false, warmIndex: false })).toEqual({ change: "unchanged", messageCount: 4 });
+    expect((await getMessagesForConversation("conversation-storage")).at(-1)?.content).toBe(original[3].content);
+    const fresh = { ...message("new-reply", 2, "Additional explanation", 3), role: "assistant" as const };
+    expect(await saveConversationCapture(capture([...slice, fresh], 3), { replace: false, warmIndex: false })).toEqual({ change: "updated", messageCount: 5 });
+    expect((await getMessagesForConversation("conversation-storage")).at(-1)?.id).toBe(fresh.id);
+  });
+
   it("remaps a DOM reply relation when equivalent imported messages keep their stable IDs", async () => {
     await saveConversationCapture(capture([message("stable-1", 0, "Question", 300), message("stable-2", 1, "Answer", 300)], 300));
     await saveConversationCapture(capture([

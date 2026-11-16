@@ -1,16 +1,46 @@
-import type { SourceChange } from "../source-freshness";
+import { useId, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { hasSourceChange, sourceChangeLabels, type SourceChange } from "../source-freshness";
 import type { Conversation } from "../../shared/types";
 import type { FocusSession } from "../../shared/focus-session";
 
 export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updateLabel, session }: { changes: SourceChange[]; conversations: Conversation[]; zh: boolean; onUpdate: () => void; updateLabel?: string; session?: FocusSession }) {
-  const changed = changes.filter((item) => item.added || item.changed || item.removed || item.reordered);
-  const pending=[...new Set(session?.sidecarConversationIds??[])].filter(id=>!session?.sourceConversationIds.includes(id));
-  if (!changed.length&&!pending.length) return null;
-  const added = changed.reduce((total, item) => total + item.added, 0), edited = changed.reduce((total, item) => total + item.changed + item.removed, 0);
-  const notes = session ? Object.values(session.sectionNotes ?? {}).filter(note => note.text.trim() && !note.deletedAt).length + (session.detachedNotes ?? []).filter(note => !note.deletedAt).length + (session.notes.trim() ? 1 : 0) : 0;
-  const full = session && (session.scope?.kind === "goal" || !session.coverage || session.coverage.method === "sampled" || changed.some(item => item.unknown) || session.sourceConversationIds.some(id => !(session.sourceMessageOrder?.[id] ?? session.sourceOutlines?.find(outline => outline.conversationId === id)?.messageOrder) || !(session.sourceRoles?.[id] ?? session.sourceOutlines?.find(outline => outline.conversationId === id)?.messageRoles)));
-  // One quiet line: what came in, that it is not in the knowledge yet, and the one action. A heading, a question and a
-  // boxed button over two lines read heavier than the news.
-  if(pending.length)return <aside className="source-update-notice is-pending-project-sources" role="status"><span className="source-update-dot" aria-hidden="true"/><p><strong>{zh?`有 ${pending.length} 条新对话加入项目`:`${pending.length} new conversations linked`}</strong><span>{zh?"尚未纳入项目知识":"Not yet in the project knowledge"}{changed.length?zh?"，原有来源也有变化":"; existing sources also changed":""}</span></p><button type="button" className="source-update-action" onClick={onUpdate}>{zh?"整理更新":"Review update"}</button></aside>;
-  return <aside className="source-update-notice" role="status"><div><strong>{zh ? "来源有更新" : "Sources changed"}</strong><p className="source-update-counts">{zh ? `新增 ${added} 段${edited ? ` · 修改或缺失 ${edited} 段` : ""}` : `${added} added${edited ? ` · ${edited} changed or missing` : ""}`}{changed.some(item => item.reordered) ? zh ? " · 顺序变化" : " · reordered" : ""}{notes ? zh ? ` · 保留 ${notes} 条笔记` : ` · ${notes} notes retained` : ""}</p><details><summary>{zh ? `${changed.length} 条对话需要更新回顾` : `${changed.length} reviews need updating`}</summary><ul>{changed.map((item) => <li key={item.conversationId}><span>{conversations.find((conversation) => conversation.id === item.conversationId)?.title ?? item.conversationId}</span><small>{zh ? `新增 ${item.added} · 修改 ${item.changed} · 缺失 ${item.removed} 段${item.reordered ? " · 顺序变化" : ""}${item.unknown ? " · 旧记录待校验" : ""}` : `${item.added} added · ${item.changed} changed · ${item.removed} missing${item.reordered ? " · reordered" : ""}${item.unknown ? " · baseline unavailable" : ""}`}</small>{item.affectedChapterTitles?.length ? <small>{zh ? "涉及章节：" : "Affected chapters: "}{item.affectedChapterTitles.join(" · ")}</small> : null}{item.added ? <small>{zh ? "新增内容尚未纳入回顾" : "New content is not yet in this review"}</small> : null}</li>)}</ul>{full ? <small>{zh ? session?.scope?.kind === "goal" ? "重新确认板块后预览" : "旧分析需要完整校验" : session?.scope?.kind === "goal" ? "Confirm discussion scope before preview" : "The old analysis needs full validation"}</small> : null}</details></div><button type="button" onClick={onUpdate}>{updateLabel ?? (zh ? "更新预览" : "Preview update")}</button></aside>;
+  const [details, setDetails] = useState(false);
+  const detailsId = useId();
+  const changed = changes.filter(hasSourceChange);
+  const pending = [...new Set(session?.sidecarConversationIds ?? [])].filter(id => !session?.sourceConversationIds.includes(id));
+  if (!changed.length && !pending.length) return null;
+  const totals = changed.reduce((sum, item) => ({
+    added: sum.added + item.added, changed: sum.changed + item.changed, removed: sum.removed + item.removed,
+    reordered: sum.reordered || Boolean(item.reordered),
+  }), { added: 0, changed: 0, removed: 0, reordered: false });
+  const summary = [
+    pending.length ? zh ? `${pending.length} 条新关联对话待整理` : `${pending.length} linked chats to organize` : "",
+    ...sourceChangeLabels(totals, zh),
+  ].filter(Boolean).join(" · ");
+  return <aside className="source-update-notice">
+    <div className="source-update-row">
+      <span className="source-update-dot" aria-hidden="true"/>
+      <div className="source-update-copy" role="status">
+        <strong>{pending.length ? zh ? "项目有新材料" : "New project material" : zh ? "来源有更新" : "Sources changed"}</strong>
+        <span>{summary}</span>
+      </div>
+      <div className="source-update-controls">
+        <button type="button" className="source-update-detail" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails(open => !open)}>
+          {zh ? "明细" : "Details"}<ChevronDown size={14} aria-hidden="true"/>
+        </button>
+        <button type="button" className="source-update-action" onClick={onUpdate}>
+          {updateLabel ?? (pending.length ? zh ? "选择材料" : "Choose sources" : zh ? "预览更新" : "Preview update")}
+        </button>
+      </div>
+    </div>
+    <ul id={detailsId} className="source-update-details" hidden={!details}>
+      {pending.map(id => <li key={id}><span>{conversations.find(item => item.id === id)?.title ?? id}</span><small>{zh ? "待纳入 Wiki" : "Ready to add to the Wiki"}</small></li>)}
+      {changed.map(item => <li key={item.conversationId}>
+        <span>{conversations.find(conversation => conversation.id === item.conversationId)?.title ?? item.conversationId}</span>
+        <small>{sourceChangeLabels(item, zh).join(" · ")}</small>
+        {item.affectedChapterTitles?.length ? <small>{zh ? "涉及章节：" : "Affected chapters: "}{item.affectedChapterTitles.join(" · ")}</small> : null}
+      </li>)}
+    </ul>
+  </aside>;
 }

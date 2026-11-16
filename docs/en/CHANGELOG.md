@@ -13,6 +13,8 @@
 - Export the project overview and Wiki chapters together, with reference examples available as a separate Markdown file.
 - Clearer project stages, decisions, evidence, example titles and source links.
 - Improvements to long-conversation reading, source navigation and imports, plus recovery when a preview fails.
+- Read a linked project's Wiki in the sidebar. Search stays out of the chapter view, and the same chapter can open in the workspace.
+- Incremental checks compare saved source messages to reduce false alerts from repeat syncs and partially loaded chats. Dismiss an update notice until the source changes again.
 
 ## 0.1.3 — Early Preview
 
