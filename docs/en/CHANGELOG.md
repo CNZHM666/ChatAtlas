@@ -15,7 +15,7 @@
 - Improvements to long-conversation reading, source navigation and imports, plus recovery when a preview fails.
 - Read a linked project's Wiki in the sidebar. Search stays out of the chapter view, and the same chapter can open in the workspace.
 - Incremental checks compare saved source messages to reduce false alerts from repeat syncs and partially loaded chats. Dismiss an update notice until the source changes again.
-- Workspace update notices show source details by default and can be dismissed. Previous and Next stay at the bottom of the sidebar while reading a Wiki chapter.
+- The workspace Source updates card shows change counts, conversations, and affected chapters with visible Dismiss and Preview update buttons. Previous and Next stay at the bottom of the sidebar while reading a Wiki chapter.
 
 ## 0.1.3 — Early Preview
 

@@ -13,8 +13,10 @@ it("shows source details immediately without starting analysis", () => {
   const update = vi.fn();
   render(<SourceUpdateNotice zh changes={[{ conversationId: "c", added: 4, changed: 1, removed: 0, unknown: false, affectedChapterTitles: ["稳定条件"] }]} conversations={[]} onUpdate={update} />);
   expect(screen.getByRole("status")).toHaveTextContent("新增 4 条 · 修改 1 条");
+  expect(screen.getAllByText(/修改 1 条/)).toHaveLength(1);
   expect(screen.getByText("涉及章节：稳定条件")).toBeVisible();
   expect(screen.queryByRole("button",{name:"明细"})).toBeNull();
+  expect(screen.getByRole("button", { name: "关闭更新提醒" })).toHaveTextContent("关闭");
   expect(update).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "预览更新" })); expect(update).toHaveBeenCalledOnce();
 });
@@ -29,7 +31,7 @@ it("remembers dismissal after reopening and shows different changes with the sam
   try {
     const first = render(notice("first"));
     fireEvent.click(screen.getByRole("button", { name: "关闭更新提醒" }));
-    expect(screen.queryByText("来源有更新")).toBeNull();
+    expect(screen.queryByText("来源更新")).toBeNull();
     first.unmount();
 
     const reopened = render(notice("first"));
