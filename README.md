@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  👋 欢迎来自 <a href="https://linux.do"><b>LINUX DO</b></a> 的佬友！试用后欢迎回帖交流，或在 <a href="https://github.com/CNZHM666/ChatAtlas/issues">Issues</a> 提建议。
+  👋 友情链接 <a href="https://linux.do"><b>LINUX DO</b></a> 
 </p>
 
 <p align="center">
