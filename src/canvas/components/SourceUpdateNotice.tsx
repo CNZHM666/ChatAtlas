@@ -1,15 +1,22 @@
-import { useId, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { X } from "lucide-react";
 import { hasSourceChange, sourceChangeLabels, type SourceChange } from "../source-freshness";
 import type { Conversation } from "../../shared/types";
 import type { FocusSession } from "../../shared/focus-session";
+import { sourceMessageSignature } from "../../shared/source-signature";
+import { useNoticeDismissal } from "../../shared/use-notice-dismissal";
 
 export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updateLabel, session }: { changes: SourceChange[]; conversations: Conversation[]; zh: boolean; onUpdate: () => void; updateLabel?: string; session?: FocusSession }) {
-  const [details, setDetails] = useState(false);
-  const detailsId = useId();
+  const { dismissedRevision, rememberDismissal } = useNoticeDismissal();
   const changed = changes.filter(hasSourceChange);
   const pending = [...new Set(session?.sidecarConversationIds ?? [])].filter(id => !session?.sourceConversationIds.includes(id));
   if (!changed.length && !pending.length) return null;
+  const key = `atlas-workspace-source-update:${session?.canvasId ?? session?.rootSessionId ?? session?.id ?? ""}`;
+  const revision = sourceMessageSignature(JSON.stringify([
+    session?.id, pending.slice().sort(),
+    changed.map(item => [item.conversationId, item.fingerprint ?? sourceChangeLabels(item, false)])
+      .sort(([a], [b]) => String(a).localeCompare(String(b))),
+  ]));
+  if (dismissedRevision(key) === revision) return null;
   const totals = changed.reduce((sum, item) => ({
     added: sum.added + item.added, changed: sum.changed + item.changed, removed: sum.removed + item.removed,
     reordered: sum.reordered || Boolean(item.reordered),
@@ -26,19 +33,20 @@ export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updat
         <span>{summary}</span>
       </div>
       <div className="source-update-controls">
-        <button type="button" className="source-update-detail" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails(open => !open)}>
-          {zh ? "明细" : "Details"}<ChevronDown size={14} aria-hidden="true"/>
-        </button>
         <button type="button" className="source-update-action" onClick={onUpdate}>
           {updateLabel ?? (pending.length ? zh ? "选择材料" : "Choose sources" : zh ? "预览更新" : "Preview update")}
         </button>
+        <button type="button" className="source-update-dismiss" aria-label={zh ? "关闭更新提醒" : "Dismiss source update"}
+          title={zh ? "关闭更新提醒" : "Dismiss source update"} onClick={() => rememberDismissal(key, revision)}>
+          <X size={15} aria-hidden="true"/>
+        </button>
       </div>
     </div>
-    <ul id={detailsId} className="source-update-details" hidden={!details}>
+    <ul className="source-update-details">
       {pending.map(id => <li key={id}><span>{conversations.find(item => item.id === id)?.title ?? id}</span><small>{zh ? "待纳入 Wiki" : "Ready to add to the Wiki"}</small></li>)}
       {changed.map(item => <li key={item.conversationId}>
         <span>{conversations.find(conversation => conversation.id === item.conversationId)?.title ?? item.conversationId}</span>
-        <small>{sourceChangeLabels(item, zh).join(" · ")}</small>
+        {changed.length > 1 ? <small>{sourceChangeLabels(item, zh).join(" · ")}</small> : null}
         {item.affectedChapterTitles?.length ? <small>{zh ? "涉及章节：" : "Affected chapters: "}{item.affectedChapterTitles.join(" · ")}</small> : null}
       </li>)}
     </ul>

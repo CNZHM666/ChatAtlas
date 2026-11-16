@@ -76,9 +76,14 @@ it("reads the linked Wiki in the empty side panel and opens the selected chapter
  fireEvent.click(within(wiki).getByRole("button",{name:"核心流程"}));
  expect(await within(wiki).findByText(/需求采集提取目标与约束/)).toBeVisible();
  expect(screen.queryByRole("searchbox",{name:"搜索历史对话"})).toBeNull();
+ const reading=within(wiki).getByRole("article",{name:"核心流程"});
+ const pager=within(wiki).getByRole("navigation",{name:"相邻章节"});
+ expect(reading).not.toContainElement(pager);
+ reading.scrollTop=900;
  expect(within(wiki).getByRole("button",{name:"上一章"})).toBeDisabled();
  fireEvent.click(within(wiki).getByRole("button",{name:"下一章"}));
  expect(await within(wiki).findByText("下一章保留已确认的实施步骤。")).toBeVisible();
+ expect(within(wiki).getByRole("article",{name:"后续计划"}).scrollTop).toBe(0);
  fireEvent.click(within(wiki).getByRole("button",{name:"打开工作区"}));
  expect(send).toHaveBeenLastCalledWith({type:"ATLAS_OPEN_REVIEW",sessionId:project.id,sectionId:"next"});
  fireEvent.click(within(wiki).getByRole("button",{name:"章节目录"}));

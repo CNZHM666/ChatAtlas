@@ -18,6 +18,7 @@ import {isCurrentHydrationComplete} from "../sync/import-state";
 import {observeMessageSearchEvents} from "../search/message-search-events";
 import {WEB_CAPTURE_PLATFORMS} from "../shared/web-capture";
 import {platformName} from "../shared/platforms";
+import {useNoticeDismissal} from "../shared/use-notice-dismissal";
 import {currentSourceChange,hasSourceChange,sourceChangeLabels,type SourceChange} from "../canvas/source-freshness";
 
 const updateNoticeKey=(projectId:string|undefined,conversationId:string)=>`atlas-sidecar-update:${JSON.stringify([projectId,conversationId])}`;
@@ -49,17 +50,8 @@ export function SidecarProject({conversationId,conversationTitle="",zh,platformL
  const freshnessRevision=JSON.stringify([project?.updatedAt,current?.rawRevision??current?.updatedAt,current?.hydrationState,current?.hydratedSourceUpdatedAt]);
  // The one bridge back to the workspace: this chat holds material the linked document has not organized yet.
  const [checked,setChecked]=useState<{key:string;change:SourceChange}>();
- const [dismissed,setDismissed]=useState<Record<string,string>>({});
+ const {dismissedRevision,rememberDismissal}=useNoticeDismissal();
  const noticeKey=updateNoticeKey(projectKey,conversationId);
- const rememberDismissal=useCallback((key:string,value?:string)=>{
-  setDismissed(previous=>{
-   if(previous[key]===value)return previous;
-   const next={...previous};
-   if(value)next[key]=value;else delete next[key];
-   return next;
-  });
-  try{if(value)localStorage.setItem(key,value);else localStorage.removeItem(key);}catch{/* The panel can still dismiss it for this session. */}
- },[]);
  useEffect(()=>{
   const saved=projectRef.current;
   if(!saved||!conversationId||!included||!currentImported)return;
@@ -74,8 +66,7 @@ export function SidecarProject({conversationId,conversationTitle="",zh,platformL
  const change=currentImported&&checked?.key===freshnessKey?checked.change:undefined;
  const notice=linked&&(!included?"linked":change&&hasSourceChange(change)?change.fingerprint??sourceChangeLabels(change,false):undefined);
  const noticeRevision=notice?JSON.stringify([projectId,notice]):undefined;
- let savedDismissal:string|undefined=dismissed[noticeKey];
- if(noticeRevision&&!savedDismissal){try{savedDismissal=localStorage.getItem(noticeKey)??undefined;}catch{/* Storage can be unavailable in an embedded panel. */}}
+ const savedDismissal=noticeRevision?dismissedRevision(noticeKey):undefined;
  const openProject=async(sessionId:string,sectionId?:string)=>{
   if(openingProject.current)return;
   openingProject.current=true;setError("");

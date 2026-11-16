@@ -108,7 +108,7 @@ export function SidecarMemory({active=true,conversations,conversationId,zh,view,
       </div></form>}
       {hasFilters&&!readingWiki?<div className="memory-search-utilities"><button className="memory-scope-trigger" type="button" aria-label={l("搜索范围与筛选","Search scope and filters")} title={scopeSummary} onClick={openFilters}>{scopeSummary}</button><button type="button" aria-label={l("清除搜索筛选","Clear search filters")} onClick={()=>applyFilters(emptyFilters())}><X size={14}/></button></div>:null}
       {/* Everything found scrolls in one area above the search box, which stays in view. */}
-      <div className="memory-found">
+      <div className="memory-found" data-reading-wiki={readingWiki || undefined}>
        {view==="home"&&!query.trim()?emptyContent:null}
        {semanticNotice&&!busy?<p className="memory-semantic-feedback" role="status">{semanticNotice}</p>:null}
        {knowledge.length&&query.trim()?<SidecarKnowledgeResults hits={knowledge} projects={projects} conversationId={conversationId} canInsert={canInsert} zh={zh}/>:null}

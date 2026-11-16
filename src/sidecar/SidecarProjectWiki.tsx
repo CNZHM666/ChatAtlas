@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { ArrowLeft, ArrowUpRight, BookOpen, ChevronLeft, ChevronRight } from "lucide-react";
 import type { FocusSession } from "../shared/focus-session";
 import { localizedWikiTitle, wikiSections } from "../shared/wiki-navigation";
@@ -10,15 +10,15 @@ export function SidecarProjectWiki({ project, chapterId, onRead, zh, onOpen }: {
   project: FocusSession; chapterId?: string; onRead: (sectionId?: string) => void; zh: boolean; onOpen: (sectionId?: string) => void;
 }) {
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const chapterBody = useRef<HTMLElement>(null);
   const pages = useMemo(() => wikiSections(project, zh ? "zh-CN" : "en").filter(section => section.body.trim()), [project, zh]);
   const position = pages.findIndex(section => section.id === chapterId);
   const chapter = pages[position];
   const sourceTexts = useMemo(() => chapter && project.evidence.filter(ref => chapter.evidenceIds.includes(ref.id)).map(ref => ref.excerpt), [chapter, project.evidence]);
   const titleOf = (page: typeof pages[number]) => page.wikiDisplayTitle || localizedWikiTitle(page, zh);
-  useEffect(() => {
-    if (!chapterId) return;
-    const container = titleRef.current?.closest(".memory-found");
-    if (container) container.scrollTop = 0;
+  useLayoutEffect(() => {
+    if (!chapterId || !chapterBody.current) return;
+    chapterBody.current.scrollTop = 0;
     titleRef.current?.focus({ preventScroll: true });
   }, [chapterId]);
   useEffect(() => {
@@ -32,14 +32,14 @@ export function SidecarProjectWiki({ project, chapterId, onRead, zh, onOpen }: {
   }, [pages, project.wikiSectionAliases, onRead]);
   if (!pages.length) return null;
   const workspace = zh ? "打开工作区" : "Open workspace";
-  return <section className="sidecar-project-wiki" aria-label={zh ? "项目 Wiki" : "Project Wiki"}>
+  return <section className="sidecar-project-wiki" data-reading={Boolean(chapter) || undefined} aria-label={zh ? "项目 Wiki" : "Project Wiki"}>
     <header>
       {chapter ? <button type="button" className="sidecar-wiki-action" onClick={() => onRead()}><ArrowLeft size={14} aria-hidden="true"/>{zh ? "章节目录" : "Chapters"}</button>
         : <div><span><BookOpen size={14} aria-hidden="true"/>{zh ? "项目 Wiki" : "Project Wiki"}</span><h2>{project.title}</h2></div>}
       <button type="button" className="sidecar-wiki-action" onClick={() => onOpen(chapter?.id)}>{workspace}<ArrowUpRight size={14} aria-hidden="true"/></button>
     </header>
     {chapter ? <>
-      <article className="sidecar-reading-content">
+      <article ref={chapterBody} className="sidecar-reading-content sidecar-wiki-chapter" tabIndex={0} aria-label={titleOf(chapter)}>
         <h2 ref={titleRef} tabIndex={-1}>{titleOf(chapter)}</h2>
         <Suspense fallback={<p role="status">{zh ? "读取章节…" : "Loading chapter…"}</p>}>
           <ChapterBody key={chapter.id} section={chapter} sourceTexts={sourceTexts} zh={zh}/>
