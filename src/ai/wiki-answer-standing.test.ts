@@ -275,12 +275,12 @@ it("keeps the user's sentence apart, names coins and the AI, drops a reason no s
   });
   const body = ledgerDocument(ledger, {}).sections[0].body;
   expect(body).toContain("科学戒色属于窄蓝海，需求真实但获客难。\n\n现有竞品仅停留在文章阅读");
-  expect(body).toContain("你还提到日活停留在32人左右");
+  expect(body).toContain("项目发起人还提到日活停留在32人左右");
   expect(body).toContain("| 方向 | AI 评价 |");
   expect(body).toContain("**AI 最看好**");
   expect(body).toContain("挑战营报名所需金币应设计为可返还的金币押金机制。");
   expect(body).not.toContain("这种渐进式路径");
-  expect(body).toContain("风险算法按历史破戒时间加权。\n\n你计划将戒色行为转化为算法");
+  expect(body).toContain("风险算法按历史破戒时间加权。\n\n项目发起人计划将戒色行为转化为算法");
 });
 
 it("lists every figure the user gave, oldest first, without the 用户反馈 they were read with", () => {
@@ -325,7 +325,7 @@ it("tells a plan the user turned down as turned down, keeps figures to their sou
     draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "首页", question: "?", group: "", problems: [], body: paragraphs.map(item => item.text).join("\n\n"), paragraphs }] },
   });
   const body = ledgerDocument(ledger, {}).sections[0].body;
-  expect(body).toContain("你在回答中否定了「首屏100%为AI Agent驾驶舱，原日历、任务等功能下移」的方案。");
+  expect(body).toContain("项目发起人在回答中否定了「首屏100%为AI Agent驾驶舱，原日历、任务等功能下移」的方案。");
   expect(body).not.toContain("约30人");
   expect(body).toContain("当时日活稳定在22人，其中15人为核心用户，占比约68%（6月14日—7月7日）。");
   expect(body).toContain("当时新增用户留存率为19%（6月14日—7月7日）。");
@@ -342,6 +342,16 @@ it("leaves open two lengths of one step, two flows from one start and a paywall 
   ];
   const notes = differingPlans(units, () => "proposal", true).map(item => item.unitIds.join(","));
   expect(notes).toEqual(["u1,u2", "u3,u4", "u5,u6"]);
+});
+
+it("keeps complementary workflows out of the pending decisions", () => {
+  const units = [
+    unit(1, "正式发布前跑通真实硬件测试：需求→生成→验证→接线→运行。"),
+    unit(2, "遇到硬件搭建问题时分层排查：需求→规划器→数据模型→校验器→物理。"),
+    unit(3, "工作台使用统一数据模型，生成流程：中间表示→规则检查→画布。"),
+    unit(4, "结构性修复应用前校验，事务流程：中间表示→校验器→提交。"),
+  ];
+  expect(differingPlans(units, () => "proposal", true)).toEqual([]);
 });
 
 it("reads rows that give only some of the table's fields as rows of it", () => {
@@ -466,7 +476,7 @@ it("tells a turned-down point as turned down however it was worded, a replaced p
     draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "定位", question: "?", group: "", problems: [], body: `${opening}\n\n### 定位\n\n${paragraphs.map(item => item.text).join("\n\n")}`, paragraphs }] },
   } as Partial<WikiKnowledgeLedger>);
   const body = ledgerDocument(ledger, {}).sections[0].body;
-  expect(body).toContain("你在回答中否定了「采用系统自动分配同期小组，而非用户主动寻找战友或创建队伍」的方案。");
+  expect(body).toContain("项目发起人在回答中否定了「采用系统自动分配同期小组，而非用户主动寻找战友或创建队伍」的方案。");
   expect(body).not.toContain("此前采用系统自动分配");
   expect(body).toContain("此前策略是弱化“戒色”敏感词");
   expect(body).not.toMatch(/^并严格/mu);
@@ -523,7 +533,7 @@ it("tells the AI's turned-down plan as the AI's, splits versions in one item, ke
   } as Partial<WikiKnowledgeLedger>);
   const [section] = ledgerDocument(ledger, {}).sections;
   expect(section.body).toContain("AI 曾建议将首屏100%设为AI Agent驾驶舱");
-  expect(section.body).not.toContain("你曾提议");
+  expect(section.body).not.toContain("项目发起人曾提议");
   expect(section.body).toContain("- **急救流程**：支持三档强度独立流程、急救后二次评估\n- **急救流程**：此前优先实现：干预前选强度、60秒三步流程");
   expect(section.body).toContain("- SOS急救不要完全收费。");
   expect(section.body).toContain("- **转化流程**：先免费评估再付费。\n- **免费范围**");
@@ -806,7 +816,7 @@ it("drops a row's empty fields, tells a question the user asked as theirs, and k
     { subtopic: "早先版本", text: before, unitIds: ["u4"], claims: [{ text: before, unitIds: ["u4"] }] },
   ]);
   const body = ledgerDocument(ledger, {}).sections[0].body;
-  expect(body).toContain("你提出需评估转向自信自律方向");
+  expect(body).toContain("项目发起人提出需评估转向自信自律方向");
   expect(body).toContain("- **当前报告**：日活 (DAU)约40；整体留存率略高于40%");
   expect(body).toContain("此前曾规划初期采用一次性“30天AI守护计划”付费模式，暂不做周订阅。");
   expect(body).not.toContain("等档位");
@@ -926,7 +936,7 @@ it("drops an earlier report a current sentence gives whole, never leaving its le
   expect(section.body).not.toContain("15个为稳定用户");
   expect(section.body).not.toContain("早先版本");
   expect(section.body).toContain("- **机制未打通**：主要问题在于新增");
-  expect(section.claims?.find(claim => claim.text.startsWith("你提到日活停留在32人"))?.holderMark).toBe(true);
+  expect(section.claims?.find(claim => claim.text.startsWith("项目发起人提到日活停留在32人"))?.holderMark).toBe(true);
 });
 
 it("puts the user's decision after an opening that tells none, and tells the earlier versions plainly", () => {
@@ -980,7 +990,7 @@ it("tells the user's question joined on with 此外 as theirs, an AI item naming
     { subtopic: "早先版本", text: sketch, unitIds: ["u4"], claims: [] },
   ]);
   const body = ledgerDocument(ledger, {}).sections[0].body;
-  expect(body).toContain("你提出需评估转向自信自律方向");
+  expect(body).toContain("项目发起人提出需评估转向自信自律方向");
   expect(body).not.toContain("此外");
   expect(body).not.toContain("15个为稳定用户");
   expect(body).toContain("- 此前建议中央AI按钮在首页已有Agent的情况下缩小尺寸。");
@@ -1007,7 +1017,7 @@ it("tells versions of one measure by their days, an older figure as then, drops 
   expect(body.indexOf("| 6月14日 | 22人")).toBeLessThan(body.indexOf("| 8月18日 | 约40"));
   expect(body).toContain("针对当时日活卡在32人左右（6月14日）且难以突破40人");
   expect(body).not.toContain("约30");
-  expect(body).toContain("你否定过这些方案：\n- 采用系统自动分配同期小组。\n- 用户开始计划后自动分配至守护小组。");
+  expect(body).toContain("项目发起人否定过这些方案：\n- 采用系统自动分配同期小组。\n- 用户开始计划后自动分配至守护小组。");
 });
 
 it("tells a one-row version table as a dated sentence, drops a sentence telling only a change, joins a follow-on item and moves an earlier paragraph out", () => {
@@ -1082,7 +1092,7 @@ it("tells a labelled rejected item as the user's, drops a sentence repeating a c
   expect(current).toContain("基础风险 = 当前时间段历史风险 × 30%\n");
   expect(current).not.toContain("中央悬浮");
   expect(current).toContain("| 风险判定 | AI不负责直接判定风险等级。|");
-  expect(earlier).toContain("- 你否定了「首屏100%为AI Agent驾驶舱，原日历、任务等功能下移作为Agent的执行结果」的方案。");
+  expect(earlier).toContain("- 项目发起人否定了「首屏100%为AI Agent驾驶舱，原日历、任务等功能下移作为Agent的执行结果」的方案。");
   expect(earlier).not.toMatch(/负责：|（已否定）/u);
   expect(earlier).toContain("中央悬浮“+”号含义不明，此前建议改为盾牌图标");
   expect(earlier).not.toContain("¥19.9");
@@ -1117,6 +1127,7 @@ it("tells a plan turned down by an answer with what was chosen instead, however 
     draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ ...chapter, body: `### 早先版本\n\n${told}`, problems: [], paragraphs: [{ subtopic: "早先版本", text: told, unitIds: ["u1"], claims: [{ text: told.slice(2), unitIds: ["u1"] }] }] }] },
   });
   const body = ledgerDocument(ledger, {}).sections[0].body;
-  expect(body).toContain("你在回答中否定了「首年采用一次性买断授权，买断价¥999」的方案，选择了「按月订阅」。");
+  expect(body).toContain("其他候选记录（不作为当前确认范围）：首年采用一次性买断授权，买断价¥999。");
+  expect(body).toContain("### 已确认的取舍\n\n计费方式：按月订阅。");
   expect(body).not.toContain("该方案已被否定");
 });

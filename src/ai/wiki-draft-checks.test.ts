@@ -4,6 +4,14 @@ import type { WikiDraftChapter } from "../shared/wiki-knowledge";
 
 const chapter = (id: string, title: string, texts: string[]): WikiDraftChapter => ({ id, title, question: "", group: "", problems: [], body: texts.join("\n\n"), paragraphs: texts.map(text => ({ subtopic: "s", text, unitIds: [] })) });
 
+it("does not equate a compound feature name with a generic step sharing one word", () => {
+  const scope = chapter("a", "范围", ["| 事项 | 第一版 |\n| --- | --- |\n| Concept Preview 接口 | 不做 |"]);
+  const operations = chapter("b", "操作流程", ["建议结构性操作经过 Plan → Preview → Confirm → Apply。"]);
+  expect(scopeDisagreements([scope, operations])).toBe(0);
+  const implementation = chapter("c", "功能", ["第一版实现 Concept Preview 接口。"]);
+  expect(scopeDisagreements([scope, implementation])).toBe(1);
+});
+
 it("notes a first-version item a scope table leaves out while another sentence puts it in", () => {
   const table = "| 事项 | 第一版 |\n| --- | --- |\n| 多平台导入适配器 | 做（首期仅稳定支持 ChatGPT） |\n| 全平台同步 | 不做 |\n| Wiki/知识图谱/自动同步 | 暂缓 |";
   const workflow = chapter("a", "核心工作流", [table, "5. **P0 基础能力**：支持 ChatGPT、Claude、Gemini 等平台的完整同步与消息级索引。"]);
@@ -93,11 +101,11 @@ it("merges lines leaving items out of each stage into one table, each row adding
     "- 严禁大量 hardcode UI、使用 any。", "",
     "| 阶段 | 不做 | 只做 |", "| --- | --- | --- |",
     "| 当前阶段 | PCB、KiCad、Wokwi、代码生成、数据库 | 仅聚焦 AI 理解层和 Undo |",
-    "| 本阶段 | 同上，另加 拍照识别、数据库开发 | — |",
-    "| Milestone 3.2 和 3.3 阶段 | 同上 | — |",
+    "| 本阶段 | 拍照识别、PCB、Wokwi、数据库开发 | — |",
+    "| Milestone 3.2 和 3.3 阶段 | PCB、KiCad、Wokwi | — |",
   ].join("\n"));
   expect(plan.body).toBe(plan.paragraphs[0].text);
-  expect(plan.paragraphs[0].claims).toEqual([{ text: "同上，另加 拍照识别、数据库开发", unitIds: ["u2"] }, { text: "Milestone 3.2 和 3.3 阶段", unitIds: ["u3"] }]);
+  expect(plan.paragraphs[0].claims).toEqual([{ text: "拍照识别、PCB、Wokwi、数据库开发", unitIds: ["u2"] }, { text: "PCB、KiCad、Wokwi", unitIds: ["u3"] }]);
   // One such line is a list item, not a table.
   expect(scopeTables([chapter("b", "规划", ["- 本阶段不做 PCB、KiCad、Wokwi。\n- 先做导入。"])])).toBe(0);
   // What a line keeps to, told before its limit, goes under 只做, not 阶段.
@@ -123,6 +131,8 @@ it("notes a name told both as still to come and as done", () => {
 it("reads stages and to-come-versus-done in English as in Chinese", () => {
   expect(stageOf("This phase won't build PCB or firmware.")).toEqual({ level: "iteration", label: "current" });
   expect(stageOf("The first version supports ESP32 only.")).toEqual({ level: "version", label: "first" });
+  expect(stageOf("V0 支持画布")).toEqual({level:"version",label:"v0"});
+  expect(stageOf("V0.1 支持画布")).not.toEqual(stageOf("V1 支持画布"));
   const plan = chapter("a", "AI", ["We will add LLMInterpreter after the local parser is stable."]), done = chapter("b", "Roadmap", ["The AI core (LocalInterpreter, LLMInterpreter) is already mature."]);
   expect(statusClashes([plan, done])).toBe(1);
 });
@@ -181,7 +191,7 @@ it("reads a scope line after its label, names a stageless row by its label, and 
   expect(plan.paragraphs[0].text).toBe([
     "| 阶段 | 不做 |", "| --- | --- |",
     "| 当前阶段禁止项 | 扩展30个元件、PCB、KiCad、Wokwi、代码生成、数据库 |",
-    "| 阶段禁令 | 同上，另加 仿真、固件生成、高压设计 |",
+    "| 阶段禁令 | PCB、仿真、固件生成、高压设计 |",
   ].join("\n"));
 });
 

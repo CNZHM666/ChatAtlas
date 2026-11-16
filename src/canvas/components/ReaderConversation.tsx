@@ -19,6 +19,9 @@ import { readerEvidenceTarget } from "../reader-evidence-location";
 import { ReaderCodeBlock } from "./ReaderCodeBlock";
 import { messagePresentation } from "../../shared/message-ui";
 import { ReaderPlatformUI } from "./ReaderPlatformUI";
+import { ReaderImage } from "./ReaderImage";
+import { defaultUrlTransform } from "react-markdown";
+import { viewableImageUrl } from "../../shared/conversation-images";
 import { readerStagePresentation } from "../reader-stage-presentation";
 import { readerStageList } from "./ReadingStageList";
 import {readerQuoteHighlights,type QuoteHighlightRange} from "../reader-quote-highlights";
@@ -40,14 +43,14 @@ export const ReaderMarkdown = memo(function ReaderMarkdown({ content, zh, litera
   const plugins = useReaderPlugins(math && format, code && format);
   const sourceAttrs = (node: ExtraProps["node"]) => text === content && node?.position?.start.offset !== undefined && node.position.end.offset !== undefined ? { "data-reader-source-start": sourceStart + node.position.start.offset, "data-reader-source-end": sourceStart + node.position.end.offset } : {};
   const components: Components = { ol: readerStageList, pre: ({ children, node }) => <div {...sourceAttrs(node)}><ReaderCodeBlock zh={zh} literal={literalCode}>{children}</ReaderCodeBlock></div> };
-  if (hideImages) components.img = ({ alt }) => <span>{alt}</span>;
+  components.img = hideImages ? ({ alt }) => <span>{alt}</span> : ({ src, alt }) => <ReaderImage src={src} alt={alt} zh={zh} />;
   for (const tag of ["p", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "table"] as const) Object.assign(components, { [tag]: ({ node, ...props }: HTMLAttributes<HTMLElement> & ExtraProps) => createElement(tag, { ...props, ...sourceAttrs(node) }) });
   // A message is indivisible for context, but parsing an unbounded Markdown AST
   // (especially tables/math) must not freeze navigation just to show its text.
   if (!format) return <div className="reader-long-text" aria-busy="true">{text}</div>;
   const remarkPlugins:PluggableList=[[remarkGfm, GFM_OPTIONS],...math?[remarkMath]:[],readerIndentedProse,readerEmphasis,readerStagePresentation];
   if(quoteHighlights?.length&&text===content)remarkPlugins.push([readerQuoteHighlights,{ranges:quoteHighlights}]);
-  return <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} skipHtml components={components}>{text}</ReactMarkdown>;
+  return <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} skipHtml urlTransform={(url, key) => key === "src" && (url.startsWith("atlas-image:") || viewableImageUrl(url)) ? url : defaultUrlTransform(url)} components={components}>{text}</ReactMarkdown>;
 });
 
 /** Parse Markdown only as the user approaches it, rather than blocking one frame
@@ -67,7 +70,8 @@ const VisibleMarkdown = memo(function VisibleMarkdown({ content, uiParts, source
     return () => { observer.disconnect(); cancel?.(); };
   }, [ready]);
   const segments = useMemo(() => messagePresentation(content, uiParts, literalWidgets, true), [content, uiParts, literalWidgets]);
-  return <div ref={root}>{ready || immediate ? segments.map((part, index) => part.kind === "text" ? <ReaderMarkdown key={index} content={part.text} sourceStart={part.sourceStart} zh={zh} literalWidgets={literalWidgets} literalCode={literalCode} /> : <div key={index} data-reader-ui-part={part.partIndex}><ReaderPlatformUI raw={part.raw} fallbackText={part.fallbackText} truncated={part.truncated} zh={zh} sourceUrl={sourceUrl} /></div>) : <div className="reader-long-text reader-markdown-placeholder" aria-busy="true">{readableConversationText(content, literalWidgets)}</div>}</div>;
+  const placeholder = useMemo(() => segments.map(part => part.kind === "text" ? readableConversationText(part.text, literalWidgets) : part.fallbackText ? readableConversationText(part.fallbackText) : zh ? "正在加载组件…" : "Loading component…").join("\n"), [segments, literalWidgets, zh]);
+  return <div ref={root}>{ready || immediate ? segments.map((part, index) => part.kind === "text" ? <ReaderMarkdown key={index} content={part.text} sourceStart={part.sourceStart} zh={zh} literalWidgets={literalWidgets} literalCode={literalCode} /> : <div key={index} data-reader-ui-part={part.partIndex}><ReaderPlatformUI raw={part.raw} fallbackText={part.fallbackText} truncated={part.truncated} zh={zh} sourceUrl={sourceUrl} /></div>) : <div className="reader-long-text reader-markdown-placeholder" aria-busy="true">{placeholder}</div>}</div>;
 });
 
 export const ReaderConversation = memo(function ReaderConversation({ messages, zh, focusMessageId, focusExcerpt, focusRange, focusNonce = 0, focusPlacement = "question", selectedQuestionId, focusOnly = false, hidden = false, highlightTurn = true, onCopy, onMark, citations, onCitation }: { messages: ConversationMessage[]; zh: boolean; focusMessageId?: string; focusExcerpt?: string; focusRange?: MessageSourceRange; focusNonce?: number; focusPlacement?: "question" | "evidence"; selectedQuestionId?: string; focusOnly?: boolean; hidden?: boolean; highlightTurn?: boolean; onCopy?: (message: ConversationMessage) => void; onMark?: (message: ConversationMessage, kind: "conclusion" | "decision") => void; citations?: Map<string, ReaderCitation[]>; onCitation?: (citation: ReaderCitation) => void }) {

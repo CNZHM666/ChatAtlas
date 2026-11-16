@@ -37,7 +37,7 @@ export const wikiHolderLabel = (holder: WikiHolder, zh: boolean) => LABELS[holde
  * the code does now ("已安装", "正在建设", "尚未接入"), or asks for something ("External feedback suggests supporting
  * multiple currencies from day one."): then it must not pass for the assistant's suggestion or the user's own. A
  * description from it reads like the rest. */
-const MATERIAL_MATTERS = /决定|确定|确认|采用|必须|不得|禁止|严禁|只(?:做|支持|保留|用)|仅|不再|取消|已(?:经)?(?:实现|安装|接入|完成|上线|支持|使用)|正在(?:建设|开发|实现|接入|迁移)|尚未(?:实现|接入|完成|支持)|(?:当前|现有|目前)的?(?:代码|实现|仓库|版本)|代码(?:中|里)|应(?:该|当)?支持|\b(?:decid|must|only|never|implemented|installed|currently|should|suggests?)/iu;
+const MATERIAL_MATTERS = /决定|确定|确认|采用|必须|不得|禁止|严禁|只(?:做|支持|保留|用)|仅|不再|取消|已(?:经)?(?:实现|安装|接入|完成|上线|支持|使用)|正在(?:建设|开发|实现|接入|迁移)|尚未(?:实现|接入|完成|支持)|(?:当前|现有|目前|当时)的?(?:代码|实现|仓库|版本)|代码(?:中|里)|应(?:该|当)?支持|\b(?:decid|must|only|never|implemented|installed|currently|should|suggests?)/iu;
 /** The holder a sentence is shown with: material stating no choice or rule is shown as the default. */
 export const wikiShownHolder = (holder: WikiHolder, text: string): WikiHolder => holder === "material" && !MATERIAL_MATTERS.test(text) ? "ai" : holder;
 /** The default holder carries no mark: unmarked text is the assistant's suggestion or analysis. */
@@ -152,7 +152,13 @@ export function withHolderMarks(text: string, marks: Array<{ text: string; holde
     const literal = (value: string) => value.normalize("NFKC").replace(/\*\*|__|\s/gu, "");
     const reference = later < 0 && literal(text.slice(from + range.start, end)) === literal(claim) ? item.reference : undefined;
     if (wikiUnmarkedHolder(holder) && !reference) continue;
-    at.push({ offset, mark: (zh ? `〔${wikiHolderLabel(holder, true)}${source}〕` : ` [${wikiHolderLabel(holder, false)}${source}]`) + (reference ?? "") });
+    let separation="";
+    if(holder==="decided"&&reference?.includes("C-")&&!/^\s*(?:\||>|[-*+]\s|\d+[.)]\s)/u.test(row)){
+      const start=from+range.start,paragraphStart=text.lastIndexOf("\n\n",start)+2,prefix=text.slice(Math.max(0,paragraphStart),start);
+      if(prefix.trim()&&/[。.!?！？]\s*$/u.test(prefix))at.push({offset:start,mark:"\n\n"});
+      if(closed&&text.slice(offset).split("\n\n")[0].trim())separation="\n\n";
+    }
+    at.push({ offset, mark: (zh ? `〔${wikiHolderLabel(holder, true)}${source}〕` : ` [${wikiHolderLabel(holder, false)}${source}]`) + (reference ?? "")+separation });
     from = offset;
   }
   let result = text;

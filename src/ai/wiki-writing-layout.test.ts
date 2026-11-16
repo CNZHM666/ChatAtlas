@@ -2,6 +2,20 @@ import {expect,it} from "vitest";
 import {claimSentence,proseLayoutBreaks,readWikiWritingBlock,readWikiWritingBlocks,wikiWritingLayout} from "./wiki-writing-layout";
 import type {WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 
+it("does not infer parallelism from knowledge kind or a shared project name",()=>{
+ const units=["输入处理","传输协议","运行环境","错误处理"].map((subject,index)=>({id:`k${index}`,subject,about:{name:"Example",role:"other_project"},kind:"constraint",statement:subject+"仅在授权后启用。",details:[],evidence:{evidenceId:"e",conversationId:"c",messageId:"m",messageIndex:index,role:"assistant",pasted:false,quote:subject},adoption:{status:"proposal"},delivery:"unknown"}) as WikiKnowledgeUnit);
+ expect(wikiWritingLayout(units).preferred).toBe("explanation");
+ expect(wikiWritingLayout(units.map(unit=>({...unit,subject:"输入处理",facet:unit.subject}))).preferred).toBe("explanation");
+});
+
+it("compiles independent numbered checks with complete evidence and preserves numbering when split",()=>{
+ const items=Array.from({length:5},(_,i)=>({text:`检查 ${i+1}：`+"仅在确认后执行，失败不得写入。".repeat(30),unitIds:["k"]}));
+ const result=readWikiWritingBlocks({type:"list",ordered:true,items},new Set(["k"]));
+ expect(result.length).toBeGreaterThan(1);
+ expect(result.flatMap(block=>block.text.match(/^\d+\./gmu))).toEqual(["1.","2.","3.","4.","5."]);
+ expect(result.flatMap(block=>block.claims).map(claim=>claim.text)).toEqual(items.map(item=>item.text));
+});
+
 it("rejects a whole comparison when any row cites unavailable evidence rather than silently omitting it",()=>{
  const block={type:"comparison",columns:["模式","前提"],rows:[
   {cells:["本地模式","仅关键词，无需密钥"],unitIds:["k1"]},
@@ -109,7 +123,7 @@ it("labels list items and prefers a labelled list for parallel rules, checks and
  const block=readWikiWritingBlock({type:"list",items:[{label:"**GPIO 冲突**",text:"仅独占资源冲突时报错。",unitIds:["k1"]},{label:"一个远远超过十二个字的过长标签名称",text:"同一总线地址重复报错。",unitIds:["k2"]}]},new Set(["k1","k2"]));
  expect(block.text).toBe("- **GPIO 冲突**：仅独占资源冲突时报错。\n- 同一总线地址重复报错。");
  expect(block.claims).toEqual([{text:"仅独占资源冲突时报错。",unitIds:["k1"]},{text:"同一总线地址重复报错。",unitIds:["k2"]}]);
- const units=["检查 GPIO 冲突。","检查 I²C 地址。","检查电压兼容。","检查负载驱动。","这样做是为了安全。"].map((statement,index)=>({id:`u${index}`,statement,kind:index<4?"mechanism":"decision",details:[]}) as unknown as WikiKnowledgeUnit);
+ const units=["检查 GPIO 冲突。","检查 I²C 地址。","检查电压兼容。","检查负载驱动。","这样做是为了安全。"].map((statement,index)=>({id:`u${index}`,subject:"安全检查",statement,kind:index<4?"mechanism":"decision",details:[]}) as unknown as WikiKnowledgeUnit);
  expect(wikiWritingLayout(units).preferred).toBe("list");
  expect(wikiWritingLayout(units).rule).toContain("labelled");
 });

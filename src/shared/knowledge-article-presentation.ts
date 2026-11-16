@@ -5,6 +5,7 @@ import { GFM_OPTIONS } from "./markdown-gfm";
 import type {RootContent} from "mdast";
 import {evidencePresentation} from "./evidence-presentation";
 import {generatedCitationPresentation} from "./generated-citation-presentation";
+import {wikiSupplementRanges,normalizeWikiSupplementHeadings} from "./wiki-source-supplements";
 
 const parser=unified().use(remarkParse).use(remarkGfm, GFM_OPTIONS);
 /** A row may hold fewer cells than its header: the missing cell reads empty. */
@@ -15,9 +16,11 @@ const states:Record<string,string>={proposal:"讨论提出以下设计：",propo
 /** Exact repeats within the same subject only. Versioned headings, literal
  * quotations, code and source excerpts must not be deduplicated by similarity. */
 function withoutRepeatedBlocks(body:string,originalTexts:string[]):string {
+ const protectedRanges=wikiSupplementRanges(body);
  const seen=new Set<string>(),headings:string[]=[];
  const ranges:Array<{start:number;end:number}>=[];
  for(const node of parser.parse(body).children){
+  if(protectedRanges.some(([start,end])=>node.position!.start.offset!>=start&&node.position!.end.offset!<=end))continue;
   if(node.type==="heading"){headings.length=node.depth-1;headings[node.depth-1]=text(node);continue;}
   // A converted deep heading is a standalone bold label. It still starts a
   // separate scope; an identical condition in another scope must survive.
@@ -35,13 +38,13 @@ function withoutRepeatedBlocks(body:string,originalTexts:string[]):string {
 /** A display/export projection for generated articles only. Original Markdown,
  * personal edits, business states, quotes and executable code remain intact. */
 export function knowledgeArticlePresentation(body:string,zh=true,originalTexts:string[]=[]):string {
+ body=normalizeWikiSupplementHeadings(body);
+ const protectedRanges=wikiSupplementRanges(body);
  const changes:Array<{start:number;end:number;value:string}>=[];
  for(const node of parser.parse(body).children){
   const start=node.position!.start.offset!,end=node.position!.end.offset!;
+  if(protectedRanges.some(([from,to])=>start>=from&&end<=to))continue;
   if(originalTexts.some(original=>original.includes(body.slice(start,end))))continue;
-  if(node.type==="heading"&&node.depth>=4){
-   changes.push({start,end,value:`**${body.slice(start,end).replace(/^#{1,6}\s+/u,"").replace(/\s+#+\s*$/u,"")}**`});
-  }
   if(node.type==="table"){
    const headers=node.children[0].children.map(cell=>text(cell).trim().toLowerCase()),remove=new Set<number>();let introduction="",mixedIndex=-1;
    for(const [index,header] of headers.entries()){

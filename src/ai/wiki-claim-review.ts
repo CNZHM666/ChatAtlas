@@ -1,3 +1,4 @@
+import {reviewSavedWikiEditorial} from "./wiki-saved-editorial";
 import type { FocusSection, FocusSession } from "../shared/focus-session";
 import type { WikiClaim } from "../shared/wiki-claims";
 import { paragraphIndex } from "../shared/wiki-body-text";
@@ -6,11 +7,17 @@ import { daysIn, figuresIn } from "../shared/wiki-figures";
 import { wikiMeasure, wikiSaidWhen } from "../shared/wiki-section-status";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { isSourceCodeParagraph, sourceBlockResolvedProblems, withoutSourceBlockRepeats } from "../shared/wiki-source-code";
-import { claimSupported } from "./wiki-claim-support";
+import { claimSupported, wikiLabelledThresholdClaims } from "./wiki-claim-support";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { withAnswerScope } from "./wiki-question-parse";
 import { applyWikiConfirmationScope, wikiConfirmationDetails, wikiConfirmationScopes } from "./wiki-confirmation-scope";
 import { measuredSourceScope, sourceScopeConflict } from "./wiki-source-scope";
+import { wikiTemporalCandidate, wikiTemporalClaim } from "./wiki-claim-temporality";
+import { wikiClaimStanding, wikiOpeningStanding, wikiStandingCandidate } from "./wiki-claim-standing";
+import { recheckWikiTableNegation } from "./wiki-negation-review";
+import { INCOMPLETE_WIKI_PROSE, restoredConditionalNegation, wikiChapterIntegrity, wikiIncompleteProse, wikiIntegrityCandidate, wikiIntegrityNote } from "./wiki-integrity";
+import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
+import { wikiHolderOf } from "../shared/wiki-holder";
 
 const UNSUPPORTED_CLAIM = /^claim "(.+)…" has no supported source after final formatting$/u;
 const LOST_CONDITION = /^"(.+)…" drops a source condition/u;
@@ -53,9 +60,9 @@ export function qualifyWikiArchitecture(text: string, units: WikiKnowledgeUnit[]
   }).join("");
 }
 
-export function qualifyWikiOverviewClaims(text: string, session: FocusSession) {
+export function qualifyWikiOverviewClaims(text: string, session: FocusSession, reading?: ReturnType<typeof resolveWikiReading>) {
   if (!session.wikiKnowledge?.draft || session.wikiKnowledge.documentType === "learning" || !NAMED_ARCHITECTURE.test(text) && !wikiConfirmationDetails(text).length) return text;
-  const { ledger, units, statuses } = resolveWikiReading(session.wikiKnowledge);
+  const { ledger, units, statuses } = reading ?? resolveWikiReading(session.wikiKnowledge);
   const openings = new Set(ledger.draft?.chapters.filter(chapter => session.sections.some(section => section.id === chapter.id && !section.userEdited && !section.origin))
     .flatMap(chapter => chapter.openingUnitIds ?? []));
   const scoped = units.filter(({ evidence }) => session.sourceConversationIds.includes(evidence.conversationId)
@@ -181,20 +188,185 @@ export function supportedProposal(text: string, unit: WikiKnowledgeUnit | undefi
 
 /** Older saved chapters also surface their recorded review failures at the affected
  * sentence. This projects the stored prose without editing the document or its sources. */
-export function reviewWikiChapter(section: FocusSection, session: FocusSession, zh = session.locale !== "en", diagnostics?: { resolved: Set<string>; scopeProblems: Set<string> }): FocusSection {
+export function wikiChapterReviewContext(session: FocusSession) {
+  const ledger = session.wikiKnowledge;
+  const units = wikiLedgerUnits(ledger);
+  let reading: ReturnType<typeof resolveWikiReading> | undefined;
+  return { units, byId: new Map(units.map(unit => [unit.id, unit])), reading: () => ledger && (reading ??= resolveWikiReading(ledger)) };
+}
+
+export function reviewWikiChapter(section: FocusSection, session: FocusSession, zh = session.locale !== "en", diagnostics?: { resolved: Set<string>; scopeProblems: Set<string> }, context = wikiChapterReviewContext(session)): FocusSection {
   const resolvedProblems = diagnostics?.resolved;
   if (section.userEdited || section.origin) return section;
   const ledger = session.wikiKnowledge;
   const chapter = ledger?.draft?.chapters.find(item => item.id === section.id);
   if (!ledger || !chapter) return section;
-  const storedUnits = wikiLedgerUnits(ledger), storedById = new Map(storedUnits.map(unit => [unit.id, unit]));
-  const evidence = session.evidence.filter(ref => section.evidenceIds.includes(ref.id) && session.sourceConversationIds.includes(ref.conversationId));
-  const sourceOf = (unit: WikiKnowledgeUnit) => evidence.find(ref => {
+  const { units: storedUnits, byId: storedById } = context;
+  const selected = new Set(section.evidenceIds), conversations = new Set(session.sourceConversationIds);
+  const evidence = session.evidence.filter(ref => selected.has(ref.id) && conversations.has(ref.conversationId));
+  const messageKey = (conversation: string, message: string) => `${conversation}\0${message}`;
+  const evidenceByMessage = new Map<string, typeof evidence>();
+  for (const ref of evidence) {
+    const key = messageKey(ref.conversationId, ref.messageId);
+    const refs = evidenceByMessage.get(key);
+    if (refs) refs.push(ref);
+    else evidenceByMessage.set(key, [ref]);
+  }
+  const sourceOf = (unit: WikiKnowledgeUnit) => evidenceByMessage.get(messageKey(unit.evidence.conversationId, unit.evidence.messageId))?.find(ref => {
     const version = session.sourceSignatures?.[ref.conversationId]?.[ref.messageId];
-    return ref.conversationId === unit.evidence.conversationId && ref.messageId === unit.evidence.messageId
-      && ref.excerpt.trim() === unit.evidence.quote.trim() && (!version || !ref.sourceSignature || version === ref.sourceSignature)
+    return ref.excerpt.trim() === unit.evidence.quote.trim() && (!version || !ref.sourceSignature || version === ref.sourceSignature)
       && (session.scope?.kind !== "goal" || session.scope.blocks?.some(block => block.conversationId === ref.conversationId && block.messageIds.includes(ref.messageId)));
   });
+  const excludedKeys = new Set([...session.wikiScopeReview?.excludeKeys ?? [], ...session.wikiScopeReview?.ignoredKeys ?? []]);
+  const excluded = session.wikiScopeReview?.materials.filter(item => (item.keys ?? [item.key]).every(key => excludedKeys.has(key))) ?? [];
+  const scopeSource = (unit: WikiKnowledgeUnit) => {
+    const ref = sourceOf(unit), versions = session.sourceSignatures?.[unit.evidence.conversationId];
+    const role = session.sourceRoles?.[unit.evidence.conversationId]?.[unit.evidence.messageId];
+    if (!ref || role && role !== unit.evidence.role || versions && !versions[unit.evidence.messageId] || excluded.some(item => item.evidenceIds.includes(ref.id) || item.evidenceIds.includes(unit.evidence.evidenceId)
+      || item.quote.trim().length >= 12 && unit.evidence.quote.includes(item.quote.trim()))) return;
+    return ref;
+  };
+  const finish=(reviewed:FocusSection)=>ledger.documentType!=="learning"?reviewSavedWikiEditorial(reviewed,context.reading()!.ledger,scopeSource):reviewed;
+  if (ledger.documentType !== "learning" && wikiStandingCandidate(section.body)) {
+    const reading = context.reading()!;
+    const available = new Map<string, NonNullable<ReturnType<typeof sourceOf>>>();
+    const scoped = reading.units.filter(unit => {
+      const ref = scopeSource(unit);
+      if (!ref) return false;
+      available.set(unit.id, ref);
+      return true;
+    });
+    const byId = new Map(scoped.map(unit => [unit.id, unit]));
+    let body = section.body;
+    const opening = body.startsWith("### ") ? "" : body.split(/\n### /u)[0];
+    const lead = wikiOpeningStanding(opening, scoped, reading.statuses, zh);
+    if (lead !== opening) body = lead + body.slice(opening.length);
+    const prose = wikiDocumentBlocks(body).filter(block => block.kind === "paragraph" || block.kind === "list");
+    const claims = section.claims?.flatMap(claim => {
+      if (!claim.unitIds?.length || !wikiStandingCandidate(claim.text) || claim.userDecided
+        || !prose.some(block => block.text.includes(claim.text)) || !body.includes(claim.text)) return [claim];
+      const cited = claim.unitIds.flatMap(id => byId.get(id) ?? []);
+      if (cited.length !== claim.unitIds.length) return [claim];
+      const revised = wikiClaimStanding(claim.text, cited, reading.statuses, zh);
+      if (!revised) return [claim];
+      const at = body.indexOf(claim.text);
+      if (at !== body.lastIndexOf(claim.text)) return [claim];
+      const after = at + claim.text.length;
+      const terminal = /[。.!?]/u.test(body[after] ?? "") && !/[。.!?]$/u.test(claim.text);
+      const separator = prose.find(block => block.text.includes(claim.text))?.kind === "list" ? " " : "\n\n";
+      const replacements = revised.map((piece, index): WikiClaim => {
+        const text = terminal && index === revised.length - 1 ? piece.text.replace(/[。.!?]$/u, "") : piece.text;
+        return { ...claim, text, formulations: undefined, holder: "ai", workStatus: "proposed", userDecided: undefined,
+          unitIds: piece.units.map(unit => unit.id), evidenceIds: [...new Set(piece.units.map(unit => available.get(unit.id)!.id))],
+          quote: piece.units[0].evidence.quote };
+      });
+      const rest = after + Number(terminal);
+      const trailing = revised.length > 1 && !/\s/u.test(body[rest] ?? " ") ? separator : "";
+      body = body.slice(0, at) + replacements.map(piece => piece.text).join(separator)
+        + body.slice(after, rest) + trailing + body.slice(rest);
+      return replacements;
+    });
+    if (body !== section.body) section = { ...section, body, claims };
+  }
+  if (chapter.problems.some(problem => problem.includes("drops the negation of"))) {
+    const bound = chapter.paragraphs.flatMap(paragraph => paragraph.claims ?? []);
+    const available = new Map([...new Set(bound.flatMap(claim => claim.unitIds))].flatMap(id => {
+      const unit = storedById.get(id);
+      return unit && sourceOf(unit) ? [[id, unit] as const] : [];
+    }));
+    for (const problem of chapter.problems) {
+      if (!problem.includes("drops the negation of")) continue;
+      const restored = resolvedProblems && bound.some(original => section.claims?.some(claim => {
+        if (claim.text === original.text || !section.body.includes(claim.text)) return false;
+        if (original.unitIds.length !== claim.unitIds?.length || !original.unitIds.every(id => claim.unitIds?.includes(id))) return false;
+        const sources = original.unitIds.flatMap(id => available.get(id) ?? []);
+        return sources.length === original.unitIds.length && restoredConditionalNegation(problem, original.text, claim.text, sources);
+      }));
+      if (restored || recheckWikiTableNegation(problem, section.body, bound, available)) resolvedProblems?.add(problem);
+    }
+  }
+  if (wikiTemporalCandidate.test(section.body) || /^### 早先版本$/mu.test(section.body)) {
+    let body = section.body;
+    let repairedEarlierHeading = false;
+    const prose = wikiDocumentBlocks(body).filter(block => block.kind === "paragraph" || block.kind === "list");
+    const claims = section.claims?.map(claim => {
+      const dualRisk=/低风险.{0,30}直接(?:执行|应用).{0,80}(?:多步|复杂|结构性).{0,80}(?:预览|Preview)/iu.test(claim.text);
+      if (!claim.unitIds?.length || !dualRisk&&!wikiTemporalCandidate.test(claim.text)
+        || !prose.some(block => block.text.includes(claim.text))) return claim;
+      const cited = claim.unitIds.flatMap(id => storedById.get(id) ?? []);
+      if (cited.length !== claim.unitIds.length || !cited.every(unit => sourceOf(unit))) return claim;
+      const relations=context.reading()?.organization?.relations ?? [];
+      const unsupportedHistory=dualRisk&&claim.holder==="earlier"&&cited.every(unit=>unit.evidence.role==="assistant"&&!unit.evidence.pasted&&!unit.about)
+        &&!relations.some(relation=>relation.status==="resolved"&&["replaces","rejects"].includes(relation.kind)&&cited.some(unit=>unit.id===relation.older)
+          &&(relation.evidence||ledger.decisions?.[relation.newer]?.verdict==="confirmed"));
+      const rewrite = unsupportedHistory ? {text:claim.text.replace(/^此前(?:曾)?(?:建议)?\s*/u,"讨论中提出，"),restoredProposal:true}
+        : wikiTemporalClaim(claim.text, cited, relations, zh);
+      if (!rewrite || rewrite.text === claim.text) return claim;
+      const text = /[。.!?]$/u.test(rewrite.text) && !/[。.!?]$/u.test(claim.text) && /[。.!?]/u.test(body[body.indexOf(claim.text) + claim.text.length] ?? "")
+        ? rewrite.text.slice(0, -1) : rewrite.text;
+      if (rewrite.restoredProposal) {
+        const heading = body.slice(0, body.indexOf(claim.text)).match(/^#{1,6} .+$/gmu)?.at(-1);
+        repairedEarlierHeading ||= /^#{1,6} (?:早先版本|Earlier versions)$/u.test(heading ?? "");
+      }
+      body = body.replace(claim.text, () => text);
+      if (rewrite.restoredProposal && claim.holder === "earlier") return { ...claim, text, formulations: undefined, holder: "ai" as const, holderMark: false, workStatus: "proposed" as const };
+      return { ...claim, text, formulations: undefined };
+    });
+    if (repairedEarlierHeading) body = body.replace(/^(#{1,6}) (?:早先版本|Earlier versions)$/mu, `$1 ${zh ? "早期讨论" : "Earlier discussion"}`);
+    if (body !== section.body) section = { ...section, body, claims };
+  }
+  // Old saved sections can have formatting that differs from the original
+  // writer's paragraphs. Review the actual blocks and their stored bindings.
+  if (wikiIntegrityCandidate(section.body)) {
+    const saved = section.claims ?? [];
+    const blocks = wikiDocumentBlocks(section.body).filter(block => block.kind === "paragraph" || block.kind === "table");
+    const bound = blocks.flatMap(block => {
+      if (!wikiIntegrityCandidate(block.text)) return [];
+      const claims = saved.flatMap(claim => [claim.text, ...claim.formulations ?? []].slice(0, 4).flatMap(text =>
+        text && block.text.includes(text) && claim.unitIds?.length ? [{ text, unitIds: claim.unitIds }] : []));
+      return claims.length ? [{ text: block.text, subtopic: "", unitIds: [...new Set(claims.flatMap(claim => claim.unitIds))], claims }] : [];
+    });
+    const trusted = new Map<string, WikiKnowledgeUnit | undefined>();
+    const unitOf = (id: string) => {
+      if (!trusted.has(id)) {
+        const unit = storedById.get(id);
+        trusted.set(id, unit && sourceOf(unit) ? unit : undefined);
+      }
+      return trusted.get(id);
+    };
+    const fixed = wikiChapterIntegrity({ ...chapter, body: section.body, paragraphs: bound }, unitOf, zh);
+    if (fixed.repaired) {
+      for (const problem of chapter.problems) {
+        const restored=bound.some((paragraph,index)=>paragraph.claims.some((claim,position)=>{
+          const next=fixed.paragraphs[index]?.claims?.[position]?.text;
+          if(!next||next===claim.text)return false;
+          const sources=claim.unitIds.flatMap(id=>unitOf(id)??[]);
+          return sources.length===claim.unitIds.length&&restoredConditionalNegation(problem,claim.text,next,sources);
+        }));
+        if(restored)resolvedProblems?.add(problem);
+      }
+      const updated = saved.flatMap(claim => {
+        if (fixed.body.includes(claim.text)) return [claim];
+        const before = bound.findIndex(paragraph => paragraph.claims.some(point => point.text === claim.text));
+        if (before < 0) return [claim];
+        const at = bound[before].claims.findIndex(point => point.text === claim.text);
+        const next = fixed.paragraphs[before]?.claims?.[at]?.text;
+        return next && fixed.body.includes(next) ? [{ ...claim, text: next, formulations: undefined }] : [claim];
+      });
+      section = { ...section, body: fixed.body, claims: updated };
+    }
+    const faults = wikiIncompleteProse(section.body).filter(fault => !evidence.some(ref => ref.excerpt.includes(fault.text.trim())));
+    if (faults.length) {
+      let body = section.body;
+      for (const fault of faults.reverse()) {
+        diagnostics?.scopeProblems.add(fault.problem);
+        body = body.slice(0, fault.start) + [fault.preserved, `> ${wikiIntegrityNote(zh)}`].filter(Boolean).join("\n\n") + body.slice(fault.end);
+      }
+      section = { ...section, body, claims: section.claims?.filter(claim => body.includes(claim.text) || !section.body.includes(claim.text)) };
+    } else {
+      for (const problem of chapter.problems) if (problem.endsWith(INCOMPLETE_WIKI_PROSE)) resolvedProblems?.add(problem);
+    }
+  }
   if (chapter.paragraphs.some(paragraph => isSourceCodeParagraph(paragraph.text))) {
     const known = new Map(storedUnits.filter(unit => unit.evidence.code && sourceOf(unit)).map(unit => [unit.id, unit]));
     const projected = withoutSourceBlockRepeats({ ...chapter, body: section.body }, id => known.get(id));
@@ -235,9 +407,9 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     return (paragraph.claims ?? []).filter(claim => !/[\n|]/u.test(claim.text) && section.body.includes(claim.text));
   });
   const scopeChanges = new Set(reviewable.filter(claim => sourceScopeConflict(claim.text, claim.unitIds.flatMap(id => storedById.get(id) ?? []))).map(claim => claim.text));
-  if (!checks.length && !scopeChanges.size && !saved.length && !priced.length && !time && !offer && !ideaTopics.size && !recordedDecisions && !architecture && !workflow.length && !mightExtendConfirmation) return section;
+  if (!checks.length && !scopeChanges.size && !saved.length && !priced.length && !time && !offer && !ideaTopics.size && !recordedDecisions && !architecture && !workflow.length && !mightExtendConfirmation) return finish(section);
   const failed = reviewable.filter(claim => scopeChanges.has(claim.text) || checks.some(({ prefix }) => claim.text.startsWith(prefix)));
-  const reading = resolveWikiReading(ledger);
+  const reading = context.reading()!;
   const units = new Map(reading?.units.map(unit => [unit.id, unit]));
   let body = section.body;
   let claims = section.claims;
@@ -293,15 +465,39 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     }
   }
   const repairedClaims = new Set<string>();
-  const excludedKeys = new Set([...session.wikiScopeReview?.excludeKeys ?? [], ...session.wikiScopeReview?.ignoredKeys ?? []]);
-  const excluded = session.wikiScopeReview?.materials.filter(item => (item.keys ?? [item.key]).every(key => excludedKeys.has(key))) ?? [];
-  const scopeSource = (unit: WikiKnowledgeUnit) => {
-    const ref = sourceOf(unit), versions = session.sourceSignatures?.[unit.evidence.conversationId];
-    const role = session.sourceRoles?.[unit.evidence.conversationId]?.[unit.evidence.messageId];
-    if (!ref || role && role !== unit.evidence.role || versions && !versions[unit.evidence.messageId] || excluded.some(item => item.evidenceIds.includes(ref.id) || item.evidenceIds.includes(unit.evidence.evidenceId)
-      || item.quote.trim().length >= 12 && unit.evidence.quote.includes(item.quote.trim()))) return;
-    return ref;
-  };
+  const repairedMetrics = new Map<string, WikiClaim[]>();
+  const unboundValues = new Set<string>();
+  for (const paragraph of chapter.paragraphs) {
+    if (!paragraph.claims?.length || /^\s*(?:```|~~~|>)/u.test(paragraph.text)) continue;
+    const labelled = wikiLabelledThresholdClaims(paragraph.text, paragraph.claims);
+    for (const [index, claim] of paragraph.claims.entries()) {
+      if (!checks.some(check => UNSUPPORTED_CLAIM.test(check.problem) && claim.text.startsWith(check.prefix))) continue;
+      const item = labelled[index];
+      if (item === claim) {
+        unboundValues.add(claim.text);
+        continue;
+      }
+      const cited = item.unitIds.flatMap(id => units.get(id) ?? []);
+      const refs = cited.flatMap(unit => scopeSource(unit) ?? []);
+      const statuses = cited.flatMap(unit => reading.statuses.get(unit.id) ?? []);
+      const holder = wikiHolderOf(statuses);
+      if (!body.includes(item.text) || !refs.length || refs.length !== item.unitIds.length || statuses.length !== cited.length || !holder
+        || cited.some(unit => droppedWikiConditions(unit, paragraph.text).length) || !claimSupported(item.text, cited)) {
+        unboundValues.add(claim.text);
+        continue;
+      }
+      const replacement: WikiClaim = { text: item.text, unitIds: item.unitIds, evidenceIds: [...new Set(refs.map(ref => ref.id))], quote: cited[0].evidence.quote,
+        holder, holderMark: holder !== "ai", userDecided: holder === "decided" || undefined,
+        workStatus: holder === "ai" ? "proposed" : statuses.some(status => status === "reported" || status === "relayed") ? "reported" : undefined,
+        verification: "supported" };
+      repairedMetrics.set(claim.text, [...repairedMetrics.get(claim.text) ?? [], replacement]);
+    }
+  }
+  for (const [value, rows] of repairedMetrics) {
+    if (unboundValues.has(value)) continue;
+    repairedClaims.add(value);
+    claims = [...claims?.filter(claim => claim.text !== value && !rows.some(row => row.text === claim.text)) ?? [], ...rows];
+  }
   for (const claim of failed.filter(claim => scopeChanges.has(claim.text))) {
     const at = paragraphIndex(body, claim.text);
     if (at < 0 || DRAFT_EXCERPT.test(body.slice(Math.max(0, at - 80), at))) continue;
@@ -333,9 +529,27 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     return proposal ? [{ text: claim.text, unitIds: [proposal.unit.id], rejected: false, scoped: false, priceText: proposal.text }] : [];
   });
   for (const claim of [...pricedProjections, ...failed.filter(claim => !scopeChanges.has(claim.text)).map(claim => ({ ...claim, rejected: false, scoped: false, priceText: undefined })), ...saved.map(claim => ({...claim, priceText: undefined}))]) {
+    if (repairedClaims.has(claim.text)) continue;
     const at = paragraphIndex(body, claim.text);
     const prefix = body.slice(Math.max(0, at - 80), at);
     if (at < 0 || DRAFT_EXCERPT.test(prefix) || claim.priceText && /(?<![不未])(?:AI\s*)?建议\s*[:：]?\s*$|\bAI proposal:\s*$/iu.test(prefix)) continue;
+    const recorded = checks.filter(check => claim.text.startsWith(check.prefix));
+    if (recorded.length && recorded.every(check => UNSUPPORTED_CLAIM.test(check.problem))) {
+      const cited = claim.unitIds.flatMap(id => units.get(id) ?? []);
+      if (cited.length && cited.length === claim.unitIds.length && cited.every(unit => scopeSource(unit) && !droppedWikiConditions(unit, claim.text).length)
+        && !ASSERTED_ADOPTION.test(claim.text) && claimSupported(claim.text, cited)) {
+        repairedClaims.add(claim.text);
+        continue;
+      }
+    }
+    if (recorded.length && recorded.every(check => LOST_CONDITION.test(check.problem))) {
+      const cited = claim.unitIds.flatMap(id => units.get(id) ?? []);
+      if (cited.length === claim.unitIds.length && cited.length && cited.every(unit => sourceOf(unit) && !droppedWikiConditions(unit, claim.text).length)
+        && !ASSERTED_ADOPTION.test(claim.text) && claimSupported(claim.text, cited)) {
+        repairedClaims.add(claim.text);
+        continue;
+      }
+    }
     const unit = claim.unitIds.length === 1 ? units.get(claim.unitIds[0]) : undefined;
     const source = unit && sourceOf(unit);
     const status = unit ? reading.statuses.get(unit.id) : undefined;
@@ -383,5 +597,6 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
       return at(first) - at(second);
     });
   }
-  return body === section.body && (!claims || claims.every((claim, index) => claim === section.claims?.[index])) ? section : { ...section, body, claims };
+  const reviewed=body === section.body && (!claims || claims.every((claim, index) => claim === section.claims?.[index])) ? section : { ...section, body, claims };
+  return finish(reviewed);
 }

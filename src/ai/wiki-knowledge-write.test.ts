@@ -1,4 +1,6 @@
 import { expect, it } from "vitest";
+import { refreshedClaimProblems } from "./wiki-knowledge-write";
+import { validateFinalClaims } from "./wiki-knowledge-write";
 import { citedFigures, countedEcho, isCommentary, qualifyVerification, withoutRepeatedClauses, refusalReason, toldEarlier, lostNegation, restatesSentence, rewriteReason, sameSentence, wikiUnitStatuses, writeLedgerDraft, writeWikiDraft, parallelAsList, withoutRepeatedItems, clausesOutsideBrackets, currentBaseline, scopedWishes, laterTakenUp, pastStageWords, sharedFigures, addedGuarantees, rehomedSubtopics, withoutRepeatedSegments, coveringRun, versionSources, namedListItems, bareLabels, restoreProhibitions, repeatedValues, labelledSteps, restoredCodes, misplacedCodes, chapterRepeatedClauses, sideLabels, reusedChapterProblems, removedLiftedLimits, openingRepeatsTrimmed, correctedSideLabels } from "./wiki-knowledge-write";
 import { curateWikiUnits } from "./wiki-knowledge-select";
 import { planRequiredWikiSourceBlocks, reconcileRequiredWikiSourceBlocks } from "./wiki-source-coverage";
@@ -28,6 +30,37 @@ function model(answer: (data: Payload, system: string) => unknown, same: (data: 
 }
 // Cites every unit of each subtopic in one paragraph built from their statements; decisions lead the opening.
 const faithful = (data: Payload) => ({ opening: "全文检索在本地完成。", openingUnitIds: data.decided ?? [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: topic.units.map(item => (item.status === "confirmed" ? "已决定" : "") + item.statement).join(""), unitIds: topic.units.map(item => item.id) }] })) });
+
+it("binds a retained formatted contract without restoring duplicate originals and keeps both source owners",()=>{
+ const first=unit(1,"Payload 契约包含 id。"),second=unit(2,"Payload 契约包含 id。");
+ first.evidence.code={language:"ts",text:"interface Payload {\n  id: string;\n}"};
+ second.evidence.code={language:"ts",text:"interface Payload {\n id: string;\n}"};
+ const l=ledger([first,second]),statuses=new Map([[first.id,"proposal" as const],[second.id,"proposal" as const]]);
+ const requirements=planRequiredWikiSourceBlocks(l,[first,second],statuses);
+ expect(requirements).toHaveLength(1);
+ const body="### 全文索引\n\n```ts\ninterface Payload {\n    id: string;\n}\n```";
+ const ch={id:l.organization!.chapters[0].id,body,paragraphs:[]};
+ const result=reconcileRequiredWikiSourceBlocks([ch],requirements,true);
+ expect(result.restored).toBe(0);expect(result.chapters[0].body).toBe(body);
+ expect(result.bindings.get(ch.id)?.map(binding=>binding.unit.id)).toEqual([first.id,second.id]);
+ expect(result.bindings.get(ch.id)?.every(binding=>body.includes(binding.markdown))).toBe(true);
+ expect(reconcileRequiredWikiSourceBlocks(result.chapters,requirements,true).restored).toBe(0);
+});
+
+it("restores one original for each evidenced release and reuses both on subsequent passes", () => {
+  const units = [unit(1, "v1 uses the Payload contract."), unit(2, "v2 uses the Payload contract.")];
+  for (const [index, item] of units.entries()) {
+    item.evidence.section = `v${index + 1} Payload contract`;
+    item.evidence.code = { language: "ts", text: "interface Payload {\n  id: string;\n}" };
+  }
+  const book = ledger(units), statuses = new Map(units.map(item => [item.id, "proposal" as const]));
+  const requirements = planRequiredWikiSourceBlocks(book, units, statuses);
+  const chapter = { id: book.organization!.chapters[0].id, body: "### 全文索引\n\n两版沿用 Payload 接口。", paragraphs: [] };
+  const first = reconcileRequiredWikiSourceBlocks([chapter], requirements, true);
+  expect(first.restored).toBe(2);
+  expect(first.bindings.get(chapter.id)?.map(binding => binding.stage)).toEqual(["v1", "v2"]);
+  expect(reconcileRequiredWikiSourceBlocks(first.chapters, requirements, true).restored).toBe(0);
+});
 
 it("states a user's view as stated, relays pasted reports and keeps requests to the assistant out", () => {
   const view = unit(1, "原生 Compaction 对用户是黑箱。", { adoption: "user_decision", kind: "fact", role: "user" });
@@ -144,10 +177,10 @@ it("keeps one complete source block when the same rule is carried by different s
   ], planned, true);
   expect(covered.restored).toBe(0);
   expect(covered.issues.size).toBe(0);
-  expect(covered.bindings.get("b")).toEqual([{ unit: b, markdown }]);
+  expect(covered.bindings.get("b")?.map(binding => ({ unit: binding.unit, markdown: binding.markdown }))).toEqual([{ unit: a, markdown },{ unit: b, markdown }]);
 });
 
-it("rewrites a recommendation that lost its source condition", async () => {
+it("restores a recommendation's source condition locally before retrying the part", async () => {
   const proposal = unit(1, "第一版使用本地索引。", { kind: "plan" });
   const condition = "如果本地性能验证通过";
   const quote = `${condition}，${proposal.statement}`;
@@ -160,9 +193,92 @@ it("rewrites a recommendation that lost its source condition", async () => {
   });
   const draft = await writeWikiDraft({ ledger: ledger([scoped]), ai, locale: "zh-CN", signal });
   expect(calls[0].data.subtopics[0].units[0]).toMatchObject({ conditions: [condition] });
-  expect(calls[1].system).toContain("drops a source condition");
-  expect(draft.chapters[0].body).toContain(quote);
+  expect(calls.filter(call => call.data.presentation === "wiki_chapter_write")).toHaveLength(1);
+  expect(draft.report.write_paragraphs_repaired_locally).toBe(1);
+  expect(draft.chapters[0].body).toContain(`原文限定：${condition}`);
   expect(draft.chapters[0].problems.join(" ")).not.toContain("drops a source condition");
+});
+
+it("restores a condition in the opening without rewriting the entire part", async () => {
+  const point = unit(1, "使用离线快照恢复工作区。", { kind: "plan" });
+  const condition = "如果备份校验通过";
+  const sourced = { ...point, conditions: [condition], evidence: { ...point.evidence, quote: `${condition}，${point.statement}` } };
+  const { ai, calls } = model(data => {
+    const id = data.subtopics[0].units[0].id;
+    return { opening: point.statement, openingUnitIds: [id], subtopics: [{ title: data.subtopics[0].title,
+      paragraphs: [{ text: `${condition}，${point.statement}`, unitIds: [id] }] }] };
+  });
+  const draft = await writeWikiDraft({ ledger: ledger([sourced]), ai, locale: "zh-CN", signal });
+  expect(calls.filter(call => call.data.presentation === "wiki_chapter_write")).toHaveLength(1);
+  expect(draft.report.write_opening_conditions_restored).toBe(1);
+});
+
+it("writes unaffected chapters while a decision is pending and reuses them after the answer", async () => {
+  const first = unit(1, "搜索采用倒排索引。"), second = unit(2, "备份使用离线快照。" );
+  const subject = (id: string, name: string, point: WikiKnowledgeUnit) => ({ id, name, aliases: [], unitIds: [point.id] });
+  const chapter = (id: string, title: string, subjectId: string) => ({ id, title, question: title, group: "", subtopics: [{ title, subjectIds: [subjectId] }] });
+  const original = ledger([first, second], { subjects: [subject("a", "搜索", first), subject("b", "备份", second)], chapters: [chapter("a", "搜索", "a"), chapter("b", "备份", "b")] });
+  const { ai, calls } = model(data => ({ ...faithful(data), opening: data.subtopics[0].units[0].statement }));
+  let finish!: (answer: WikiKnowledgeLedger) => void;
+  let previewReady!: () => void;
+  const ready = new Promise<WikiKnowledgeLedger>(resolve => { finish = resolve; });
+  const preview = new Promise<void>(resolve => { previewReady = resolve; });
+  const pending = writeLedgerDraft(original, { ai, locale: "zh-CN", signal, pendingDecisions: { units: new Set([second.id]), ready },
+    onChapters: chapters => { if (chapters.some(item => item.id === "a")) previewReady(); } });
+  await preview;
+  expect(calls.filter(call => call.data.presentation === "wiki_chapter_write").map(call => call.data.subtopics[0].title)).toEqual(["搜索"]);
+  finish({ ...original, decisions: { [second.id]: { verdict: "confirmed", at: 2 } } });
+  const final = await pending;
+  expect(final.decisions?.[second.id]?.verdict).toBe("confirmed");
+  expect(final.draft?.report.chapters_written_while_reviewing).toBe(1);
+  expect(calls.filter(call => call.data.presentation === "wiki_chapter_write").map(call => call.data.subtopics[0].title)).toEqual(["搜索", "备份"]);
+});
+
+it("publishes checked body text while an optional opening is still being generated", async () => {
+  const point = unit(1, "索引在本地读取历史消息。");
+  let release!: () => void;
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const snapshots: string[] = [];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt) as Payload;
+    if (data.presentation === "wiki_chapter_opening") {
+      expect(snapshots[0]).toContain(point.statement);
+      await wait;
+      return request.validate({ opening: point.statement });
+    }
+    return request.validate({ ...faithful(data), opening: "" });
+  } };
+  let visible!: () => void;
+  const preview = new Promise<void>(resolve => { visible = resolve; });
+  const writing = writeWikiDraft({ ledger: ledger([point]), ai, locale: "zh-CN", signal, onChapters: chapters => {
+    snapshots.push(chapters[0].body);
+    visible();
+  } });
+  await preview;
+  expect(snapshots[0]).toMatch(/^### /u);
+  release();
+  const draft = await writing;
+  expect(draft.report.write_body_previews).toBe(1);
+});
+
+it("publishes every written chapter even when one still needs review", async () => {
+  const clean = unit(1, "检索采用倒排索引。"), pending = unit(2, "备份使用离线快照。");
+  const subjects = [
+    { id: "s1", name: "检索", aliases: [], unitIds: [clean.id] },
+    { id: "s2", name: "备份", aliases: [], unitIds: [pending.id] },
+  ];
+  const chapters = subjects.map(subject => ({ id: subject.id, title: subject.name, question: "", group: "", subtopics: [{ title: subject.name, subjectIds: [subject.id] }] }));
+  const { ai } = model(data => ({
+    opening: "本章记录实现方案。",
+    subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: topic.units.map(point => ({
+      text: topic.title === "备份" ? `用户报告，${point.statement}` : point.statement, unitIds: [point.id],
+    })) })),
+  }));
+  const snapshots: WikiDraftChapter[][] = [];
+  await writeWikiDraft({ ledger: ledger([clean, pending], { subjects, chapters }), ai, locale: "zh-CN", signal,
+    onChapters: value => snapshots.push(structuredClone(value)) });
+  expect(snapshots.map(value => value.length)).toEqual([1, 2]);
+  expect(snapshots.at(-1)?.find(chapter => chapter.id === "s2")?.problems).toEqual(expect.arrayContaining([expect.stringContaining("credits the user")]));
 });
 
 it("states each unit from its own adoption and the checked relations", () => {
@@ -269,6 +385,18 @@ it("writes a large chapter in order, telling later parts what is already written
   expect(draft.chapters[0].paragraphs.flatMap(paragraph => paragraph.unitIds)).toHaveLength(100);
 });
 
+it("splits an oversized serialized writing request before it reaches the model", async () => {
+  const units = Array.from({ length: 42 }, (_, index) => unit(index, `检索规则第 ${index} 条。`, {
+    role: "user", details: [`${"检索索引覆盖范围与存储要求".repeat(48)}${index}`],
+  }));
+  const fixture = model(data => ({ opening: "本地检索按规则运行。", subtopics: data.subtopics.map(topic => ({ title: topic.title,
+    paragraphs: topic.units.map(item => ({ text: item.statement, unitIds: [item.id] })),
+  })) }));
+  const draft = await writeWikiDraft({ ledger: ledger(units), ai: { ...fixture.ai, modelId: "test-budget-model" }, locale: "zh-CN", signal });
+  expect(draft.report.write_preflight_splits).toBeGreaterThan(0);
+  expect(fixture.calls.filter(call => call.data.presentation === "wiki_chapter_write").every(call => call.data.subtopics.flatMap(topic => topic.units).length < units.length)).toBe(true);
+});
+
 it("writes the curated view: must-show units and each subject's best within its quota, the rest counted", async () => {
   // 30 proposals: quota 8. One confirmed unit is always written; decisions with exact details rank first.
   // Distinct statements (five characters each from a pool) so no two count as the same point.
@@ -332,17 +460,20 @@ it("asks for a holder said once per paragraph and never a change told in prose",
     : "AI 建议首页只保留搜索入口。AI 建议侧栏默认收起。AI 建议导出提供 Markdown。后续讨论改为首页应成为日常搜索的唯一入口，但尚未确定。", unitIds: data.subtopics[0].units.map(item => item.id) }] }] }));
   const draft = await writeWikiDraft({ ledger: ledger(units), ai, locale: "zh-CN", signal });
   expect(calls).toHaveLength(1);
-  // Every leading AI 建议 is removed locally: the mark says whose the sentences are.
-  expect(draft.chapters[0].paragraphs[0].text).not.toMatch(/AI\s?建议/u);
+  expect(draft.chapters[0].paragraphs[0].text.match(/AI\s?建议/gu)).toHaveLength(1);
 });
 
 it("points to the chapter that explains a subject instead of explaining it again", async () => {
   const units = [unit(1, "全文索引使用 Orama。"), { ...unit(2, "上下文按任务组装。"), subject: "上下文引擎" }];
   const organization: Partial<WikiKnowledgeOrganization> = { subjects: [{ id: "s:search", name: "检索", aliases: [], unitIds: ["unit:1"] }, { id: "s:context", name: "上下文引擎", aliases: [], unitIds: ["unit:2"] }],
+    relations: [{ older: "unit:1", newer: "unit:2", kind: "supplements", status: "resolved" }],
     chapters: [{ id: "a", title: "检索", question: "?", group: "", subtopics: [{ title: "全文索引", subjectIds: ["s:search"] }] }, { id: "b", title: "上下文", question: "?", group: "", subtopics: [{ title: "组装", subjectIds: ["s:context"] }] }] };
   const { ai, calls } = model(faithful);
   await writeWikiDraft({ ledger: ledger(units, organization), ai, locale: "zh-CN", signal });
   expect(calls.find(call => call.data.subtopics[0].title === "全文索引")!.data.elsewhere).toEqual([{ subject: "上下文引擎", chapter: "上下文" }]);
+  const unrelated = model(faithful);
+  await writeWikiDraft({ ledger: ledger(units, { ...organization, relations: [] }), ai: unrelated.ai, locale: "zh-CN", signal });
+  expect(unrelated.calls.every(call => !call.data.elsewhere?.length)).toBe(true);
 });
 
 it("keeps chapters whose inputs are unchanged and rewrites the ones that changed", async () => {
@@ -399,14 +530,14 @@ it("keeps another project out, names competitors and keeps separate roadmaps apa
   const statuses = wikiUnitStatuses([hardware, competitor, decided], ledger([hardware, competitor, decided]).organization!);
   expect(statuses.get(decided.id)).toBe("stated");
   expect(selectWikiUnits(ledger([hardware, competitor, decided]), statuses).has(hardware.id)).toBe(false);
-  // Two assistant roadmaps from different messages: only the newest is sent; the earlier one stays in the ledger.
+  // Different proposals remain available and a merged answer is repaired.
   const plans = [unit(4, "M1 完成导入和全文搜索。", { kind: "plan" }), unit(5, "M1 手动选择并复制 Markdown。", { kind: "plan" })];
   const { ai, calls } = model((data, system) => ({ opening: "AI 曾建议过两条路线。", subtopics: [{ title: "全文索引", paragraphs: system.includes("SECOND ATTEMPT")
     ? data.subtopics[0].units.map(item => ({ text: `AI 曾建议的一条路线：${item.statement}`, unitIds: [item.id] }))
     : [{ text: "AI 建议 M1 完成导入和全文搜索，同时手动选择并复制 Markdown。", unitIds: data.subtopics[0].units.map(item => item.id) }] }] }));
   const draft = await writeWikiDraft({ ledger: ledger(plans), ai, locale: "zh-CN", signal });
-  expect((calls[0].data.subtopics[0].units as Array<{ statement: string }>).map(item => item.statement)).toEqual([plans[1].statement]);
-  expect(calls).toHaveLength(1);expect(draft.report.earlier_plans_left_out).toBe(1);
+  expect((calls[0].data.subtopics[0].units as Array<{ statement: string }>).map(item => item.statement)).toEqual(plans.map(item=>item.statement));
+  expect(calls).toHaveLength(2);expect(draft.chapters[0].problems).toEqual([]);
 });
 
 it("gives each paragraph one footnote: the user's words first, three quoted, the rest by message number", () => {
@@ -439,6 +570,20 @@ it("removes a sentence repeating the opening's decision from a paragraph that sa
   expect(draft.report.opening_repeats_removed).toBe(1);
 });
 
+it("keeps confirmed details in their chapter without requiring all of them in the opening", async () => {
+  const units = [
+    unit(1, "全文索引使用 Orama。", { adoption: "user_decision", role: "user" }),
+    unit(2, "离线导出使用 Markdown。", { adoption: "user_decision", role: "user" }),
+  ];
+  const { ai } = model(data => ({ opening: units[0].statement, openingUnitIds: [data.decided![0]], subtopics: [{
+    title: "全文索引", paragraphs: data.subtopics[0].units.map(item => ({ text: item.statement, unitIds: [item.id] })),
+  }] }));
+  const { chapters: [chapter] } = await writeWikiDraft({ ledger: ledger(units), ai, locale: "zh-CN", signal });
+  expect(chapter.openingUnitIds).toEqual([units[0].id]);
+  expect(chapter.body.match(/离线导出使用 Markdown/gu)).toHaveLength(1);
+  expect(chapter.paragraphs.some(paragraph => paragraph.claims?.some(claim => claim.unitIds.includes(units[1].id)))).toBe(true);
+});
+
 it("lists a message once in a footnote and skips code in its excerpt", () => {
   const first = unit(1, "收藏保存的是可复用的上下文。"), second = { ...unit(2, "收藏包含原始消息和前后文。"), evidence: { ...unit(2, "").evidence, evidenceId: "e1b", messageId: "m1", messageIndex: 1, quote: "收藏包含原始消息和前后文。" } };
   const draft = { version: 1 as const, generatedAt: 0, status: "complete" as const, report: {}, chapters: [{ id: "a", title: "收藏", question: "?", group: "", body: "收藏保存可复用的上下文。", paragraphs: [{ subtopic: "收藏", text: "收藏保存可复用的上下文。", unitIds: [first.id, second.id] }], problems: [] }] };
@@ -468,8 +613,7 @@ it("refuses crediting the user with an assistant's words and removes remarks tha
   const draft = await writeWikiDraft({ ledger: ledger(units), ai, locale: "zh-CN", signal });
   expect(calls[1].system).toContain("credits the user");
   expect(draft.chapters[0].problems).toEqual([]);
-  // The holder is the mark's to say: the saved sentence states the point alone.
-  expect(draft.chapters[0].paragraphs[1].text).toBe("邀请 5-10 人参加 Alpha 测试。");
+  expect(draft.chapters[0].paragraphs[1].text).toBe("AI 建议邀请 5-10 人参加 Alpha 测试。");
 });
 
 it("writes an explanation group's core once with its status, each condition with its own, and no sentence for a restatement", async () => {
@@ -493,13 +637,12 @@ it("writes an explanation group's core once with its status, each condition with
   expect(draft.report).toMatchObject({ write_groups: 1, select_group_points: 1 });
 });
 
-it("labels priority plans from separate messages, pasted ones included, and marks the most recent one", async () => {
+it("keeps separately attributed priority plans, including pasted material", async () => {
   const pasted = { ...unit(2, "Reader 列为 P0。", { kind: "plan", role: "user" }), evidence: { ...unit(2, "").evidence, role: "user" as const, pasted: true } };
   const units = [unit(1, "Dashboard 和 Reader 列为 P1。", { kind: "plan" }), pasted];
   const { calls } = await (async () => { const fake = model(faithful); await writeWikiDraft({ ledger: ledger(units), ai: fake.ai, locale: "zh-CN", signal }); return fake; })();
-  // The most recent plan, pasted or not, is the one sent and written; the earlier ranking is left to History.
-  expect((calls[0].data.subtopics[0].units as Array<{ statement: string }>).map(item => item.statement)).toEqual([pasted.statement]);
-  expect(calls[0].system).not.toContain("早先曾列为");
+  expect(calls[0].data.subtopics[0].units.map(item => item.statement)).toEqual(units.map(item=>item.statement));
+  expect(calls[0].system).toContain("separately attributed block");
 });
 
 it("quotes a footnote from the stored quote's own sentences before better-matching ones elsewhere", () => {
@@ -527,7 +670,7 @@ it("tells the writer each plan's scope", async () => {
   const fake = model(faithful);
   await writeWikiDraft({ ledger: ledger(units, organization), ai: fake.ai, locale: "zh-CN", signal });
   expect((fake.calls[0].data.subtopics[0].units as Array<{ planScope?: string }>).map(item => item.planScope)).toEqual(["侧栏改造", "Wiki 阅读"]);
-  expect(fake.calls[0].system).toContain("不代表全项目路线");
+  expect(fake.calls[0].system).toContain("plan and planScope distinguish roadmap proposals");
 });
 
 it("says in the export that the draft records the selected discussions, not the current direction", () => {
@@ -562,6 +705,28 @@ it("asks for a claim on every decided, done, figure or change sentence", async (
   const other = model((data, system) => ({ opening: "导入有成本。", subtopics: [{ title: "全文索引", paragraphs: [{ text: system.includes("SECOND ATTEMPT") ? "首次导入约 150,000 Token。" : "首次导入约 200,000 Token。", unitIds: [data.subtopics[0].units[0].id], claims: [] }] }] }));
   const asked = await writeWikiDraft({ ledger: ledger(units), ai: other.ai, locale: "zh-CN", signal });
   expect(other.calls[1].system).toContain("has no claim");expect(asked.chapters[0].problems).toEqual([]);
+});
+
+it("binds a historical range to its own source in the organized subject", () => {
+  const older = { ...unit(1, "底部工具栏折叠后高度为 36–40px。"), subject: "工具栏布局" };
+  const newer = { ...unit(2, "底部工具栏折叠后高度为 40–48px。"), subject: "面板规范" };
+  const unrelated = { ...unit(3, "顶部工具栏高度为 36–40px。"), subject: "顶部布局" };
+  const sentence = "此前讨论中底部工具栏高度也有 36–40px 的说法。";
+  const chapter: WikiDraftChapter = { id: "c", title: "界面", group: "", question: "", body: sentence,
+    paragraphs: [{ subtopic: "工具栏", text: sentence, unitIds: [newer.id] }],
+    problems: [`"${sentence.slice(0, 24)}…" has no claim naming the units it states`] };
+  const units = new Map([older, newer, unrelated].map(point => [point.id, point]));
+  refreshedClaimProblems([chapter], units, [], [{ id: "s", name: "底部工具栏", aliases: [], unitIds: [older.id, newer.id] }]);
+  expect(chapter.paragraphs[0].claims).toEqual([{ text: sentence, unitIds: [older.id] }]);
+  expect(chapter.problems).toEqual([]);
+});
+
+it("treats a warning against claiming completion as a warning, even when no implementation was reported", async () => {
+  const point = unit(1, "完整自动化闭环仍是后续方向，不能全部写成已实现。", { kind: "plan" });
+  const { ai, calls } = model(faithful);
+  const draft = await writeWikiDraft({ ledger: ledger([point]), ai, locale: "zh-CN", signal });
+  expect(draft.chapters[0].problems).not.toEqual(expect.arrayContaining([expect.stringContaining("states as decided or done")]));
+  expect(calls.filter(call => call.system.includes("SECOND ATTEMPT"))).toHaveLength(0);
 });
 
 it("states two confirmed but conflicting choices as contested, not both decided", () => {
@@ -817,38 +982,35 @@ it("quotes sources without the escapes, emphasis, cut tags, tables and citation 
   expect(notes).not.toMatch(/\|\*|="|\[30\]|##/u);
 });
 
-it("cites a restating member where its core is, and supplements an important unit the rewrite still left out", async () => {
+it("cites a restating member and restores an omitted decision without a supplement request", async () => {
   const decided = unit(1, "我要在对话旁加上书签，支持手动标注。", { adoption: "user_decision", role: "user", kind: "decision" });
   const core = unit(2, "导出提供 Markdown 文件。"), echo = unit(3, "导出提供 Markdown 格式的文件。");
   const exported: WikiExplanationGroup = { id: "g:1", core: "导出提供 Markdown 文件。", homeSubjectId: "s:search", anchorUnitId: core.id, signature: "g", members: [
     { unitId: core.id, support: "导出提供 Markdown 文件", adds: [], role: "restates" }, { unitId: echo.id, support: "导出提供 Markdown 格式的文件", adds: [], role: "restates" }] };
-  // Both attempts write the export once, citing one member, and leave the decision out; the supplement writes it.
-  const { ai, calls } = model((data, system) => {
-    if (system.includes("SUPPLEMENT")) return { opening: "", subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "已决定在对话旁加上书签，支持手动标注。", unitIds: topic.units.map(item => item.id), claims: [{ text: "已决定在对话旁加上书签，支持手动标注。", unitIds: topic.units.map(item => item.id) }] }] })) };
+  const { ai, calls } = model(data => {
     const ids = data.subtopics[0].units.map(item => item.id);
     return { opening: "本章说明导出方式。", openingUnitIds: [], subtopics: [{ title: "全文索引", paragraphs: [{ text: "AI 建议导出提供 Markdown 文件。", unitIds: [ids[1]] }] }] };
   });
   const draft = await writeWikiDraft({ ledger: ledger([decided, core, echo], { groups: [exported] }), ai, locale: "zh-CN", signal });
-  const supplement = calls.find(call => call.system.includes("SUPPLEMENT"))!;
-  expect(supplement.data.subtopics.flatMap(topic => topic.units.map(item => item.statement))).toEqual(["我要在对话旁加上书签，支持手动标注。"]);
+  expect(calls.some(call => call.system.includes("SUPPLEMENT"))).toBe(false);
+  expect(draft.chapters[0].body).toContain(decided.statement);
   expect(draft.chapters[0].paragraphs.map(paragraph => paragraph.unitIds)).toEqual([[core.id, echo.id], [decided.id]]);
   expect(draft.chapters[0].problems.filter(problem => problem.startsWith("important units"))).toEqual([]);
-  expect(draft.report).toMatchObject({ restatements_cited: 1, write_supplements: 1, write_supplemented_units: 1 });
+  expect(draft.report).toMatchObject({ restatements_cited: 1, write_omissions_restored_locally: 1 });
 });
 
-it("drops a supplement paragraph that copies a written point under another unit's label", async () => {
+it("keeps the written paragraph and fills the omitted decision from its own unit", async () => {
   const decided = unit(1, "我要在对话旁加上书签，支持手动标注。", { adoption: "user_decision", role: "user", kind: "decision" });
   const exported = unit(2, "导出功能提供 Markdown 文件，按章节拆分并附带来源链接与生成时间。");
   const written = "AI 建议导出功能提供 Markdown 文件，按章节拆分并附带来源链接与生成时间。";
-  // The part leaves the decision out; the supplement repeats the written point and cites the decision for it.
-  const { ai } = model((data, system) => {
+  const { ai, calls } = model(data => {
     const ids = data.subtopics.flatMap(topic => topic.units.map(item => item.id));
-    if (system.includes("SUPPLEMENT")) return { opening: "", subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: written, unitIds: ids }] })) };
     return { opening: "", openingUnitIds: [], subtopics: [{ title: "全文索引", paragraphs: [{ text: written, unitIds: [ids[1]] }] }] };
   });
   const draft = await writeWikiDraft({ ledger: ledger([decided, exported]), ai, locale: "zh-CN", signal });
   expect(draft.chapters[0].paragraphs.map(paragraph => paragraph.unitIds)).toEqual([[exported.id], [decided.id]]);
-  expect(draft.report).toMatchObject({ repeated_paragraphs_dropped: 1, confirmed_decisions_restored: 1 });
+  expect(calls.some(call => call.system.includes("SUPPLEMENT"))).toBe(false);
+  expect(draft.report).toMatchObject({ write_omissions_restored_locally: 1 });
   expect(draft.chapters[0].problems.some(problem => problem.startsWith("important units"))).toBe(false);
 });
 
@@ -991,14 +1153,14 @@ it("treats a sentence as a restatement only when it adds no number or name of it
   expect(restatesSentence("索引使用 Orama 在本地完成全文检索。", "首页只保留搜索入口和最近项目。")).toBe(false);
 });
 
-it("treats roadmaps for the whole project as one scope, whatever subjects they were filed under, and marks the newest", async () => {
+it("treats roadmaps for the whole project as one scope, whatever subjects they were filed under, and retains both proposals", async () => {
   const units = [unit(1, "MVP 第一版 P0 包括导入、全文搜索和消息定位。", { kind: "plan" }), unit(2, "开发分为 M1 全文检索、M2 混合检索、M3 LLM 重排。", { kind: "plan" })];
   const organization = { subjects: [{ id: "s:mvp", name: "MVP 功能", aliases: [], unitIds: ["unit:1"] }, { id: "s:road", name: "开发里程碑", aliases: [], unitIds: ["unit:2"] }] };
   const fake = model(faithful);
   await writeWikiDraft({ ledger: ledger(units, organization), ai: fake.ai, locale: "zh-CN", signal });
   const sent = fake.calls[0].data.subtopics.flatMap(topic => topic.units) as Array<{ planScope?: string; latestPlan?: boolean }>;
-  // One scope for the whole project: the newer roadmap is the one sent.
-  expect((sent as Array<{ statement?: string }>).map(item => item.statement)).toEqual([units[1].statement]);
+  expect((sent as Array<{ statement?: string }>).map(item => item.statement)).toEqual(units.map(item=>item.statement));
+  expect(new Set(sent.map(item=>item.planScope))).toEqual(new Set(["项目整体路线"]));
 });
 
 it("removes holder wording, since the mark after the sentence says whose it is", async () => {
@@ -1017,9 +1179,8 @@ it("tells roadmaps apart across a chapter's parts, versions in any spelling incl
   await writeWikiDraft({ ledger: ledger(units), ai, locale: "zh-CN", signal });
   expect(calls.length).toBeGreaterThan(1);
   const sent = calls.flatMap(call => call.data.subtopics.flatMap(topic => topic.units)) as Array<{ statement: string; plan?: string; planScope?: string; latestPlan?: boolean }>;
-  // The two roadmaps sit in different parts; only the newest, in the later part, is sent and written.
   expect(sent.map(item => item.statement)).toContain(units[79].statement);
-  expect(sent.map(item => item.statement)).not.toContain(units[0].statement);
+  expect(sent.map(item => item.statement)).toContain(units[0].statement);
 });
 
 it("keeps the letters that tell plans apart out of the text", async () => {
@@ -1030,7 +1191,7 @@ it("keeps the letters that tell plans apart out of the text", async () => {
   expect(draft.report.plan_labels_removed).toBe(1);
 });
 
-it("leaves an earlier roadmap out and writes the newest in full", async () => {
+it("retains all selected stages of unresolved roadmaps", async () => {
   const inMessage = (item: WikiKnowledgeUnit, messageId: string, messageIndex: number) => ({ ...item, evidence: { ...item.evidence, messageId, messageIndex } });
   const units = [
     inMessage(unit(1, "M1 实现全文检索。", { kind: "plan" }), "old", 1), inMessage(unit(2, "M2 加入 Embedding 混合检索与本地向量。", { kind: "plan" }), "old", 1), inMessage(unit(3, "M3 加入 LLM 重排。", { kind: "plan" }), "old", 1),
@@ -1038,10 +1199,9 @@ it("leaves an earlier roadmap out and writes the newest in full", async () => {
   const fake = model(faithful);
   const draft = await writeWikiDraft({ ledger: ledger(units), ai: fake.ai, locale: "zh-CN", signal });
   const sent = fake.calls[0].data.subtopics.flatMap(topic => topic.units).map(item => item.statement);
-  // No step of the earlier plan; the newest plan's steps as selected.
-  expect(sent.filter(text => [units[0], units[1], units[2]].some(item => item.statement === text))).toEqual([]);
+  expect(sent).toEqual(expect.arrayContaining(units.slice(0,4).map(item=>item.statement)));
   expect(sent).toContain(units[3].statement);
-  expect(draft.report.earlier_plans_left_out).toBe(1);
+  expect(draft.report.earlier_plans_left_out).toBeUndefined();
 });
 
 it("removes a sentence repeating its paragraph and drops a claim not copied exactly, without a rewrite", async () => {
@@ -1074,7 +1234,7 @@ it("does not count list numbering or 一天 written as 1 天 as numbers the unit
   expect(calls).toHaveLength(1);
 });
 
-it("sends only the newest of several roadmaps of a scope, and strips bare plan letters from the text", async () => {
+it("keeps unresolved roadmaps visible to the writer and strips bare plan letters from the text", async () => {
   const road = (index: number, text: string) => ({ ...unit(index, text, { kind: "plan" }), evidence: { ...unit(index, text).evidence, messageId: `plan${index}`, messageIndex: index } });
   const units = [
     road(1, "第一套路线先做导入：M1 支持 ChatGPT 与 Claude 对话导入和去重；M2 做标题搜索；M3 做标签管理；M4 做团队共享与权限。"),
@@ -1086,8 +1246,8 @@ it("sends only the newest of several roadmaps of a scope, and strips bare plan l
   const sent = fake.calls[0].data.subtopics.flatMap(topic => topic.units) as Array<{ statement: string; earlierPlan?: true; latestPlan?: true }>;
   expect(sent.map(item => item.statement)).toContain(units[3].statement);
   expect(sent.filter(item => item.earlierPlan)).toEqual([]);
-  expect(sent.some(item => /^第[一二三]套/u.test(item.statement))).toBe(false);
-  expect(draft.report.earlier_plans_left_out).toBe(3);
+  expect(sent.some(item => /^第[一二三]套/u.test(item.statement))).toBe(true);
+  expect(sent.every(item=>!item.latestPlan)).toBe(true);
   expect(draft.chapters[0].body).not.toMatch(/Plan [A-Z]/u);
 });
 
@@ -1363,7 +1523,7 @@ it("notes an excluded project and restores a confirmed decision omitted by the w
   const draft = await writeWikiDraft({ ledger: { ...ledger([kept, confirmed, other]), scopeAnswers: { chatatlas: "exclude" }, decisions: { [confirmed.id]: { verdict: "confirmed", at: 1 } } }, ai, locale: "zh-CN", signal });
   expect(draft.chapters[0].problems).toContain("names ChatAtlas, a project you left out");
   expect(draft.chapters[0].body).toContain(confirmed.statement);
-  expect(draft.report).toMatchObject({ excluded_named: 1, confirmed_decisions_restored: 1 });
+  expect(draft.report).toMatchObject({ excluded_named: 1, write_omissions_restored_locally: 1 });
   expect(draft.report.confirmed_unwritten).toBeUndefined();  expect(draft.quality?.passed).toBe(false);
 });
 
@@ -1584,6 +1744,22 @@ it("checks a table cell against its whole row", async () => {
   expect(draft.chapters.flatMap(chapter => chapter.problems).filter(problem => /^claim "(?:6 个|当前已完成|20-30 个)/u.test(problem))).toEqual([]);
 });
 
+it("does not lend a repeated value from another table row", () => {
+  const size = unit(1, "界面工具栏只保留搜索和导出入口。");
+  const library = unit(2, "第一版元件库收录30个本地元件。");
+  const text = "| 事项 | 数量 | 状态 |\n| --- | --- | --- |\n| 工具栏入口 | 30 个 | 已实现 |\n| 元件库收录 | 30 个 | 已实现 |";
+  const chapter: WikiDraftChapter = { id: "x", title: "规划", question: "", group: "", body: text, problems: [], paragraphs: [{
+    subtopic: "", text, unitIds: [size.id, library.id],
+    claims: [{ text: "工具栏入口", unitIds: [size.id] }, { text: "元件库收录", unitIds: [library.id] },
+      { text: "30 个", unitIds: [library.id] }],
+  }] };
+  const report: Record<string, number> = {};
+  validateFinalClaims([chapter], new Map([[size.id, size], [library.id, library]]), report);
+  expect(chapter.body).not.toContain("工具栏入口 | 30 个");
+  expect(chapter.body).toContain("元件库收录 | 30 个");
+  expect(report.row_sources_added).toBeUndefined();
+});
+
 it("keeps one of two parts that state one rule, the one giving every number", () => {
   const line = "- **圆角规范**：全局圆角统一控制在 6px~8px，禁止使用超大圆角以符合工程工具定位；统一推荐6px～8px，禁止20px/30px超大圆角，体现工程工具属性。";
   expect(withoutRepeatedSegments(line).text).toBe("- **圆角规范**：统一推荐6px～8px，禁止20px/30px超大圆角，体现工程工具属性。");
@@ -1647,7 +1823,7 @@ it("tells a line giving one value twice from lines giving several values once", 
   expect(repeatedValues("- **CTA按钮**：高度40~44px，圆角8~10px，内边距14~16px。\n| 高度 | 40~44px | 40~44px |")).toEqual([]);
 });
 
-it("writes a chapter's missing opening from the chapter in one short request", async () => {
+it("uses a checked lead for a missing chapter opening without another request", async () => {
   const rule = unit(1, "检索在本地完成，不调用模型。", { kind: "decision" });
   const prompts: string[] = [];
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
@@ -1658,7 +1834,8 @@ it("writes a chapter's missing opening from the chapter in one short request", a
     return request.validate(claimed({ opening: "", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "检索在本地完成，不调用模型。", unitIds: [topic.units[0].id] }] })) }));
   } };
   const draft = await writeWikiDraft({ ledger: ledger([rule]), ai, locale: "zh-CN", signal });
-  expect(prompts).toContain("wiki_chapter_opening");
+  expect(prompts).not.toContain("wiki_chapter_opening");
+  expect(draft.report.openings_from_checked_claims).toBe(1);
   expect(draft.chapters[0].body.startsWith("检索在本地完成，不调用模型。")).toBe(true);
   expect(draft.chapters[0].problems).not.toContain("the opening is missing");
 });
@@ -1741,37 +1918,36 @@ it("keeps every point of a subtopic the writer and its supplement both left out,
   expect(chapter.signature).toBeUndefined();
 });
 
-it("asks for a refused opening once more with the reason", async () => {
+it("keeps the checked chapter when an optional model opening is refused", async () => {
   const rule = unit(1, "检索在本地完成，不调用模型。", { kind: "decision" });
   const systems: string[] = [];
-  let openings = 0;
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
     const data = JSON.parse(request.prompt) as Payload & { presentation?: string };
     if (data.presentation === "wiki_unit_propositions") return request.validate({ same: [] });
-    if (data.presentation === "wiki_chapter_opening") { systems.push(request.system); return request.validate({ opening: openings++ ? "检索在本地完成，不调用模型。" : "检索确保硬件方案的正确性与可执行性。" }); }
-    return request.validate(claimed({ opening: "", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "检索在本地完成，不调用模型。", unitIds: [topic.units[0].id] }] })) }));
+    if (data.presentation === "wiki_chapter_opening") { systems.push(request.system); return request.validate({ opening: "检索确保硬件方案的正确性与可执行性。" }); }
+    return request.validate(claimed({ opening: "", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "全文检索在设备端执行，不调用模型。", unitIds: [topic.units[0].id] }] })) }));
   } };
   const draft = await writeWikiDraft({ ledger: ledger([rule]), ai, locale: "zh-CN", signal });
-  expect(systems).toHaveLength(2);
-  expect(systems[1]).toContain("SECOND ATTEMPT");
-  expect(systems[1]).toContain("确保硬件方案的正确性");
-  expect(draft.chapters[0].body.startsWith("检索在本地完成，不调用模型。")).toBe(true);
+  expect(systems).toHaveLength(1);
+  expect(draft.report.openings_omitted_after_recovery).toBe(1);
+  expect(draft.chapters[0].body).toContain("不调用模型");
+  expect(draft.chapters[0].body).not.toContain("确保");
 });
 
 it("does not take a guarantee the chapter's question asks about as one the chapter gives", async () => {
   const rule = unit(1, "检索在本地完成，不调用模型。", { kind: "decision" });
   const systems: string[] = [];
-  let openings = 0;
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
     const data = JSON.parse(request.prompt) as Payload & { presentation?: string };
     if (data.presentation === "wiki_unit_propositions") return request.validate({ same: [] });
-    if (data.presentation === "wiki_chapter_opening") { systems.push(request.system); return request.validate({ opening: openings++ ? "检索在本地完成，不调用模型。" : "检索在本地完成来确保方案正确可执行。" }); }
-    return request.validate(claimed({ opening: "", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "检索在本地完成，不调用模型。", unitIds: [topic.units[0].id] }] })) }));
+    if (data.presentation === "wiki_chapter_opening") { systems.push(request.system); return request.validate({ opening: "检索在本地完成来确保方案正确可执行。" }); }
+    return request.validate(claimed({ opening: "", openingUnitIds: [], subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: [{ text: "全文检索在设备端执行，不调用模型。", unitIds: [topic.units[0].id] }] })) }));
   } };
   const base = ledger([rule]);
   const asked = ledger([rule], { chapters: base.organization!.chapters.map(chapter => ({ ...chapter, question: "系统如何确保生成的方案是正确且可执行的？" })) });
   const draft = await writeWikiDraft({ ledger: asked, ai, locale: "zh-CN", signal });
-  expect(systems[1]).toContain("确保方案正确可执行");
+  expect(systems).toHaveLength(1);
+  expect(draft.report.openings_omitted_after_recovery).toBe(1);
   expect(draft.chapters[0].body).not.toContain("确保");
 });
 

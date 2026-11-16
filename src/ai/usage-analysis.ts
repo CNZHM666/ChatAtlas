@@ -79,7 +79,7 @@ function inferredStatus(usage: AIUsageEvent[]): "failed" | "completed" {
 
 /** documentMetrics builds each saved Wiki's full export for the CSV quality columns.
  * It is the expensive part; the diagnostics view leaves it to the CSV download. */
-export function analyzeOrganizationRuns(runs: OrganizationRun[], events: AIUsageEvent[], diagnostics: AnalysisDiagnostics[], focusSessions: FocusSession[] = [], options: { documentMetrics?: boolean } = {}): OrganizationAnalysis[] {
+export function analyzeOrganizationRuns(runs: OrganizationRun[], events: AIUsageEvent[], diagnostics: AnalysisDiagnostics[], focusSessions: FocusSession[] = [], options: { documentMetrics?: boolean; preparedQuality?: { sessionId: string; updatedAt: number; metrics: ReturnType<typeof wikiQualityCsvMetrics> } } = {}): OrganizationAnalysis[] {
   const documentMetrics = options.documentMetrics ?? true;
   // Keep the exported pipeline ledger consistent with the metrics calculated
   // here, even if a live run appends another span before the user exports.
@@ -129,7 +129,7 @@ export function analyzeOrganizationRuns(runs: OrganizationRun[], events: AIUsage
     const latestGenerationMs=focus?.coverage?.elapsedMs??generations.at(-1)?.durationMs;
     const recoveries=requests.filter(event=>event.recoveryReason!==undefined);
     return {
-      wikiQuality:documentMetrics&&focus?.sections.some(section=>section.body.trim())?wikiQualityCsvMetrics(projectDocument(focus,{overview:true,wikiIds:focus.sections.map(section=>section.id),matters:false,history:false,sources:false},"md").text):undefined,
+      wikiQuality:documentMetrics&&focus?.sections.some(section=>section.body.trim())?(options.preparedQuality?.sessionId===focus.id&&options.preparedQuality.updatedAt===focus.updatedAt?options.preparedQuality.metrics:wikiQualityCsvMetrics(projectDocument(focus,{overview:true,wikiIds:focus.sections.map(section=>section.id),matters:false,history:false,sources:false},"md").text)):undefined,
       failuresByOrigin:failuresByOrigin(usage),
       lifecycle:analyzeAILifecycle(usage),
       byStage:[...stages.values()],

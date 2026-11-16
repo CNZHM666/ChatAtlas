@@ -1,9 +1,10 @@
 import type { Conversation, ConversationCapture, ConversationMessage } from "../../shared/types";
 import { createContentHash, normalizeMessageText, previewMessage } from "../../content/message-identity";
+import { materializeCaptureImages } from "../../shared/capture-images";
 
 /** One conversation found in an export file, tagged with the importer that owns it.
  * Records cross a worker boundary, so raw must stay structured-clone friendly. */
-export interface ImportRecord { platform: string; raw: unknown }
+export interface ImportRecord { platform: string; raw: unknown; imageResources?: import("../../shared/conversation-images").ImportedImageResource[] }
 
 export interface PlatformImporter<Raw = unknown> {
   platform: string;
@@ -14,7 +15,7 @@ export interface PlatformImporter<Raw = unknown> {
   normalize(raw: Raw, revision: string, capturedAt?: number): Promise<ConversationCapture>;
 }
 
-export interface DraftMessage { id?: string; role: "user" | "assistant"; content: string; createdAt?: number }
+export interface DraftMessage { id?: string; role: "user" | "assistant"; content: string; createdAt?: number; uiParts?: ConversationMessage["uiParts"] }
 
 /** Accept only plausible provider timestamps; unknown stays unknown, never "now". */
 export function sourceTimestamp(value: unknown): number | undefined {
@@ -40,13 +41,13 @@ export async function captureFromDrafts(conversation: Conversation, drafts: Draf
     const platformMessageId = draft.id ?? `${occurrenceKey}:${count}`;
     const id = `${conversation.id}:${platformMessageId}`;
     if (draft.role === "user") lastUserId = id;
-    messages.push({ id, conversationId: conversation.id, platformMessageId, replyToMessageId: draft.role === "assistant" ? lastUserId : undefined, messageIndex: messages.length, role: draft.role, content, preview: previewMessage(content), contentHash, sourceCreatedAt: draft.createdAt, createdAt: draft.createdAt ?? capturedAt, updatedAt: capturedAt });
+    messages.push({ id, conversationId: conversation.id, platformMessageId, replyToMessageId: draft.role === "assistant" ? lastUserId : undefined, messageIndex: messages.length, role: draft.role, content, ...(draft.uiParts?.length ? { uiParts: draft.uiParts } : {}), preview: previewMessage(content), contentHash, sourceCreatedAt: draft.createdAt, createdAt: draft.createdAt ?? capturedAt, updatedAt: capturedAt });
   }
   // A platform whose list gives only the last update (DeepSeek) still dates its messages: the first one is when the
   // conversation began, which is what tells two conversations' order apart.
   const firstSaid = drafts.map(draft => draft.createdAt).filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= Date.UTC(2000, 0, 1) && value <= capturedAt + 86_400_000).reduce<number | undefined>((first, value) => first === undefined || value < first ? value : first, undefined);
   const began = conversation.sourceCreatedAt ?? firstSaid;
-  return { conversation: { ...conversation, ...(began !== undefined ? { sourceCreatedAt: began } : {}), messageCount: messages.length, importState: "complete", hydrationState: "hydrated" }, messages, capturedAt };
+  return materializeCaptureImages({ conversation: { ...conversation, ...(began !== undefined ? { sourceCreatedAt: began } : {}), messageCount: messages.length, importState: "complete", hydrationState: "hydrated" }, messages, capturedAt });
 }
 
 export function baseConversation(fields: { id: string; platform: string; source: string; title: string; url?: string; createdAt?: number; updatedAt?: number }): Conversation {

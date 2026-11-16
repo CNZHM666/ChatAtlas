@@ -6,10 +6,11 @@ import type { ProjectMaintenance } from "../../shared/project-state";
 import { ReaderGuide } from "./ReaderGuide";
 import type { WikiClaimMarkerPoint } from "../../shared/wiki-claim-markers";
 import { projectOverviewContent,projectOverviewReadingText } from "../../shared/project-overview";
+import {useProjectReadingCache} from "../project-reading-cache";
 
 export function ProjectOverviewIntro({session,zh,onMaintain,preview,editTarget,claimMarkers}:{session:FocusSession;zh:boolean;onMaintain?:(value:ProjectMaintenance)=>Promise<void>;preview:boolean;compact?:boolean;claimMarkers?:WikiClaimMarkerPoint[];editTarget?:HTMLElement|null}){
-  const overview=projectOverviewContent(session);
-  const text=overview.text,readingText=projectOverviewReadingText(session,overview),[editing,setEditing]=useState(false),[draft,setDraft]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  const readingCache=useProjectReadingCache(),overview=readingCache.get(session,"overview",()=>projectOverviewContent(session));
+  const text=overview.text,readingText=readingCache.get(session,"overview-text",()=>projectOverviewReadingText(session,overview)),[editing,setEditing]=useState(false),[draft,setDraft]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
   const personal=Boolean(session.briefUserEdited||session.projectMaintenance?.overview!==undefined);
   const save=async()=>{if(!onMaintain||busy)return;setBusy(true);setError("");try{await onMaintain({...session.projectMaintenance,overview:draft.trim()});setEditing(false);}catch{setError(zh?"保存失败，请重试。":"Could not save. Try again.");}finally{setBusy(false);}};
   const edit=!preview&&onMaintain&&!editing?<button type="button" className="project-intro-edit" aria-label={text?zh?"编辑说明":"Edit description":zh?"添加项目说明":"Add description"} title={text?zh?"编辑说明":"Edit description":zh?"添加项目说明":"Add description"} onClick={()=>{setDraft(text);setEditing(true);}}>{text?zh?"编辑":"Edit":<><Pencil size={15} aria-hidden="true"/><span>{zh?"添加项目说明":"Add description"}</span></>}</button>:null;

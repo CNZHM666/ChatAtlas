@@ -2,6 +2,8 @@
 
 [简体中文](../GETTING_STARTED.md) · **English**
 
+Follow the [three-step installation guide](../../README.en.md#install-on-chrome-or-edge) to load ChatAtlas in Chrome or Edge.
+
 File import accepts official exports from ChatGPT, Claude, Gemini (Google Takeout JSON) and DeepSeek, plus Markdown/JSON transcripts from other AIs. Beta website adapters for Claude, Gemini, DeepSeek, Doubao, Kimi and Qianwen (including Qwen international) run automatically after browser website permission, with pause/resume controls. They support the native sidebar, local search, project association, loaded-message sync, source location and composer insertion. Website history import reads loaded titles and saves loaded bodies one at a time; it saves currently loaded messages, not guaranteed full history. ChatGPT retains its dedicated history inventory and body sync. The new adapters still need signed-in live-site acceptance; BYOK model providers are independent of conversation-source support.
 
 Supported AI websites run automatically after installation/update and browser website permission. Use **Settings → Capture & data → Automatic page capture** to pause or resume a platform. Open a signed-in conversation to save loaded messages locally as the page changes. Capture makes no model calls and never rewrites documents automatically. The home source list has AI category filters; sync counts follow the selected category. ChatGPT, Claude, Gemini, DeepSeek and GLM have direct categories; Kimi, Doubao, Qwen, Grok, Yuanbao and other sources are available in the icon-based More AIs menu. Categories filter imported sources and do not imply automatic page capture for every listed platform.

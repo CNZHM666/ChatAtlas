@@ -5,6 +5,8 @@ import { getDatabase } from "./db";
 import { cachedReaderMessages, invalidateMessageReadCache } from "./message-read-cache";
 import { sourceVersion } from "./source-versions";
 import { invalidateMessageSearchReaders } from "../search/message-search-invalidation";
+import { imageLinks } from "../shared/conversation-images";
+import { materializeCaptureImages } from "../shared/capture-images";
 
 let indexVersion = 0;
 let rebuilding: Promise<number> | null = null;
@@ -97,13 +99,25 @@ export async function searchStoredDiscussions(query: string, conversationIds: Re
 
 export async function saveConversationCapture(capture: ConversationCapture, options: { replace?: boolean; warmIndex?: boolean } = {}): Promise<void> {
   const db = await getDatabase();
-  const tx = db.transaction(["conversations", "messages", "sourceVersions"], "readwrite");
+  if (capture.messages.some(message => imageLinks(message.content).some(link => !/^atlas-image:sha256-/u.test(link.source)))) {
+    const previous = await db.getAllFromIndex("messages", "by-conversation", capture.conversation.id);
+    const retained = new Map<string, string>();
+    const ambiguous = new Set<string>();
+    for (const message of previous) for (const source of message.imageSources ?? []) {
+      if (retained.has(source.reference) && retained.get(source.reference) !== source.assetId) ambiguous.add(source.reference);
+      retained.set(source.reference, source.assetId);
+    }
+    for (const reference of ambiguous) retained.delete(reference);
+    capture = await materializeCaptureImages(capture, [], retained);
+  }
+  const tx = db.transaction(["conversations", "messages", "sourceVersions", "imageAssets"], "readwrite");
   const existing = await tx.objectStore("conversations").get(capture.conversation.id);
   if (existing?.sourceAccount && capture.conversation.sourceAccount && existing.sourceAccount !== capture.conversation.sourceAccount) {
     tx.abort(); await tx.done.catch(() => undefined);
     throw Error("Source account differs from saved content");
   }
   const messageStore = tx.objectStore("messages");
+  for (const asset of capture.imageAssets ?? []) await tx.objectStore("imageAssets").put(asset);
   const existingMessages = await messageStore.index("by-conversation").getAll(capture.conversation.id);
   const existingById = new Map(existingMessages.map((message) => [message.id, message]));
   const existingByPosition = new Map(existingMessages.map((message) => [`${message.messageIndex}:${message.role}`, message]));
@@ -118,7 +132,7 @@ export async function saveConversationCapture(capture: ConversationCapture, opti
     // when the corresponding article is unchanged; a changed article invalidates offsets.
     // A virtualized DOM capture numbers its visible subset from zero. Updating
     // a known ID must not move an imported late question to the transcript top.
-    const timestamped = { ...message, ...(options.replace===false&&matched&&!authoritativeOrder?{messageIndex:matched.messageIndex}:{}),sourceCreatedAt: message.sourceCreatedAt ?? matched?.sourceCreatedAt };
+    const timestamped = { ...message, ...(options.replace===false&&matched&&!authoritativeOrder?{messageIndex:matched.messageIndex,...(matched.content===message.content&&matched.contentKind&&!message.contentKind?{contentKind:matched.contentKind}:{})}:{}),sourceCreatedAt: message.sourceCreatedAt ?? matched?.sourceCreatedAt };
     const preserved = matched?.content === message.content && !message.uiParts?.length && matched.uiParts?.length ? { ...timestamped, uiParts: matched.uiParts } : timestamped;
     return matched && matched.id !== message.id ? { ...preserved, id: matched.id, platformMessageId: options.replace === false ? matched.platformMessageId ?? message.platformMessageId : message.platformMessageId ?? matched.platformMessageId } : preserved;
   }).map((message) => ({ ...message, replyToMessageId: message.replyToMessageId ? idRemap.get(message.replyToMessageId) ?? message.replyToMessageId : undefined }));

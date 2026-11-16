@@ -2,6 +2,12 @@ import {sourceMessageSignature} from "./source-signature";
 import type {FocusSession} from "./focus-session";
 import {withoutProgressDisclaimer} from "./wiki-cross-duplicates";
 
+/** Old generated introductions sometimes used a confirmation as delivery evidence. */
+export function wikiConfirmedScopeText(text:string){
+ return text.replace(/(?:目前|当前|现阶段)?\s*已(?:经)?确认(?:实现|完成|上线|交付)\s*(?=\S)/gu,"已确认的范围包括 ")
+  .replace(/\b(?:(?:is|are|was|were) confirmed (?:to be|as) (?:implemented|complete|delivered|shipped))\b/giu,"is in the confirmed scope");
+}
+
 /** Changes whenever any chapter's title, opening or body changes. */
 export function wikiOverviewSignature(session:Pick<FocusSession,"sections">):string {
  return sourceMessageSignature(JSON.stringify(session.sections.map(section=>[section.id,section.title,section.body])));
@@ -32,5 +38,5 @@ export function currentWikiOverview(session:FocusSession){
  const overview=session.wikiOverview;
  if(!overview||session.briefUserEdited||session.projectMaintenance?.overview!==undefined||overview.version!==1||typeof overview.text!=="string"||!overview.text.trim())return undefined;
  // Saved overviews may still claim "no user confirmation"; the status line says that precisely.
- return overview.signature===wikiOverviewSignature(session)?{...overview,text:withoutProgressDisclaimer(overview.text)}:undefined;
+ return overview.signature===wikiOverviewSignature(session)?{...overview,text:session.wikiKnowledge?.documentType==="learning"?withoutProgressDisclaimer(overview.text):wikiConfirmedScopeText(withoutProgressDisclaimer(overview.text))}:undefined;
 }

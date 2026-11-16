@@ -22,6 +22,7 @@ export default defineConfig(({ command }) => ({
       input: {
         atlas: "atlas.html",
         sidecar: "sidecar.html",
+        readerPreview: "reader-preview.html",
       },
     },
   },

@@ -7,6 +7,22 @@ const message = (index: number, content: string): ConversationMessage => ({
   id: `message-${index}`, conversationId: "conversation", messageIndex: index, role: "assistant", content, preview: content.slice(0, 20), contentHash: String(index), createdAt: 1, updatedAt: 1,
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+it("keeps tool processes out of the reading body without removing user code or final explanations", () => {
+  const command = { ...message(1, 'bash -lc python internal-command'), contentKind: "tool" as const };
+  const { container } = render(<ReaderConversation messages={[{ ...message(0, "```bash\nbash -lc ls\n```"), role: "user" }, command, message(2, '说明\n\n{"path":"/files/read","args":{}}\n\n结论')]} zh />);
+  expect(container).not.toHaveTextContent("internal-command");
+  expect(container).not.toHaveTextContent('"path"');
+  expect(container).toHaveTextContent("bash -lc ls");
+  expect(container).toHaveTextContent("说明"); expect(container).toHaveTextContent("结论");
+});
+it("does not flash tool parameters or component scripts in lazy message placeholders", () => {
+  vi.stubGlobal("IntersectionObserver", class { observe() {} disconnect() {} });
+  const content = 'Before\n\n{"path":"/files/read","args":{}}\n\n{@body const [value,setValue]=DIL.useState(false)}\n<checkbox checked={value} onChange={setValue}>Option</checkbox>\n\nAfter';
+  const { container } = render(<ReaderConversation messages={[{ ...message(0, "Question"), role: "user" }, message(1, "First answer"), message(2, content)]} zh />);
+  const placeholder = container.querySelector(".reader-markdown-placeholder")!;
+  expect(placeholder).toHaveTextContent("Before"); expect(placeholder).toHaveTextContent("After");
+  expect(placeholder).not.toHaveTextContent("/files/read"); expect(placeholder).not.toHaveTextContent("DIL.useState");
+});
 
 it("uses original offsets to highlight the second occurrence of an identical paragraph", async () => {
   const content = "重复关键词。\n\n重复关键词。", start = content.lastIndexOf("关键词");
@@ -44,12 +60,32 @@ it("reads sentence-length steps as a numbered column, not cards", () => {
 it("renders retained UI between its original paragraphs and offers source for native-only components", () => {
   const messages = [{ ...message(0, '前提\n【原平台交互内容】\n结论'), id: "chatgpt:conversation:0", uiParts: [{ ordinal: 0, raw: '{"type":"html","text":"<section><h2>选择项目</h2><p>组织上下文</p></section>"}' }] }, { ...message(1, 'genui{"quiz":{"id":"native-only"}}\n后续条件'), id: "chatgpt:conversation:1" }];
   const { container } = render(<ReaderConversation messages={messages} zh />);
-  expect(container.querySelector(".reader-ui-preview iframe")).toHaveAttribute("sandbox", "");
-  expect(container.querySelector(".reader-ui-preview iframe")?.getAttribute("srcdoc")).toContain("组织上下文");
-  expect(container.querySelector('[data-reader-message-id="chatgpt:conversation:0"]')?.textContent).toMatch(/前提.*界面快照.*结论/u);
+  const frame = container.querySelector<HTMLIFrameElement>(".reader-ui-preview iframe")!;
+  expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+  expect(frame).toHaveAttribute("src", "/reader-preview.html");
+  const send = vi.spyOn(frame.contentWindow!, "postMessage");
+  fireEvent.load(frame);
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "atlas-reader-preview", document: expect.stringContaining("组织上下文") }), "*");
+  expect(container.querySelector('[data-reader-message-id="chatgpt:conversation:0"]')?.textContent).toMatch(/前提.*本地交互.*结论/u);
   expect(screen.getByRole("link", { name: "查看原文" })).toHaveAttribute("href", "https://chatgpt.com/c/conversation");
   expect(container).toHaveTextContent("后续条件");
   expect(container).not.toHaveTextContent("native-only");
+});
+it("opens an HTML artifact made only of a button without requiring an artificial layout wrapper", () => {
+  const item = { ...message(0, "【原平台交互内容】"), uiParts: [{ ordinal: 0, raw: JSON.stringify({ type: "html", text: '<button onclick="this.textContent=\'Done\'">Try</button>' }) }] };
+  const { container } = render(<ReaderConversation messages={[item]} zh />);
+  expect(container.querySelector("iframe")).toHaveAttribute("sandbox", "allow-scripts");
+  expect(container).toHaveTextContent("本地交互");
+});
+it("reloads an interactive preview when the saved component changes without changing its placeholder", () => {
+  const item = (label: string) => ({ ...message(0, "【原平台交互内容】"), uiParts: [{ ordinal: 0, raw: JSON.stringify({ type: "html", text: `<div><button onclick="this.textContent='Done'">${label}</button></div>` }) }] });
+  const { container, rerender } = render(<ReaderConversation messages={[item("First")]} zh />);
+  const first = container.querySelector("iframe");
+  rerender(<ReaderConversation messages={[item("Revised")]} zh />);
+  const current = container.querySelector<HTMLIFrameElement>("iframe")!;
+  expect(current).not.toBe(first);
+  const send = vi.spyOn(current.contentWindow!, "postMessage"); fireEvent.load(current);
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ document: expect.stringContaining("Revised") }), "*");
 });
 
 it("does not scroll back to a citation when the reader loads more, but allows an explicit repeat jump", async () => {

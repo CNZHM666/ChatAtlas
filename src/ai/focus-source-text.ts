@@ -1,4 +1,4 @@
-import type { Conversation } from "../shared/types";
+import type { Conversation, ConversationMessage } from "../shared/types";
 import type { TranscriptPassage } from "../search/transcript-index";
 import { getMessagesForConversation } from "../storage/messages";
 import { isInternalSearchQueryMessage } from "../shared/conversation-text";
@@ -25,13 +25,15 @@ export function sampleReadingPassages(full: TranscriptPassage[]): TranscriptPass
 }
 
 /** Full reading needs original messages, not overlapping search windows or a persistent search index. */
-export async function loadFullReadingPassages(sources: Conversation[], signal: AbortSignal): Promise<{ passages: TranscriptPassage[]; missing: number }> {
+export async function loadFullReadingPassages(sources: Conversation[], signal: AbortSignal): Promise<{ passages: TranscriptPassage[]; missing: number; messagesBySource: Array<readonly [string, ConversationMessage[]]> }> {
   const passages: TranscriptPassage[] = [];
+  const messagesBySource: Array<readonly [string, ConversationMessage[]]> = [];
   let missing = 0;
   let sliceStarted = performance.now();
   for (const source of sources) {
     signal.throwIfAborted();
     const messages = await getMessagesForConversation(source.id);
+    messagesBySource.push([source.id, messages]);
     let included = 0;
     for (const message of messages) {
       signal.throwIfAborted();
@@ -50,5 +52,5 @@ export async function loadFullReadingPassages(sources: Conversation[], signal: A
     if (!included) missing++;
   }
   signal.throwIfAborted();
-  return { passages, missing };
+  return { passages, missing, messagesBySource };
 }

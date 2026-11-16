@@ -18,6 +18,15 @@ export function wikiWritingQuality(section:FocusSection,batch:CoverageMaterial[]
  });
  const nodes=parser.parse(section.body).children;
  if(options.completeChapter){
+  let shortRun=0,details=0;
+  for(const node of nodes){
+   if(node.type==="html")details+=(node.value.match(/<details\b/gu)??[]).length-(node.value.match(/<\/details>/gu)??[]).length;
+   const value=text(node).trim();
+   if(details>0||node.type!=="paragraph"){shortRun=0;continue;}
+   if(value.includes(" · ")&&!/[。！？!?]/u.test(value)&&value.length<200)issues.push({code:"orphan_labels",title:value});
+   shortRun=value.length<100&&(value.match(/[。！？!?]/gu)??[]).length===1?shortRun+1:0;
+   if(shortRun===4)issues.push({code:"fragmented_prose",title:""});
+  }
   // A small chapter, or one with a single subtopic, deliberately has no opening.
   const small=nodes.filter(node=>node.type==="heading"&&node.depth===2).length<=1||nodes.filter(node=>node.type!=="heading").map(text).join("").replace(/\s+/gu,"").length<600;
   if(nodes[0]?.type!=="paragraph"&&!small)issues.push({code:"missing_overview",title:""});

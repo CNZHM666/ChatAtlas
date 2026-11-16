@@ -70,6 +70,10 @@ export function requestBudget(request: Pick<StructuredAIRequest<unknown>, "promp
     // One paragraph written again with the user's answers: the paragraph and its points in, the paragraph out.
     : request.taskType === "other" && data?.presentation === "wiki_paragraph_revise"
     ? { maxInputTokens: 6000, maxOutputTokens: 1500 }
+    : request.taskType === "other" && data?.presentation === "wiki_chapter_fit"
+    ? { maxInputTokens: 14000, maxOutputTokens: 1600 }
+    : request.taskType === "other" && data?.presentation === "wiki_topic_chains"
+    ? { maxInputTokens: 12000, maxOutputTokens: 2400 }
     // A chapter's missing opening: its question, subtopic first sentences and decisions in, 1-3 sentences out.
     : request.taskType === "other" && data?.presentation === "wiki_chapter_opening"
     ? { maxInputTokens: 4000, maxOutputTokens: 600 }
@@ -77,6 +81,8 @@ export function requestBudget(request: Pick<StructuredAIRequest<unknown>, "promp
     ? { maxInputTokens: 16000, maxOutputTokens: 2600 }
     : request.taskType === "other" && data?.presentation === "wiki_claim_repair"
     ? { maxInputTokens: 14000, maxOutputTokens: 2400 }
+    : request.taskType === "other" && data?.presentation === "wiki_unit_fidelity"
+    ? { maxInputTokens: 10000, maxOutputTokens: 3600 }
     : request.taskType === "other" && (data?.stage === "project:verify" || data?.presentation === "structure_review")
     ? { maxInputTokens: 14000, maxOutputTokens: 2400 }
     : taskPolicy(request.taskType ?? "other", data, modelId, baseUrl);

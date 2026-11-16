@@ -41,6 +41,7 @@ const NOT_YET = /\b(?:not (?:yet )?(?:work|working|built|done|implemented|finish
 const BUILT = /\b(?:built|implemented|done|finished|working|works|shipped)\b|已完成|已实现|做好了|可以用/iu;
 const NOT_YET_ALL = new RegExp(NOT_YET.source, "giu");
 export type ReportedStatus = "built" | "partial" | "not_yet" | "measured";
+type ReportedRow = { text: string; done: boolean; status: ReportedStatus; unitId: string; when?: string; at?: number };
 /** A measure, not a piece of work: "小程序目前每天稳定在22人" read 已完成 in the status table. */
 const MEASURE = /日活|DAU|MAU|留存|活跃|用户数|付费率|转化率|收入|流水|\d+\s*(?:人|个用户|名用户|位用户)|\b(?:daily active|users|retention|revenue|conversion)\b/iu;
 /** A measure of the project's own state: a fact or report giving a number of users, a retention or a revenue
@@ -56,7 +57,7 @@ export function wikiSaidWhen(unit: WikiKnowledgeUnit, zh: boolean): string {
 }
 /** What the user reported of this project's own state, as rows of a status table: each report once, built, partly
  * built or not yet. */
-export function reportedStatusRows(units: WikiKnowledgeUnit[], cited: Set<string>, zh = true): Array<{ text: string; done: boolean; status: ReportedStatus; when?: string; at?: number }> {
+export function reportedStatusRows(units: WikiKnowledgeUnit[], cited: Set<string>, zh = true): ReportedRow[] {
   const seen = new Set<string>();
   // The user's figures, whatever kind the reading gave them: 「日活有32，累计用户1100」 and 「DAU 约40，活跃留存略高于40%」
   // were facts, and the table showed only the one report of 22 users, weeks older than the last figure. Oldest first.
@@ -68,18 +69,21 @@ export function reportedStatusRows(units: WikiKnowledgeUnit[], cited: Set<string
   const rows = own.map(unit => wikiMeasure(unit) ? figures[next++] : unit).filter(unit =>
     // Said in the message it stands under: "Three core features are implemented, CSV export is unfinished, …", placed
     // under "Give me a roadmap with 4 milestones …", is the AI's summary, listed beside the two reports it repeats.
-    wikiSaidInQuote(unit)).flatMap((unit): Array<{ text: string; done: boolean; status: ReportedStatus; when?: string; at?: number }> => {
+    wikiSaidInQuote(unit)).flatMap((unit): ReportedRow[] => {
     // 「用户反馈日活停留在32人左右」: the row is the user's own; who said it is the table's title.
-    const text = unit.statement.trim().replace(/^用户(?:反馈|提到|报告|表示|称)称?/u, ""), key = text.toLowerCase().replace(/\W+/gu, "");
+    const text = unit.statement.trim().replace(/^用户(?:反馈|提到|报告|表示|称)称?/u, "");
+    const key = text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}%]+/gu, "");
     if (seen.has(key)) return [];
     seen.add(key);
     // "Three core features are implemented, CSV export is unfinished": built and not, one row read Built for both.
     const notYet = NOT_YET.test(text), built = BUILT.test(text.replace(NOT_YET_ALL, " "));
     // A measure is data as of when it was said, never work done.
-    if (!built && !notYet && MEASURE.test(text)) { const when = wikiSaidWhen(unit, zh); return [{ text: when ? text.replace(/^(?:当前|目前|现在)(?=\S{4})/u, "") : text, done: false, status: "measured" as const, ...(when ? { when } : {}), ...(at(unit) ? { at: at(unit) } : {}) }]; }
-    if (unit.kind !== "report") return [];
+    const when = wikiSaidWhen(unit, zh);
+    const source = { unitId: unit.id, ...(when ? { when } : {}), ...(at(unit) ? { at: at(unit) } : {}) };
+    if (!built && !notYet && MEASURE.test(text)) return [{ text: when ? text.replace(/^(?:当前|目前|现在)(?=\S{4})/u, "") : text, done: false, status: "measured", ...source }];
+    if (unit.kind !== "report" || !built && !notYet && unit.delivery !== "user_reported") return [];
     const status: ReportedStatus = !notYet ? "built" : built ? "partial" : "not_yet";
-    return [{ text, done: status === "built", status }];
+    return [{ text, done: status === "built", status, ...source }];
   });
   return rows.filter((row, index) => row.status !== "measured" || !rows.some((other, at) => at !== index && other.status === "measured"
     && other.when === row.when && figuresGivenBy(row.text, other.text) && (!figuresGivenBy(other.text, row.text) || at < index)));

@@ -8,7 +8,7 @@ import type {StructuredAIRequest} from "./provider";
 import {knowledgeFactText,projectKnowledgeView} from "../shared/project-knowledge-view";
 import {introductionPriority} from "../shared/project-introduction-text";
 import {WIKI_STATUS_DISCLAIMER,wikiSentenceCoverage,withoutProgressDisclaimer} from "../shared/wiki-cross-duplicates";
-import {wikiOverviewSignature,wikiReadingRouteOverview} from "../shared/wiki-overview";
+import {wikiConfirmedScopeText,wikiOverviewSignature,wikiReadingRouteOverview} from "../shared/wiki-overview";
 import {qualifyWikiOverviewClaims} from "./wiki-claim-review";
 import {compactWritingRouting,wikiScopeWritingRouting} from "./wiki-project-scope";
 import {scopedWikiDraft,wikiLedgerUnits} from "../shared/wiki-knowledge";
@@ -120,7 +120,8 @@ export async function generateWikiOverview(session:FocusSession,ai:OverviewAI,si
    const data=value as {overview?:unknown;factIds?:unknown},said=withoutReadingAdvice(typeof data?.overview==="string"?withoutProgressDisclaimer(data.overview.trim()):""),ids=Array.isArray(data?.factIds)?data.factIds:[];
    // Work told as under way that no fact reports: 「目前正推进首屏交互优化及黑白模式等用户确认的功能落地」, where nothing
    // said any of it was being built and the document says implementation is unchecked. The clause goes.
-   const text=facts.some(item=>item.kind==="user_report")?said:withoutUnreportedProgress(said);
+   const progress=facts.some(item=>item.kind==="user_report")?said:withoutUnreportedProgress(said);
+   const text=session.wikiKnowledge?.documentType==="learning"?progress:wikiConfirmedScopeText(progress);
    // A one-line tagline is not an overview of the whole document.
    const [min,max]=zh?[40,200]:[120,700],count=sentences(text).length;
    if(text.length<min||text.length>max)throw new OverviewRejected("length");

@@ -21,6 +21,41 @@ export const unitClaimText = (unit: WikiKnowledgeUnit) => [unit.statement, ...wi
  * testing with 10–15 college students for one week." shared three terms with its unit, not four, and was reported as
  * having no source. */
 const bareTerms = (text: string) => new Set([...knowledgeTerms(text)].map(term => term.replace(/[.,;:!?)"'’”]+$/u, "").replace(/^[("'‘“]+/u, "")).filter(Boolean));
+const metric = /^([^：:<>≤≥=\d\n]{2,45}?)\s*[：:]?\s*(>=|<=|>|<|≥|≤)\s*(\d+(?:\.\d+)?)\s*%[。.]?$/u;
+const threshold = /^(?:>=|<=|>|<|≥|≤)\s*\d+(?:\.\d+)?\s*%$/u;
+const metricKey = (text: string) => text.normalize("NFKC").replace(/[\s*_`]/gu, "").replace(/>=/gu, "≥").replace(/<=/gu, "≤").toLowerCase();
+const metricOf = (text: string) => metric.exec(text.replace(/\*\*|__/gu, "").trim());
+
+/** A percentage in a list is owned by its label, even if two items have the same value. */
+export function wikiLabelledThresholdClaims<T extends { text: string }>(paragraph: string, claims: readonly T[]) {
+  const items = paragraph.split("\n").flatMap(line => {
+    const item = line.match(/^\s*(?:[-*+]\s+|\d+[.)]\s+)(.+)$/u)?.[1];
+    const parsed = item && metricOf(item);
+    return item && parsed ? [{ item, value: metricKey(`${parsed[2]}${parsed[3]}%`) }] : [];
+  });
+  const pending = [...items];
+  return claims.map(claim => {
+    if (!threshold.test(claim.text.trim())) return claim;
+    const value = metricKey(claim.text);
+    if (items.filter(item => item.value === value).length !== claims.filter(other => threshold.test(other.text.trim()) && metricKey(other.text) === value).length) return claim;
+    const at = pending.findIndex(item => item.value === value);
+    return at < 0 ? claim : { ...claim, text: pending.splice(at, 1)[0].item };
+  });
+}
+
+function sourcedSingularOutput(text: string, units: WikiKnowledgeUnit[]) {
+  const output = /(?:生成|得到|产出|输出|创建)\s*一个([^。！？\n]{2,80})/u;
+  const said = text.match(output)?.[1];
+  if (!said) return false;
+  const theirs = knowledgeTerms(said);
+  return units.some(unit => {
+    const original = unit.evidence.quote.match(output)?.[1];
+    if (!original) return false;
+    const terms = knowledgeTerms(original);
+    return terms.size >= 3 && [...terms].filter(term => theirs.has(term)).length / terms.size >= .75;
+  });
+}
+
 /** Whether a value of the text is a unit's: a stretch of the text giving it shares a word with a unit giving it. */
 function lentBy(value: string, ofRange: boolean, text: string, units: WikiKnowledgeUnit[]): boolean {
   const segments = text.split(/[，,；;、。！？!?()（）]/u).filter(segment => segment.trim());
@@ -34,6 +69,13 @@ export function claimSupported(said: string, units: WikiKnowledgeUnit[]): boolea
   // day in its words, and its numbers read as unsourced. The user's report lost 〔你〕 for it.
   const text = said.replace(SAID_ON, "");
   if (sourceScopeConflict(text, units)) return false;
+  const reading = metricOf(text);
+  if (reading) {
+    const known = units.flatMap(unit => [unit.statement, ...wikiUnitDetails(unit)]).flatMap(statement => statement.split(/[、，,。；;\n]/u))
+      .flatMap(part => { const whole = metricOf(part); return whole ? [whole] : part.split(/[：:]/u).flatMap(piece => { const found = metricOf(piece); return found ? [found] : []; }); });
+    if (known.length) return known.some(source => metricKey(source[1]) === metricKey(reading[1])
+      && metricKey(source[2]) === metricKey(reading[2]) && Number(source[3]) === Number(reading[3]));
+  }
   if (valuesDifferSaid(text, units.map(unit => [unitClaimText(unit), unit.evidence.quote].join(" ")))) return true;
   const terms = bareTerms(text);
   // A palette row ("Dark / #0F0F10 / #111112 / #151516 / #27272A") says its colours, which no word list holds: two of
@@ -59,7 +101,8 @@ export function claimSupported(said: string, units: WikiKnowledgeUnit[]): boolea
   // one of them gives is that unit's, when the stretch saying it shares a term with it, though the unit shares too
   // little with the whole sentence to count as stating it. One run reported such a line as having no source.
   const lent = (value: string, ofRange: boolean) => lentBy(value, ofRange, text, units);
-  return !wikiQuantityConflicts(text, known).length && numbers(text).every(number => knownNumbers.has(number) || lent(number, false))
+  return !wikiQuantityConflicts(text, known).length && numbers(text).every(number => knownNumbers.has(number) || lent(number, false)
+    || number === "1" && !/(?<!\d)1(?!\d)/u.test(text) && sourcedSingularOutput(text, relevant))
     && ranges(text).every(range => known.some(source => ranges(source).includes(range)) || lent(range, true));
 }
 

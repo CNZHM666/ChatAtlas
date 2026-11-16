@@ -2,7 +2,7 @@
 
 **简体中文** · [English](en/RELEASE_CHECKLIST.md)
 
-目标：0.1.3 Early Preview 的公开前端源码和可加载 Chrome 扩展。无需共享后端。本清单本身不表示已完成线上验收。
+目标：公开前端源码和供 Chrome、Edge 共用的 Early Preview 扩展包。无需共享后端。本清单本身不表示已完成线上验收。
 
 发布范围区分多平台文件导入、ChatGPT 批量历史同步与原生侧栏、Claude/Gemini/DeepSeek 可选网页采集试用。中文和英文说明应一致；手动上下文复用和 BYOK 服务商选择不算网页适配。
 
@@ -22,7 +22,7 @@ pwsh -File scripts/package-demo.ps1
 
 ## 浏览器验收
 
-使用新的浏览器配置和虚构材料：
+用同一个扩展 ZIP，在 Chrome 和 Edge 的新浏览器配置中以虚构材料检查：
 
 - 加载扩展，新开 ChatGPT 页面，检查图标、页面入口、原生侧栏和快捷键；关闭／切换对话不自动重新打开或发送。
 - ZIP/JSON 导入、网页同步、暂停继续和空／旧材料覆盖保护。
@@ -57,7 +57,7 @@ pwsh -File scripts/package-demo.ps1
 1. 仅将公开源码清单中的内容提交到仓库；MIT 与第三方通知一并保留。不要直接上传整个本机工作目录。
 2. 首次推送前运行 `npm run check:public`，检查 staging；`.gitignore` 不能移除已经跟踪的文件。
 3. 等待 GitHub Actions 实际通过后，为匹配源码创建对应版本 Release。
-4. 附 `ChatAtlas-extension-v0.1.3.zip`、可选源码 ZIP、SHA256 和本次验证说明。
+4. 附 `ChatAtlas-extension-v<版本>.zip`、可选源码 ZIP、SHA256 和本次验证说明。同步两份 README 的直达下载链接。
 5. 明确标注 Early Preview、BYOK、数据存本机以及已知限制。
 
 上传、推送、线上工作流执行和真实付费评测不包含在本地准备完成的结论中。

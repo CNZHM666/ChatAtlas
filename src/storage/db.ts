@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { AISettings, AIUsageEvent, AnalysisDiagnostics, AtlasCanvas, CanvasCard, CanvasEdge, CanvasMembership, CanvasViewport, Conversation, ConversationGraph, ConversationMessage, ConversationSemanticProfile, ImportDiagnostics, ImportItemStatus, ImportJob, KnowledgeCard, KnowledgeProposal, KnowledgeRelation, MessageAnchor, OrganizationPlan, OrganizationRun, QuestionSnapshot, SemanticDecisionCache, SourceRelation } from "../shared/types";
 
 export interface AtlasDB extends DBSchema {
+  imageAssets: { key: string; value: import("../shared/conversation-images").ConversationImageAsset };
   discussionHighlights: { key: string; value: import("./discussion-highlights").DiscussionHighlightEdit; indexes: { "by-conversation": string } };
   homeResults: { key: string; value: import("./home-results").HomeResult; indexes: { "by-created": number } };
   messageSearchDocuments: { key: string; value: import("../search/message-search-store").MessageSearchDocument; indexes: { generation: string } };
@@ -14,7 +15,7 @@ export interface AtlasDB extends DBSchema {
   knowledgeIndexes: { key: string; value: import("../shared/knowledge-index").KnowledgeIndex };
   projectQueryThreads: { key: string; value: import("./project-query-threads").ProjectQueryThread };
   focusGenerationTasks: { key: string; value: import("./focus-generation-tasks").FocusGenerationTask; indexes: { "by-updated": number } };
-  focusSessions: { key: string; value: import("../shared/focus-session").FocusSession; indexes: { "by-updated": number } };
+  focusSessions: { key: string; value: import("../shared/focus-session").FocusSession; indexes: { "by-updated": number; "by-run": string } };
   reviewMarks: { key: string; value: { id: string; cardId: string; canvasId: string; conversationId: string; messageId: string; kind: "conclusion" | "decision"; originalText: string; updateNote: string; createdAt: number; updatedAt: number }; indexes: { "by-card": string } };
   readingProgress: { key: string; value: import("./reading-progress").ReadingProgress; indexes: { "by-updated": number } };
   transcriptIndexes: { key: string; value: { id: string; fingerprint: string; passages: import("../search/transcript-index").TranscriptPassage[] } };
@@ -45,19 +46,24 @@ export interface AtlasDB extends DBSchema {
   knowledgeProposals: { key: string; value: KnowledgeProposal; indexes: { "by-updated": number; "by-status": string } };
   semanticProfiles: { key: string; value: ConversationSemanticProfile; indexes: { "by-updated": number } };
   questionSnapshots: { key: string; value: QuestionSnapshot; indexes: { "by-conversation": string } };
-  analysisDiagnostics: { key: string; value: AnalysisDiagnostics };
+  analysisDiagnostics: { key: string; value: AnalysisDiagnostics; indexes: { "by-run": string } };
   semanticDecisionCache: { key: string; value: SemanticDecisionCache };
   aiSettings: { key: string; value: AISettings };
-  aiUsageEvents: { key: string; value: AIUsageEvent; indexes: { "by-created": number } };
-  organizationRuns: { key: string; value: OrganizationRun; indexes: { "by-updated": number; "by-status": string } };
+  aiUsageEvents: { key: string; value: AIUsageEvent; indexes: { "by-created": number; "by-run": string } };
+  organizationRuns: { key: string; value: OrganizationRun; indexes: { "by-updated": number; "by-status": string; "by-source": string } };
   semanticVectors: { key: string; value: { id: string; modelKey: string; textHash: string; values: number[]; updatedAt: number; embeddingProvider?: string; embeddingModel?: string; embeddingDimension?: number; embeddingVersion?: string } };
 }
 
 let database: Promise<IDBPDatabase<AtlasDB>> | undefined;
 
 export function getDatabase(): Promise<IDBPDatabase<AtlasDB>> {
-  database ??= openDB<AtlasDB>("ai-conversation-atlas", 24, {
-    upgrade(db) {
+  database ??= openDB<AtlasDB>("ai-conversation-atlas", 26, {
+    blocking(_currentVersion, _blockedVersion, event) {
+      (event.target as IDBDatabase).close();
+      database = undefined;
+    },
+    upgrade(db, _oldVersion, _newVersion, transaction) {
+      if (!db.objectStoreNames.contains("imageAssets")) db.createObjectStore("imageAssets", { keyPath: "id" });
       if (!db.objectStoreNames.contains("discussionHighlights")) db.createObjectStore("discussionHighlights", { keyPath: "id" }).createIndex("by-conversation", "conversationId");
       if (!db.objectStoreNames.contains("homeResults")) db.createObjectStore("homeResults", { keyPath: "id" }).createIndex("by-created", "createdAt");
       if (!db.objectStoreNames.contains("messageSearchDocuments")) db.createObjectStore("messageSearchDocuments", { keyPath: "id" }).createIndex("generation", "generation");
@@ -170,6 +176,12 @@ export function getDatabase(): Promise<IDBPDatabase<AtlasDB>> {
         runs.createIndex("by-updated", "updatedAt");
         runs.createIndex("by-status", "status");
       }
+      for (const name of ["aiUsageEvents", "analysisDiagnostics", "focusSessions"] as const) {
+        const store = transaction.objectStore(name);
+        if (!store.indexNames.contains("by-run")) store.createIndex("by-run", "runId");
+      }
+      const runs = transaction.objectStore("organizationRuns");
+      if (!runs.indexNames.contains("by-source")) runs.createIndex("by-source", "targetIds", { multiEntry: true });
       if (!db.objectStoreNames.contains("semanticVectors")) db.createObjectStore("semanticVectors", { keyPath: "id" });
     },
   });

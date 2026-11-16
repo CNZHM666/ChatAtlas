@@ -65,6 +65,22 @@ it("builds version chains from the model's answer, held to each group", async ()
   expect(report.topics).toBe(1);
 });
 
+it("reuses an unchanged version check and asks again when a user verdict changes", async () => {
+  const units = [unit("a", "首屏显示一个快捷入口。", { at: 2 }), unit("b", "首屏显示三个快捷入口。", { at: 3 })];
+  const ledger = ledgerOf(units, { subjects: [{ id: "s", name: "首页", aliases: [], unitIds: ["a", "b"] }] });
+  let requests = 0;
+  const ai = fakeAI(() => { requests++; return { topics: [] }; });
+  const checks: NonNullable<WikiKnowledgeOrganization["topicChecks"]> = {};
+  const input = { ai, locale: "zh-CN", signal: new AbortController().signal };
+  await wikiTopicChains(ledger.organization!, ledger, { ...input, checks }, {});
+  const report: Record<string, number> = {};
+  await wikiTopicChains(ledger.organization!, ledger, { ...input, previousChecks: checks }, report);
+  expect(requests).toBe(1);
+  expect(report.topic_checks_reused).toBe(1);
+  await wikiTopicChains(ledger.organization!, { ...ledger, decisions: { a: { verdict: "confirmed", at: 4 } } }, { ...input, previousChecks: checks }, {});
+  expect(requests).toBe(2);
+});
+
 it("reads statuses from the chains: earlier holds no longer, open stays open until the user chooses", () => {
   const units = [unit("now", "首屏100%为AI Agent驾驶舱。"), unit("old", "首屏应改为状态询问结构。"), unit("mine", "中间加号按钮直接跳转AI界面。", { role: "user", kind: "plan" }), unit("theirs", "中央按钮改为守护入口。")];
   const topics: WikiTopicChain[] = [{ id: "t1", name: "首屏", current: ["now"], earlier: ["old"], open: false }, { id: "t2", name: "中央按钮", current: ["mine", "theirs"], earlier: [], open: true }];
@@ -104,6 +120,30 @@ it("moves a point the chapter check is sure of, and keeps doubts and a chapter e
   const kept = await checkedChapterFit(organization, ledgerOf(units, {}), { ai: greedy, locale: "zh-CN", signal: new AbortController().signal }, {});
   expect(kept.subjects.find(subject => subject.id === "v")!.unitIds).toHaveLength(3);
   expect(kept.placementDoubts).toHaveLength(3);
+});
+
+it("rechecks only the changed chapter and preserves placement doubts from an unchanged chapter", async () => {
+  const a = unit("a", "采用莫兰迪色系。"), b = unit("b", "记录次日留存率。");
+  const ledger = ledgerOf([a, b], {
+    subjects: [{ id: "a", name: "视觉", aliases: [], unitIds: ["a"] }, { id: "b", name: "留存", aliases: [], unitIds: ["b"] }],
+    chapters: [{ id: "ui", title: "界面设计", question: "", group: "", subtopics: [{ title: "视觉", subjectIds: ["a"] }] },
+      { id: "grow", title: "增长运营", question: "", group: "", subtopics: [{ title: "留存", subjectIds: ["b"] }] }],
+  });
+  const called: string[] = [];
+  const ai = fakeAI(request => {
+    const { chapter } = JSON.parse(request.prompt as string) as { chapter: string };
+    called.push(chapter);
+    return { moves: chapter === "c1" ? [{ unit: "k1", chapter: "c2", sure: false }] : [] };
+  });
+  const input = { ai, locale: "zh-CN", signal: new AbortController().signal };
+  const previous = await checkedChapterFit(ledger.organization!, ledger, input, {});
+  called.length = 0;
+  const updated = ledgerOf([a, { ...b, statement: "记录七日留存率。" }], ledger.organization!);
+  const report: Record<string, number> = {};
+  const fit = await checkedChapterFit(updated.organization!, updated, { ...input, previous }, report);
+  expect(called).toEqual(["c2"]);
+  expect(report.fit_chapters_reused).toBe(1);
+  expect(fit.placementDoubts).toEqual(previous.placementDoubts);
 });
 
 it("reads the chains against the user's latest answers: a turned-down point leaves, a confirmed one holds", () => {

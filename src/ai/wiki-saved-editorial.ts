@@ -1,0 +1,114 @@
+import type {FocusEvidence,FocusSection} from "../shared/focus-session";
+import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
+import {wikiSupplementRanges} from "../shared/wiki-source-supplements";
+import {wikiLedgerUnits,type WikiDraftChapter,type WikiKnowledgeLedger,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
+import type {WikiClaim} from "../shared/wiki-claims";
+import {reviewWikiEditorial} from "./wiki-editorial-review";
+import {claimSupported} from "./wiki-claim-support";
+import {wikiDecisionRestatement} from "./wiki-confirmation-scope";
+import {wikiLocalAnswer} from "./wiki-question-parse";
+import {wikiUnconfirmedWorkflowFeedback} from "./wiki-workflow-scope";
+import {placeWikiChoices} from "./wiki-choice-placement";
+import {wikiHistoricalHeading} from "../shared/wiki-history-layout";
+
+/** Apply the same answer reconciliation to saved generated prose as to new
+ * drafts. All receipts must still belong to this chapter's selected sources.
+ * This is a reading projection: neither the saved article nor sources change. */
+export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowledgeLedger,sourceOf:(unit:WikiKnowledgeUnit)=>FocusEvidence|undefined):FocusSection{
+ if(section.userEdited||section.origin||ledger.documentType==="learning")return section;
+ const units=new Map(wikiLedgerUnits(ledger).map(unit=>[unit.id,unit]));
+ const recovered=new Set((ledger.writingQuestions??[]).filter(question=>question.options.length===1&&!question.options[0].actions.length)
+  .map(question=>`answer:${question.id}:${question.options[0].id}`));
+ const safeClaims=section.claims?.map(claim=>{
+  if(claim.holder!=="decided"&&!claim.userDecided){
+   const unit=claim.unitIds?.length===1?units.get(claim.unitIds[0]):undefined;
+   if(unit?.id.startsWith("answer:")&&wikiLocalAnswer(ledger,unit.id)&&sourceOf(unit)&&wikiDecisionRestatement(claim.text,unit.statement))
+    return {...claim,holder:"decided" as const,holderMark:true,userDecided:true,workStatus:undefined,verification:"supported" as const};
+   return claim;
+  }
+  const stale=claim.unitIds?.filter(id=>recovered.has(id)&&!claimSupported(claim.text,units.has(id)?[units.get(id)!]:[]))??[];
+  if(!stale.length)return claim;
+  return {...claim,unitIds:claim.unitIds?.filter(id=>!stale.includes(id)),holder:"ai" as const,holderMark:undefined,userDecided:undefined,workStatus:"proposed" as const};
+ });
+ if(safeClaims?.some((claim,index)=>claim!==section.claims?.[index]))section={...section,claims:safeClaims};
+ const blocks=wikiDocumentBlocks(section.body,section.claims),ranges=wikiSupplementRanges(section.body),bindings:Array<{claim:WikiClaim;from:string;to:{text:string;unitIds:string[]}}>=[];
+ let subtopic="";
+ const paragraphs=blocks.map(block=>{
+  if(ranges.some(([start,end])=>block.start>=start&&block.end<=end))return {text:block.text,subtopic,unitIds:[],claims:[]};
+  if(block.kind==="heading")subtopic=block.text.replace(/^#+\s+/u,"");
+  const candidates=block.kind==="list"&&!/[`~]{3}/u.test(block.text)?(section.claims??[]).filter(claim=>[claim.text,...claim.formulations??[]].some(form=>form&&block.text.includes(form))):block.claims;
+  const claims=candidates.flatMap(claim=>{
+   const ids=claim.unitIds??[];
+   if(!ids.length||!ids.every(id=>{const unit=units.get(id);return unit&&sourceOf(unit);}))return [];
+   return [claim.text,...claim.formulations??[]].filter((form,index,all)=>form&&block.text.includes(form)&&all.indexOf(form)===index).map(from=>{
+    const to={text:from,unitIds:[...ids]};bindings.push({claim,from,to});return to;
+   });
+  });
+  return {text:block.text,subtopic,unitIds:[...new Set(claims.flatMap(claim=>claim.unitIds))],claims};
+ });
+ // Editorial review clones its input; bind the returned claims by paragraph/index.
+ const draft:WikiDraftChapter={id:section.id,title:section.title,question:"",group:"",body:section.body,problems:[],paragraphs,openingUnitIds:ledger.draft?.chapters.find(chapter=>chapter.id===section.id)?.openingUnitIds?.filter(id=>{const unit=units.get(id);return unit&&sourceOf(unit);})};
+ const reviewed=reviewWikiEditorial([draft],ledger)[0];
+ let body=section.body;
+ const claims=[...section.claims??[]];
+ for(let index=paragraphs.length-1;index>=0;index--){
+  const before=paragraphs[index],after=reviewed.paragraphs[index];
+  if(before.text===after.text)continue;
+  const block=blocks[index];body=body.slice(0,block.start)+after.text+body.slice(block.end);
+  for(let ci=0;ci<(before.claims?.length??0);ci++){
+   const from=before.claims![ci],to=after.claims![ci];if(from.text===to.text)continue;
+   const bound=bindings.find(binding=>binding.to===from);if(!bound)continue;
+   const originalIndex=section.claims?.indexOf(bound.claim)??-1;
+   if(originalIndex>=0){const claim=claims[originalIndex];claims[originalIndex]={...claim,text:claim.text===bound.from?to.text:claim.text,formulations:claim.formulations?.map(form=>form===bound.from?to.text:form),
+    ...(wikiUnconfirmedWorkflowFeedback(to.text)?{holder:"ai",holderMark:undefined,userDecided:undefined,workStatus:"proposed",sourceReading:undefined}:{})};}
+  }
+ }
+ const additions:string[]=[];
+ for(const paragraph of reviewed.paragraphs.slice(paragraphs.length)){
+  const sourceUnits=paragraph.unitIds.flatMap(id=>units.get(id)??[]);
+  const feedback=wikiUnconfirmedWorkflowFeedback(paragraph.text);
+  if(!sourceUnits.length||!sourceUnits.every(unit=>sourceOf(unit))||!feedback&&!sourceUnits.every(unit=>ledger.decisions?.[unit.id]?.verdict==="confirmed"))continue;
+  // Restored references are handled by the draft pipeline; here only explicit
+  // answers can add a missing current decision to an already saved chapter.
+  if(!feedback&&!sourceUnits.every(unit=>unit.id.startsWith("answer:")))continue;
+  const subjectIds=new Set(ledger.organization?.subjects.filter(subject=>sourceUnits.some(unit=>subject.unitIds.includes(unit.id))).map(subject=>subject.id));
+  const home=ledger.organization?.chapters.find(chapter=>chapter.subtopics.some(topic=>topic.subjectIds.some(id=>subjectIds.has(id))));
+  if(home&&home.id!==section.id&&home.id!==section.wikiOwnerId)continue;
+  const text=paragraph.text;
+  if(!body.includes(text)){
+   const heading=!wikiHistoricalHeading(paragraph.subtopic)&&wikiDocumentBlocks(body).find(block=>block.kind==="heading"&&block.text.replace(/^#+\s+/u,"")===paragraph.subtopic);
+   if(heading)body=body.slice(0,heading.end)+`\n\n${text}`+body.slice(heading.end);
+   else if(!feedback)additions.push(text);
+   else continue;
+  }
+  if(!claims.some(claim=>claim.text===text))claims.push({text,quote:sourceUnits[0].evidence.quote,unitIds:paragraph.unitIds,evidenceIds:[...new Set(sourceUnits.map(unit=>sourceOf(unit)!.id))],
+   ...(feedback?{holder:"ai",workStatus:"proposed"}:{holder:"decided",holderMark:true,userDecided:true}),verification:"supported"});
+ }
+ if(additions.length)body+=`\n\n### ${/\p{Script=Han}/u.test(additions.join(""))?"已确认的取舍":"Confirmed choices"}\n\n${additions.join("\n\n")}`;
+ const local=ledger.userAnswers?.filter(answer=>{
+  const unit=units.get(`answer:${answer.questionId}:${answer.optionId}`);
+  return unit&&sourceOf(unit);
+ });
+ if(local?.length){
+  const projection=wikiDocumentBlocks(body,claims),owner=section.wikiOwnerId??section.id;
+  let topic="";
+  const [placed]=placeWikiChoices([{...draft,id:owner,body,paragraphs:projection.map(block=>{
+   if(block.kind==="heading")topic=block.text.replace(/^#+\s+/u,"");
+   const points=block.claims.flatMap(claim=>claim.unitIds?.length&&block.text.includes(claim.text)?[{text:claim.text,unitIds:claim.unitIds}]:[]);
+   return {text:block.text,subtopic:topic,claims:points,unitIds:[...new Set(points.flatMap(point=>point.unitIds))]};
+  })}],{...ledger,userAnswers:local});
+  if(placed.body!==body){
+   for(let index=claims.length-1;index>=0;index--){
+    const forms=[claims[index].text,...claims[index].formulations??[]].filter(Boolean);
+    if(forms.some(form=>body.includes(form))&&!forms.some(form=>placed.body.includes(form)))claims.splice(index,1);
+   }
+   body=placed.body;
+   for(const paragraph of placed.paragraphs)for(const point of paragraph.claims??[]){
+    const unit=point.unitIds.length===1?units.get(point.unitIds[0]):undefined,ref=unit&&sourceOf(unit);
+    if(unit&&ref&&point.text===unit.statement&&wikiLocalAnswer(ledger,unit.id)&&body.includes(point.text)&&!claims.some(claim=>claim.text===point.text&&claim.holder==="decided"))
+     claims.push({text:point.text,unitIds:[unit.id],quote:unit.evidence.quote,evidenceIds:[ref.id],holder:"decided",holderMark:true,userDecided:true,verification:"supported"});
+   }
+  }
+ }
+ return body===section.body&&claims.length===(section.claims?.length??0)?section:{...section,body,claims:claims.filter(claim=>claim.text)};
+}

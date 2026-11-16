@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { droppedContainedRepeats, splitUnrelatedSentences } from "./wiki-paragraph-repeats";
-import { claimSupported } from "./wiki-claim-support";
+import { claimSupported, wikiLabelledThresholdClaims } from "./wiki-claim-support";
 import { pastCapabilityWords, plannedCapabilityWords } from "./wiki-capability-state";
 import { mergeOverlappingRows } from "./wiki-draft-checks";
 import { withHolderMarks } from "../shared/wiki-holder";
@@ -43,6 +43,25 @@ it("lets a value come from the cited unit its own clause is about, and a palette
   // A cell of one colour is the unit's that gives it.
   expect(claimSupported("#111112", [dark])).toBe(true);
   expect(claimSupported("#222223", [dark])).toBe(false);
+});
+
+it("keeps percentage claims attached to the named metric and its exact comparator", () => {
+  const source = unit("goals", "验收目标：导入成功率>90%、导出成功率>90%、还原成功率>80%。");
+  const text = "- **导入成功率**：>90%\n- **导出成功率**：>90%\n- **还原成功率**：>80%";
+  const values = [">90%", ">90%", ">80%"].map(text => ({ text, unitIds: [source.id] }));
+  const labelled = wikiLabelledThresholdClaims(text, values);
+  expect(labelled.map(claim => claim.text)).toEqual(text.split("\n").map(line => line.slice(2)));
+  expect(labelled.every(claim => claimSupported(claim.text, [source]))).toBe(true);
+  expect(claimSupported("导入成功率：>80%", [source])).toBe(false);
+  expect(claimSupported("导入成功率：≥90%", [source])).toBe(false);
+});
+
+it("keeps a singular output in a timing goal only when the cited quote names it", () => {
+  const source = unit("goal", "让初学者在5分钟内用自然语言生成可修改的示例项目。");
+  source.evidence.quote = "让初学者输入一句话，5 分钟内得到一个能理解、可修改的示例项目。";
+  const goal = "初学者可以在5分钟内用自然语言生成一个能理解、可修改的示例项目。";
+  expect(claimSupported(goal, [source])).toBe(true);
+  expect(claimSupported(goal.replace("5分钟", "6分钟"), [source])).toBe(false);
 });
 
 it("tells a lack the discussion went past as earlier, and a check still missing as planned", () => {

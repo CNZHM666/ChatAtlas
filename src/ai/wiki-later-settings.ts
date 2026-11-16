@@ -1,4 +1,4 @@
-import { knowledgeTerms } from "../shared/knowledge-subject";
+import { knowledgeStage, knowledgeTerms } from "../shared/knowledge-subject";
 import type { WikiKnowledgeOrganization, WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import { wikiByDiscussion, wikiSaidLater } from "../shared/wiki-sources";
 
@@ -66,13 +66,22 @@ function sameSetting(a: WikiKnowledgeUnit, b: WikiKnowledgeUnit): boolean {
  * replaced; the user's own words and a decision they confirmed are not replaced by a later suggestion. Returns the
  * organization with those relations added. */
 export function laterSettings(organization: WikiKnowledgeOrganization, units: Map<string, WikiKnowledgeUnit>, report: Record<string, number> = {}, confirmed: (id: string) => boolean = () => false): WikiKnowledgeOrganization {
+  const stages = new Map<string, string | undefined>();
+  const stage = (unit: WikiKnowledgeUnit) => {
+    if (!stages.has(unit.id)) stages.set(unit.id, knowledgeStage(unit.statement) ?? knowledgeStage(unit.evidence.section ?? ""));
+    return stages.get(unit.id);
+  };
+  const compatible = (older: WikiKnowledgeUnit, newer: WikiKnowledgeUnit) => {
+    const first = stage(older), second = stage(newer);
+    return !first || !second || first === second;
+  };
   const live = [...new Set(organization.subjects.flatMap(subject => subject.unitIds))].map(id => units.get(id)).filter((unit): unit is WikiKnowledgeUnit => Boolean(unit) && !unit!.about)
     .map(unit => ({ unit, settings: settingsOf(unit.statement) })).filter(item => item.settings.size);
   const related = new Set(organization.relations.flatMap(relation => [`${relation.older}|${relation.newer}`, `${relation.newer}|${relation.older}`]));
   const added: WikiKnowledgeOrganization["relations"] = [], replaced = new Set<string>();
   for (const older of live) {
     if (replaced.has(older.unit.id) || older.unit.evidence.role === "user" || confirmed(older.unit.id)) continue;
-    const newer = live.find(item => wikiSaidLater(item.unit, older.unit)
+    const newer = live.find(item => compatible(older.unit, item.unit) && wikiSaidLater(item.unit, older.unit)
       && !related.has(`${older.unit.id}|${item.unit.id}`) && conflicting(older.settings, item.settings) && sameSetting(older.unit, item.unit));
     if (!newer) continue;
     added.push({ older: older.unit.id, newer: newer.unit.id, kind: "replaces", status: "resolved" });
@@ -81,7 +90,7 @@ export function laterSettings(organization: WikiKnowledgeOrganization, units: Ma
   // Colours of one theme ("Dark 主背景 #0D0D0D ~ #111111" at message 24, "背景色 #101011/#111112" at 101) and how much a
   // small screen is served ("手机仅要求 Landing Page 正常" before "Welcome/Discovery 优先支持移动端"): the same rule given
   // again later, read like the measures above.
-  const later = (older: WikiKnowledgeUnit, newer: WikiKnowledgeUnit) => wikiSaidLater(newer, older) && !related.has(`${older.id}|${newer.id}`);
+  const later = (older: WikiKnowledgeUnit, newer: WikiKnowledgeUnit) => compatible(older, newer) && wikiSaidLater(newer, older) && !related.has(`${older.id}|${newer.id}`);
   const all = [...new Set(organization.subjects.flatMap(subject => subject.unitIds))].map(id => units.get(id)).filter((unit): unit is WikiKnowledgeUnit => Boolean(unit) && !unit!.about)
     .sort(wikiByDiscussion);
   const colours = all.map(unit => ({ unit, colours: coloursOf(unit) })).filter(item => item.colours.size);

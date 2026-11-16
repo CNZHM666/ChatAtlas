@@ -11,6 +11,15 @@ beforeEach(async () => {
 });
 
 describe("local ChatAtlas backup", () => {
+  it("round trips local picture resources and accepts older text-only backups", async () => {
+    const db = await getDatabase(), image = { id: "sha256-image", dataUrl: "data:image/png;base64,AQ==" };
+    await db.put("imageAssets", image);
+    const backup = await createAtlasBackup();
+    await db.clear("imageAssets"); await restoreAtlasBackup(backup);
+    expect(await db.get("imageAssets", image.id)).toEqual(image);
+    delete (backup.stores as Partial<typeof backup.stores>).imageAssets;
+    expect(parseAtlasBackup(JSON.stringify(backup)).stores.imageAssets).toEqual([]);
+  });
   it("round trips personal discussion navigation and accepts backups predating highlights", async () => {
     const db = await getDatabase();
     const edit = { id: JSON.stringify(["c", "m"]), conversationId: "c", messageId: "m", title: "我的重点", category: "我的分类", hidden: true, manual: true, messageIds: ["m"], signatures: { m: "original" }, updatedAt: 2 };

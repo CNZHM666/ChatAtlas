@@ -13,6 +13,8 @@ import { wikiSaidInQuote } from "../shared/wiki-said-in-quote";
 
 const ANALYSIS_KINDS: WikiKnowledgeUnit["kind"][] = ["fact", "report", "history", "question"];
 const LEFT_UNDECIDED = /\bcan'?t decide\b|\bcannot decide\b|\bhaven'?t decided\b|拿不定|定不下来/iu;
+export const wikiPersonalIntent = (unit: WikiKnowledgeUnit) => unit.evidence.role === "user" && !unit.evidence.pasted
+  && (personalDirection(unit.statement) || /(?:我|用户).{0,16}(?:不应|不该|不想)[^。；]{0,18}放弃|\bI (?:should not|won't|do not want to) give up\b/iu.test(unit.evidence.quote));
 /** A point from text the user quoted in their message rather than wrote: "Here is feedback a friend pasted from their
  * review, what do you think?\n> "The app should support multiple currencies …"". The message is too short to read as
  * pasted, yet the point is the quoted lines', which make up much of it. */
@@ -27,7 +29,7 @@ export function quotesMaterial(unit: WikiKnowledgeUnit): boolean {
 // Liking one of the shown designs ("我喜欢这种设计") or settling on it ("就这个") chooses it too.
 /** A confirmed point: a deciding kind, accepted from a proposal or chosen in the user's own words. */
 const decides = (unit: WikiKnowledgeUnit) => {
-  if (unit.about || unit.evidence.pasted || !DECIDING_KINDS.includes(unit.kind)) return false;
+  if (unit.about || unit.evidence.pasted || wikiPersonalIntent(unit) || !DECIDING_KINDS.includes(unit.kind)) return false;
   const { status, approval } = unit.adoption;
   if (status === "user_adopted") return unit.evidence.role === "assistant" && Boolean(approval?.evidenceId && approval.messageId && approval.messageId !== unit.evidence.messageId && approval.quote?.trim());
   return status === "user_decision" && unit.evidence.role === "user" && wikiUserChooses(unit.evidence.quote);
@@ -176,21 +178,23 @@ export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string
   const currentScopes = live.filter(unit => notNow.some(item => item.unitIds.includes(unit.id)));
   const leavesOut = (scope: WikiKnowledgeUnit) => (scope.statement.match(LEFT_OUT_ITEMS)?.[1] ?? "").split(/[、/，,]|以及|及|和|与/u).map(part => part.trim().replace(/^(?:开发|实现|支持)/u, "")).filter(part => part.length >= 2);
   // A stage word naming a part in a list ("当前进展、下一步行动、关键决策" are an overview's modules) says no stage.
-  const staged = (text: string) => stageTransition(text) || [...text.matchAll(new RegExp(BASELINE_NOW.source, "giu"))].some(match => ((match.index ?? 0) < 8 || /Milestone|Phase|里程碑/iu.test(match[0])) && !/^[^。，,；;]{0,5}[、→」”]/u.test(text.slice((match.index ?? 0) + match[0].length)));
+  const staged = (text: string) => wikiStageTransition(text) || [...text.matchAll(new RegExp(BASELINE_NOW.source, "giu"))].some(match => ((match.index ?? 0) < 8 || /Milestone|Phase|里程碑/iu.test(match[0])) && !/^[^。，,；;]{0,5}[、→」”]/u.test(text.slice((match.index ?? 0) + match[0].length)));
   // A state is what the work is now only as the user reports it: the assistant's account ("项目已进入系统测试……
   // 177 项测试通过") is no task, and stood beside the tasks as one.
   const candidates = live.filter(unit => (["plan", "decision"].includes(unit.kind) || ["report", "fact"].includes(unit.kind) && ["reported", "confirmed", "stated"].includes(statuses.get(unit.id)!)) && staged(unit.statement)
     && !/^(?:默认)?(?:只|仅)?(?:展示|显示|提示)|\b(?:display|show) (?:the )?current phase\b/iu.test(unit.statement)
-    && (stageTransition(unit.statement) || !BASELINE_LEAVES.test(unit.statement) && ["plan", "decision"].includes(unit.kind)));
+    && (wikiStageTransition(unit.statement) || !BASELINE_LEAVES.test(unit.statement) && ["plan", "decision"].includes(unit.kind)));
   // The latest entry into a stage ("建议进入 Milestone 5 Alpha Validation 阶段，冻结大功能") ends the stages before it: a
   // plan said earlier in its conversation ("按 Phase A 至 Phase B 逐步实现") and the criteria of earlier stages ("第一阶段
   // ……仿真运行率>80%", a milestone's 七个验收场景) were read as current beside it.
-  const entered = candidates.find(unit => stageTransition(unit.statement));
+  const entered = candidates.find(unit => wikiStageTransition(unit.statement) && ["confirmed", "reported", "stated"].includes(statuses.get(unit.id)!));
+  const proposedTransition = candidates.find(unit => wikiStageTransition(unit.statement) && statuses.get(unit.id) === "proposal");
   const before = (unit: WikiKnowledgeUnit) => Boolean(entered) && unit !== entered && wikiSaidLater(entered!, unit);
   const criteria = live.filter(unit => BASELINE_DONE.test(unit.statement) && !currentScopes.some(scope => scope.evidence.conversationId === unit.evidence.conversationId && leavesOut(scope).some(part => unit.statement.toLocaleLowerCase().includes(part.toLocaleLowerCase()))));
   const currentCriteria = criteria.some(unit => !before(unit));
   const done = pick("done", unit => criteria.includes(unit) && (!currentCriteria || !before(unit)));
-  const now = pick("now", unit => candidates.includes(unit) && !before(unit));
+  const now = pick("now", unit => candidates.includes(unit) && !before(unit)
+    && !(proposedTransition && statuses.get(unit.id) === "proposal" && wikiSaidLater(proposedTransition, unit)));
   // The work now is the earliest numbered stage given: "Milestone 3 involves running a private alpha …" stood under Doing
   // now beside Milestone 1's line, the roadmap's later stages read as current. Lines naming no stage stay.
   const numbered = (item: WikiBaselineItem) => { const stage = item.text.match(MOVED_TO) ?? item.text.match(STAGE_SUBJECT) ?? item.text.match(STAGE_NAMED); return stage ? Number(stage[2]) : undefined; };
@@ -200,7 +204,7 @@ export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string
 
 /** A project entering a phase, including a proposed transition with a feature freeze.
  * Merely asking the UI to display a current-stage hint is not a transition. */
-function stageTransition(text: string): boolean {
+export function wikiStageTransition(text: string): boolean {
   return /(?:项目|产品|下一阶段|当前阶段|本阶段)[^。；;]{0,16}(?:进入|转入|推进到)|(?:进入|转入|定义为)[^。；;]{0,20}(?:Milestone|Phase|里程碑)|\b(?:project|product|next phase)\b[^.;]{0,35}\b(?:enter|move|focus|implement)|\b(?:enter|move to)\b[^.;]{0,20}\b(?:milestone|phase)\b/iu.test(text);
 }
 

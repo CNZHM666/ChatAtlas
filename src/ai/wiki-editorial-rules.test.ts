@@ -3,7 +3,7 @@ import {withWikiOutline} from "../test/wiki-outline-fixture";
 import {contextKnowledge} from "../test/context-fixture";
 import {planWikiTopics} from "./wiki-topic-plan";
 import {WIKI_DIRECTORY_EDITING_INSTRUCTIONS,WIKI_SCOPED_DIRECTORY_EDITING_INSTRUCTIONS} from "./wiki-directory-editing";
-import {WIKI_COMPOSITION_INSTRUCTIONS,CURRENT_WIKI_READER_STATUS_INSTRUCTIONS,WIKI_READER_STATUS_INSTRUCTIONS,WIKI_CLAIM_LIMIT_INSTRUCTIONS} from "./wiki-composition-instructions";
+import {WIKI_COMPOSITION_INSTRUCTIONS,EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,CURRENT_WIKI_READER_STATUS_INSTRUCTIONS,WIKI_READER_STATUS_INSTRUCTIONS,WIKI_CLAIM_LIMIT_INSTRUCTIONS} from "./wiki-composition-instructions";
 import type {StructuredAIRequest} from "./provider";
 
 it("sends the directory editing rules with every directory request",async()=>{
@@ -27,6 +27,8 @@ it("names shared subjects and sends side material to scope review before chapter
 });
 
 it("writes current understanding first, states status once and dates superseded designs in the current edition",()=>{
- expect(WIKI_COMPOSITION_INSTRUCTIONS.endsWith(WIKI_CLAIM_LIMIT_INSTRUCTIONS+CURRENT_WIKI_READER_STATUS_INSTRUCTIONS)).toBe(true);
+ expect(WIKI_COMPOSITION_INSTRUCTIONS).toContain("Use time for chronology and explicit evidence for adoption or replacement");
+ expect(WIKI_COMPOSITION_INSTRUCTIONS).not.toContain(CURRENT_WIKI_READER_STATUS_INSTRUCTIONS);
+ expect(EDITION7_WIKI_COMPOSITION_INSTRUCTIONS.endsWith(WIKI_CLAIM_LIMIT_INSTRUCTIONS+CURRENT_WIKI_READER_STATUS_INSTRUCTIONS)).toBe(true);
  for(const rule of ["Current first","历史：","workStatus:proposed","材料未显示用户已确认采用","Never invent a replacement","这一阶段之后"])expect(WIKI_READER_STATUS_INSTRUCTIONS).toContain(rule);
 });

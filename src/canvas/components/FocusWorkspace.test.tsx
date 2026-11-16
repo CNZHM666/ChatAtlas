@@ -90,7 +90,7 @@ it("restores a scoped discussion through a separate preview while preserving per
  fireEvent.click(within(screen.getByRole("region",{name:"Needs review"})).getByRole("button",{name:"Keep in project"}));fireEvent.click(screen.getByRole("button",{name:"Apply 1 selection"}));
  await screen.findByRole("button",{name:"Save and view"});
  expect(vi.mocked(generateFocusSession).mock.calls.at(-1)?.[9]).toMatchObject({wikiScopeIncludeKeys:["old-choice","travel-key"],wikiScopeExcludeKeys:[]});
- expect(screen.getByText("My exact personal Wiki edit.")).toBeInTheDocument();expect(screen.getByText("Restored material.")).toBeInTheDocument();
+ expect(await screen.findByText("My exact personal Wiki edit.")).toBeInTheDocument();expect(await screen.findByText("Restored material.")).toBeInTheDocument();
  const original=await (await getDatabase()).get("focusSessions",project.id);expect(original?.sections[0].body).not.toBe("Restored material.");
 });
 
@@ -129,7 +129,7 @@ it("opens selected project file export directly from the toolbar without running
  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
  expect(screen.getByRole("button",{name:"Save project"})).toBeVisible();
  fireEvent.click(screen.getByRole("button",{name:"Export"}));
- const dialog=await screen.findByRole("dialog",{name:"Export project files"});expect(within(dialog).getByRole("checkbox",{name:"Wiki chapters"})).toBeChecked();fireEvent.click(within(dialog).getByRole("button",{name:"Choose Wiki chapters"}));expect(within(dialog).getByRole("checkbox",{name:"Understanding poles"})).toBeChecked();expect(within(dialog).queryByRole("checkbox",{name:"Project matters"})).toBeNull();expect(within(dialog).getByRole("combobox",{name:"File format"})).toHaveValue("md");expect(generateFocusSession).not.toHaveBeenCalled();
+ const dialog=await screen.findByRole("dialog",{name:"Export project files"});expect(within(dialog).getByRole("checkbox",{name:"Project Wiki"})).toBeChecked();fireEvent.click(within(dialog).getByRole("button",{name:"Choose Wiki chapters"}));expect(within(dialog).getByRole("checkbox",{name:"Understanding poles"})).toBeChecked();expect(within(dialog).queryByRole("checkbox",{name:"Project matters"})).toBeNull();expect(within(dialog).getByRole("combobox",{name:"File format"})).toHaveValue("md");expect(generateFocusSession).not.toHaveBeenCalled();
 });
 
 it("offers an explicit side-material decision for a contradictory chapter in the final preview",async()=>{
@@ -194,7 +194,7 @@ describe("goal reading workflow", () => {
     render(<PreferencesProvider><FocusWorkspace initialSession={draft} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
     const chapter=screen.getByRole("region",{name:"Understanding poles"});
     expect(screen.queryByText(/This preview does not run an additional evolution analysis/)).toBeNull();
-    expect(within(chapter).getByText("Read the original explanation.")).toBeVisible();
+    expect(await within(chapter).findByText("Read the original explanation.")).toBeVisible();
     // A clean preview: no preview tag, status tag or per-chapter sources button.
     expect(within(chapter).queryByRole("button",{name:"View sources"})).toBeNull();expect(screen.queryByText("Preview")).toBeNull();
     // The preview has no per-chapter review panel: claims are checked from their markers.
@@ -206,7 +206,7 @@ describe("goal reading workflow", () => {
     render(<PreferencesProvider><FocusWorkspace initialSession={{...session, mode:"work", status:"preview", sections:[{...session.sections[0], reviewIssue:"Review optional"}]}} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
     const button = screen.getByRole("button", {name:"Save and view"}); expect(button).toBeEnabled(); fireEvent.click(button);
     expect(await screen.findByRole("alert")).toHaveTextContent("Your draft is retained");
-    expect(screen.getAllByText("Read the original explanation.")[0]).toBeVisible(); expect(screen.getByRole("button", {name:"Save and view"})).toBeEnabled();
+    expect((await screen.findAllByText("Read the original explanation."))[0]).toBeVisible(); expect(screen.getByRole("button", {name:"Save and view"})).toBeEnabled();
     fireEvent.click(screen.getByRole("button", {name:"Save and view"}));
     await waitFor(() => expect(screen.queryByText("Project plan preview")).toBeNull());
     expect(save).toHaveBeenCalledTimes(2); expect(generateFocusSession).not.toHaveBeenCalled();
@@ -242,8 +242,8 @@ describe("goal reading workflow", () => {
     expect(screen.queryByRole("button",{name:"Use project context"})).toBeNull();
     fireEvent.click(screen.getByRole("button",{name:"Export"}));
     const dialog=await screen.findByRole("dialog",{name:"Export project files"});
-    expect(within(dialog).getByRole("checkbox",{name:"Project overview"})).toBeChecked();
-    expect(within(dialog).getByRole("checkbox",{name:"Wiki chapters"})).toBeChecked();
+    expect(within(dialog).getByRole("checkbox",{name:"Project Wiki"})).toBeChecked();
+    expect(within(dialog).getByRole("button",{name:"Choose Wiki chapters"})).toHaveAttribute("aria-expanded","false");
     expect(within(dialog).getByRole("combobox",{name:"File format"})).toHaveValue("md");
     expect(within(dialog).queryByRole("textbox",{name:"Current task"})).toBeNull();
     fireEvent.click(within(dialog).getByRole("button",{name:"Close export"}));
@@ -255,7 +255,9 @@ describe("goal reading workflow", () => {
     render(<PreferencesProvider><FocusWorkspace initialSession={empty} conversations={[]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
     fireEvent.click(screen.getByRole("button",{name:"Export"}));
     const dialog=await screen.findByRole("dialog",{name:"Export project files"});
-    expect(within(dialog).getByRole("checkbox",{name:"Wiki chapters"})).toBeDisabled();
+    expect(within(dialog).getByRole("checkbox",{name:"Project Wiki"})).toBeChecked();
+    expect(within(dialog).queryByRole("button",{name:"Choose Wiki chapters"})).toBeNull();
+    expect(within(dialog).queryByRole("checkbox",{name:"Reference examples"})).toBeNull();
     expect(generateFocusSession).not.toHaveBeenCalled();
   });
   it("uses the shared document layout for review, with section navigation, source evidence and review progress", () => {
@@ -550,7 +552,7 @@ describe("goal reading workflow", () => {
     expect(onSaved).not.toHaveBeenCalled();
     const scopeReview:FocusSession["wikiScopeReview"]={version:1,status:"complete",goal:"Review stability",includeKeys:[],materials:[{id:"foreign",key:"foreign",kind:"other",title:"Other project discussion",body:"Original note",reason:"Belongs to a different product",quote:"Original",evidenceIds:["e1"]}]};
     act(()=>call[9]?.onPartial?.({...session,mode:"work",wikiScopeReview:scopeReview,sections:[{...session.sections[0],title:"Completed draft chapter",body:"Source-checked partial text."}]}));
-    expect(screen.getByRole("region",{name:"Chapter draft preview"})).toHaveTextContent("Source-checked partial text.");
+    await waitFor(()=>expect(screen.getByRole("region",{name:"Chapter draft preview"})).toHaveTextContent("Source-checked partial text."));
     expect(screen.getByRole("region",{name:"Needs review"})).toHaveTextContent("Other project discussion");
     expect(screen.getByRole("button",{name:"Keep in project"})).toBeDisabled();
     expect(host.querySelector(".focus-header-progress")).not.toBeNull();
@@ -564,7 +566,7 @@ describe("goal reading workflow", () => {
     expect(screen.getByRole("region",{name:"Needs review"})).toHaveTextContent("Other project discussion");
     expect(screen.getByRole("button",{name:"Keep in project"})).toBeEnabled();
     expect(screen.queryByText("Read chapter")).not.toBeInTheDocument();
-    expect(screen.getByText(/End of the complete chapter/).closest("details")).toBeNull();
+    expect((await screen.findByText(/End of the complete chapter/)).closest("details")).toBeNull();
   });
   it("cancels from header progress and removes it when leaving the workspace", async () => {
     vi.mocked(generateFocusSession).mockImplementation(() => new Promise(() => {}));
@@ -591,7 +593,7 @@ describe("goal reading workflow", () => {
     const stored = await (await getDatabase()).get("focusSessions", "s"); expect(stored?.status).toBe("preview");
     render(<PreferencesProvider><FocusWorkspace {...props} initialSession={stored} /></PreferencesProvider>);
     expect(screen.getByRole("button", { name: "Confirm and start" })).toBeInTheDocument();
-    expect(screen.getByText("Read the original explanation.")).toBeVisible();
+    expect(await screen.findByText("Read the original explanation.")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Confirm and start" }));
     await screen.findByRole("region", { name: "Reading overview" });
     expect((await (await getDatabase()).get("focusSessions", "s"))?.status).toBe("ready");
@@ -602,7 +604,7 @@ describe("goal reading workflow", () => {
     vi.mocked(generateFocusSession).mockResolvedValue(session);
     render(<PreferencesProvider><FocusWorkspace request={{ id: "save-failure", goal: "Review poles", mode: "answer", sourceIds: ["c"], scope: { kind: "all", sourceConversationIds: ["c"] } }} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
     const retry = await screen.findByRole("button", { name: "Retry save" });
-    expect(screen.getByText("Read the original explanation.")).toBeVisible();
+    expect(await screen.findByText("Read the original explanation.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Retry generation" })).not.toBeInTheDocument();
     fireEvent.click(retry);
     await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.status).toBe("preview"));

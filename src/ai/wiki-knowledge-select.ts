@@ -150,7 +150,8 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
   // What holds now of a thing the discussion settled more than once: left out, its earlier versions told the change
   // without its end (顶部大卡改为今日状态 nowhere, 必须严格区分四个指标 written as replaced).
   const holdsNow = new Set(wikiDecidedTopics(organization.topics, ledger.decisions).flatMap(topic => topic.current));
-  const must = (unit: WikiKnowledgeUnit) => carriers.has(unit.id) || baseline.has(unit.id) || holdsNow.has(unit.id) || MUST.includes(statuses.get(unit.id)!) || unit.evidence.role === "user" && !unit.evidence.pasted
+  const retainedReferences=new Set((ledger.userAnswers??[]).flatMap(answer=>ledger.writingQuestions?.find(question=>question.id===answer.questionId)?.options.find(option=>option.id===answer.optionId)?.actions.flatMap(action=>action.do==="owner"&&action.answer==="reference"?action.units:[])??[]));
+  const must = (unit: WikiKnowledgeUnit) => retainedReferences.has(unit.id) || carriers.has(unit.id) || baseline.has(unit.id) || holdsNow.has(unit.id) || MUST.includes(statuses.get(unit.id)!) || unit.evidence.role === "user" && !unit.evidence.pasted
     || unit.kind === "plan" && statuses.get(unit.id) === "proposal" && Boolean(unit.conditions?.length)
     || (echoes.get(unit.id) ?? 0) >= ECHOED_MUST || RULE_KINDS.includes(unit.kind) && MEASURE.test(unit.statement) || wikiSafetyRule(unit) || [...RULE_KINDS, "plan"].includes(unit.kind) && COUNTED_TARGET.test(unit.statement) || IDENTIFIER.test(`${unit.statement} ${unit.details.join(" ")}`);
   const points: Point[] = [], grouped = new Set<string>(), elsewhere = new Map<string, Array<{ core: string; home: string }>>();

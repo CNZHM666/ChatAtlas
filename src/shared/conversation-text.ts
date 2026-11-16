@@ -1,3 +1,7 @@
+import { isToolTrafficMessage } from "./tool-traffic";
+import { codeRanges } from "./markdown-code-ranges";
+export { codeRanges } from "./markdown-code-ranges";
+
 /** Locate an embedded JSON object without executing it or consuming following prose. */
 function widgetJsonEnd(value: string, start: number): number | undefined {
   const stack: string[] = [];
@@ -13,24 +17,6 @@ function widgetJsonEnd(value: string, start: number): number | undefined {
     }
   }
   return undefined;
-}
-
-export function codeRanges(value: string): Array<[number, number]> {
-  const protectedRanges: Array<[number, number]> = [];
-  let offset = 0, fence: { character: string; length: number; start: number } | undefined;
-  for (const line of value.split(/(?<=\n)/u)) {
-    const delimiter = /^ {0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
-    if (delimiter) {
-      if (!fence) fence = { character: delimiter[0], length: delimiter.length, start: offset };
-      else if (delimiter[0] === fence.character && delimiter.length >= fence.length) { protectedRanges.push([fence.start, offset + line.length]); fence = undefined; }
-    } else if (!fence) {
-      if (/^(?: {4}|\t)/u.test(line)) protectedRanges.push([offset, offset + line.length]);
-      else for (const match of line.matchAll(/(`+)[^\n]*?\1/gu)) protectedRanges.push([offset + match.index!, offset + match.index! + match[0].length]);
-    }
-    offset += line.length;
-  }
-  if (fence) protectedRanges.push([fence.start, value.length]);
-  return protectedRanges;
 }
 
 /** Platform citation IDs are not usable ChatAtlas references. Preserve literal code examples. */
@@ -127,8 +113,9 @@ function readablePlatformLinks(value: string): string {
 }
 
 /** Some ChatGPT exports include an assistant search request as a JSON turn. It is not a reply. */
-export function isInternalSearchQueryMessage(message: { role: string; content: string }): boolean {
+export function isInternalSearchQueryMessage(message: { role: string; content: string; contentKind?: string }): boolean {
   if (message.role === "user") return false;
+  if (isToolTrafficMessage(message)) return true;
   const content = message.content.trim().replace(/^```(?:json)?\s*\n?/u, "").replace(/\n?```$/u, "").trim();
   if (!content.startsWith("{")) return false;
   try {

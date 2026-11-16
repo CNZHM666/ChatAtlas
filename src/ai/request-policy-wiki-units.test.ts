@@ -13,6 +13,16 @@ it("gives the questions before writing room for six questions", () => {
   expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_writing_questions", version: 1 }) })).toMatchObject({ maxInputTokens: 16000, maxOutputTokens: 2600 });
 });
 
+it("reserves a real output budget for statement fidelity recovery", () => {
+  expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_unit_fidelity" }) }))
+    .toMatchObject({ maxInputTokens: 10000, maxOutputTokens: 3600 });
+});
+
+it("gives a chapter placement review its requested output allowance", () => {
+  expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_chapter_fit" }) })).toMatchObject({ maxInputTokens: 14000, maxOutputTokens: 1600 });
+  expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_topic_chains" }) })).toMatchObject({ maxInputTokens: 12000, maxOutputTokens: 2400 });
+});
+
 it("gives one paragraph written again with the user's answers a small allowance", () => {
   expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_paragraph_revise", version: 1 }) })).toMatchObject({ maxInputTokens: 6000, maxOutputTokens: 1500 });
 });

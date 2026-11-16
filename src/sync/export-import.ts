@@ -2,6 +2,8 @@ import { getConversation } from "../storage/conversations";
 import { saveConversationCapture } from "../storage/messages";
 import { openExportRecordStream } from "./export-record-stream";
 import { importerFor } from "./importers";
+import { materializeCaptureImages } from "../shared/capture-images";
+import { createContentHash } from "../content/message-identity";
 
 export interface ExportImportProgress {
   stage: "reading" | "saving";
@@ -35,12 +37,14 @@ export async function importConversationExport(file: File, onProgress?: (progres
       const item = adapter.describe(record.raw);
       const existing = await getConversation(item.id);
       const knownNewer = Boolean(existing?.sourceUpdatedAt && (!item.sourceUpdatedAt || existing.sourceUpdatedAt > item.sourceUpdatedAt));
-      const revision = knownNewer ? undefined : await adapter.revision(record.raw);
+      // Importer capability changes must hydrate old text-only imports once, including unchanged archives.
+      const imageRevision = record.imageResources?.length ? await createContentHash(JSON.stringify(record.imageResources)) : "none";
+      const revision = knownNewer ? undefined : `reader-media-v1:${await adapter.revision(record.raw)}:${imageRevision}`;
       const sameRevision = Boolean(existing && existing.sourceRevision === revision && (!existing.sourceUpdatedAt || existing.sourceUpdatedAt === item.sourceUpdatedAt));
       if (existing?.importState === "complete" && (knownNewer || sameRevision)) {
         progress.unchanged += 1;
       } else {
-        const capture = await adapter.normalize(record.raw, revision ?? await adapter.revision(record.raw));
+        const capture = await materializeCaptureImages(await adapter.normalize(record.raw, revision ?? await adapter.revision(record.raw)), record.imageResources);
         if (existing?.messageCount && capture.messages.length === 0) throw new Error("Refusing to replace saved messages with an empty export record.");
         await saveConversationCapture(capture, { warmIndex: false });
         if (existing) progress.updated += 1;

@@ -3,8 +3,9 @@ import { defaultSchema } from "rehype-sanitize";
 /** Keep the math markers until KaTeX runs; all other input uses the default policy. */
 export const readerSanitizeSchema = {
   ...defaultSchema,
+  protocols: { ...defaultSchema.protocols, src: [...defaultSchema.protocols?.src ?? [], "atlas-image", "data"] },
   // Presentation tags the Reader adds itself (reader-structure-presentation): no attributes, mapped to styled spans.
-  tagNames:[...defaultSchema.tagNames??[],"mark","atlas-flow","atlas-flow-step","atlas-flow-arrow","atlas-lead","atlas-caption","atlas-caption-kind","atlas-caption-place","atlas-caption-ai","atlas-caption-mine","atlas-caption-old","atlas-caption-note"],
+  tagNames:[...defaultSchema.tagNames??[],"mark","atlas-token","atlas-code-token","atlas-word-break","atlas-color","atlas-colors","atlas-palette","atlas-palette-row","atlas-palette-head","atlas-palette-name","atlas-palette-value","atlas-supplement","atlas-flow","atlas-flow-step","atlas-flow-arrow","atlas-lead","atlas-caption","atlas-caption-kind","atlas-caption-place","atlas-caption-ai","atlas-caption-mine","atlas-caption-old","atlas-caption-note"],
   attributes: {
     ...defaultSchema.attributes,
     code: [

@@ -1,6 +1,6 @@
 import { webConversation, type WebCapturePlatform, type WebPageInspection } from "../shared/web-capture";
 import type { CaptureAdapter, ParsedChatMessage } from "./capture-adapter";
-import { domMessageText } from "./dom-message-text";
+import { domMessagePresentation } from "./dom-platform-ui";
 import {createContentHash,previewMessage} from "./message-identity";
 import type {NativeMessageIdentity} from "../shared/native-discussion";
 import {findQuestionBlock,sameQuestionText} from "./question-text";
@@ -118,19 +118,19 @@ export class WebChatAdapter implements CaptureAdapter {
     const messages=roots.flatMap((element): ParsedChatMessage[] => {
       const role = element.matches(selectors.user) ? "user" : "assistant";
       if (role === "assistant" && element.querySelector(selectors.user)) return [];
-      const body = role === "assistant" && selectors.content ? element.querySelector<HTMLElement>(selectors.content) ?? element : this.platform === "gemini" && role === "user" ? element.querySelector<HTMLElement>(".query-text") ?? element : element;
-      const text = domMessageText(body); if (!text.trim()) return [];
+      const body = element.querySelector('img,iframe,[data-artifact-content],[data-component-type="interactive"],[data-testid*="genui"],[data-testid*="widget"]') ? element : role === "assistant" && selectors.content ? element.querySelector<HTMLElement>(selectors.content) ?? element : this.platform === "gemini" && role === "user" ? element.querySelector<HTMLElement>(".query-text") ?? element : element;
+      const { text, uiParts } = domMessagePresentation(body); if (!text.trim()) return [];
       const holder = element.closest<HTMLElement>("[data-message-id],[data-message-uuid],[data-turn-id],[data-response-id]");
       const rawId = holder?.dataset.messageId ?? holder?.dataset.messageUuid ?? holder?.dataset.responseId ?? holder?.dataset.turnId;
       // Turn containers may own both roles; their role suffix must stay distinct.
       const sharedTurn = holder?.dataset.turnId || holder?.querySelector(selectors.user) && holder.querySelector(selectors.assistant);
       const stableId = rawId ? sharedTurn ? `${rawId}:${role}` : rawId : undefined;
-      return [{ element, role, stableId, index: 0, text }];
+      return [{ element, role, stableId, index: 0, text, ...(uiParts?.length ? { uiParts } : {}) }];
     });
     const coalesced:ParsedChatMessage[]=[],known=new Map<string,ParsedChatMessage>();
     for(const message of messages){
       const key=message.stableId?`${message.role}:${message.stableId}`:undefined, previous=key?known.get(key):undefined;
-      if(previous){if(previous.text!==message.text)previous.text+=`\n\n${message.text}`;}
+      if(previous){if(previous.text!==message.text){const offset=previous.text.split("【原平台交互内容】").length-1;previous.text+=`\n\n${message.text}`;if(message.uiParts?.length)previous.uiParts=[...previous.uiParts??[],...message.uiParts.map(part=>({...part,ordinal:part.ordinal+offset}))];}}
       else{coalesced.push(message);if(key)known.set(key,message);}
     }
     return coalesced.map((message,index)=>({...message,index}));

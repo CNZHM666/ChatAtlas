@@ -5,6 +5,13 @@ import {contextKnowledge} from "../test/context-fixture";
 import type {CoverageMaterial} from "./focus-coverage";
 const inventory={details:[{kind:"module",title:"Hardware IR",status:"proposed"},{kind:"constraints",text:"失败时保留原IR"},{kind:"decisions",text:"先保持6个元件"},{kind:"questions",text:"电压校验尚未验证"}],originals:{q1:{role:"user",text:"PRIVATE_LONG_ORIGINAL",sourceIds:["private"]}}};
 const source:CoverageMaterial={id:"n",wikiOwnerId:"o",conversationId:"c",sourceConversationIds:["c"],messageId:"m",title:"主题",text:"讨论来源。\n\nSOURCE DETAIL INVENTORY (evidence):\n"+JSON.stringify(inventory),rawEvidenceIds:["e"]};
+it("hints at disconnected prose and orphan labels without rewriting examples or forcing retries",()=>{
+ const body="## 配置\n\n先理解需求。\n\n再检查条件。\n\n然后选择元件。\n\n最后生成方案。\n\nBase URL · API Key · Model ID\n\n<details>\n<summary>原文</summary>\n\nA · B · C\n\n</details>";
+ const page={...contextKnowledge().session.sections[0],body};
+ expect(wikiWritingQuality(page,[],{completeChapter:true}).writingQuality?.issues.map(item=>item.code)).toEqual(["fragmented_prose","orphan_labels"]);
+ expect(wikiWritingQuality(page,[]).body).toBe(body);
+ expect(wikiWritingQuality(page,[]).writingQuality).toBeUndefined();
+});
 it("uses bounded inventory subjects in planning without sending originals, keeping writing evidence intact",()=>{
  const page={...contextKnowledge().session.sections[0],body:source.text},before=page.body;
  const summary=wikiCatalogueSummary(page);expect(summary).toContain("Hardware IR");expect(summary).toContain("电压校验尚未验证");expect(summary).not.toContain("PRIVATE_LONG_ORIGINAL");expect(page.body).toBe(before);expect(summary.length).toBeLessThanOrEqual(700);

@@ -84,7 +84,7 @@ export interface FocusSection {
   /** Preview only: planned chapter shown as key points while its prose is being written. Never saved. */
   wikiOutline?:boolean;
   /** Editorial hints tied to this body, not verification/adoption metadata. */
-  writingQuality?:{signature:string;issues:Array<{code:"thin_subtopic"|"result_checklist"|"missing_overview"|"batch_commentary"|"duplicate_heading"|"repeated_explanation"|"dense_outline"|"empty_citation"|"cross_chapter_duplicate";title:string}>};
+  writingQuality?:{signature:string;issues:Array<{code:"thin_subtopic"|"result_checklist"|"missing_overview"|"batch_commentary"|"duplicate_heading"|"repeated_explanation"|"dense_outline"|"empty_citation"|"cross_chapter_duplicate"|"orphan_labels"|"fragmented_prose";title:string}>};
   wikiGroupEdited?: boolean;
   /** Preserve the generated title for signatures when only the Wiki label changes. */
   wikiOriginalTitle?: string;

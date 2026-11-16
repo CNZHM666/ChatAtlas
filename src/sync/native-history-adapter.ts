@@ -4,6 +4,7 @@ import { baseConversation, captureFromDrafts, importRevision, sourceTimestamp, t
 import { claudeImporter, type ClaudeConversation } from "./importers/claude";
 import { normalizeHistoryConversation, normalizeHistoryItem, type RawConversation, type RawHistoryItem } from "./chatgpt-normalizer";
 import { doubaoHistoryBody, doubaoRows, doubaoHasMore, doubaoInteger, doubaoNext } from "./doubao-history";
+import { importedImage } from "../shared/conversation-images";
 
 type Row = Record<string, unknown>;
 const object = (value: unknown): Row => value && typeof value === "object" && !Array.isArray(value) ? value as Row : {};
@@ -18,6 +19,8 @@ const text = (value: unknown): string => {
   if (Array.isArray(value)) return value.map(text).filter(Boolean).join("\n\n");
   const v = object(value);
   if (v.type === "thinking" || v.type === "reasoning" || v.type === "tool_call") return "";
+  const image = importedImage(v);
+  if (image) return image;
   return text(v.content ?? v.text ?? v.parts ?? v.text_block ?? v.message) || (v.file_name || v.name ? `【附件 ${string(v.file_name ?? v.name)}】` : "");
 };
 const more = (flag: unknown, cursor: unknown): string | undefined => {
@@ -170,11 +173,14 @@ export class NativeHistoryAdapter {
           const bodyText = text(row.content);
           // A message that is only a file (long pasted text becomes one) has no text fragment: its files are its body,
           // named as the other platforms name attachments. Without them the whole conversation was refused. A file without a name still counts.
-          const files = [row.files, ...fragments.map(fragment => fragment.files)].flatMap(list => Array.isArray(list) ? list.map(file => { const item = object(file); return string(item.file_name ?? item.name ?? item.fileName ?? item.title); }) : []);
-          const attached = files.map(name => name ? `【附件 ${name}】` : "【附件】").join("\n");
+          const files = [row.files, ...fragments.map(fragment => fragment.files)].flatMap(list => Array.isArray(list) ? list.map(object) : []);
+          const fileImage = (item: Row) => importedImage({ ...item, file_name: item.file_name ?? item.name ?? item.fileName ?? item.title });
+          const attached = files.map(item => { const name = string(item.file_name ?? item.name ?? item.fileName ?? item.title); return fileImage(item) ?? (name ? `【附件 ${name}】` : "【附件】"); }).join("\n");
           // Text in a fragment type this reader does not know yet; the model's reasoning and searches are never the discussion.
           const otherText = fragments.filter(fragment => fragment.type !== "THINK" && fragment.type !== "SEARCH").map(fragment => text(fragment.content)).filter(value => value.trim()).join("\n\n");
-          const content = fragmentText || (bodyText.trim() ? bodyText : text(row.text)) || otherText || attached;
+          const prose = fragmentText || (bodyText.trim() ? bodyText : text(row.text)) || otherText;
+          const images = files.map(fileImage).filter((image): image is string => Boolean(image) && !prose.includes(image!));
+          const content = prose ? [prose, ...images].join("\n\n") : attached;
           const messageId = string(row.message_id ?? row.id) || fail();
           // An answer stopped, failed or cut off before it said anything (the website shows it empty, or only its
           // reasoning) holds no text to lose: it is left out. Refusing it failed the whole conversation, whose every
@@ -190,7 +196,7 @@ export class NativeHistoryAdapter {
         batch = rows(data.messages ?? []).slice().reverse().flatMap(row => {
           const role = string(row.role).toLowerCase();
           if (!/^(user|assistant|human|bot)$/u.test(role)) return fail();
-          return [{ id: string(row.id ?? row.messageId ?? row.message_id) || fail(), role: /user|human/u.test(role) ? "user" as const : "assistant" as const, content: text(rows(row.blocks ?? []).map(block => block.text ?? block.content)), createdAt: sourceTimestamp(row.createTime ?? row.created_at) }];
+          return [{ id: string(row.id ?? row.messageId ?? row.message_id) || fail(), role: /user|human/u.test(role) ? "user" as const : "assistant" as const, content: text(rows(row.blocks ?? [])), createdAt: sourceTimestamp(row.createTime ?? row.created_at) }];
         });
         next = more(undefined, data.nextPageToken ?? data.next_page_token);
       } else if (platform === "qwen" && this.source.origin !== "https://chat.qwen.ai") {

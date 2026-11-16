@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { localRestatements, moveTechnicalSubjects, opposesSwitch, placeUnitsByKind, gatherAcrossStages, fillThinChapters, gatherTwins, explicitSwitches, organizeLedger, organizeWikiKnowledge, rebalanceChapters, splitByRelatedness, standApart } from "./wiki-knowledge-organize";
 import type { StructuredAIRequest } from "./provider";
-import { AIProviderResponseError } from "./provider-errors";
+import { AIProviderHttpError, AIProviderResponseError } from "./provider-errors";
 import { statementsConflict, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiSubject } from "../shared/wiki-knowledge";
 import type { DirectoryPage } from "../shared/wiki-directory";
 
@@ -371,7 +371,7 @@ it("keeps the earlier organization when a new directory comes back with no chapt
 });
 
 it("names the first window alone, then the rest in parallel with its names, applied in window order", async () => {
-  // 300 distinct subject names: four windows of up to 80.
+  // A short seed and six parallel windows cover the 300 names.
   const units = Array.from({ length: 300 }, (_, index) => unit(`话题${index}`, `第 ${index} 个话题的结论。`, { index: 10_000 + index }));
   const seen: Array<{ first: string; existing: string[] }> = [];
   let running = 0, peak = 0;
@@ -384,11 +384,11 @@ it("names the first window alone, then the rest in parallel with its names, appl
   const slow = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => { running++; peak = Math.max(peak, running); await new Promise(resolve => setTimeout(resolve, 5)); try { return await ai.generateStructured(request); } finally { running--; } } };
   const result = await organizeWikiKnowledge({ ledger: ledger(units), ai: slow, locale: "zh-CN", signal, names: ["Atlas"], conversations: 1 });
   const naming = seen.filter(call => call.first.startsWith("话题"));
-  expect(naming).toHaveLength(4);
+  expect(naming).toHaveLength(7);
   // Window 1 sees no names; the later windows all see exactly the names window 1 chose.
-  expect(naming[0].existing).toEqual([]);expect(naming.slice(1).map(call => call.existing)).toEqual([["主题A"], ["主题A"], ["主题A"]]);
+  expect(naming[0].existing).toEqual([]);expect(naming.slice(1).every(call => call.existing.join() === "主题A")).toBe(true);
   expect(peak).toBeGreaterThanOrEqual(2);
-  expect(result.report.subject_parallel_windows).toBe(3);
+  expect(result.report.subject_parallel_windows).toBe(6);
 });
 
 it("keeps the earlier directory on a reorganization while its subjects still fall into it, and plans again when they do not", async () => {
@@ -415,6 +415,13 @@ it("reads the compact subject answer: names once, one index per supplied name", 
   const compact: Handler = data => { const names = [...new Set(data.names.map((entry: { name: string }) => entry.name === "Context Engine" ? "上下文引擎" : entry.name))] as string[]; return { subjects: names, assign: data.names.map((entry: { name: string }) => names.indexOf(entry.name === "Context Engine" ? "上下文引擎" : entry.name)) }; };
   const { result } = await run(units, { wiki_subject_merge: compact, wiki_unit_merge: noMerges, wiki_subject_plan: oneChapterPerSubject });
   expect(result.subjects.map(subject => [subject.name, subject.unitIds.length]).sort()).toEqual([["上下文引擎", 2], ["全文索引", 1]]);
+});
+
+it("applies only subject changes and retains the original labels of omitted IDs", async () => {
+  const units = [unit("上下文引擎", "上下文引擎负责组装上下文。"), unit("Context Engine", "Context Engine 读取项目知识。"), unit("全文索引", "全文索引使用 Orama。")];
+  const { result } = await run(units, { wiki_subject_merge: data => ({ changes: data.names.filter(entry => entry.name === "Context Engine").map(entry => [entry.id, "上下文引擎"]) }), wiki_unit_merge: noMerges, wiki_subject_plan: oneChapterPerSubject });
+  expect(result.subjects.map(subject => [subject.name, subject.unitIds.length]).sort()).toEqual([["上下文引擎", 2], ["全文索引", 1]]);
+  expect(result.report.subject_unassigned).toBeUndefined();
 });
 
 it("reads the compact attach answer: one anchor position per small subject, -1 to leave it", async () => {
@@ -513,6 +520,7 @@ it("merges a rewording that shares few words when the statement vectors are clos
   const result = await organizeWikiKnowledge({ ledger: ledger(units), ai, embeddings, locale: "zh-CN", signal, names: ["Atlas"], conversations: 1 });
   expect(result.merged.map(row => [row.id, row.from])).toEqual([[units[0].id, [units[1].id]]]);
   expect(result.report).toMatchObject({ semantic_units: 6, cross_semantic: 1 });
+  expect(result.report.cross_clusters_already_checked).toBeGreaterThan(0);
   expect(calls.some(call => call.presentation === "wiki_unit_merge" && call.subjects.some(subject => subject.name.includes("产品定位") && subject.name.includes("目标用户")))).toBe(true);
 });
 
@@ -609,12 +617,12 @@ it("asks a naming window cut off at the output limit again as two halves", async
   const sizes: number[] = [];
   const { ai } = model({
     wiki_subject_merge: data => { const payload = data as unknown as { names: Array<{ id: string; name: string }> }; sizes.push(payload.names.length);
-      if (payload.names.length === 60) throw new AIProviderResponseError("PROVIDER_OUTPUT_TRUNCATED");
+      if (payload.names.length === 36) throw new AIProviderResponseError("PROVIDER_OUTPUT_TRUNCATED");
       return { subjects: ["主题B"], assign: payload.names.map(() => 0) }; },
     wiki_unit_merge: noMerges, wiki_subject_plan: oneChapterPerSubject, wiki_subject_attach: () => ({ attach: [] }), wiki_subject_split: () => ({ parts: [] }), wiki_subject_same: () => ({ same: [] }), wiki_subject_place: () => ({ placements: [] }),
   });
   const result = await organizeWikiKnowledge({ ledger: ledger(units), ai, locale: "zh-CN", signal, names: ["Atlas"], conversations: 1 });
-  expect(sizes.slice(0, 3)).toEqual([60, 30, 30]);
+  expect(sizes).toEqual([24, 36, 18, 18]);
   expect(result.report).toMatchObject({ subject_halved: 1 });
   expect(result.report.subject_unassigned).toBeUndefined();
 });
@@ -645,9 +653,20 @@ it("asks a naming window that broke off for another reason again in halves, twic
   });
   const result = await organizeWikiKnowledge({ ledger: ledger(units), ai, locale: "zh-CN", signal, names: ["Atlas"], conversations: 1 });
   // The whole window, then its halves, then the failing half's halves; the quarter breaking off again is not split further.
-  expect(sizes.slice(0, 3)).toEqual([60, 30, 30]);
-  expect(sizes).toContain(15);
-  expect(result.report).toMatchObject({ subject_halved: 2, subject_failed: 1, subject_unassigned: 15 });
+  expect(sizes.slice(0, 3)).toEqual([24, 12, 12]);
+  expect(sizes).toContain(6);
+  expect(result.report).toMatchObject({ subject_halved: 2, subject_failed: 1, subject_unassigned: 6 });
+});
+
+it("keeps extracted subject names without splitting a window after a permission error", async () => {
+  const units = Array.from({ length: 24 }, (_, index) => unit(`检索主题 ${index}`, `检索方式 ${index}。`));
+  const { result, calls } = await run(units, {
+    wiki_subject_merge: () => { throw new AIProviderHttpError(403, "denied"); },
+    wiki_unit_merge: noMerges, wiki_subject_plan: oneChapterPerSubject,
+  });
+  expect(calls.filter(call => call.presentation === "wiki_subject_merge")).toHaveLength(1);
+  expect(result.report).toMatchObject({ subject_failed: 1, subject_unassigned: 24 });
+  expect(result.subjects.flatMap(subject => subject.unitIds).sort()).toEqual(units.map(unit => unit.id).sort());
 });
 
 it("reads a statement saying not to use what a decision switches to as the approach it left", () => {
@@ -834,7 +853,8 @@ it("reads an approach a later choice says it is chosen instead of as replaced, a
 
 it("reuses a complete unchanged organization and preserves explicit replan behavior",async()=>{
  const units=[unit("检索","全文索引使用 Orama。"),unit("侧边栏","侧边栏只放搜索入口。")];
- const fake=model({wiki_subject_merge:subjects(),wiki_unit_merge:noMerges,wiki_subject_plan:oneChapterPerSubject});
+ const fake=model({wiki_subject_merge:subjects(),wiki_unit_merge:noMerges,wiki_subject_plan:oneChapterPerSubject,
+   wiki_chapter_fit:()=>({moves:[]}),wiki_topic_chains:()=>({topics:[]})});
  const options={ai:fake.ai,locale:"zh-CN",signal,names:["Atlas"],conversations:1};
  const first=await organizeLedger(ledger(units),options);fake.calls.length=0;
  const reused=await organizeLedger(first,options);

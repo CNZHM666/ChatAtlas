@@ -241,6 +241,7 @@ export class DeterministicConversationStructurer implements ConversationStructur
  * ----- |") read as its words, not its marks. */
 export function questionPlainText(original: string): string {
   return original
+    .replace(/!\[((?:\\.|[^\]\\])*)\]\(\s*(?:<[^>\n]+>|[^\s)]+)(?:\s+"[^"\n]*")?\s*\)/gu, (_, alt: string) => alt || "图片 / Image")
     .replace(/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/gmu, " ")
     .replace(/```[^\n]*/gu, " ")
     .replace(/\*\*|__|`|^\s{0,3}#{1,6}\s+|^\s{0,3}>\s?|^\s*(?:[-*+]|\d+[.)])\s+/gmu, "")

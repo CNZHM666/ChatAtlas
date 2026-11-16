@@ -12,10 +12,11 @@ const MIN_REPEAT=60;
 const MIN_SOURCED_REPEAT=20;
 const exactText=(text:string)=>text.normalize("NFKC").replace(/\*\*|__/gu,"").replace(/\s+/gu," ").trim();
 const claimIdentity=(claim:WikiClaim)=>JSON.stringify([
- exactText(claim.text),claim.quote,[...claim.evidenceIds].sort(),[...claim.unitIds??[]].sort(),
+ claim.quote,[...claim.evidenceIds].sort(),[...claim.unitIds??[]].sort(),
  claim.scope,claim.holder,claim.userDecided,claim.workStatus,claim.verification,claim.markOnly,claim.relation,
 ]);
 const SCOPED=/\d|如果|假如|只有|仅|除非|否则|未|禁止|\b(?:if|unless|except|only|never|not|without)\b/iu;
+const technicalTerms=(text:string)=>new Set(text.match(/`[^`\n]+`|\b[A-Z][A-Z\d_]{1,}\b|\b[a-z]+[A-Z][A-Za-z\d_]*\b/gu)??[]);
 
 /** Unambiguous planned home of each point. Shared or unassigned units still
  * use the first eligible chapter in reading order. */
@@ -56,6 +57,7 @@ export function wikiChapterLinks(body:string,section:Pick<FocusSection,"id"|"cla
  }]);
  const nodes=wikiDocumentBlocks(body,section.claims);
  const owner=new Map<number,Pick<FocusSection,"id"|"title">>();
+ const related=new Map<number,Pick<FocusSection,"id"|"title">>();
  nodes.forEach((node,at)=>{
   if(node.kind!=="paragraph"||node.standaloneLabel||node.text.length<(node.claims.length?MIN_SOURCED_REPEAT:MIN_REPEAT)||!wikiExplanatorySentenceCount(node.text))return;
   const claimIds=node.claims.flatMap(claim=>claim.unitIds??[]);
@@ -64,22 +66,36 @@ export function wikiChapterLinks(body:string,section:Pick<FocusSection,"id"|"cla
   if(home===section.id)return;
   const literal=Boolean(homes)||node.claims.length>0||SCOPED.test(node.text);
   const identity=new Set(node.claims.map(claimIdentity));
-  const equivalent=(other:typeof node)=>other.kind==="paragraph"&&!other.standaloneLabel
-   && exactText(node.text)===exactText(other.text) && identity.size===new Set(other.claims.map(claimIdentity)).size
-   && other.claims.every(claim=>identity.has(claimIdentity(claim)));
+  const equivalent=(other:typeof node)=>{
+   if(other.kind!=="paragraph"||other.standaloneLabel||identity.size!==new Set(other.claims.map(claimIdentity)).size
+    ||!other.claims.every(claim=>identity.has(claimIdentity(claim))))return false;
+   if(exactText(node.text)===exactText(other.text))return true;
+   // For rephrased prose, require the same source and status, and full coverage
+   // in both directions. Keep any paragraph carrying scope or exact details.
+   const names=technicalTerms(node.text), destinationNames=technicalTerms(other.text);
+   return identity.size>0&&!SCOPED.test(node.text)&&!SCOPED.test(other.text)
+    &&names.size===destinationNames.size&&[...names].every(term=>destinationNames.has(term))
+    &&wikiCoverageMatcher(other.text,.96)(node.text)===1&&wikiCoverageMatcher(node.text,.96)(other.text)===1;
+  };
   const eligible=candidates.filter(item=>home?item.chapter.id===home:item.at<index);
   const match=eligible.find(item=>literal?item.blocks.some(equivalent):item.covers(node.text)===1&&item.blocks.some(other=>
    other.kind==="paragraph"&&!other.claims.length&&!SCOPED.test(other.text)&&wikiCoverageMatcher(other.text,.9)(node.text)===1&&wikiCoverageMatcher(node.text,.9)(other.text)===1));
   if(match)owner.set(at,match.chapter);
+  else if(home&&claimIds.length){
+   const destination=eligible.find(item=>item.blocks.some(block=>block.kind==="paragraph"&&block.claims.some(claim=>identity.has(claimIdentity(claim)))));
+   if(destination)related.set(at,destination.chapter);
+  }
  });
- if(!owner.size)return body;
+ if(!owner.size&&!related.size)return body;
  // Subsections: the nodes after each heading (the lead before the first heading is one too).
  const groups:number[][]=[[]];
  nodes.forEach((node,at)=>{if(node.kind==="heading")groups.push([]);else groups.at(-1)!.push(at);});
  const edits:Array<{start:number;end:number;text:string}>=[];
  for(const group of groups){
-  const owned=group.filter(at=>owner.has(at));if(!owned.length)continue;
-  const chapters=[...new Map(owned.map(at=>[owner.get(at)!.id,owner.get(at)!])).values()];
+  const owned=group.filter(at=>owner.has(at));
+  const destinations=group.flatMap(at=>owner.get(at)??related.get(at)??[]);
+  if(!destinations.length)continue;
+  const chapters=[...new Map(destinations.map(chapter=>[chapter.id,chapter])).values()];
   const start=nodes[group[0]].start,end=nodes[group.at(-1)!].end;
   if(owned.length===group.length&&chapters.length===1){
    edits.push({start,end,text:zh?`> 这部分已在${link(chapters[0],zh)}中说明。`:`> Already explained in ${link(chapters[0],zh)}.`});

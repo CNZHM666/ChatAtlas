@@ -1,14 +1,16 @@
 import type { FocusEvidence, FocusSection, FocusSession } from "../shared/focus-session";
 import type { WikiDraftChapter, WikiKnowledgeLedger, WikiKnowledgeUnit, WikiUnitStatus } from "../shared/wiki-knowledge";
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
+import { wikiExampleDisplayKey, wikiExampleKey, wikiExampleStage, wikiExampleStanding } from "../shared/wiki-example-identity";
 import { wikiOverviewSignature } from "../shared/wiki-overview";
-import { isRequiredWikiSourceBlock, sourceBlockSupportsRows, wikiSourceBlockCaption, wikiSourceBlockMarkdown } from "../shared/wiki-source-code";
+import { isRequiredWikiSourceBlock, sourceBlockSupportsRows, wikiSourceBlockCaption, wikiSourceBlockMarkdown, wikiSourceExampleScope } from "../shared/wiki-source-code";
 import type { resolveWikiReading } from "./wiki-knowledge-reading";
 
 interface Home { chapterId: string; subtopic: string }
 interface SourceCandidate { unit: WikiKnowledgeUnit; status: WikiUnitStatus; homes: Home[] }
-interface RequiredBlock { markdown: string; candidates: SourceCandidate[] }
-export interface WikiSourceBlockBinding { unit: WikiKnowledgeUnit; markdown: string; evidence: FocusEvidence }
+interface RequiredBlock { markdown: string; stage: string; standing: string; candidates: SourceCandidate[] }
+interface SourceBlockScope { stage: string; standing: string }
+export interface WikiSourceBlockBinding extends SourceBlockScope { unit: WikiKnowledgeUnit; markdown: string; evidence: FocusEvidence }
 export const SOURCE_BLOCK_PROBLEM = /required source block is missing/u;
 
 /** Planned, in-scope originals are checked independently of what the writer cited. */
@@ -26,9 +28,11 @@ export function planRequiredWikiSourceBlocks(ledger: WikiKnowledgeLedger, units:
   for (const unit of units) {
     const locations = homes.get(unit.id), status = statuses.get(unit.id);
     if (!locations?.length || !status || status === "history" || unit.adoption.status === "rejected" || !isRequiredWikiSourceBlock(unit)) continue;
-    const markdown = wikiSourceBlockMarkdown(unit.evidence.code!), prior = requirements.get(markdown);
+    const code = unit.evidence.code!;
+    const { stage, standing } = wikiSourceExampleScope(unit, status);
+    const markdown = wikiSourceBlockMarkdown(code), identity = wikiExampleDisplayKey(code, stage, standing), prior = requirements.get(identity);
     const candidate = { unit, status, homes: locations };
-    if (!prior) requirements.set(markdown, { markdown, candidates: [candidate] });
+    if (!prior) requirements.set(identity, { markdown, stage, standing, candidates: [candidate] });
     else if (status === "confirmed" && prior.candidates[0].status !== "confirmed") prior.candidates.unshift(candidate);
     else prior.candidates.push(candidate);
   }
@@ -39,8 +43,22 @@ type CoverageChapter = Pick<WikiDraftChapter, "id" | "body" | "paragraphs">;
 const key = (text: string) => text.normalize("NFKC").replace(/[\s*_`]/gu, "").toLowerCase();
 const depth = (heading: string) => heading.match(/^#+/u)?.[0].length ?? (/\n=+$/u.test(heading) ? 1 : 2);
 const sourceCaption = /讨论中的原文|(?:Table|Code) from the discussion/iu;
+const codeKey=(markdown:string)=>{
+ const match=/^(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)\n\1\s*$/u.exec(markdown.trim());
+ return match?wikiExampleKey({language:match[2],text:match[3]}):undefined;
+};
 const isOriginal = (block: ReturnType<typeof wikiDocumentBlocks>[number], markdown: string) =>
-  (block.kind === "code" || block.kind === "table") && block.text.trimEnd() === markdown.trimEnd();
+  (block.kind === "code" || block.kind === "table") && (block.text.trimEnd() === markdown.trimEnd()||block.kind==="code"&&codeKey(markdown)!==undefined&&codeKey(block.text)===codeKey(markdown));
+
+export function findWikiSourceBlock(blocks: ReturnType<typeof wikiDocumentBlocks>, markdown: string, { stage, standing }: SourceBlockScope, requireScope = false) {
+  const originals = blocks.filter(block => isOriginal(block, markdown));
+  if (!requireScope && originals.length <= 1) return originals[0];
+  return originals.find(block => {
+    const index = blocks.indexOf(block), caption = blocks[index - 1]?.text ?? "";
+    const heading = blocks.slice(0, index).reverse().find(item => item.kind === "heading")?.text ?? "";
+    return wikiExampleStage(caption, heading) === stage && wikiExampleStanding(caption) === standing;
+  });
+}
 
 function isPartialOriginal(text: string, code: NonNullable<WikiKnowledgeUnit["evidence"]["code"]>) {
   if (!sourceCaption.test(text.split("\n")[0])) return false;
@@ -56,21 +74,28 @@ function isPartialOriginal(text: string, code: NonNullable<WikiKnowledgeUnit["ev
  * subsection. Keep partial replacements tied to the same source unit. */
 export function reconcileRequiredWikiSourceBlocks<T extends CoverageChapter>(chapters: T[], requirements: RequiredBlock[], zh: boolean, canUse: (unit: WikiKnowledgeUnit, chapter: T) => boolean = () => true, include: (chapterId: string) => boolean = () => true) {
   const documents = new Map(chapters.map(chapter => [chapter.id, chapter]));
-  const bindings = new Map<string, Array<{ unit: WikiKnowledgeUnit; markdown: string }>>(), issues = new Map<string, string[]>();
+  const bindings = new Map<string, Array<Omit<WikiSourceBlockBinding, "evidence">>>(), issues = new Map<string, string[]>();
   let restored = 0;
-  for (const { markdown, candidates } of requirements) {
+  const formatCounts = new Map<string, number>();
+  for (const requirement of requirements) {
+    const format = codeKey(requirement.markdown) ?? requirement.markdown;
+    formatCounts.set(format, (formatCounts.get(format) ?? 0) + 1);
+  }
+  for (const { markdown, stage, standing, candidates } of requirements) {
+    const sharedPayload = (formatCounts.get(codeKey(markdown) ?? markdown) ?? 0) > 1;
     const planned = candidates.find(candidate => candidate.homes.some(home => include(home.chapterId)));
     if (!planned) continue;
     const homes = planned.homes.filter(home => include(home.chapterId));
-    let existing: { candidate: SourceCandidate; home: Home } | undefined;
+    let existing: { candidate: SourceCandidate; home: Home; markdown:string } | undefined;
     for (const candidate of candidates) {
-      const matches = (paragraph: CoverageChapter["paragraphs"][number]) => paragraph.unitIds.includes(candidate.unit.id) && paragraph.text.trimEnd().endsWith(markdown);
       for (const chapter of documents.values()) {
-        if (!include(chapter.id) || !chapter.body.includes(markdown)) continue;
-        const paragraph = chapter.paragraphs.find(matches);
+        if (!include(chapter.id)) continue;
+        const blocks = wikiDocumentBlocks(chapter.body);
+        const displayed = findWikiSourceBlock(blocks, markdown, { stage, standing }, sharedPayload);
+        const paragraph = displayed && chapter.paragraphs.find(item => item.unitIds.includes(candidate.unit.id) && item.text.trimEnd().endsWith(displayed.text));
         const home = paragraph ? { chapterId: chapter.id, subtopic: paragraph.subtopic } : candidate.homes.find(home => home.chapterId === chapter.id);
-        if (home && canUse(candidate.unit, chapter) && wikiDocumentBlocks(chapter.body).some(block => isOriginal(block, markdown))) {
-          existing = { candidate, home };
+        if (home && displayed && canUse(candidate.unit, chapter)) {
+          existing = { candidate, home,markdown:displayed.text };
           break;
         }
       }
@@ -87,7 +112,7 @@ export function reconcileRequiredWikiSourceBlocks<T extends CoverageChapter>(cha
 
     const code = unit.evidence.code!;
     const blockStatus = status === "confirmed" && !unit.statement.includes(code.text.trim()) ? undefined : status;
-    const original = `*${wikiSourceBlockCaption(code, unit.evidence.role, zh, blockStatus)}*\n\n${markdown}`;
+    const original = `*${wikiSourceBlockCaption(code, unit.evidence.role, zh, blockStatus)}${stage ? ` · ${stage}` : ""}*\n\n${markdown}`;
     let body = chapter.body, paragraphs = chapter.paragraphs;
     if (!existing) {
       const blocks = wikiDocumentBlocks(body);
@@ -105,11 +130,13 @@ export function reconcileRequiredWikiSourceBlocks<T extends CoverageChapter>(cha
       }
       restored++;
     }
-    if (!paragraphs.some(paragraph => paragraph.unitIds.includes(unit.id) && paragraph.text.trimEnd().endsWith(markdown) && body.includes(paragraph.text))) {
-      paragraphs = [...paragraphs, { subtopic: home.subtopic, text: existing ? markdown : original, unitIds: [unit.id], claims: [] }];
+    const displayed=existing?.markdown??markdown;
+    if (!paragraphs.some(paragraph => paragraph.unitIds.includes(unit.id) && paragraph.text.trimEnd().endsWith(displayed) && body.includes(paragraph.text))) {
+      paragraphs = [...paragraphs, { subtopic: home.subtopic, text: existing ? displayed : original, unitIds: [unit.id], claims: [] }];
     }
     if (body !== chapter.body || paragraphs !== chapter.paragraphs) documents.set(chapter.id, { ...chapter, body, paragraphs });
-    bindings.set(chapter.id, [...bindings.get(chapter.id) ?? [], { unit, markdown }]);
+    const owners=candidates.filter(candidate=>canUse(candidate.unit,chapter)).map(candidate=>({unit:candidate.unit,markdown:displayed,stage,standing}));
+    bindings.set(chapter.id, [...bindings.get(chapter.id) ?? [], ...owners]);
   }
   return { chapters: [...documents.values()], bindings, issues, restored };
 }
@@ -153,9 +180,9 @@ export function projectRequiredWikiSourceBlocks(session: FocusSession, chapterId
   const evidence = new Map(session.evidence.map(ref => [ref.id, ref]));
   for (const chapter of projection.chapters) {
     const original = byId.get(chapter.id)!;
-    const bound = (projection.bindings.get(chapter.id) ?? []).flatMap(({ unit, markdown }) => {
-      const ref = refs.get(unit.id);
-      return ref ? [{ unit, markdown, evidence: ref }] : [];
+    const bound = (projection.bindings.get(chapter.id) ?? []).flatMap(binding => {
+      const ref = refs.get(binding.unit.id);
+      return ref ? [{ ...binding, evidence: ref }] : [];
     });
     if (!bound.length) continue;
     for (const item of bound) evidence.set(item.evidence.id, item.evidence);

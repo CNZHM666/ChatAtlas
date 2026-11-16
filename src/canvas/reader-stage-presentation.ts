@@ -14,6 +14,8 @@ export function readerStagePresentation() {
   return (tree: Root) => {
     tree.children.forEach((node, index) => {
       const heading = tree.children[index - 1];
+      // Acceptance cases enumerate independent checks, not a sequential journey.
+      if(heading&&/验收|测试场景|检查清单|\b(?:acceptance|test cases|checklist)\b/iu.test(label(heading)))return;
       if (node.type !== "list" || !node.ordered || node.children.length < 2 || node.children.length > 20) return;
       if (node.children.some(item => item.checked != null || item.children.length !== 1 || item.children[0].type !== "paragraph" || !label(item).trim())) return;
       // Every item opening on a short bold stage label ("**第一阶段**：…") is a plan's stages, whatever precedes it.

@@ -1,7 +1,8 @@
 import { OPEN_ZH } from "../shared/open-words";
+import {wikiScopeNamesAgree} from "../shared/wiki-scope-identity";
 import { FIRST_VERSION_EN, FIRST_VERSION_ZH, ITERATION_EN, ITERATION_ZH } from "../shared/stage-words";
 import { LEAVES_OUT, LEFT_OUT_LABEL } from "../shared/negation";
-import { knowledgeTerms } from "../shared/knowledge-subject";
+import { knowledgeStage, knowledgeTerms } from "../shared/knowledge-subject";
 import { replaceParagraph } from "../shared/wiki-body-text";
 import type { WikiDraftChapter } from "../shared/wiki-knowledge";
 
@@ -25,15 +26,15 @@ const CHAIN = /->|→|=>/u, CHAIN_STEP = /(?:->|→|=>)\s*$/u;
 const USE = /利用|集成|接入|使用|采用|引入|导出至|导出到/u, LATER = /后期|后续|之后|以后|未来|稳定后|再接入|V[2-9]/u;
 /** A list or sentence leaving items out: the verb, then the items up to 等 or the clause's end. */
 const LEFT_OUT_LIST = /(暂缓开发|暂缓|不实现|不做|不开发|不进行)[：:]?\s*([^。；;\n]{2,90}?)(?=等|[。；;\n]|$)/gu;
-/** The stage a clause speaks of: an iteration (本阶段, Milestone 3.2) or a version (V1, 第一版), by its label; V0.x and V1
- * are the first version. */
+/** Keep explicitly numbered releases distinct. Their equivalence requires
+ * source evidence, not a convention assumed by the checker. */
 /** The phase now under way, named as such rather than by number. */
 const CURRENT_ITERATION = new RegExp(`^(?:${ITERATION_ZH}|${ITERATION_EN})$`, "iu");
 const ITERATION = new RegExp(String.raw`${ITERATION_ZH}|Milestone\s*[\d.]+|里程碑\s*[\d.]+|${ITERATION_EN}`, "iu"), VERSION = new RegExp(String.raw`\bV\d+(?:\.\d+)?|${FIRST_VERSION_ZH}|\bMVP\b|正式版|${FIRST_VERSION_EN}`, "iu");
 export function stageOf(clause: string): { level: "iteration" | "version"; label: string } | undefined {
   const iteration = clause.match(ITERATION), version = clause.match(VERSION);
   if (iteration) return { level: "iteration", label: CURRENT_ITERATION.test(iteration[0]) ? "current" : iteration[0].replace(/\s+/gu, "").toLocaleLowerCase() };
-  if (version) return { level: "version", label: /第一版|首版|mvp|first (?:version|release)|^v0(?:\.\d+)?$|^v1(?:\.0)?$/iu.test(version[0]) ? "first" : version[0].toLocaleLowerCase() };
+  if (version) return { level: "version", label: /第一版|首版|first (?:version|release)/iu.test(version[0]) ? "first" : version[0].toLocaleLowerCase() };
 }
 /** The stage word a statement names ("本阶段", "Milestone 3.2", "V1"), as it is written. */
 export const stageWord = (text: string) => (text.match(ITERATION) ?? text.match(VERSION))?.[0];
@@ -43,7 +44,7 @@ const clauseAt = (text: string, at: number) => {
   return text.slice(start, rest < 0 ? text.length : at + rest);
 };
 const plain = (text: string) => text.replace(/\*\*|__/gu, "").replace(/^\s*(?:[-*+]|\d+\.)\s+/u, "").trim();
-const short = (text: string) => { const value = plain(text).replace(/[。；;]$/u, ""); return value.length <= CLAUSE_LENGTH ? value : `${value.slice(0, CLAUSE_LENGTH - 1)}…`; };
+const short = (text: string) => { const value = plain(text).replace(/[。；;]$/u, ""); return value.length <= CLAUSE_LENGTH || /→|->|=>/u.test(value) ? value : `${value.slice(0, CLAUSE_LENGTH - 1)}…`; };
 
 /** Where a part of an item stands in a clause, ignoring case: a Latin name only as a whole word. -1 when absent. */
 function nameAt(clause: string, part: string) {
@@ -76,12 +77,14 @@ export function scopeDisagreements(chapters: WikiDraftChapter[], decided: Set<st
   const noted = new Set<string>();
   for (const chapter of chapters) for (const paragraph of chapter.paragraphs) {
     const notes: string[] = [];
+    const tableHeader = paragraph.text.split("\n").find(line => /^\s*\|/u.test(line)) ?? "";
+    const tableStage = stageOf(tableHeader);
     // Left out in a scope table's row, or in a list or sentence ("暂缓开发：完整 Wiki 自动生成、3D 知识球……",
     // "不实现 Wiki、知识图谱、自动同步等所有功能"), each item on its own.
     const rows = [...paragraph.text.matchAll(/^\|([^|\n]+)\|([^|\n]+)\|/gmu)].flatMap(row => LEFT_OUT.test(row[2].trim()) ? [{ item: plain(row[1]), cell: row[2].trim(), whole: true }] : []);
     const unlisted = paragraph.text.replace(/^\|.*$/gmu, "");
     const listed = [...unlisted.matchAll(LEFT_OUT_LIST)].flatMap(match => { const stage = stageOf(clauseAt(unlisted, match.index ?? 0)); return match[2].split(/[、，,]|和|与|及|或/u).map(part => plain(part).replace(/^(?:所有|全部|完整的?)$/u, "")).filter(part => part.length >= 2 && !/功能$|^等/u.test(part)).map(item => ({ item, cell: match[1], whole: false, stage })); });
-    for (const { item, cell, whole, stage } of [...rows.map(row => ({ ...row, stage: undefined })), ...listed]) {
+    for (const { item, cell, whole, stage } of [...rows.map(row => ({ ...row, stage: tableStage })), ...listed]) {
       if (added + notes.length >= MAX_NOTES) break;
       // A long item is matched by its Latin names ("完整 Wiki 自动生成" by Wiki), a short one by itself.
       const names = item.match(/[A-Za-z][\w.+#-]*/gu)?.filter(name => name.length >= 3 && !GENERIC_NAME.test(name)) ?? [];
@@ -92,10 +95,17 @@ export function scopeDisagreements(chapters: WikiDraftChapter[], decided: Set<st
       // Or proposed elsewhere as a thing to use ("不实现 Wokwi 仿真" beside "利用 Wokwi 进行浏览器端仿真"): it reads as
       // done now unless the reader is told the first version leaves it out.
       // "不接入实时比价" says not to use it: a use word after a negation is no proposal.
-      const usesIt = (clause: string) => parts.some(part => { const at = nameAt(clause, part); const before = clause.slice(Math.max(0, at - 6), at); return at > 0 && !NEGATED_USE.test(before) && (USE.test(before.slice(-4)) || CHAIN_STEP.test(before)); });
+      const usesIt = (clause: string) => wikiScopeNamesAgree(item,clause) && parts.some(part => { const at = nameAt(clause, part); const before = clause.slice(Math.max(0, at - 6), at); return at > 0 && !NEGATED_USE.test(before) && (USE.test(before.slice(-4)) || CHAIN_STEP.test(before)); });
       // Left out of one stage, put in another, both hold: "本阶段不进行 Wokwi" beside "V1 阶段导出至 Wokwi" is a plan,
       // not a disagreement. Only clauses of the same stage, or naming none, are compared.
-      const sameStage = (clause: string) => { const theirs = stageOf(clause); return !stage || !theirs || stage.level === theirs.level && stage.label === theirs.label; };
+      const sameStage = (clause: string) => {
+        const exact = whole && knowledgeStage(tableHeader), theirsExact = knowledgeStage(clause);
+        if (exact && theirsExact && exact !== theirsExact) return false;
+        const theirs = stageOf(clause);
+        // An unnamed "first release" still warrants a scope question beside a
+        // numbered release. Two different numbered releases remain distinct.
+        return !stage || !theirs || stage.level === theirs.level && (stage.label === theirs.label||stage.label==="first"||theirs.label==="first");
+      };
       const core = whole || names.length ? "" : item.replace(NARROWING, "");
       const yours = core.length >= 2 ? confirmed.find(({ clause }) => clause.includes(core) && sameStage(clause)) : undefined;
       const found = clauses.find(({ clause }) => mentions(clause) && sameStage(clause)) ?? yours ?? (whole ? undefined : uses.find(({ clause }) => usesIt(clause) && sameStage(clause)));
@@ -134,6 +144,7 @@ export function scopeTables(chapters: WikiDraftChapter[]): number {
       const label = line.match(LABEL)?.[1]?.trim() ?? "", body = plain(line.replace(LABEL, ""));
       const match = body.match(LEFT_OUT_LINE);
       if (!match) return undefined;
+      if (/[，,]\s*(?:先(?:将|把|做|完善|完成|验证|打磨)|再(?:逐步)?|然后)/u.test(match[3])) return undefined;
       const items = match[3].replace(/^(?:涉及|包括|包含)/u, "").split(/[、，,]|以及|及|和|与/u).map(item => item.replace(/^(?:所有|全部)|等(?:功能)?$/u, "").trim()).filter(item => item.length >= 2);
       if (items.length < SCOPE_ITEMS_MIN) return undefined;
       // A line naming no stage is named by its label ("阶段禁令"), never "未注明".
@@ -145,10 +156,16 @@ export function scopeTables(chapters: WikiDraftChapter[]): number {
     });
     const found = read.flatMap(row => row ? [row] : []);
     if (found.length < SCOPE_LINES_MIN) continue;
-    const seen = new Set<string>(), cells = found.map((row, index) => {
+    const cells = found.map((row, index) => {
+      const before = found[index - 1], stage = stageOf(row.stage), previous = stageOf(before?.stage ?? "");
+      // “同上” only refers to an adjacent row with the same explicit scope.
+      const same = Boolean(before && (row.stage && itemKey(row.stage) === itemKey(before.stage)
+        || stage?.label === "current" && previous?.label === "current"));
+      const seen = new Set(same ? before.items.map(itemKey) : []);
       const fresh = row.items.filter(item => !seen.has(itemKey(item)));
-      row.items.forEach(item => seen.add(itemKey(item)));
-      return [row.stage || "其他", index === 0 ? row.items.join("、") : fresh.length ? `同上，另加 ${fresh.join("、")}` : "同上", row.keeps || "—"];
+      const inherits = same && [...seen].every(item => row.items.some(value => itemKey(value) === item));
+      const out = !inherits ? row.items.join("、") : fresh.length ? `同上，另加 ${fresh.join("、")}` : "同上";
+      return [row.stage || "其他", out, row.keeps || "—"];
     });
     // No row keeps to anything: the column of dashes goes.
     const keeping = cells.some(cell => cell[2] !== "—");

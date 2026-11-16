@@ -50,6 +50,8 @@ export interface WikiUnitBatch {
   /** The first few rejected rows, for diagnosing extraction; never read into documents. */
   rejectedSamples?: Array<{ reason: string; statement?: string; subject?: string; keys?: string; detail?: string }>;
   error?: string;
+  /** Successful halves of an incomplete extraction, reusable under the same input signature. */
+  recoveredHalves?: Array<{ index: number; units: WikiKnowledgeUnit[]; rejected: Record<string, number>; rejectedSamples?: WikiUnitBatch["rejectedSamples"] }>;
   /** The batch's own user messages that produced no unit even when asked again. */
   uncovered?: string[];
   /** The version of the sentence check this batch passed: each of the user's own sentences stating a choice
@@ -61,9 +63,13 @@ export interface WikiUnitBatch {
   /** The version of the cover check this batch passed: the user's own messages it left without a unit were read once
    * more. A reused batch without it is checked on the next run. */
   coverChecked?: number;
+  /** Per-material recovery outcomes, bound to the source text and review rules. */
+  coverage?: Record<string, { version: number; sourceSignature: string; status: "covered" | "duplicate" | "no_knowledge" | "failed" | "pending"; reason?: string; attempts: number }>;
   /** The version of the statement check this batch passed: statements saying more than their source (a stronger rule,
    * a figure, a length) were asked to be told in the source's terms once. */
   fidelityChecked?: number;
+  /** Successful statement checks survive failures of other requests in this batch. */
+  fidelityResults?: Record<string, { version: number; signature: string; remaining?: number }>;
   /** Such sentences still without a unit after that request, counted. */
   uncoveredSentences?: number;
 }
@@ -231,6 +237,8 @@ export const assistantRequest = (statement: string) => /^(?:用户)?(?:要求|�
 // is no project knowledge either: one run listed the first as a completion criterion.
 const WORKING_STEPS = /\b(?:tell|ask|instruct|remind) (?:codex|claude|chatgpt|cursor|copilot|the ai|the model|the assistant)\b|\breport back\b|\bwrite (?:a|the) prompt\b|(?:最后|并|然后|完成后|之后)(?:需|需要|应|要|请)?(?:向我)?(?:汇报|报告)(?:新|修改|实现|结果|以下|下一)|向\s*(?:Codex|Claude|ChatGPT|Cursor|Copilot|AI|模型|助手)[^。]{0,8}(?:传达|交代|说明|下达|转达)|(?:生成|写|输出|给出)一[份个篇段][^。]{0,40}(?:提示词|prompt)|说明修改结果|(?:只)?汇报测试|运行(?:现有的?)?(?:代码)?(?:检查|测试|lint|typecheck|build)[^。]{0,12}(?:说明|汇报|报告)|列出(?:发现的)?问题及|画出[^。]{0,6}数据流|请提供[^。]{0,20}(?:对照|证明|报告)|给\s*(?:Codex|Claude|ChatGPT|Cursor|Copilot|AI|Agent|模型|助手)\s*的(?:指令|提示词|prompt|任务说明|说明)|最终(?:输出|综述|文档|报告)(?:中|里)?应|综述(?:中|里)?(?:应|需)(?:优先|明确|先)?(?:展示|显示|标记|区分|写)/iu;
 export interface WikiDraftChapter {
+  /** Local editorial choices; complete originals remain in unit evidence and the Reader. */
+  sourceBlocks?: import("./wiki-block-presentation").WikiBlockAdmission[];
   id: string; title: string; question: string; group: string;
   /** Left out on purpose, not lost: a learning record's planning chapter, told in its overview instead. */
   leftOut?: "plan";
@@ -252,6 +260,12 @@ export interface WikiDraftClaim { text: string; unitIds: string[]; markOnly?: tr
 /** Three separate answers: did every request run (status), was the material complete, did the checks pass. */
 /** uncovered: the user's own messages no unit was extracted from; a warning, since some hold no project content. */
 export interface WikiDraftQuality { sources: "complete" | "partial"; failedBatches: number; uncovered?: number; organization: "complete" | "partial"; critical: number; problems: number; passed: boolean }
+/** Coverage material IDs end in message index and part index. A split message
+ * contributes one unresolved message to the document's quality summary. */
+export function wikiUncoveredMessageCount(batches: WikiUnitBatch[]) {
+  return new Set(batches.flatMap(batch => batch.uncovered ?? []).map(id =>
+    /^e:[^:]+:\d+:\d+$/u.test(id) ? id.replace(/:\d+$/u, "") : id)).size;
+}
 /** status says whether every writing request ran; quality says whether the material and the text can be relied on. */
 /** What the project is doing now, leaves out now, and counts as done, from the units the draft shows: what a reader
  * continuing the work needs first. holder: decided (the user confirmed it) or user (the user said it); none for a suggestion. */
@@ -303,7 +317,7 @@ export function scopedWikiDraft(source: WikiKnowledgeLedger): WikiUnitDraft | un
   return { ...draft, status: "partial", chapters, baseline, report: { ...draft.report, scope_filtered: filtered }, ...(draft.quality ? { quality: { ...draft.quality, passed: false } } : {}) };
 }
 /** A local check failure that makes a claim unreliable: a borrowed decision, a wrong holder, a number or change no source states. */
-export const CRITICAL_PROBLEM = /says 已决定|borrows|credits the user|states as decided|numbers its units do not state|states the range|drops the negation of|drops a source condition|done what only|tells a change|has no claim|claim .* not in the paragraph|has no supported source|changes the counted object|could not be written|a project you left out|you confirmed is not written|required source block is missing/u;
+export const CRITICAL_PROBLEM = /says 已决定|borrows|credits the user|states as decided|(?:numbers|identifiers) its units do not state|states the range|drops the negation of|drops a source condition|done what only|tells a change|has no claim|claim .* not in the paragraph|has no supported source|has incomplete generated prose|changes the counted object|could not be written|a project you left out|you confirmed is not written|required source block is missing/u;
 
 /** ChatGPT's inline markers, kept by its export: U+E200 kind U+E202 argument … U+E201. A link (url, entity)
  * reads as its name; a search citation or any other marker says nothing to a reader and goes. */
@@ -472,6 +486,7 @@ export interface WikiKnowledgeOrganization {
   layoutSignature?: string;
   layoutContext?: true;
   unitSignatures?: Record<string, string>;
+  fitSignatures?: Record<string, string>;
   status: "complete" | "partial";
   subjects: WikiSubject[];
   /** Same-statement units folded into one; the kept unit carries the union of details. */
@@ -490,6 +505,8 @@ export interface WikiKnowledgeOrganization {
   /** Version chains: points from any subject that settle one thing, which of them holds now, which came before and
    * whether the discussion left it open. Absent on older ledgers, where relations alone tell versions apart. */
   topics?: WikiTopicChain[];
+  /** Successful version checks, keyed by their exact model input. */
+  topicChecks?: Record<string, WikiTopicChain[]>;
   /** Points the chapter check found misplaced without being sure where they go: left where they are, for the user. */
   placementDoubts?: WikiPlacementDoubt[];
   /** Request counts and local repairs, for diagnostics. */
@@ -662,6 +679,8 @@ export function statesCore(core: string, sentence: string) {
 const conditionKey = (text: string) => detailKey(text.replace(/[*`]/gu, "").trim().replace(/[，,。.;；:：]+$/u, ""));
 const CONDITION_PREFIX = /^(?:如果|假如|若(?!干)|倘若|只要|只有|仅当|除非|一旦|待(?=.{2,70}(?:后|通过|验证))|if\b|only if\b|unless\b|provided that\b|as long as\b|once\b)/iu;
 const CONDITION_LIMIT = /^(?:仅限|仅适用|只适用|限于|only (?:for|in|on)\b|limited to\b)/iu;
+const CONDITION_SENTENCE = /(?<=[。！？.!?])(?=\s|\p{Script=Han})|\n/u;
+const CONDITION_BOUNDARY = /[；;]|[，,]\s*(?:(?:但(?:是)?|不过|然而|另一方面|另(?:外|行)|无论|不论)|(?:but|however|separately|regardless)\b)/iu;
 function conditionClaimMatches(statement: string, said: string) {
   const own = conditionKey(statement), candidate = conditionKey(said);
   if (!own || !candidate) return false;
@@ -675,17 +694,27 @@ function conditionClaimMatches(statement: string, said: string) {
  * same sentence states the unit. Never borrow a condition from a nearby sentence. */
 export function wikiUnitConditions(unit: WikiKnowledgeUnit): string[] {
   const quote = unit.evidence.quote;
-  const validated = (unit.conditions ?? []).filter(condition => {
-    const key = conditionKey(condition);
-    return key && conditionKey(quote).includes(key);
-  });
-  if (validated.length) return [...new Map(validated.map(condition => [conditionKey(condition), condition])).values()];
-  return quote.split(/(?<=[。！？.!?])(?=\s|\p{Script=Han})|\n/u).flatMap(line => {
+  const scoped = new Map<string, { condition: string; applies: boolean }>();
+  for (const line of quote.split(CONDITION_SENTENCE)) {
     const value = line.trim().replace(/^(?:[>\-*]+\s*)+/u, "");
     const match = value.match(/^([^，,。！？!?]{3,100})[，,]\s*(.+)$/u);
-    if (!match || !(CONDITION_PREFIX.test(match[1]) || CONDITION_LIMIT.test(match[1])) || !conditionClaimMatches(unit.statement, match[2])) return [];
-    return [match[1]];
-  }).slice(0, 2);
+    if (!match || !(CONDITION_PREFIX.test(match[1]) || CONDITION_LIMIT.test(match[1]))) continue;
+    const [governed, ...independent] = match[2].split(CONDITION_BOUNDARY);
+    const applies = conditionClaimMatches(unit.statement, governed);
+    const key = conditionKey(match[1]), prior = scoped.get(key);
+    // An independently stated constraint after a contrast keeps its own scope.
+    // Keep explicit qualifiers in less structured quotes when we cannot separate their clauses.
+    if (applies || independent.some(clause => conditionClaimMatches(unit.statement, clause)) || !conditionClaimMatches(unit.statement, match[2])) {
+      scoped.set(key, { condition: match[1], applies: applies || Boolean(prior?.applies) });
+    }
+  }
+  const raw = unit.conditions?.length ? conditionKey(quote) : "";
+  const validated = (unit.conditions ?? []).filter(condition => {
+    const key = conditionKey(condition);
+    return key && raw.includes(key) && scoped.get(key)?.applies !== false;
+  });
+  if (validated.length) return [...new Map(validated.map(condition => [conditionKey(condition), condition])).values()];
+  return [...scoped.values()].filter(item => item.applies).slice(0, 2).map(item => item.condition);
 }
 export function missingWikiConditions(unit: WikiKnowledgeUnit, text: string): string[] {
   const key = conditionKey(text);

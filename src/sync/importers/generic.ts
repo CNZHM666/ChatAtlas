@@ -1,4 +1,8 @@
 import { sourceMessageSignature } from "../../shared/source-signature";
+import { importedImage } from "../../shared/conversation-images";
+import { importUIPart } from "../../shared/import-ui-part";
+import type { ConversationMessage } from "../../shared/types";
+import { TOOL_PART_TYPES } from "../../shared/tool-traffic";
 import { platformFromLabel } from "../../shared/platforms";
 import { baseConversation, captureFromDrafts, importRevision, isRecord, sourceTimestamp, type DraftMessage, type PlatformImporter } from "./types";
 
@@ -16,14 +20,19 @@ function role(value: unknown): "user" | "assistant" | undefined {
   return USER_ROLES.test(label) ? "user" : ASSISTANT_ROLES.test(label) ? "assistant" : undefined;
 }
 
-function contentText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map(contentText).filter(Boolean).join("\n\n");
+function contentText(value: unknown, uiParts: NonNullable<ConversationMessage["uiParts"]>, cursor = { ordinal: 0 }): string {
+  if (typeof value === "string") { cursor.ordinal += value.split("【原平台交互内容】").length - 1; return value; }
+  if (Array.isArray(value)) return value.map(item => contentText(item, uiParts, cursor)).filter(Boolean).join("\n\n");
   if (!isRecord(value)) return "";
+  if (TOOL_PART_TYPES.has(String(value.type))) return "";
+  const image = importedImage(value);
+  if (image) return image;
+  const ui = importUIPart(value, uiParts, cursor.ordinal);
+  if (ui) { cursor.ordinal++; return ui; }
   if (typeof value.text === "string") return value.text;
   if (isRecord(value.text) && typeof value.text.value === "string") return value.text.value;
-  if (Array.isArray(value.parts)) return contentText(value.parts);
-  return typeof value.content === "string" || Array.isArray(value.content) ? contentText(value.content) : "";
+  if (Array.isArray(value.parts)) return contentText(value.parts, uiParts, cursor);
+  return typeof value.content === "string" || Array.isArray(value.content) ? contentText(value.content, uiParts, cursor) : "";
 }
 
 function genericMessage(value: unknown): DraftMessage | undefined {
@@ -31,8 +40,9 @@ function genericMessage(value: unknown): DraftMessage | undefined {
   const author = isRecord(value.author) ? value.author.role ?? value.author.name : value.author;
   const sender = isRecord(value.sender) ? value.sender.role ?? value.sender.name : value.sender;
   const speaker = role(value.role ?? author ?? sender ?? value.from ?? value.speaker ?? value.type);
-  const text = contentText(value.content ?? value.text ?? value.message ?? value.body ?? value.parts);
-  return speaker && text.trim() ? { ...(typeof value.id === "string" ? { id: value.id } : {}), role: speaker, content: text, createdAt: sourceTimestamp(value.created_at ?? value.createdAt ?? value.create_time ?? value.timestamp ?? value.time) } : undefined;
+  const uiParts: NonNullable<ConversationMessage["uiParts"]> = [];
+  const text = contentText(value.content ?? value.text ?? value.message ?? value.body ?? value.parts, uiParts);
+  return speaker && text.trim() ? { ...(typeof value.id === "string" ? { id: value.id } : {}), role: speaker, content: text, ...(uiParts.length ? { uiParts } : {}), createdAt: sourceTimestamp(value.created_at ?? value.createdAt ?? value.create_time ?? value.timestamp ?? value.time) } : undefined;
 }
 
 const messageList = (value: Record<string, unknown>) => [value.messages, value.chat_messages, value.conversation, value.turns, value.history, value.chatHistory].find(Array.isArray) as unknown[] | undefined;

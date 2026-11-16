@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readExportRecords, readExportZip, readImportRecords } from "./zip-import";
 import { importerFor } from "./importers";
 
-function zipWithStoredEntries(entries: Array<[string, string]>): File {
+function zipWithStoredEntries(entries: Array<[string, string | Uint8Array]>): File {
   const encoder = new TextEncoder();
-  const encoded = entries.map(([name, json]) => ({ filename: encoder.encode(name), data: encoder.encode(json) }));
+  const encoded = entries.map(([name, json]) => ({ filename: encoder.encode(name), data: typeof json === "string" ? encoder.encode(json) : json }));
   const localLength = encoded.reduce((length, entry) => length + 30 + entry.filename.length + entry.data.length, 0);
   const centralLength = encoded.reduce((length, entry) => length + 46 + entry.filename.length, 0);
   const bytes = new Uint8Array(localLength + centralLength + 22);
@@ -39,6 +39,21 @@ function zipWithStoredEntries(entries: Array<[string, string]>): File {
 function zipWithStoredJson(name: string, json: string): File { return zipWithStoredEntries([[name, json]]); }
 
 describe("ChatGPT export ZIP", () => {
+  it("imports uploaded and generated image files even when the images follow conversations.json", async () => {
+    const file = zipWithStoredEntries([
+      ["conversations.json", JSON.stringify([{ id: "photos", current_node: "a", mapping: {
+        u: { parent: null, message: { id: "u", author: { role: "user" }, content: { parts: [{ content_type: "image_asset_pointer", asset_pointer: "sediment://file-upload" }] } } },
+        a: { parent: "u", message: { id: "a", author: { role: "assistant" }, content: { parts: [{ content_type: "image_asset_pointer", asset_pointer: "file-service://file-generated" }] } } },
+      } }])],
+      ["images/file-upload-photo.png", new Uint8Array([1, 2, 3])],
+      ["images/file-generated.png", new Uint8Array([4, 5, 6])],
+    ]);
+    const captures = [];
+    for await (const capture of readExportZip(file)) captures.push(capture);
+    expect(captures[0].messages).toHaveLength(2);
+    expect(captures[0].imageAssets).toHaveLength(2);
+    expect(captures[0].messages.every(message => message.content.includes("atlas-image:sha256-"))).toBe(true);
+  });
   it("imports a stored conversations.json file", async () => {
     const file = zipWithStoredJson("conversations.json", JSON.stringify([{ id: "zip-1", title: "From ZIP", current_node: "m1", mapping: { m1: { id: "m1", parent: null, message: { id: "m1", author: { role: "user" }, content: { parts: ["Hello ZIP"] } } } } }]));
     const captures = [];

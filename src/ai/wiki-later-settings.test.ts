@@ -35,6 +35,12 @@ it("keeps apart settings of two screens, two parts, the same value, and the user
   expect(replaced([proposed, later])).toEqual([[proposed.id, later.id, "replaces"]]);
 });
 
+it("keeps proposals for the same setting in explicitly different versions", () => {
+  const first = unit(1, "Welcome Screen", "V0.1 首页输入框宽约 460~500px。");
+  const later = unit(2, "Welcome Screen", "V1 首页输入框宽约 620~660px。");
+  expect(replaced([first, later])).toEqual([]);
+});
+
 it("replaces an earlier palette of one theme and a small screen served only in part", () => {
   const first = unit(24, "Dark Mode", "Dark 主背景 #0D0D0D，面板 #161616。"), second = unit(101, "Dark Mode", "Dark 背景色 #101011，面板 #151516。");
   const same = unit(120, "Dark Mode", "Dark 背景色 #101011，边框 #27272A。");

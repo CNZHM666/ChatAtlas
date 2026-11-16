@@ -1,8 +1,7 @@
 import type { ProjectAnalysisTarget } from "./project-analysis-csv";
 import type { ProjectAnalysisResponse } from "./project-analysis-worker";
 
-export async function projectAnalysisInBackground({ runId, sourceConversationIds }: ProjectAnalysisTarget): Promise<string | undefined> {
-  const target = { runId, sourceConversationIds };
+export async function projectAnalysisInBackground(target: ProjectAnalysisTarget): Promise<string | undefined> {
   const fallback = async () => (await import("./project-analysis-csv")).projectAnalysisCsv(target);
   if (typeof Worker === "undefined") return fallback();
   let worker: Worker;

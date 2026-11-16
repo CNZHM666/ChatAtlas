@@ -1,3 +1,5 @@
+import {wikiArticleLayout} from "./wiki-article-layout";
+import {wikiSupplementRanges} from "./wiki-source-supplements";
 import {unified} from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
@@ -83,10 +85,12 @@ const COMMENTARY_SENTENCE=/^(?:这(?:种|一|些|样|个)|此举|该(?:设计|�
 export function readingEmphasisMarkdown(body:string,options:ReaderHighlights):string{
  if(options.userEdited||options.origin==="user")return body;
  const preferred:string[]=[];
+ const protectedRanges=wikiSupplementRanges(body);
  if(options.sectioned){
   const changes:Array<{start:number;end:number;text:string}>=[];
   const quoted=[...body.matchAll(/“[^”]*”|「[^」]*」|『[^』]*』|‘[^’]*’|'[^'\n]*'|"[^"\n]*"/gu)].map(match=>({start:match.index!,end:match.index!+match[0].length}));
   const clean=(node:import("mdast").RootContent)=>{
+   if(node.position&&protectedRanges.some(([start,end])=>node.position!.start.offset!>=start&&node.position!.end.offset!<=end))return;
    if(node.type==="blockquote"||node.type==="code"||node.type==="table")return;
    if(node.type==="paragraph")for(const [index,child] of node.children.entries()){
     if(child.type!=="strong"||!child.position)continue;
@@ -108,12 +112,13 @@ export function readingEmphasisMarkdown(body:string,options:ReaderHighlights):st
  const ranges:Array<{start:number;end:number}>=[];
  readerGuideHighlights({...options,phrases:[...options.phrases??[],...preferred],enabled:true,onHighlight:(start,end)=>ranges.push({start,end})})(emphasisParser.parse(body),{value:body} as VFile);
  for(const {start,end} of ranges.sort((a,b)=>b.start-a.start))body=body.slice(0,start)+"**"+body.slice(start,end)+"**"+body.slice(end);
- return body;
+ return options.sectioned?wikiArticleLayout(body):body;
 }
 /** One short, literal conclusion per substantial topic. Unsafe qualifications
  * are skipped rather than expanded into a whole sentence. */
 function highlightSections(tree:Root,file:VFile|undefined,phrases:string[],onHighlight?:ReaderHighlights["onHighlight"]){
  const source=file?String(file.value):undefined;
+ const protectedRanges=source?wikiSupplementRanges(source):[];
  const quotations=source?[...source.matchAll(/“[^”]*”|「[^」]*」|『[^』]*』|‘[^’]*’|'[^'\n]*'|"[^"\n]*"/gu)].map(match=>({start:match.index!,end:match.index!+match[0].length})):[];
  const textOf=(node:{type:string;value?:string;children?:unknown[]}):string=>node.value??(node.children??[]).map(child=>textOf(child as typeof node)).join("");
  // A clause cut at a comma inside brackets or quotes would bold half a parenthesis.
@@ -127,6 +132,7 @@ function highlightSections(tree:Root,file:VFile|undefined,phrases:string[],onHig
  const candidates=[...new Set(phrases.map(sourceQuoteText).flatMap(clauses).map(unattributed).filter(short))],seen=new Set<string>();
  const sections:Paragraph[][]=[];let started=false;
  for(const node of tree.children){
+  if(node.position&&protectedRanges.some(([start,end])=>node.position!.start.offset!>=start&&node.position!.end.offset!<=end))continue;
   // Ledger chapters open straight into their subtopics (###), with no level-2 heading.
   if(node.type==="heading"&&(node.depth===2||node.depth===3))started=true;
   if(started&&node.type==="heading"&&(node.depth===2||node.depth===3))sections.push([]);

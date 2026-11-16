@@ -1,8 +1,9 @@
 import type { WikiDraftChapter, WikiKnowledgeUnit } from "./wiki-knowledge";
 import { removeParagraph, replaceParagraph } from "./wiki-body-text";
 import { knowledgeTerms } from "./knowledge-subject";
-import { wikiSaidLater } from "./wiki-sources";
+import { wikiExampleDisplayKey, wikiExampleKey, wikiExampleStage, wikiExampleStanding } from "./wiki-example-identity";
 import { wikiDocumentBlocks } from "./wiki-document-blocks";
+import { plainBlockLayout } from "./wiki-plain-block";
 
 /** A block of a message shown as written: a fenced block with its language, or a Markdown table (language "table"). */
 export interface WikiSourceCode { language: string; text: string }
@@ -100,8 +101,8 @@ export const isSourceCaption = (text: string, next: { type: string; text: string
  * stays. Read from the block itself, so documents saved before get it too. */
 const ZH_WHOSE: Record<string, string> = { "你确认的": "你确认", "你提供的": "你提供", "AI 建议，未确认": "AI 建议", "早期版本，已被替换": "早期方案，已被替换" };
 const EN_WHOSE: Record<string, string> = { "confirmed by you": "confirmed by you", "provided by you": "provided by you", "AI suggestion, not confirmed": "AI suggestion", "earlier version, since replaced": "earlier version, since replaced" };
-const ZH_CAPTION = /^\*讨论中的原文(表格|代码) · (你确认的|你提供的|AI\s*建议，未确认|早期版本，已被替换)(?:；你随后的决定优先：([^*\n]+))?\*$/u;
-const EN_CAPTION = /^\*(Table|Code) from the discussion · (confirmed by you|provided by you|AI suggestion, not confirmed|earlier version, since replaced)(?:; your later decision takes precedence: ([^*\n]+))?\*$/u;
+const ZH_CAPTION = /^\*讨论中的原文(表格|代码) · (你确认的|你提供的|AI\s*建议，未确认|早期版本，已被替换)(?: · ([^*\n；]+))?(?:；你随后的决定优先：([^*\n]+))?\*$/u;
+const EN_CAPTION = /^\*(Table|Code) from the discussion · (confirmed by you|provided by you|AI suggestion, not confirmed|earlier version, since replaced)(?: · ([^*\n;]+))?(?:; your later decision takes precedence: ([^*\n]+))?\*$/u;
 /** A caption as an earlier version showed it: what the block is, the section, whose it is, and a later decision. */
 const SHOWN_CAPTION = /^\*(对照表|命令|数据结构|代码示例|代码|界面草图|规则逻辑|事件清单|目录结构|提示词|计算规则|示例数据|界面文案|流程|对照|清单|Table|Commands|Data structure|Code example|Code|UI sketch|Rules|Event list|File layout|Prompt|Scoring|Sample data|UI copy|Flow|Mapping|List)(?: · ([^*·\n]+))? · (AI\s*建议|AI suggestion|你确认|你提供|confirmed by you|provided by you|早期方案，已被替换|earlier version, since replaced)((?: · (?:以你后来的决定为准：|your later decision holds: )[^*\n]+)?)\*$/u;
 /** The block after a caption line: a fence with its language, or a table. */
@@ -144,24 +145,28 @@ export function withoutPlaceholderFences(text: string): string {
   return kept.join("\n");
 }
 
-export function readableSourceCaptions(body: string): string {
+export function readableSourceCaptions(body: string, keepFlowStatus = false): string {
   const lines = body.split("\n");
   return lines.map((line, index) => {
     const zh = line.match(ZH_CAPTION), match = zh ?? line.match(EN_CAPTION);
+    if (keepFlowStatus && (match || SHOWN_CAPTION.test(line))) {
+      const block = blockAfter(lines, index);
+      if (block && PLAIN_BLOCK.test(block.language) && plainBlockLayout(block.text)?.kind === "flow") return line;
+    }
     if (!match) {
       // A chapter edited by hand keeps the caption as it was shown then ("*流程 · 战略方向 · AI 建议*"): shown the same
       // way as the rest, with the section and the AI holder dropped.
       const shown = line.match(SHOWN_CAPTION);
       if (!shown || !blockAfter(lines, index)) return line;
-      const [, what, , whose, later] = shown, kept = /^AI(?:\s|$)/u.test(whose ?? "") ? "" : whose;
-      return `*${[what, kept].filter(Boolean).join(" · ")}${later ?? ""}*`;
+      const [, what, context, whose, later] = shown, kept = /^AI(?:\s|$)/u.test(whose ?? "") ? "" : whose;
+      return `*${[what, wikiExampleStage(context ?? ""), kept].filter(Boolean).join(" · ")}${later ?? ""}*`;
     }
-    const [, kind, whose, later] = match, block = blockAfter(lines, index);
+    const [, kind, whose, stage, later] = match, block = blockAfter(lines, index);
     const what = block ? blockKind(block, Boolean(zh)) : zh ? kind === "表格" ? "对照表" : "代码" : kind.toLowerCase();
     const label = zh ? ZH_WHOSE[whose.replace(/^AI\s*/u, "AI ")] : EN_WHOSE[whose];
     // Only what the block is: its section is the heading right above, and a block with no holder is AI's, as the
     // document's legend says of every unmarked line. Who holds it is named only when that is news (you, or replaced).
-    const parts = [zh ? what : what[0].toUpperCase() + what.slice(1), /^AI(?:\s|$)/u.test(label) ? "" : label].filter(Boolean);
+    const parts = [zh ? what : what[0].toUpperCase() + what.slice(1), stage, /^AI(?:\s|$)/u.test(label) ? "" : label].filter(Boolean);
     return `*${parts.join(" · ")}${later ? zh ? ` · 以你后来的决定为准：${later.trim()}` : ` · your later decision holds: ${later.trim()}` : ""}*`;
   }).join("\n");
 }
@@ -244,18 +249,6 @@ function showsItsPoint(code: WikiSourceCode, owners: WikiKnowledgeUnit[], carrie
   return elsewhere < RESTATED * words.size;
 }
 
-/** The share of a sketch's words a later sketch says, past which they draw one screen. */
-const SAME_SCREEN = .5;
-/** The text pieces a sketch shows, frames and buttons left out: each line cut at wide gaps and bars. Two versions of one
- * screen keep some ("晚上好，卡夫卡", "不导 · 今日守护", "主要诱因：独处、熬夜、短视频") however much else changed: four
- * versions of one home page, sharing too few words, all stood in one record. */
-const sketchPieces = (text: string) => new Set(text.split("\n").flatMap(line => line.replace(/[┌┐└┘│─├┤┬┴┼╭╮╰╯━┃]/gu, " ").split(/\s{2,}|[｜|]/u)).map(piece => piece.trim().replace(/\s+/gu, " ")).filter(piece => piece.length >= 4 && !/^\[[^\]]*\]$/u.test(piece) && /\p{L}/u.test(piece)));
-const sameScreen = (a: string, b: string) => {
-  const pieces = sketchPieces(b);
-  if ([...sketchPieces(a)].filter(piece => pieces.has(piece)).length >= 2) return true;
-  const words = blockWords(a), theirs = blockWords(b);
-  return words.size >= 4 && theirs.size >= 4 && sharedWords(words, b) >= SAME_SCREEN * Math.min(words.size, theirs.size);
-};
 /** A table row naming at least FIELD_ROW_MIN identifiers, FIELD_ROW_SAID of them the structure's own, lists its fields. */
 const FIELD_ROW_MIN = 5, FIELD_ROW_SAID = .7, IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]+/gu;
 /** A line naming at least FIELD_ROW_MIN identifiers, FIELD_ROW_SAID of them the structure's own. */
@@ -528,28 +521,42 @@ export const saysOfBlock = (unit: WikiKnowledgeUnit) => { const block = cellTerm
 const BLOCK_SAID = 3;
 /** A block's words cell by cell: read whole, a table's pipes and backticks ran its cells into one word. */
 const cellTerms = (text: string) => knowledgeTerms(text.replace(/[|`\n]/gu, " "));
+export function wikiSourceExampleScope(unit: WikiKnowledgeUnit, status?: string) {
+  const code = unit.evidence.code;
+  const stage = wikiExampleStage(unit.evidence.section ?? "", saysOfBlock(unit) ? unit.statement : "");
+  const blockStatus = status === "confirmed" && code && !unit.statement.includes(code.text.trim()) ? undefined : status;
+  const standing = code ? wikiExampleStanding(wikiSourceBlockCaption(code, unit.evidence.role, true, blockStatus)) : "discussion";
+  return { stage, standing };
+}
+
 /** Each code block or table the cited units carry, shown once in the whole document, as written, after the first
  * paragraph that cites it, under a line saying whose it is: a file tree, schema or property table retold in prose loses
  * what it shows. After every pass over sentences, which would split, punctuate or drop its lines. */
-export function placedSourceCode(chapters: WikiDraftChapter[], unitOf: (id: string) => WikiKnowledgeUnit | undefined, statusOf: (id: string) => string | undefined, zh: boolean, carriers: WikiKnowledgeUnit[] = [], learning = false): number {
-  const shown = new Set<string>();
+export function placedSourceCode(chapters: WikiDraftChapter[], unitOf: (id: string) => WikiKnowledgeUnit | undefined, statusOf: (id: string) => string | undefined, zh: boolean, carriers: WikiKnowledgeUnit[] = [], learning = false, admit?: (code: WikiSourceCode, units: WikiKnowledgeUnit[], context: string) => boolean): number {
+  const shown = new Map<string, WikiDraftChapter["paragraphs"][number]>();
+  const keyOf = (unit: WikiKnowledgeUnit, code: WikiSourceCode) => {
+    const { stage, standing } = wikiSourceExampleScope(unit, statusOf(unit.id));
+    return wikiExampleDisplayKey(code, stage, standing);
+  };
   let placed = 0;
   if (learning) for (const chapter of chapters) splitExampleLists(chapter, unitOf);
   const cited = new Set(chapters.flatMap(chapter => chapter.paragraphs.flatMap(paragraph => paragraph.unitIds)));
   /** The line over a block: whose it is, and a later decision of the user's that holds over it. */
-  const captionOf = (key: string, code: WikiSourceCode, unitIds: string[], topic = "") => {
+  const captionOf = (code: WikiSourceCode, unitIds: string[], topic = "") => {
     const units = unitIds.flatMap(id => unitOf(id) ?? []);
     // An earlier version, since replaced: the radius scale of 12/16/24px read as a current suggestion beside the
     // confirmed 8px.
     // Every unit carrying the block counts, cited here or not: one run cited the scale only through "a restrained radius
     // scale defined by tokens", while the unit giving its 16px cards and 24px dialogs had been replaced.
-    const sharing = carriers.filter(unit => unit.evidence.code && `${unit.evidence.code.language}\n${unit.evidence.code.text}` === key);
+    const stage = units.length ? wikiSourceExampleScope(units[0]).stage : "";
+    const sharing = carriers.filter(unit => unit.evidence.code && wikiExampleKey(unit.evidence.code) === wikiExampleKey(code)
+      && wikiSourceExampleScope(unit).stage === stage);
     const replaced = unitIds.every(id => statusOf(id) === "history")
       || sharing.some(unit => statusOf(unit.id) === "history" && saysOfBlock(unit)) && ![...sharing.map(unit => unit.id), ...unitIds].some(id => statusOf(id) === "confirmed")
       // A current point speaking of the block keeps it current: the Codex prompt stood under 「交付给Codex时需明确要求组件化、
       // 数据驱动」 and was captioned replaced for an older plan in the same message.
         && !sharing.some(unit => statusOf(unit.id) !== "history" && saysOfBlock(unit));
-    const whose = unitIds.every(id => statusOf(id) === "confirmed") ? (zh ? "你确认的" : "confirmed by you")
+    const whose = units.every(unit => wikiSourceExampleScope(unit, statusOf(unit.id)).standing === "confirmed") ? (zh ? "你确认的" : "confirmed by you")
       : replaced ? (zh ? "早期版本，已被替换" : "earlier version, since replaced")
       : units.every(unit => unit.evidence.role === "user") ? (zh ? "你提供的" : "provided by you")
       : (zh ? "AI 建议，未确认" : "AI suggestion, not confirmed");
@@ -568,25 +575,9 @@ export function placedSourceCode(chapters: WikiDraftChapter[], unitOf: (id: stri
       const whoseNote = mine ? zh ? "（你写的）" : " (yours)" : replaced ? zh ? "（早期写法，已被替换）" : " (earlier version, since replaced)" : "";
       return `${what}${whoseNote}${overridden}`;
     }
-    return zh ? `讨论中的原文${table ? "表格" : "代码"} · ${whose}${overridden}` : `${table ? "Table" : "Code"} from the discussion · ${whose}${overridden}`;
+    const label = stage ? `${whose} · ${stage}` : whose;
+    return zh ? `讨论中的原文${table ? "表格" : "代码"} · ${label}${overridden}` : `${table ? "Table" : "Code"} from the discussion · ${label}${overridden}`;
   };
-  // A screen drawn again later in the discussion shows only its last version: one record repeated the 首页 mockup three
-  // times, each a little different, the first one a scheme the user had since dropped. Two sketches are one screen when
-  // most of the smaller one's words are the larger one's.
-  const sketches = new Map<string, WikiKnowledgeUnit>();
-  if (!learning) for (const chapter of chapters) for (const paragraph of chapter.paragraphs) for (const id of paragraph.unitIds) {
-    const unit = unitOf(id), code = unit?.evidence.code;
-    if (!unit || !code || blockKind(code, true) !== "界面草图") continue;
-    const key = `${code.language}\n${code.text}`, known = sketches.get(key);
-    if (!known || wikiSaidLater(unit, known)) sketches.set(key, unit);
-  }
-  const outdated = new Set<string>();
-  for (const [key, unit] of sketches) {
-    for (const [other, later] of sketches) {
-      if (other === key || !wikiSaidLater(later, unit)) continue;
-      if (sameScreen(unit.evidence.code!.text, later.evidence.code!.text)) { outdated.add(key); break; }
-    }
-  }
   // A block the writer copied into the text as it stands gets the same line: one run copied the AI's milestone table
   // naming "configurable currency" without it, and the table read as the plan beside the USD-only decision.
   for (const chapter of chapters) for (const paragraph of chapter.paragraphs) {
@@ -594,10 +585,10 @@ export function placedSourceCode(chapters: WikiDraftChapter[], unitOf: (id: stri
     const own = paragraph.text.trim();
     const sharing = carriers.filter(unit => unit.evidence.code?.language === TABLE && unit.evidence.code.text.trim() === own);
     if (!sharing.length || !chapter.body.includes(paragraph.text)) continue;
-    const code = sharing[0].evidence.code!, key = `${code.language}\n${code.text}`;
+    const code = sharing[0].evidence.code!, key = keyOf(sharing[0], code);
     if (shown.has(key)) continue;
-    shown.add(key);
-    const text = `*${captionOf(key, code, sharing.map(unit => unit.id), topicOf(paragraph, chapter.title))}*\n\n${paragraph.text}`;
+    shown.set(key, paragraph);
+    const text = `*${captionOf(code, sharing.map(unit => unit.id), topicOf(paragraph, chapter.title))}*\n\n${paragraph.text}`;
     chapter.body = replaceParagraph(chapter.body, paragraph.text, () => text);
     paragraph.text = text;
     placed++;
@@ -608,14 +599,17 @@ export function placedSourceCode(chapters: WikiDraftChapter[], unitOf: (id: stri
       if (isSourceCodeParagraph(paragraph.text) || !chapter.body.includes(paragraph.text)) continue;
       const blocks = new Map<string, { code: WikiSourceCode; unitIds: string[] }>();
       for (const id of paragraph.unitIds) {
-        const code = unitOf(id)?.evidence.code;
+        const unit = unitOf(id), code = unit?.evidence.code;
         // Saved before replies were told from code: shown, the whole answer read as a block of source. In a learning
         // record a line too short to show anything ("print(scores)", "tests/", "Normal") is a fragment, not an example.
         // In a project record a lone expression ("urgeLevel === 'severe'") shows nothing either; a one-line command stays.
-        if (!code || readsAsProse(code) || learning && (fragment(code) || !showsItsPoint(code, [unitOf(id)!], carriers)) || !learning && fragment(code) && blockKind(code, true) === "代码示例" && loneExpression(code.text)) continue;
-        const key = `${code.language}\n${code.text}`;
-        // Shown already, or written into the text by the writer itself.
-        if (shown.has(key) || outdated.has(key) || chapters.some(other => other.body.includes(code.text))) continue;
+        if (!unit || !code || readsAsProse(code) || learning && (fragment(code) || !showsItsPoint(code, [unitOf(id)!], carriers)) || !learning && fragment(code) && blockKind(code, true) === "代码示例" && loneExpression(code.text)) continue;
+        const key = keyOf(unit, code), prior = shown.get(key);
+        if (prior) {
+          if (!prior.unitIds.includes(id)) prior.unitIds = [...prior.unitIds, id];
+          continue;
+        }
+        if (learning && chapters.some(other => other.body.includes(code.text))) continue;
         // A plain list the paragraph above already says, item for item, shows nothing new.
         if (!learning && restates(code, paragraph.text)) continue;
         // A block another cited point of its message shows far better is that point's: a quote running through the
@@ -625,13 +619,19 @@ export function placedSourceCode(chapters: WikiDraftChapter[], unitOf: (id: stri
       }
       let after = paragraph.text;
       for (const [key, block] of blocks) {
-        shown.add(key);
+        const owners = block.unitIds.flatMap(id => unitOf(id) ?? []);
+        if (admit && !owners.some(isRequiredWikiSourceBlock)) {
+          const context = chapter.paragraphs.filter(item => item.subtopic === paragraph.subtopic && !isSourceCodeParagraph(item.text)).map(item => item.text).join("\n\n");
+          if (!admit(block.code, owners, context)) continue;
+        }
         const table = block.code.language === TABLE;
         // In a learning record, a block under a sentence (not a labelled list item) is named for its own point: a dozen
         // blocks under one subtopic were all "「路线与节奏」的清单".
         const point = learning && !LABELLED.test(paragraph.text) ? unitOf(block.unitIds[0])?.subject.trim() : undefined;
-        const text = `*${captionOf(key, block.code, block.unitIds, point || topicOf(paragraph, chapter.title))}*\n\n${wikiSourceBlockMarkdown(block.code)}`;
-        chapter.paragraphs.splice(index + 1, 0, { subtopic: paragraph.subtopic, text, unitIds: block.unitIds, claims: [] });
+        const text = `*${captionOf(block.code, block.unitIds, point || topicOf(paragraph, chapter.title))}*\n\n${wikiSourceBlockMarkdown(block.code)}`;
+        const placedBlock = { subtopic: paragraph.subtopic, text, unitIds: block.unitIds, claims: [] };
+        shown.set(key, placedBlock);
+        chapter.paragraphs.splice(index + 1, 0, placedBlock);
         // A row the writer made of a structure's fields ("| 数据结构 | 包含id、userId、source……")
         // says again what the structure shows, worse: the row goes.
         if (!table && /^(?:数据结构|代码示例)$/u.test(blockKind(block.code, true))) for (const other of chapter.paragraphs) {
@@ -675,7 +675,8 @@ export function currentCaptions(text: string, units: WikiKnowledgeUnit[], status
     if (!block) return line;
     const said = cellTerms(block.text);
     if (!said.size) return line;
-    const carriers = units.filter(unit => unit.evidence.code && (() => { const own = cellTerms(unit.evidence.code!.text); return [...said].filter(term => own.has(term)).length / said.size >= BLOCK_CARRIED; })());
+    const stage = wikiExampleStage(line);
+    const carriers = units.filter(unit => unit.evidence.code && (!stage || wikiSourceExampleScope(unit).stage === stage) && (() => { const own = cellTerms(unit.evidence.code!.text); return [...said].filter(term => own.has(term)).length / said.size >= BLOCK_CARRIED; })());
     if (!carriers.length || carriers.every(unit => statusOf(unit.id) === "history") || carriers.some(unit => statusOf(unit.id) === "history" && saysOfBlock(unit)) && !carriers.some(unit => statusOf(unit.id) !== "history" && saysOfBlock(unit))) return line;
     const mine = carriers.every(unit => unit.evidence.role === "user"), confirmed = carriers.some(unit => statusOf(unit.id) === "confirmed");
     const zh = !/earlier version/u.test(line), shown = SHOWN_CAPTION.test(line);

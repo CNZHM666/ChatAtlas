@@ -241,14 +241,14 @@ it("keeps a report's headings, bullets, scoped states and comparison table acces
  expect(region).toHaveTextContent("用户选择后启用");expect(view.container).toHaveTextContent("尚未确认");
 });
 
-it("shows an arrowed run of steps as a strip and sets a long paragraph's first sentence apart, keeping every character", () => {
+it("keeps embedded flows and long paragraph emphasis unchanged", () => {
   const flow = "侧边栏流程为：找到相关消息 -> 用户确认/选择 -> 生成上下文 -> 插入当前 AI。第一版不实时监视。";
   const long = "采用侧边栏为默认入口、按需展开分屏与完整工作台的三级阅读体验。" + "宽屏模式下左侧保留对话，右侧展示 Atlas 历史详情，实现双栏同时可读且无需跳转，两边互不遮挡。".repeat(3);
   const { container } = render(<ReaderGuide content={`${flow}\n\n${long}\n\n1. **第一层**：浏览只展示最需要的信息。\n2. **第二层**：详情展示完整内容。\n3. **第三层**：编辑展示修改操作。`} zh complete hideEvidenceMarkers />);
-  expect([...container.querySelectorAll(".reading-inline-flow-step")].map(step => step.textContent)).toEqual(["找到相关消息", "用户确认/选择", "生成上下文", "插入当前 AI"]);
+  expect(container.querySelector(".reading-inline-flow")).toBeNull();
   // The written arrows stay in the text.
-  expect(container.querySelector(".reading-inline-flow")?.parentElement?.textContent).toBe(flow);
-  expect(container.querySelector(".reading-lead")?.textContent).toBe("采用侧边栏为默认入口、按需展开分屏与完整工作台的三级阅读体验。");
+  expect(container.textContent).toContain(flow);
+  expect(container.querySelector(".reading-lead")).toBeNull();
   // Layers read as stage cards.
   expect(container.querySelectorAll(".reading-stage-flow.is-labelled li")).toHaveLength(3);
 });
@@ -287,4 +287,131 @@ it("reads a caption saved as the block's kind alone, and leaves other lone empha
  expect(bars).toHaveLength(2);
  expect(bars[0]).toHaveTextContent(/^流程$/);
  expect(bars[1].querySelector(".wiki-block-caption-note")).toHaveTextContent("以你后来的决定为准：只支持美元");
+});
+it("renders optional source examples collapsed without enabling arbitrary HTML", () => {
+ const mark=String.fromCharCode(96).repeat(3),source=mark+'ts\nconst literal = "此前建议";\n\n\nconst id = 7;\n'+mark;
+ const content='<details data-atlas="atlas-wiki-supplement">\n<summary>补充资料 · 代码示例</summary>\n\n'+source+'\n\n</details>\n\n<script>window.bad=true</script>';
+ const view=render(<ReaderGuide content={content} zh complete hideEvidenceMarkers/>);
+ const details=view.container.querySelector('details.wiki-source-supplement');
+ expect(details).not.toBeNull(); expect(details).not.toHaveAttribute('open');
+ expect(details?.querySelector('summary')).toHaveTextContent('补充资料 · 代码示例');
+ expect(details?.querySelector('summary .wiki-supplement-chevron')).toHaveAttribute('aria-hidden','true');
+ expect(details?.querySelector('code')).toBeNull();
+ (details as HTMLDetailsElement).open=true;fireEvent(details!,new Event('toggle'));
+ expect(details?.querySelector('code')?.textContent).toBe('const literal = "此前建议";\n\n\nconst id = 7;\n');
+ (details as HTMLDetailsElement).open=false;fireEvent(details!,new Event('toggle'));
+ expect(details?.querySelector('code')).toBeNull();
+ expect(view.container.querySelector('script')).toBeNull();
+});
+
+it("leaves quoted, incomplete and scope-conflict workflows as readable prose", () => {
+ const content='> 范围有分歧：「Concept Preview 接口」写为不做，又建议「Plan → Preview → Confirm → A…」。\n\n“Plan → Preview → Confirm → Apply”是引用。\n\nPlan → Preview → Confirm → A…';
+ const view=render(<ReaderGuide content={content} zh complete/>);
+ expect(view.container.querySelector('.reading-inline-flow')).toBeNull();
+ expect(view.container.textContent).toContain('Plan → Preview → Confirm → A…');
+});
+
+it("keeps a complete mixed-language workflow inside the steps without cutting an identifier",()=>{
+ const content='作为示意，产品主链为：自然语言/零件盒/照片识别 → 需求理解与方案规划 → Hardware IR + Validator -> Canvas可视化工作区。该链路聚焦低压模块。';
+ const view=render(<ReaderGuide content={content} zh complete/>);
+ const steps=[...view.container.querySelectorAll('.reading-inline-flow-step')].map(step=>step.textContent);
+ expect(steps).toEqual([]);
+ expect(view.container.textContent).toBe(content);
+});
+it("shows short stages as compact steps and displays parameter colors without fake action buttons",()=>{
+ const content="执行流程：\n\n1. 输入需求\n2. 理解需求\n3. 确认清单\n4. 生成方案\n5. 校验\n6. 提交\n\n| 项目 | 内容 |\n| --- | --- |\n| Background | `#FAFAFA` |\n\nAdd component · Run validation · Toggle theme";
+ const view=render(<ReaderGuide content={content} zh complete hideEvidenceMarkers/>);
+ expect(view.container.querySelector('.reading-stage-flow')).toHaveClass('is-compact');
+ expect([...view.container.querySelectorAll('.reading-stage-flow li')].map(node=>node.textContent)).toEqual(['输入需求','理解需求','确认清单','生成方案','校验','提交']);
+ expect(view.container.querySelector('.reader-color-swatch')).toHaveStyle({backgroundColor:'#FAFAFA'});
+ expect(view.container.querySelector('td code')).toHaveTextContent('#FAFAFA');
+ expect(screen.queryByRole('button',{name:'Add component'})).toBeNull();
+});
+
+it("keeps a deployment introduction outside the actual flow steps",()=>{
+ const content='部署路径首选 GitHub → Vercel → Next.js/API Routes → LLM。';
+ const view=render(<ReaderGuide content={content} zh complete/>);
+ expect([...view.container.querySelectorAll('.reading-inline-flow-step')].map(node=>node.textContent)).toEqual(['GitHub','Vercel','Next.js/API Routes','LLM']);
+ expect(view.container.textContent).toBe(content);
+});
+
+it("does not bind explanatory prose into an unbreakable flow step or turn acceptance checks into stages",()=>{
+ const text='修改分两级：简单操作直接应用，复杂操作预览后应用，所有操作后必须经过 Transaction->Schema->Validator->Commit 流程。';
+ const view=render(<ReaderGuide content={text+'\n\n完整流程的验收场景：\n\n1. 无密钥可用\n2. 失败不得写入\n3. 仅确认后提交'} zh complete/>);
+ expect(view.container.querySelector('.reading-inline-flow-step')).toBeNull();
+ expect(view.container.querySelectorAll('.reading-inline-flow-arrow')).toHaveLength(3);
+ expect(view.container.querySelector('p')?.textContent).toBe(text);
+ expect(view.container.querySelector('.reading-stage-flow')).toBeNull();
+ expect(view.container.querySelectorAll('ol li')).toHaveLength(3);
+});
+
+it("renders a grouped source attachment with named examples while preserving original code",()=>{
+ const mark=String.fromCharCode(96).repeat(3),content='<details data-atlas="atlas-wiki-supplement">\n<summary>原文与示例 · 2 项</summary>\n\n#### 1. 布局示例\n\n'+mark+'text\n┌ 输入 ┐\n'+mark+'\n\n#### 2. 命令示例\n\n'+mark+'sh\nnpm run check\n'+mark+'\n\n</details>';
+ const view=render(<ReaderGuide content={content} zh complete hideEvidenceMarkers/>);
+ expect(view.container.querySelectorAll('.wiki-source-supplement')).toHaveLength(1);
+ expect(view.container.querySelector('details')).not.toHaveAttribute('open');
+ const details=view.container.querySelector('details')!;details.open=true;fireEvent(details,new Event('toggle'));
+ expect(screen.getByText('1. 布局示例')).toBeInTheDocument();expect(screen.getByText('2. 命令示例')).toBeInTheDocument();
+ expect(view.container.querySelector('code.language-sh')).toHaveTextContent('npm run check');
+});
+
+it("renders long, short and legacy example captions as identical heading elements without touching code",()=>{
+ const fence=(text:string)=>'```ts\n'+text+'\n```';
+ const code='interface Example {\n  label: "原文不改";\n}';
+ const content='<details data-atlas="atlas-wiki-supplement">\n<summary>原文与示例 · 3 项</summary>\n\n1. JSON 示例 · this is a much longer source title for testing\n\n'+fence('const x = 1;')+'\n\n**2. 数据结构 · interface Example {**\n\n'+fence(code)+'\n\n3. **流程示例 · User**\n\n'+fence('User')+'\n\n</details>';
+ const view=render(<ReaderGuide content={content} zh complete hideEvidenceMarkers/>);
+ const details=view.container.querySelector('details')!;details.open=true;fireEvent(details,new Event('toggle'));
+ const titles=view.container.querySelectorAll('.wiki-source-supplement h4');
+ expect(titles).toHaveLength(3);expect([...titles].every(title=>!title.querySelector('strong'))).toBe(true);
+ expect(view.container.querySelectorAll('.wiki-source-supplement pre code')[1].textContent).toBe(code+'\n');
+ expect(view.container.querySelector('.wiki-source-supplement ol')).toBeNull();
+});
+it("shows prose color values with swatches and palettes as compact fields, preserving identifiers and code",()=>{
+ const mark=String.fromCharCode(96).repeat(3);
+ const content='背景使用 #FAFAFA，边框用 #E8E8E8，文字为 `#18181B`。\n\n提交 `#abc123`，工单 #123，链接 [原文](https://example.com/#abc123)。\n\n| 用途 | 色值 |\n| --- | --- |\n| Background | `#FAFAFA` |\n| Border | `#E8E8E8` |\n\n'+mark+'css\n.panel { color: #18181B; }\n'+mark;
+ const view=render(<ReaderGuide content={content} zh complete hideEvidenceMarkers/>);
+ expect(view.container.querySelectorAll('.reader-color-swatch')).toHaveLength(5);
+ expect(view.container.querySelector('.reader-palette')).not.toBeNull();expect(view.container.querySelectorAll('.reader-palette-entry')).toHaveLength(2);
+ expect([...view.container.querySelectorAll('.reader-palette-entry dt')].map(node=>node.textContent)).toEqual(['Background','Border']);
+ expect(view.container.querySelector('code.language-css')).toHaveTextContent('.panel { color: #18181B; }');
+ expect(view.container.querySelector('code.language-css .reader-color-swatch')).toBeNull();
+ expect(view.container.textContent).toContain('工单 #123');expect(view.container.querySelector('a')).toHaveAttribute('href','https://example.com/#abc123');
+});
+
+it("does not interpret arbitrary hash identifiers as a palette",()=>{
+ const content='| Issue | Identifier |\n| --- | --- |\n| a | #abc123 |\n| b | #def456 |';
+ const view=render(<ReaderGuide content={content} zh complete hideEvidenceMarkers/>);
+ expect(view.container.querySelector('.reader-palette')).toBeNull();expect(view.container.querySelector('.reader-color-swatch')).toBeNull();
+});
+it("retains alternative color values while giving each value its own swatch",()=>{
+ const content='背景可用 #FCFCFC/#FFFFFF。Canvas：`#FCFCFC / #FFFFFF`。';
+ const view=render(<ReaderGuide content={content} zh complete hideEvidenceMarkers/>);
+ expect(view.container.querySelectorAll('.reader-color-swatch')).toHaveLength(4);
+ expect(view.container.textContent).toBe(content.replaceAll('`',''));
+});
+it("keeps nearby issue and commit identifiers literal even in a paragraph about colors",()=>{
+ const content='背景使用 #FAFAFA，工单 #123，提交 `#abc123`，配色见 Issue #456。';
+ const view=render(<ReaderGuide content={content} zh complete hideEvidenceMarkers/>);
+ expect(view.container.querySelectorAll('.reader-color-swatch')).toHaveLength(1);
+ expect(view.container.textContent).toBe(content.replaceAll('`',''));
+});
+it("adds only discretionary breaks to long technical names and leaves links and fenced code literal",()=>{
+ const token='unsupportedOrUnsafe=true',mark=String.fromCharCode(96).repeat(3);
+ const content='返回 '+token+'，禁止加入 Inventory。字段 `'+token+'`。\n\n[原文](https://example.com/'+token+')\n\n'+mark+'ts\n'+token+'\n'+mark;
+ const view=render(<ReaderGuide content={content} zh complete/>);
+ const spans=view.container.querySelectorAll('.reader-token');expect(spans).toHaveLength(2);
+ expect([...spans].map(node=>node.textContent)).toEqual([token,token]);
+ expect(spans[0].querySelectorAll('wbr')).toHaveLength(3);expect(spans[0].querySelector('br')).toBeNull();
+ expect(view.container.querySelector('a wbr')).toBeNull();expect(view.container.querySelector('pre wbr')).toBeNull();
+ expect(view.container.querySelector('pre code')).toHaveTextContent(token);
+});
+
+it("wraps slash-separated technical terms at separators without splitting ordinary English names or changing copied text",()=>{
+ const text='由 AI 从 Component Catalog 选取元件，输出 JSON 经 Zod/Validator/Store 渲染至 Canvas。';
+ const view=render(<ReaderGuide content={text} zh complete/>);
+ expect(view.container.textContent).toBe(text);
+ const token=view.container.querySelector('.reader-token')!;
+ expect(token.textContent).toBe('Zod/Validator/Store');expect(token.querySelectorAll('wbr')).toHaveLength(2);
+ expect([...token.childNodes].map(node=>node.textContent)).toEqual(['Zod/','','Validator/','','Store']);
+ expect(view.container.querySelector('br')).toBeNull();
 });

@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;width:100%;height:100%;border:0}</style></head><body><script>
+// Manifest sandbox: opaque origin, no extension APIs. Accept documents from the embedding Reader only.
+addEventListener("message", function (event) {
+  if (event.source !== parent || !event.data || event.data.type !== "atlas-reader-preview" || typeof event.data.document !== "string" || event.data.document.length > 400000) return;
+  const frame = document.createElement("iframe");
+  frame.setAttribute("sandbox", "allow-scripts");
+  frame.setAttribute("referrerpolicy", "no-referrer");
+  frame.title = "Local interactive preview";
+  frame.srcdoc = event.data.document;
+  document.body.replaceChildren(frame);
+});
+</script></body></html>

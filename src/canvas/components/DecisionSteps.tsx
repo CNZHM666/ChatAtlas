@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { wikiLedgerUnits, type WikiKnowledgeLedger, type WikiUnitAboutRole, type WikiWritingQuestion } from "../../shared/wiki-knowledge";
 import { pendingWriterQuestions, pendingWritingQuestions, wikiNamedProjects, withExcludedProject, withWritingAnswer } from "../../ai/wiki-writing-questions";
@@ -18,7 +18,7 @@ const ROLE: Record<WikiUnitAboutRole, [string, string]> = { other_project: ["另
 /** The questions before writing, one at a time: an answer moves on to the next, the last one starts writing.
  * Skipping a question leaves it to the AI's reading; nothing here is required. Each question shows what it is about
  * first, then the question, so no answer depends on guessing what "这一点" means. */
-export function DecisionSteps({ ledger, zh, onChange, onDone, writing = false, questions, busy = false }: {
+export function DecisionSteps({ ledger, zh, onChange, onDone, onInteract, writing = false, questions, busy = false }: {
   ledger: WikiKnowledgeLedger; zh: boolean;
   /** While writing: only the questions the writer asks, with no list of names to leave out. */
   writing?: boolean;
@@ -27,6 +27,7 @@ export function DecisionSteps({ ledger, zh, onChange, onDone, writing = false, q
   /** The chapters are still being written: finishing answers does not end anything yet. */
   busy?: boolean;
   onChange: (change: (ledger: WikiKnowledgeLedger) => WikiKnowledgeLedger) => void;
+  onInteract?: () => void;
   /** Writing starts with the answers given so far. */
   onDone: () => void;
 }) {
@@ -45,16 +46,27 @@ export function DecisionSteps({ ledger, zh, onChange, onDone, writing = false, q
       quotes: question.unitIds.flatMap(id => statements.get(id) ?? []).slice(0, 3), options: question.options.map(option => ({ id: option.id, label: option.label })),
       apply: (current, answer) => withWritingAnswer(current, question, answer), write: (current, text) => withWritingAnswer(current, question, undefined, text) }))];
   }, [initial, named, writing, questions, zh]);
-  const [index, setIndex] = useState(0), [answers, setAnswers] = useState<Record<string, string>>({}), [draft, setDraft] = useState("");
+  const [index, setIndex] = useState(0), [answers, setAnswers] = useState<Record<string, string>>({}), [drafts, setDrafts] = useState<Record<string, string>>({});
   const [excluded, setExcluded] = useState(() => new Set(named.filter(item => item.excluded).map(item => item.key))), [typed, setTyped] = useState<Pick[]>([]);
   const step = steps[index];
+  const heading = useRef<HTMLHeadingElement>(null), moved = useRef(false);
+  useLayoutEffect(() => { if (moved.current) { moved.current = false; heading.current?.focus({ preventScroll: true }); } }, [step?.id]);
   if (!step) return null;
   const last = index === steps.length - 1;
+  const draft = drafts[step.id] ?? "";
+  const setDraft = (text: string) => setDrafts(current => ({ ...current, [step.id]: text }));
+  const go = (next: number) => { moved.current = true; setIndex(next); };
   const choose = (option: string) => {
-    const next = answers[step.id] === option ? undefined : option;
-    setAnswers(current => { const copy = { ...current }; if (next) copy[step.id] = next; else delete copy[step.id]; return copy; });
-    onChange(current => step.apply(current, next));
-    if (next && !last) setIndex(index + 1);
+    if (answers[step.id] !== option) {
+      setAnswers(current => ({ ...current, [step.id]: option }));
+      setDraft("");
+      onChange(current => step.apply(current, option));
+    }
+    if (!last) go(index + 1);
+  };
+  const clear = () => {
+    setAnswers(current => { const next = { ...current }; delete next[step.id]; return next; });
+    onChange(current => step.apply(current, undefined));
   };
   const toggle = (item: Pick) => {
     const leave = !excluded.has(item.key);
@@ -75,29 +87,31 @@ export function DecisionSteps({ ledger, zh, onChange, onDone, writing = false, q
       return;
     }
     setAnswers(current => ({ ...current, [step.id]: `text:${text}` }));
-    if (!last) setIndex(index + 1);
+    if (!last) go(index + 1);
   };
-  const option = (item: Option) => <button key={item.id} type="button" role="radio" aria-checked={answers[step.id] === item.id} className={item.quiet ? "is-quiet" : undefined} onClick={() => choose(item.id)}>
+  const option = (item: Option) => <button key={item.id} type="button" role="radio" aria-checked={answers[step.id] === item.id} className={item.quiet ? "is-quiet" : undefined} onClick={event => { if (event.detail <= 1) choose(item.id); }}>
     {item.quiet ? null : <span className="decision-steps-dot" aria-hidden="true" />}{item.tag ? <em>{item.tag}</em> : null}<span>{item.label}</span>
   </button>;
   const main = step.options.filter(item => !item.quiet), quiet = step.options.filter(item => item.quiet);
   const own = answers[step.id]?.startsWith("text:") ? answers[step.id].slice(5) : "";
-  return <section className="decision-steps" aria-label={writing ? zh ? "写作中发现的问题" : "Found while writing" : zh ? "写作前确认" : "Before writing"}>
+  const hasAnswers = Object.keys(answers).length > 0;
+  const updateLabel = hasAnswers ? zh ? "按回答更新" : "Update the draft" : zh ? "保持现稿" : "Keep the draft";
+  return <section className="decision-steps" onPointerDownCapture={onInteract} onFocusCapture={onInteract} aria-label={writing ? zh ? "写作中发现的问题" : "Found while writing" : zh ? "写作前确认" : "Before writing"}>
     <header>
-      {index ? <button type="button" className="decision-steps-back" aria-label={zh ? "上一题" : "Previous"} onClick={() => setIndex(index - 1)}><ChevronLeft size={16} aria-hidden="true" /></button> : null}
+      {index ? <button type="button" className="decision-steps-back" aria-label={zh ? "上一题" : "Previous"} onClick={() => go(index - 1)}><ChevronLeft size={16} aria-hidden="true" /></button> : null}
       <span>{writing ? zh ? "写作中发现的问题" : "Found while writing" : zh ? "写作前确认" : "Before writing"}</span>
       <ol className="decision-steps-progress" aria-label={zh ? `第 ${index + 1} 题，共 ${steps.length} 题` : `Question ${index + 1} of ${steps.length}`}>{steps.map((item, at) => <li key={item.id} className={at === index ? "is-current" : answers[item.id] ? "is-answered" : undefined} />)}</ol>
       <small>{index + 1} / {steps.length}</small>
     </header>
     <span className="decision-steps-kind">{step.kind}</span>
-    <h3>{step.title}</h3>
+    <h3 ref={heading} tabIndex={-1}>{step.title}</h3>
     {step.ask ? <p className="decision-steps-ask">{step.ask}</p> : null}
     {step.quotes?.length ? <ul className="decision-steps-quotes" aria-label={zh ? "讨论中的说法" : "As said in the discussion"}>{step.quotes.map(quote => <li key={quote}>{quote}</li>)}</ul> : null}
     {step.pick ? <div className="decision-steps-options" role="group" aria-label={step.ask ?? step.title}>
       {[...step.pick, ...typed].map(item => <button key={item.key} type="button" role="checkbox" aria-checked={excluded.has(item.key)} onClick={() => toggle(item)}>
         <span className="decision-steps-box" aria-hidden="true" /><span>{item.name}</span><em>{excluded.has(item.key) ? zh ? "不写入" : "Left out" : item.detail}</em>
       </button>)}
-    </div> : <div role="radiogroup" aria-label={step.ask ?? step.title}>
+    </div> : <div key={step.id} role="radiogroup" aria-label={step.ask ?? step.title}>
       <div className="decision-steps-options">{main.map(option)}</div>
       {quiet.length ? <div className="decision-steps-quiet">{quiet.map(option)}</div> : null}
     </div>}
@@ -106,8 +120,11 @@ export function DecisionSteps({ ledger, zh, onChange, onDone, writing = false, q
       <button type="submit" disabled={!draft.trim()}>{step.pick ? zh ? "排除" : "Leave out" : zh ? "确定" : "Save"}</button>
     </form> : null}
     <footer>
-      <button type="button" className="decision-steps-skip" onClick={onDone}>{writing ? Object.keys(answers).length ? zh ? "按回答更新" : "Update the draft" : zh ? "保持现稿" : "Keep the draft" : Object.keys(answers).length ? zh ? "直接写作" : "Write now" : zh ? "全部跳过" : "Skip all"}</button>
-      {last ? <button type="button" className="primary" onClick={onDone}>{writing ? busy ? zh ? "答完了，继续写" : "Done, keep writing" : zh ? "按回答更新" : "Update the draft" : zh ? "开始写作" : "Start writing"}</button> : <button type="button" className="decision-steps-next" onClick={() => setIndex(index + 1)}>{step.pick ? zh ? "下一步" : "Next" : zh ? "跳过此题" : "Skip"}</button>}
+      {!last || !writing ? <button type="button" className="decision-steps-skip" onClick={onDone}>{writing ? updateLabel : hasAnswers ? zh ? "直接写作" : "Write now" : zh ? "全部跳过" : "Skip all"}</button> : null}
+      <div className="decision-steps-actions">
+        {!step.pick && answers[step.id] ? <button type="button" onClick={clear}>{zh ? "清除回答" : "Clear answer"}</button> : null}
+        {last ? <button type="button" className="primary" onClick={onDone}>{writing ? busy ? zh ? "答完了，继续写" : "Done, keep writing" : updateLabel : zh ? "开始写作" : "Start writing"}</button> : <button type="button" className="decision-steps-next" onClick={() => go(index + 1)}>{step.pick || answers[step.id] ? zh ? "下一题" : "Next" : zh ? "跳过此题" : "Skip"}</button>}
+      </div>
     </footer>
   </section>;
 }

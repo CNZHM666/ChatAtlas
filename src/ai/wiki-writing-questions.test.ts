@@ -4,7 +4,7 @@ import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { reviseForAnswers, writeWikiDraft } from "./wiki-knowledge-write";
 import type { StructuredAIRequest } from "./provider";
 import type { WikiKnowledgeLedger, WikiKnowledgeUnit } from "../shared/wiki-knowledge";
-import { readQuestions } from "./wiki-question-parse";
+import { readQuestions, wikiLocalAnswer } from "./wiki-question-parse";
 
 const signal = new AbortController().signal;
 const unit = (index: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${index}`, subject: "密钥", statement, kind: "constraint", details: [], evidence: { evidenceId: `e${index}`, conversationId: "c", messageId: `m${index}`, messageIndex: index, role: "assistant", pasted: false, quote: statement }, adoption: { status: "proposal" }, delivery: "unknown", ...extra });
@@ -21,6 +21,32 @@ function asking(answer: (prompt: { chapters: Array<{ subtopics: Array<{ units: A
   return { prompts, ai: { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => { const data = JSON.parse(request.prompt); prompts.push(data); return request.validate(answer(data)); } } };
 }
 const idOf = (prompt: Parameters<Parameters<typeof asking>[0]>[0], statement: string) => prompt.chapters.flatMap(chapter => chapter.subtopics.flatMap(topic => topic.units)).find(item => item.statement === statement)!.id;
+
+it("keeps the answered question across rewrites and recovers a legacy positional collision", () => {
+  const version = unit(5, "首个公开标签定为 v0.1.0-alpha，或仅公开 main 分支。"), bench = unit(6, "优先搭建硬件基准测试集。");
+  const real = new Map([["k1", version.id], ["k2", bench.id]]);
+  const parse = (about: string, ask: string, label: string, id: string) => readQuestions({ questions: [{ about, ask, unitIds: [id], options: [
+    { label, actions: [{ do: "confirm", units: [id] }] }, { label: "未定", actions: [] },
+  ] }] }, real, 7, { prefix: "w:c:0", stage: "writing" })[0];
+  const chosen = parse("发布标签", "发布 v0.1.0-alpha 标签吗？", "发布v0.1.0-alpha标签", "k1");
+  const regenerated = parse("基准测试", "优先搭建基准测试集吗？", "优先搭建硬件基准测试集", "k2");
+  expect(chosen.id).not.toBe(regenerated.id);
+  const base = book();
+  base.batches[0].units.push(version, bench);
+  base.organization!.subjects[0].unitIds.push(version.id, bench.id);
+  const answered = withWritingAnswer(base, chosen, "o1");
+  const merged = withAnswersFrom({ ...base, writingQuestions: [regenerated] }, answered);
+  expect(merged.writingQuestions).toContain(chosen);
+  expect(pendingWritingQuestions(merged)).toEqual([regenerated]);
+
+  const collision = { ...regenerated, id: chosen.id };
+  const restored = resolveWikiReading({ ...answered, writingQuestions: [collision] });
+  const choiceId = `answer:${chosen.id}:o1`;
+  expect(restored.units.find(item => item.id === choiceId)?.statement).toBe("发布v0.1.0-alpha标签。");
+  expect(wikiLocalAnswer(restored.ledger, choiceId)?.answer).toBe(chosen.options[0].label);
+  expect(wikiLocalAnswer(restored.ledger, bench.id)).toBeUndefined();
+  expect(restored.statuses.get(bench.id)).toBe("proposal");
+});
 
 it("asks in the model's words what it cannot write without the user, with answers that act on the ledger", async () => {
   const { ai, prompts } = asking(prompt => ({ questions: [

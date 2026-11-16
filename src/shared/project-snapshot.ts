@@ -3,6 +3,7 @@ import {factTextKey} from "./project-fact-state";
 import {discussionBlocks} from "./discussion-context";
 import {evidencePresentation} from "./evidence-presentation";
 import {projectKnowledgeView,projectKnowledgeIntroduction,knowledgeFactText,projectKnowledgeSection} from "./project-knowledge-view";
+import {reviewWikiChapter,wikiChapterReviewContext} from "../ai/wiki-claim-review";
 
 export interface ProjectSnapshotBlock {
  role:"scope"|"workflow"|"architecture"|"decision"|"constraint"|"status"|"questions";
@@ -21,10 +22,10 @@ function workflowRole(text:string,fallback=false):"workflow"|"architecture" {
 }
 
 /** Detailed enough to orient a new reader, reusing complete saved facts only. */
-export function projectSnapshot(session:FocusSession):ProjectSnapshotBlock[] {
+export function projectSnapshot(session:FocusSession,knowledge?:ReturnType<typeof projectKnowledgeView>):ProjectSnapshotBlock[] {
  if(session.mode!=="work"||session.projectMaintenance?.overview!==undefined||session.briefUserEdited)return [];
  const rows:ProjectSnapshotBlock[]=[],seen=new Set<string>();let characters=0;
- const view=projectKnowledgeView(session),introductoryText=factTextKey(projectKnowledgeIntroduction(session));
+ const view=knowledge??projectKnowledgeView(session),introductoryText=factTextKey(projectKnowledgeIntroduction(session));
  const limits={scope:1,workflow:1,architecture:1,decision:2,constraint:1,status:2,questions:3};
  const add=(row:ProjectSnapshotBlock)=>{
   const key=factTextKey(row.text);
@@ -59,11 +60,13 @@ export function projectSnapshot(session:FocusSession):ProjectSnapshotBlock[] {
   add({role:"status",text:(session.locale==="en"?"The relationship between these choices is unresolved: ":"这些方案记录的关系尚未明确：")+conflict.facts.map(fact=>fact.claim.text).join("；"),evidenceIds:[...new Set(conflict.facts.flatMap(fact=>fact.claim.evidenceIds))],sectionIds:[...new Set(conflict.facts.map(fact=>fact.sectionId))],status:"draft"});
  }
  // Compatibility: a complete architectural paragraph is background, not adoption.
+ let reviewContext:ReturnType<typeof wikiChapterReviewContext>|undefined;
  if(!rows.length)for(const section of session.sections){
   if(section.userEdited||section.origin||section.reviewIssue||!["review","finding"].includes(section.kind))continue;
-  const paragraph=discussionBlocks(projectKnowledgeSection(section,session).body).find(block=>block.text.trim().length>=60&&block.text.length<=450&&!/^\s*(?:[#>`~|*-]|\d+[.)])/u.test(block.text));
-  if(!paragraph||!section.evidenceIds.length||introductoryText.includes(factTextKey(evidencePresentation(paragraph.text))))continue;
   if(!/架构|系统|流程|工作流|architecture|system|workflow/iu.test(section.title))continue;
+  const checked=reviewWikiChapter(section,session,undefined,undefined,reviewContext??=wikiChapterReviewContext(session));
+  const paragraph=discussionBlocks(projectKnowledgeSection(checked,session,view,true).body).find(block=>block.text.trim().length>=60&&block.text.length<=450&&!/^\s*(?:[#>`~|*-]|\d+[.)])/u.test(block.text));
+  if(!paragraph||!section.evidenceIds.length||introductoryText.includes(factTextKey(evidencePresentation(paragraph.text))))continue;
   add({role:workflowRole(paragraph.text,true),text:evidencePresentation(paragraph.text),evidenceIds:[...section.evidenceIds],sectionIds:[section.id],status:"draft"});break;
  }
  for(const question of view.questions)add({role:"questions",text:question.text,evidenceIds:question.sources.map(ref=>ref.id),sectionIds:[],status:"draft"});

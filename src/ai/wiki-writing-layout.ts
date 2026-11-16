@@ -1,5 +1,6 @@
 import type {WikiDraftClaim,WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 import {rowFields} from "../shared/wiki-row-sentence";
+import {wikiInlineChecklist} from "../shared/wiki-article-layout";
 
 interface WritingBlock {text:string;unitIds:string[];claims:WikiDraftClaim[]}
 const record=(value:unknown):Record<string,unknown>=>value&&typeof value==="object"?value as Record<string,unknown>:{};
@@ -39,7 +40,7 @@ export function proseLayoutBreaks(text:string):string[]{
  let fenced=false;
  return text.split("\n").map(line=>line.trim()).filter(line=>{
   if(line.startsWith("```")){fenced=!fenced;return false;}
-  return !fenced&&Boolean(line)&&(LAYOUT_LINE.test(line)||FIELD_RUN.test(line));
+  return !fenced&&Boolean(line)&&(LAYOUT_LINE.test(line)||FIELD_RUN.test(line)||Boolean(wikiInlineChecklist(line)));
  });
 }
 /** A short label for a stage or list item, markdown marks stripped; one too long or empty is left off. */
@@ -86,14 +87,16 @@ export function wikiWritingLayout(units:WikiKnowledgeUnit[],options:{zh?:boolean
  // Parallel points (rules, checks, parts, settings) read as a labelled list: written as prose, one sentence per
  // rule, a subtopic of validator checks read as a wall of 检查……。检查……。
  const constraints=units.filter(unit=>unit.kind==="constraint"),parallel=units.filter(unit=>PARALLEL_KINDS.includes(unit.kind));
- const listed=constraints.length>=3&&constraints.length*2>=units.length||parallel.length>=PARALLEL_MIN&&parallel.length*3>=units.length*2;
+ // Kind alone is not a shared topic: runtime constraints and adapter rules are not peers.
+ const topics=new Set(units.map(unit=>`${unit.subject??""}\u0000${unit.about?.name??""}\u0000${unit.facet??""}`.trim().toLocaleLowerCase()));
+ const listed=units.every(unit=>Boolean(unit.subject?.trim()))&&topics.size===1&&(constraints.length>=3&&constraints.length*2>=units.length||parallel.length>=PARALLEL_MIN&&parallel.length*3>=units.length*2);
  const subjects=new Set(units.flatMap(unit=>unit.about?.name??[]));
  const stages=subjects.size<2&&stagedPlan(units),table=subjects.size>=2||stages?undefined:fittingTable(units,options.open??0);
  return {preferred:stages?"stages":subjects.size>=2||table?"comparison":listed?"list":"explanation",
   allowed:["paragraph","list","comparison","stages"],maxColumns:4,
   ...(table?{table:{columns:COLUMNS[table][options.zh===false?1:0],rows:HOW[table]}}:{}),
-  rule:"Explain reasons in prose; group parallel rules in lists; compare only shared, evidenced dimensions. Keep each item's conditions, status and unitIds. Do not invent cells or repeat the same content in prose."
-   +(listed&&!stages&&!table?" The material is mostly parallel rules, checks, parts or settings: write them as labelled list blocks of at most 7 items each, grouped by what they concern, each item labelled (2-8 characters) and one short sentence, after at most one sentence saying what they are for.":"")
+  rule:"Explain one question per subsection in connected prose. Share a list only when items have the same subject, scope and semantic role; kind alone does not prove parallelism. Separate unrelated mechanisms, operating requirements and checks into their own explanatory blocks. Compare only shared, evidenced dimensions. Keep each item's conditions, status and unitIds. Do not invent cells or repeat the same content in prose. Prefer unlabelled lists; use labels only for field/value mappings. Render short linear stages as an inline arrow flow. Number acceptance cases separately from the overall outcome. Real headings describe topics; avoid bold sentences as pseudo-headings or mechanically bold paragraph openings."
+   +(listed&&!stages&&!table?" These units share a topic; use a short list only for genuinely parallel rules, checks or settings. Do not force a label onto each item; explain dependencies and reasons in prose.":"")
    +(stages?" The material is the stages of a plan: write them as one stages block, one item per stage in the plan's order, stage a short label (第一阶段, P0, v0.1) and text what that stage does; put the short answer before it.":"")
    +(table?" table names a table this material fits: write the units it covers as one comparison block with these columns (drop a column no unit fills), rows as described, each row citing its own units; put the short answer before it and only reasons it cannot hold after it. Leave out the table when fewer than two rows can be filled from the units.":"")};
 }
@@ -138,10 +141,11 @@ export function readWikiWritingBlock(value:unknown,known:Set<string>):WritingBlo
  if(block.type==="list"){
   if(!Array.isArray(block.items)||!block.items.length)throw Error("invalid_writing_list");
   // A list of one item is a sentence: read as a paragraph, not refused with the rest of the answer.
-  if(block.items.length===1)return item(block.items[0]);
+  if(block.items.length===1&&block.ordered!==true)return item(block.items[0]);
   // A labelled item ("**GPIO 冲突**：……") is scanned by its label; the label is layout, the text the claim.
   rows=block.items.map(value=>{const bound=item(value),label=labelOf(record(value).label,LIST_LABEL);return label?{...bound,text:`**${label}**：${bound.text}`}:bound;});
-  text=rows.map(row=>`- ${row.text}`).join("\n");
+  const start=Number.isInteger(block.start)&&Number(block.start)>0?Number(block.start):1;
+  text=rows.map((row,index)=>`${block.ordered===true?`${start+index}.`:"-"} ${row.text}`).join("\n");
  }else if(block.type==="stages"){
   // One card per stage: a short label, then what the stage does. The label is layout; the text is the claim.
   if(!Array.isArray(block.items)||!block.items.length)throw Error("invalid_writing_stages");
@@ -217,7 +221,8 @@ export function readWikiWritingBlocks(value:unknown,known:Set<string>):WritingBl
     const all=part[key];
     if(!(error instanceof Error)||error.message!=="writing_block_too_large"||!Array.isArray(all)||all.length<least*2)throw error;
     const half=Math.max(least,Math.ceil(all.length/2));
-    const parts=[...split({...part,[key]:all.slice(0,half)}),...split({...part,[key]:all.slice(half)})];
+    const start=Number.isInteger(part.start)&&Number(part.start)>0?Number(part.start):1;
+    const parts=[...split({...part,[key]:all.slice(0,half)}),...split({...part,[key]:all.slice(half),...(part.ordered===true?{start:start+half}:{})})];
     // A half of one item reads as a sentence, which has no size check of its own: one item too long is still refused.
     if(parts.some(item=>item.text.length>1600))throw error;
     return parts;

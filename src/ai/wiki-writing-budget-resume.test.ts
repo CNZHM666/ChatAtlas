@@ -10,7 +10,8 @@ vi.mock("./wiki-subtopic-budget",async original=>({...await original<typeof impo
 
 it("keeps the 48000 cap and resumes only unfinished writing after genuine exhaustion",async()=>{
  const runId=crypto.randomUUID(),paragraph="只有用户确认本次保存后才能更新记录；失败时保留原始消息，不能覆盖已有草稿，用户报告完成不等于代码验证。";
- const sources:Conversation[]=Array.from({length:10},(_,i)=>({id:`${runId}:${i}`,title:"记录保留",platform:"chatgpt",url:"",updatedAt:1,messageCount:1}));
+ // The shorter editorial prompt fits more passages per request. Keep enough sources to exhaust recovery anyway.
+ const sources:Conversation[]=Array.from({length:16},(_,i)=>({id:`${runId}:${i}`,title:"记录保留",platform:"chatgpt",url:"",updatedAt:1,messageCount:1}));
  const passages=sources.flatMap(source=>transcriptPassages(source,[{id:source.id,conversationId:source.id,role:"user",messageIndex:0,content:paragraph.repeat(180),preview:"",contentHash:"",createdAt:1,updatedAt:1}]));
  let reads=0,writes=0;const caps:number[]=[],initialBodies=new Set<string>(),sent:string[]=[];
  const ai={canReuseProjectKnowledge:true,supportsCacheMissGuard:true,getAnalysisKey:async()=>runId,

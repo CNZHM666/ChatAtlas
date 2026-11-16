@@ -4,7 +4,7 @@ import { RULES_OUT_ZH } from "../shared/negation";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import type { StructuredAIRequest } from "./provider";
 import { requestBudget } from "./request-policy";
-import { answerLeavesDetailsOpen, readQuestions, soundQuestion, withSoundAnswers } from "./wiki-question-parse";
+import { answerLeavesDetailsOpen, readQuestions, soundQuestion, withOriginalAnswerQuestions, withSoundAnswers } from "./wiki-question-parse";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { curateWikiUnits } from "./wiki-knowledge-select";
 import { wikiScopeConditions } from "./wiki-scope-conditions";
@@ -78,13 +78,16 @@ export async function withWritingQuestions(ledger: WikiKnowledgeLedger, input: {
   }
 }
 
-/** The questions still to ask of this ledger: those of its current organization. */
-export const pendingWritingQuestions = (ledger: WikiKnowledgeLedger | undefined) => (ledger && withSoundAnswers(ledger))?.writingQuestions?.filter(question => question.organization === ledger.organization?.generatedAt) ?? [];
+/** Unanswered questions of the current organization. */
+export function pendingWritingQuestions(ledger: WikiKnowledgeLedger | undefined) {
+  if (!ledger) return [];
+  const sound = withSoundAnswers(ledger), answered = new Set(sound.userAnswers?.map(answer => answer.questionId));
+  return sound.writingQuestions?.filter(question => question.organization === sound.organization?.generatedAt && !answered.has(question.id)) ?? [];
+}
 
 /** An answer applied: what any of the question's options did is undone, then the chosen option's actions are taken and
  * the answer is kept in the user's words. written: what the user typed instead of an option. undefined clears it. */
-export function withWritingAnswer(ledger: WikiKnowledgeLedger, question: WikiWritingQuestion, optionId: string | undefined, written?: string): WikiKnowledgeLedger {
-  const at = Date.now();
+export function withWritingAnswer(ledger: WikiKnowledgeLedger, question: WikiWritingQuestion, optionId: string | undefined, written?: string, at = Date.now()): WikiKnowledgeLedger {
   const all = question.options.flatMap(option => option.actions);
   let next = withDecision(ledger, [...new Set(all.flatMap(action => action.do === "owner" ? [] : action.units))], undefined, at);
   const pairs = new Set(all.flatMap(action => action.do === "both" ? [`${action.units[0]}>${action.units[1]}`] : []));
@@ -117,7 +120,7 @@ export function withWritingAnswer(ledger: WikiKnowledgeLedger, question: WikiWri
   }
   const answer = chosen?.label ?? words;
   if (answer) {
-    if (!next.writingQuestions?.some(item => item.id === question.id)) next.writingQuestions = [...next.writingQuestions ?? [], question];
+    next.writingQuestions = [...(next.writingQuestions ?? []).filter(item => item.id !== question.id), question];
     next.userAnswers = [...next.userAnswers ?? [], { questionId: question.id, unitIds: question.unitIds, question: question.ask, answer, ...(chosen ? { optionId: chosen.id } : {}), at } satisfies WikiUserAnswer];
   }
   for (const key of ["coexisting", "userAnswers"] as const) if (!next[key]?.length) delete next[key];
@@ -180,17 +183,18 @@ const SAME_MOMENT = 2000;
 /** A point saying a choice is still to make. */
 
 export function withAnswersRevisited(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  ledger = withOriginalAnswerQuestions(ledger);
   let next = ledger;
   for (const answer of ledger.userAnswers ?? []) {
     const question = ledger.writingQuestions?.find(item => item.id === answer.questionId);
-    if (!question || !answer.optionId || !question.options.some(option => option.id === answer.optionId)) continue;
+    if (!question || !answer.optionId || !question.options.some(option => option.id === answer.optionId && option.actions.length)) continue;
     const touched = question.options.flatMap(option => option.actions).flatMap(action => action.do === "owner" ? [] : action.units);
     if (touched.some(id => {
       const verdict = next.decisions?.[id];
       return verdict && verdict.at > answer.at + (verdict.wholeUnit ? 0 : SAME_MOMENT);
     })) continue;
     const before = JSON.stringify(next.decisions ?? {});
-    const redone = withWritingAnswer(next, question, answer.optionId);
+    const redone = withWritingAnswer(next, question, answer.optionId, undefined, answer.at);
     if (JSON.stringify(redone.decisions ?? {}) === before) continue;
     next = redone;
   }
@@ -304,12 +308,18 @@ export const pendingWriterQuestions = (ledger: WikiKnowledgeLedger | undefined) 
   return pendingWritingQuestions(ledger).filter(question => question.stage === "writing" && !answered.has(question.id));
 };
 
-/** The ledger being written from, with what the user answered on another copy of it while it was written: their
- * answers, verdicts, both-hold pairs and what belongs to another project. Nothing else is taken from that copy. */
+/** Merge answers together with the definitions the user actually saw. */
 export function withAnswersFrom(ledger: WikiKnowledgeLedger, answered: WikiKnowledgeLedger): WikiKnowledgeLedger {
   const next: WikiKnowledgeLedger = { ...ledger };
   for (const key of ["userAnswers", "decisions", "decisionsAt", "coexisting", "scopeAnswers", "userOwners"] as const) {
     if (answered[key] === undefined) delete next[key]; else (next as unknown as Record<string, unknown>)[key] = answered[key];
+  }
+  const answeredIds = new Set(answered.userAnswers?.map(answer => answer.questionId));
+  const originals = (answered.writingQuestions ?? []).filter(question => answeredIds.has(question.id));
+  if (originals.length) {
+    const questions = new Map(ledger.writingQuestions?.map(question => [question.id, question]));
+    for (const question of originals) questions.set(question.id, question);
+    next.writingQuestions = [...questions.values()];
   }
   return next;
 }

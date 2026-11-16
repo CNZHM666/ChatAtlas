@@ -8,11 +8,12 @@ import { explicitSwitches, gatherAcrossStages, gatherNamedItems, gatherPositioni
 import { scopedWishes, wikiUnitStatuses } from "./wiki-knowledge-state";
 import { laterSettings } from "./wiki-later-settings";
 import { chooseGroupHomes } from "./wiki-knowledge-groups";
-import { exclusiveWikiVersions } from "./wiki-version-conflict";
+import { exclusiveWikiVersions, wikiExplicitContinuation } from "./wiki-version-conflict";
 import { wikiUserChooses } from "../shared/wiki-user-choice";
 import { withUnsaidPlansOut } from "../shared/wiki-unsaid-plan";
 import { wikiSaidLater } from "../shared/wiki-sources";
 import { answeredTogether, explicitExclusions, withUserQuestionsAsked } from "./wiki-user-questions";
+import { knowledgeOwner, knowledgeScopesAgree } from "../shared/knowledge-subject";
 
 /** One reversible interpretation for writing, reading and export. The source ledger and
  * the user's answers remain untouched; never store these deductions as user verdicts. */
@@ -35,6 +36,14 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
   const answeredIds = new Set((source.userAnswers ?? []).flatMap(answer => answer.unitIds));
   const checked = answered.organization ? { ...answered.organization, relations: answered.organization.relations.map(relation => {
     const older = known.get(relation.older), newer = known.get(relation.newer);
+    const olderOwner = older && knowledgeOwner(older.statement), newerOwner = newer && knowledgeOwner(newer.statement);
+    if (relation.kind === "replaces" && older && newer && !relation.evidence && !answeredIds.has(newer.id)
+      && knowledgeScopesAgree(older.statement, newer.statement) && wikiExplicitContinuation(older, newer)) {
+      report.continuation_relations = (report.continuation_relations ?? 0) + 1;
+      return { ...relation, kind: "supplements" as const, status: "resolved" as const };
+    }
+    if (olderOwner && newerOwner && olderOwner !== newerOwner && !relation.evidence && !answeredIds.has(relation.older) && !answeredIds.has(relation.newer)
+      && ["replaces", "rejects", "narrows"].includes(relation.kind)) return { ...relation, kind: "coexists" as const, status: "resolved" as const };
     // A later point that contradicts an earlier decision (保留深色风格 after 采用浅色风格) still loses to it.
     // Otherwise a point said later in the same conversation is never replaced by an earlier one: "默认仅保存在当前浏览器会话中"
     // (message 50) did not replace "默认仅保存在运行时内存……可选 sessionStorage" (message 53), which says how. It adds to it.

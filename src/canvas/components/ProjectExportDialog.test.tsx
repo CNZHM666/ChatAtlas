@@ -17,31 +17,48 @@ it("uses the chapter header for full and partial selection without extra explana
  const session=contextKnowledge().session;
  session.sections.push({...session.sections[0],id:"another-wiki",title:"另一章节"});
  render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
- const all=screen.getByRole("checkbox",{name:"Wiki 章节"}) as HTMLInputElement;
+ const all=screen.getByRole("checkbox",{name:"项目 Wiki"}) as HTMLInputElement;
  expect(all).toBeChecked();fireEvent.click(screen.getByRole("button",{name:"选择 Wiki 章节"}));
  fireEvent.click(screen.getByRole("checkbox",{name:"另一章节"}));expect(all.indeterminate).toBe(true);
  fireEvent.click(all);expect(all.indeterminate).toBe(false);expect(screen.getByRole("checkbox",{name:"另一章节"})).toBeChecked();
- expect(screen.queryByText(/包含可点击目录|按项目顺序导出/)).toBeNull();expect(screen.getByRole("checkbox",{name:"附来源摘录"})).not.toBeChecked();
+ expect(screen.queryByText(/包含可点击目录|按项目顺序导出/)).toBeNull();
+});
+it("explains each conversation source option and updates the key record count with the chapter selection",()=>{
+ const session=contextKnowledge().session,source=session.evidence[0];
+ session.sections[0].claims=[{text:source.excerpt,quote:source.excerpt,evidenceIds:[source.id],holder:"decided"}];
+ render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
+ const sources=screen.getByRole("combobox",{name:"对话来源"});
+ expect(screen.getAllByRole("option",{name:/只保留引用编号|附重点原话和确认|附章节引用的原话/})).toHaveLength(3);
+ expect(sources).toHaveValue("locators");
+ expect(sources).toHaveAccessibleDescription("保留引用编号，方便回到原对话查找。");
+ fireEvent.change(sources,{target:{value:"key"}});
+ expect(sources).toHaveAccessibleDescription(/附上 1 条重点记录/);
+ const wiki=screen.getByRole("checkbox",{name:"项目 Wiki"});
+ fireEvent.click(wiki);
+ expect(sources).toHaveAccessibleDescription("所选章节暂无可附的重点记录。");
+ expect(sources).toBeDisabled();
+ fireEvent.click(wiki);
+ fireEvent.change(sources,{target:{value:"excerpts"}});
+ expect(sources).toHaveAccessibleDescription("附上所选章节引用的对话片段，方便逐条核对。");
 });
 it("lets the user select an individual Wiki and exports a complete safe document",async()=>{
  const create=vi.fn().mockReturnValue("blob:fixture");vi.stubGlobal("URL",class extends URL{static createObjectURL=create;static revokeObjectURL=vi.fn();});const click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{}),close=vi.fn();
  render(<ProjectExportDialog session={contextKnowledge().session} zh onClose={close}/>);
  expect(screen.getByRole("combobox",{name:"文件格式"})).toHaveValue("md");
  expect(screen.queryByText(/包含可点击目录/)).toBeNull();expect(screen.getByRole("button",{name:"选择 Wiki 章节"})).toHaveAttribute("aria-expanded","false");
- fireEvent.click(screen.getByRole("checkbox",{name:"项目总览"}));fireEvent.click(screen.getByRole("checkbox",{name:"Wiki 章节"}));expect(screen.getByRole("button",{name:"导出"})).toBeDisabled();
+ fireEvent.click(screen.getByRole("checkbox",{name:"项目 Wiki"}));expect(screen.getByRole("button",{name:"导出"})).toBeDisabled();
  fireEvent.click(screen.getByRole("button",{name:"选择 Wiki 章节"}));fireEvent.click(screen.getByRole("checkbox",{name:"数据库存储"}));fireEvent.click(screen.getByRole("button",{name:"导出"}));await screen.findByText("文件已导出");
  const reader=new FileReader();reader.readAsText(create.mock.calls[0][0]);await waitFor(()=>expect(reader.result).toBeTruthy());expect(String(reader.result)).toContain("数据库使用 IndexedDB");expect(String(reader.result)).not.toContain("const action");expect(String(reader.result)).not.toContain("绝不默认带出的私人笔记");expect(click).toHaveBeenCalledOnce();
  fireEvent.keyDown(screen.getByRole("dialog"),{key:"Escape"});expect(close).toHaveBeenCalledOnce();
 });
-it("exports the knowledge ledger as its own JSON file when ticked, with no note under the source option",async()=>{
+it("exports the knowledge ledger as its own JSON file when ticked",async()=>{
  const create=vi.fn().mockReturnValue("blob:fixture");vi.stubGlobal("URL",class extends URL{static createObjectURL=create;static revokeObjectURL=vi.fn();});
  const names:string[]=[];vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(function(this:HTMLAnchorElement){names.push(this.download);});
  const session={...contextKnowledge().session,title:"ChatAtlas",runId:"run-1",wikiKnowledge:{version:1,generatedAt:0,status:"complete",materials:0,batches:[]}} as Parameters<typeof ProjectExportDialog>[0]["session"];
  render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
- expect(screen.queryByText(/始终保留|核对原话/)).toBeNull();
  const ledger=screen.getByRole("checkbox",{name:/知识点账本/});expect(ledger).not.toBeChecked();
  // The ledger alone is enough to export.
- fireEvent.click(screen.getByRole("checkbox",{name:"项目总览"}));fireEvent.click(screen.getByRole("checkbox",{name:"Wiki 章节"}));fireEvent.click(ledger);
+ fireEvent.click(screen.getByRole("checkbox",{name:"项目 Wiki"}));fireEvent.click(ledger);
  fireEvent.click(screen.getByRole("button",{name:"导出"}));await screen.findByText("账本已导出");
  expect(names).toEqual(["ChatAtlas-ledger.json"]);
  const reader=new FileReader();reader.readAsText(create.mock.calls[0][0]);await waitFor(()=>expect(reader.result).toBeTruthy());
@@ -49,6 +66,36 @@ it("exports the knowledge ledger as its own JSON file when ticked, with no note 
  // A document without a ledger offers none.
  cleanup();render(<ProjectExportDialog session={contextKnowledge().session} zh onClose={vi.fn()}/>);
  expect(screen.queryByRole("checkbox",{name:/知识点账本/})).toBeNull();
+});
+
+it.each(["wiki","references","both","html-with-references"] as const)("exports the selected files for %s",async mode=>{
+ const session=contextKnowledge().session;
+ const example="const settings = { enabled: true };";
+ session.sections[0].body="## 设置\n\n保留正文说明。\n\n~~~ts\n"+example+"\n~~~";
+ const create=vi.fn().mockReturnValue("blob:fixture");
+ vi.stubGlobal("URL",class extends URL{static createObjectURL=create;static revokeObjectURL=vi.fn();});
+ const names:string[]=[];
+ vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(function(this:HTMLAnchorElement){names.push(this.download);});
+ render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
+ const wiki=screen.getByRole("checkbox",{name:"项目 Wiki"}),references=screen.getByRole("checkbox",{name:"参考示例"});
+ expect(wiki).toBeChecked();expect(references).not.toBeChecked();
+ if(mode==="references")fireEvent.click(wiki);
+ if(mode!=="wiki")fireEvent.click(references);
+ if(mode==="html-with-references")fireEvent.change(screen.getByRole("combobox",{name:"文件格式"}),{target:{value:"html"}});
+ fireEvent.click(screen.getByRole("button",{name:"导出"}));
+ await screen.findByText(mode==="wiki"?"文件已导出":mode==="references"?"参考示例已导出":"文件和参考示例已导出");
+ expect(names).toEqual([...(mode!=="references"?[mode==="html-with-references"?"ChatAtlas.html":"ChatAtlas.md"]:[]),...(mode!=="wiki"?["ChatAtlas - 参考示例.md"]:[])]);
+ const texts=await Promise.all(create.mock.calls.map(([blob])=>new Promise<string>((resolve,reject)=>{
+  const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsText(blob);
+ })));
+ if(mode!=="references"){
+  expect(texts[0]).toContain("项目总览");expect(texts[0]).toContain("保留正文说明");expect(texts[0]).not.toContain(example);
+ }
+ if(mode!=="wiki"){
+  expect(texts.at(-1)).toContain(example);expect(texts.at(-1)).not.toContain("保留正文说明");
+  if(mode==="references")expect(texts.at(-1)).not.toContain("返回项目 Wiki");
+  if(mode==="both")expect(texts.at(-1)).toContain("[返回项目 Wiki](ChatAtlas.md)");
+ }
 });
 it("exports this project's generation record as a CSV when ticked",async()=>{
  const create=vi.fn().mockReturnValue("blob:fixture");vi.stubGlobal("URL",class extends URL{static createObjectURL=create;static revokeObjectURL=vi.fn();});
@@ -62,7 +109,7 @@ it("exports this project's generation record as a CSV when ticked",async()=>{
  fireEvent.click(screen.getByRole("checkbox",{name:/生成记录/}));
  fireEvent.click(screen.getByRole("button",{name:"导出"}));
  expect(screen.getByText("正在准备生成记录…")).toBeInTheDocument();
- expect(post).toHaveBeenCalledWith({runId:"run-1",sourceConversationIds:session.sourceConversationIds});
+ expect(post).toHaveBeenCalledWith({runId:"run-1",sourceConversationIds:session.sourceConversationIds,quality:expect.objectContaining({sessionId:session.id,updatedAt:session.updatedAt})});
  receive?.({data:{csv:"\uFEFFrun_id\r\nrun-1\r\n"}});
  await screen.findByText("文件和生成记录已导出");
  expect(names.some(name=>name.endsWith("-analysis.csv"))).toBe(true);

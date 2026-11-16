@@ -88,6 +88,25 @@ it("shows the planned directory first, then each chapter as a preview once it is
   expect(previews[0].body).toBe("如何检索？\n\n本章包括：全文索引");
 });
 
+it("applies the user's scope to the writing outline and finished chapters", async () => {
+  const previews: string[][] = [];
+  const result = await generate("ledger-excluded-outline", {
+    onKeyDecisions: async ledger => {
+      const organization = ledger.organization!;
+      return { ...ledger, scopeAnswers: { sideproject: "exclude" }, organization: {
+        ...organization,
+        subjects: [...organization.subjects, { id: "side", name: "SideProject", aliases: [], unitIds: [] }],
+        chapters: [...organization.chapters, { id: "side", title: "Related project: SideProject", question: "", group: "", subtopics: [{ title: "SideProject", subjectIds: ["side"] }] }],
+      } };
+    },
+    onPartial: session => previews.push(session.sections.map(section => section.title)),
+  });
+  expect(previews.length).toBeGreaterThan(1);
+  expect(previews.every(titles => titles.length === 1 && titles[0] === "检索")).toBe(true);
+  expect(result.sections.map(section => section.title)).toEqual(["检索"]);
+  expect(result.wikiKnowledge?.scopeAnswers?.sideproject).toBe("exclude");
+});
+
 it("reports each ledger step to the progress view, from extraction to writing", async () => {
   const stages: string[] = [];
   await generate("ledger-progress", {}, (_done, _total, _stage, detail) => { if (detail?.ledger && stages.at(-1) !== detail.ledger.stage) stages.push(detail.ledger.stage); });

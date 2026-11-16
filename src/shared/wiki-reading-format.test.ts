@@ -4,6 +4,19 @@ import {wikiChapterLinks,wikiChapterLinksAsText} from "./wiki-chapter-links";
 import {readingEmphasisMarkdown} from "./reading-emphasis";
 import {distinctNotes} from "./wiki-history";
 
+it("qualifies generated compatibility and key lifecycle prose without changing literal examples or personal writing",()=>{
+ const claims="规则引擎 + 数据库保证电气兼容性。\n\nKey 存储（sessionStorage），关闭浏览器后消失。";
+ const literal=`\n\n\`\`\`text\n${claims}\n\`\`\``;
+ const result=wikiReadingFormat(claims+literal,{});
+ expect(result.split("```text")[0]).toContain("目录提供元件参数，由规则引擎检查已知电气约束");
+ expect(result.split("```text")[0]).toContain("刷新和恢复会话时需单独核对保留行为");
+ expect(result).toContain(literal.trim());
+ expect(wikiReadingFormat(claims,{userEdited:true})).toBe(claims);
+ const range="### 学习路线规划\n\nV1 第一版功能边界包括识别范围。";
+ expect(wikiReadingFormat(range,{})).toContain("### 第一版范围与识别边界");
+ expect(wikiReadingFormat("### 学习路线规划\n\n先学习 Python，再学习电路。",{})).toContain("### 学习路线规划");
+});
+
 it("keeps the fuller of two restated opening paragraphs and drops near-verbatim repeats",()=>{
  const short="ChatAtlas 的整体架构建议采用本地优先路线，数据主要保存在本地，用户自行配置模型接口。";
  const full="ChatAtlas 的整体架构建议采用本地优先路线，数据主要保存在本地，用户自行配置模型接口，以降低后端成本并保护隐私，核心是四层架构。";

@@ -2,12 +2,13 @@ import { wikiUserChooses } from "../shared/wiki-user-choice";
 import { UNDECIDED } from "../shared/open-words";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
+import { AIProviderHttpError, AIProviderResponseError, AIProviderValidationError } from "./provider-errors";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
 import { resolveProjectProofs } from "./project-knowledge";
 import { confirmsProposal } from "../shared/statement-evidence";
 import { sourceMessageSignature } from "../shared/source-signature";
 import { knowledgeTerms } from "../shared/knowledge-subject";
-import { FIDELITY_RULES, repairedStatements, statementDrift, trimmedQuote } from "./wiki-unit-fidelity";
+import { FIDELITY_RULES, fidelitySignature, repairedStatements, statementDrift, trimmedQuote } from "./wiki-unit-fidelity";
 import { measuredSourceScope, sourceScopedUnit } from "./wiki-source-scope";
 import { ABOUT_ROLES, aboutNameKey, ownSection, WIKI_EXCEPTION, assistantRequest, DECIDING_KINDS, pastedUserText, quotedDetails, similarStatements, STATE_KINDS, wikiUnitConditions, type WikiKnowledgeLedger, type WikiUnitAboutRole, type WikiProgressFn, type WikiKnowledgeUnit, type WikiUnitAdoption, type WikiUnitBatch, type WikiUnitKind } from "../shared/wiki-knowledge";
 
@@ -69,7 +70,7 @@ const SENTENCE_RULES = 2;
  * packed together. Their words carry the decisions: one run left 25 of them without a unit, 「首屏应展示类似 ChatGPT
  * 的欢迎页」 among them, and the user's decisions were missing from the document, not only unmarked. Eight packs: read
  * side by side they add no wait, and four left nine of a record's messages unread, one conversation never cited. */
-const COVER_RULES = 1, COVER_REQUESTS = 8;
+const COVER_RULES = 2, COVER_REQUESTS = 8;
 const PRODUCT_RULES = 1, PRODUCT_REQUESTS = 6, PRODUCT_MIN_NAMES = 2;
 const COMPARES = /竞品|竞争|对手|参考|对比|借鉴|开源项目|同类产品|标杆|替代方案|\b(?:competitors?|alternatives?|compared? (?:to|with)|vs\.?)\b/giu;
 /** Product names a passage gives: capitalized Latin names (one or two words) and names in Chinese quotes. Words every
@@ -289,7 +290,9 @@ export function checkWikiUnits(value: unknown, passages: Passage[], project?: st
       evidence: { evidenceId: material.id, conversationId: material.conversationId, messageId: material.messageId, messageIndex: material.messageIndex ?? -1, role: source.role, pasted: source.pasted, quote },
       adoption, delivery, ...(conditions.length ? { conditions } : {}), ...(relation ? { relation } : {}), ...(about ? { about } : {}) };
     const scoped = wikiUnitConditions(unit);
-    units.set(id, scoped.length ? { ...unit, conditions: scoped } : unit);
+    if (scoped.length) unit.conditions = scoped;
+    else delete unit.conditions;
+    units.set(id, unit);
   }
   return { units: [...units.values()], rejected, rejectedSamples };
 }
@@ -388,7 +391,7 @@ export function droppedFigures(unit: WikiKnowledgeUnit, message: string): string
   return found;
 }
 
-export interface WikiKnowledgeReport { requests: number; /** Characters of all material, of pasted material, and of material the user chose to leave out (unread). */ totalCharacters?: number; pastedCharacters?: number; skippedMaterials?: number; skippedCharacters?: number; coverRetries: number; rereadNoLedger?: number; rereadBatchChanged?: number; rereadFailed?: number; rereadRulesChanged?: number; rereadInputChanged?: number; rereadLegacySignatureChanged?: number; /** User messages with source blocks still uncovered after extraction and repair. */ uncoveredMessages?: number; firstPassUncoveredMessages?: number; sentenceRetries?: number; sentenceUnits?: number; figuresRecovered?: number; reused: number; failed: number; units: number; rejected: number; materials: number; coveredMaterials: number; /** Batches read again as two halves after failing whole. */ splitRetries?: number; /** Product comparisons read once more, the units they added and the units they tagged. */ productRequests?: number; productUnits?: number; productTagged?: number; /** Units the user's uncovered messages gave when read again. */ coverUnits?: number; /** Quotes cut to the blocks stating their point; statements saying more than their source, those told again in its terms, and the requests asking. */ quotesTrimmed?: number; statementsDrifting?: number; statementsRepaired?: number; fidelityRequests?: number }
+export interface WikiKnowledgeReport { requests: number; coverageCovered?: number; coverageDuplicate?: number; coverageNoKnowledge?: number; coverageFailed?: number; coveragePending?: number; fidelityFailedRequests?: number; fidelityUncheckedUnits?: number; fidelityPendingUnits?: number; /** Characters of all material, of pasted material, and of material the user chose to leave out (unread). */ totalCharacters?: number; pastedCharacters?: number; skippedMaterials?: number; skippedCharacters?: number; coverRetries: number; rereadNoLedger?: number; rereadBatchChanged?: number; rereadFailed?: number; rereadRulesChanged?: number; rereadInputChanged?: number; rereadLegacySignatureChanged?: number; /** User messages with source blocks still uncovered after extraction and repair. */ uncoveredMessages?: number; firstPassUncoveredMessages?: number; sentenceRetries?: number; sentenceUnits?: number; figuresRecovered?: number; reused: number; failed: number; units: number; rejected: number; materials: number; coveredMaterials: number; /** Batches read again as two halves after failing whole. */ splitRetries?: number; /** Product comparisons read once more, the units they added and the units they tagged. */ productRequests?: number; productUnits?: number; productTagged?: number; /** Units the user's uncovered messages gave when read again. */ coverUnits?: number; /** Quotes cut to the blocks stating their point; statements saying more than their source, those told again in its terms, and the requests asking. */ quotesTrimmed?: number; statementsDrifting?: number; statementsRepaired?: number; fidelityRequests?: number }
 
 /** One request per batch, bounded concurrency; a failed batch is recorded, never fatal. */
 /** An earlier batch still describes these materials: same signature, or (older ledgers
@@ -396,9 +399,9 @@ export interface WikiKnowledgeReport { requests: number; /** Characters of all m
 function sameBatchSources(previous: WikiUnitBatch, sourceIds: string[]) {
   return previous.sourceIds.length === sourceIds.length && previous.sourceIds.every((id, index) => id === sourceIds[index]);
 }
-function reusable(previous: WikiUnitBatch | undefined, signature: string, batch: CoverageMaterial[], sourceIds: string[]) {
+function reusable(previous: WikiUnitBatch | undefined, sameInput: boolean, batch: CoverageMaterial[], sourceIds: string[]) {
   if (!previous || previous.status !== "ok" || previous.skipped || !sameBatchSources(previous, sourceIds)) return false;
-  if (previous.signature) return previous.signature === signature;
+  if (previous.signature) return sameInput;
   const text = new Map(batch.map(material => [material.id, normalized(bodyOf(material))]));
   return previous.sourceIds.length === batch.length && previous.sourceIds.every((id, index) => id === batch[index].id) && previous.units.every(unit => text.get(unit.evidence.evidenceId)?.includes(normalized(unit.evidence.quote)));
 }
@@ -426,9 +429,32 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
   const leftOut = (material: CoverageMaterial) => skippedNow().has(`${material.conversationId}:${material.messageId}`);
   let skippedMaterials = 0, skippedCharacters = 0;
   let next = 0, reused = 0, finished = 0, splitRetries = 0;
+  let available = CONCURRENCY;
+  const waitingForSlot: Array<() => void> = [];
+  const send = async <T>(request: StructuredAIRequest<T>): Promise<T> => {
+    if (available) available--;
+    else await new Promise<void>(resolve => waitingForSlot.push(resolve));
+    try { signal.throwIfAborted(); return await ai.generateStructured!(request); }
+    finally { const waiting = waitingForSlot.shift(); if (waiting) waiting(); else available++; }
+  };
   const reread: Partial<Record<"rereadNoLedger" | "rereadBatchChanged" | "rereadFailed" | "rereadRulesChanged" | "rereadInputChanged" | "rereadLegacySignatureChanged", number>> = {};
   // The user's own words carry the decisions: a substantive user message with no unit is asked for once more.
-  const uncoveredIn = (batch: CoverageMaterial[], found: WikiKnowledgeUnit[]) => batch.filter(material => roleOf(material) === "user" && !pasted(material) && bodyOf(material).trim().length >= COVER_MIN && !onlyAsks(bodyOf(material).trim()) && !assistantRequest(bodyOf(material)) && !found.some(unit => unit.evidence.evidenceId === material.id)).map(material => material.id);
+  const uncoveredIn = (batch: CoverageMaterial[], found: WikiKnowledgeUnit[]) => batch.filter(material => {
+    if (roleOf(material) !== "user" || pasted(material) || found.some(unit => unit.evidence.evidenceId === material.id)) return false;
+    const body = bodyOf(material).trim(), statesChoice = STATES_INTENT.test(body) || CHOICE_SENTENCE.test(body);
+    return (body.length >= COVER_MIN || statesChoice) && !onlyAsks(body) && (!assistantRequest(body) || statesChoice);
+  }).map(material => material.id);
+  const coverageOf = (material: CoverageMaterial, result: WikiUnitBatch) => {
+    const recorded = result.coverage?.[material.id];
+    return recorded?.version === COVER_RULES && recorded.sourceSignature === sourceMessageSignature(material.text) ? recorded : undefined;
+  };
+  const recordCoverage = (material: CoverageMaterial, result: WikiUnitBatch, status: NonNullable<WikiUnitBatch["coverage"]>[string]["status"], reason?: string, attempted = false) => {
+    const prior = coverageOf(material, result);
+    return { ...result, coverage: { ...result.coverage, [material.id]: {
+      version: COVER_RULES, sourceSignature: sourceMessageSignature(material.text), status, ...(reason ? { reason } : {}),
+      attempts: (prior?.attempts ?? 0) + Number(attempted),
+    } } };
+  };
   // What the user said that no unit states, whole messages or single choice sentences, is noted on its batch.
   interface Pending { index: number; batch: CoverageMaterial[]; units: WikiKnowledgeUnit[]; missing: string[]; sentences: Array<{ id: string; sentences: string[] }>; base: WikiUnitBatch }
   const pending: Pending[] = [];
@@ -443,9 +469,13 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       const batch = batches[index].filter(material => !leftOut(material));
       if (batch.length < batches[index].length) { skippedMaterials += batches[index].length - batch.length; skippedCharacters += batches[index].filter(leftOut).reduce((sum, material) => sum + material.text.length, 0); }
       if (!batch.length) { results[index] = { sourceIds, status: "ok", skipped: true, units: [], rejected: {} }; finished++; tick(); continue; }
-      const request = wikiUnitRequest(batch, materials, locale, signal, pasted, input.project), signature = sourceMessageSignature(JSON.stringify([EXTRACT_RULES, request.system, request.prompt])), previous = earlier.get(sourceIds[0]);
+      const request = wikiUnitRequest(batch, materials, locale, signal, pasted, input.project);
+      const signature = sourceMessageSignature(JSON.stringify([EXTRACT_RULES, request.prompt]));
+      const previous = earlier.get(sourceIds[0]);
+      const sameInput = Boolean(previous?.signature && sameBatchSources(previous, sourceIds) && (previous.signature === signature
+        || previous.signature === sourceMessageSignature(JSON.stringify([EXTRACT_RULES, request.system, request.prompt]))));
       // An unchanged batch keeps its units; only new or changed material is read again.
-      if (reusable(previous, signature, batch, sourceIds)) {
+      if (reusable(previous, sameInput, batch, sourceIds)) {
         const kept: WikiUnitBatch = { ...previous!, signature, extractRules: EXTRACT_RULES, sentenceChecked: SENTENCE_RULES };
         // A batch read before the sentence check gets it once: only the choice sentences no unit states are asked for.
         const left = previous!.sentenceChecked !== SENTENCE_RULES ? uncoveredSentences(batch, previous!.units, pasted) : [];
@@ -458,22 +488,37 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       try {
         // A batch over the input budget, or one the provider timed out on, is read again as two halves: one run lost six
         // of 36 batches this way (one at 15358/14000 estimated tokens, five at 90-117 s), a sixth of its material.
-        // A half that fails again fails the batch.
-        const read = async () => {
-          try { return await ai.generateStructured!(request); }
-          catch (error) {
-            signal.throwIfAborted();
-            if (batch.length < 2) throw error;
-            const middle = Math.ceil(batch.length / 2), halves = [batch.slice(0, middle), batch.slice(middle)];
-            const parts = [];
-            for (const half of halves) parts.push(await ai.generateStructured!(wikiUnitRequest(half, materials, locale, signal, pasted, input.project)));
-            splitRetries++;
-            const rejected: Record<string, number> = {};
-            for (const part of parts) for (const [reason, count] of Object.entries(part.rejected)) rejected[reason] = (rejected[reason] ?? 0) + count;
-            return { units: parts.flatMap(part => part.units), rejected, rejectedSamples: parts.flatMap(part => part.rejectedSamples) };
+        // A failed half leaves the batch incomplete and the successful half available to resume.
+        const saved = sameInput ? previous?.recoveredHalves : undefined;
+        let first: Awaited<ReturnType<typeof request.validate>> | undefined;
+        if (!saved?.length) try { first = await send(request); }
+        catch (error) {
+          signal.throwIfAborted();
+          const code = (error as { code?: string })?.code;
+          if (batch.length < 2 || !(code === "LOCAL_INPUT_BUDGET" || code === "LOCAL_INPUT_CHARACTERS" || error instanceof AIProviderValidationError
+            || error instanceof AIProviderHttpError && error.status === 413 || error instanceof AIProviderResponseError && ["PROVIDER_TIMEOUT", "PROVIDER_OUTPUT_TRUNCATED", "PROVIDER_STREAM_INCOMPLETE"].includes(error.code))) throw error;
+        }
+        if (!first) {
+          const middle = Math.ceil(batch.length / 2), halves = [batch.slice(0, middle), batch.slice(middle)];
+          const parts = [...saved ?? []], rejected: Record<string, number> = {};
+          splitRetries++;
+          const outcomes = await Promise.allSettled(halves.flatMap((half, halfIndex) => parts.some(part => part.index === halfIndex) ? [] : [
+            send(wikiUnitRequest(half, materials, locale, signal, pasted, input.project)).then(part => ({ index: halfIndex, ...part })),
+          ]));
+          signal.throwIfAborted();
+          let failure: string | undefined;
+          for (const outcome of outcomes) {
+            if (outcome.status === "fulfilled") parts.push(outcome.value);
+            else failure ??= outcome.reason instanceof Error ? outcome.reason.message.slice(0, 200) : "failed";
           }
-        };
-        const first = await read();
+          parts.sort((a, b) => a.index - b.index);
+          for (const part of parts) for (const [reason, count] of Object.entries(part.rejected)) rejected[reason] = (rejected[reason] ?? 0) + count;
+          first = { units: parts.flatMap(part => part.units), rejected, rejectedSamples: parts.flatMap(part => part.rejectedSamples ?? []) };
+          if (failure) {
+            results[index] = { sourceIds, signature, extractRules: EXTRACT_RULES, status: "failed", units: first.units, rejected, error: failure, ...(parts.length ? { recoveredHalves: parts } : {}) };
+            finished++; tick(); continue;
+          }
+        }
         const missing = uncoveredIn(batch, first.units), sentences = uncoveredSentences(batch, first.units, pasted).filter(item => !missing.includes(item.id));
         const base: WikiUnitBatch = { sourceIds, signature, extractRules: EXTRACT_RULES, status: "ok", units: first.units, rejected: first.rejected, ...(first.rejectedSamples.length ? { rejectedSamples: first.rejectedSamples } : {}), sentenceChecked: SENTENCE_RULES };
         results[index] = base;
@@ -484,6 +529,11 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
+  const initialCoverageGaps = results.flatMap((result, index) => result?.status === "ok" && !result.skipped
+    ? uncoveredIn(batches[index].filter(material => !leftOut(material)), result.units).filter(id => {
+      const material = batches[index].find(material => material.id === id)!;
+      return coverageOf(material, result)?.status !== "no_knowledge";
+    }) : []);
   // No second request for what the first answer left out: packed after the main pass it added about 5 units in 1,200
   // for eight requests. What stays uncovered is recorded, so the quality check still names it.
   for (const item of pending) {
@@ -494,7 +544,17 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
   // unit kept with the batch its message belongs to. A unit stating again what the batch has is not added.
   const batchOf = new Map(batches.flatMap((batch, index) => batch.map(material => [material.id, index] as const)));
   const byId = new Map(materials.map(material => [material.id, material]));
-  const waiting = results.flatMap((result, index) => result && result.status === "ok" && !result.skipped && result.coverChecked !== COVER_RULES ? (result.uncovered ?? []).flatMap(id => byId.get(id) ? [{ index, material: byId.get(id)! }] : []) : []);
+  // Recalculate gaps even if a legacy recovery was marked complete.
+  const waiting = results.flatMap((result, index) => {
+    if (!result || result.status !== "ok" || result.skipped) return [];
+    const missing = uncoveredIn(batches[index].filter(material => !leftOut(material)), result.units);
+    return missing.flatMap(id => {
+      const material = byId.get(id);
+      if (!material) return [];
+      const outcome = coverageOf(material, result);
+      return outcome?.status === "no_knowledge" ? [] : [{ index, material }];
+    });
+  });
   const packs: CoverageMaterial[][] = [];
   for (const { material } of waiting) {
     const pack = packs[packs.length - 1], size = pack?.reduce((sum, item) => sum + item.text.length, 0) ?? 0;
@@ -508,14 +568,52 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
     signal.throwIfAborted();
     try {
       coverRequests++;
-      const answer = await ai.generateStructured!(wikiUnitRequest(pack, materials, locale, signal, pasted, input.project, pack.map(material => material.id)));
+      const request = wikiUnitRequest(pack, materials, locale, signal, pasted, input.project, pack.map(material => material.id));
+      const payload = JSON.parse(request.prompt);
+      const proof = new Map(pack.map((material, index) => ["p" + (index + 1), material]));
+      const answer = await send({
+        ...request,
+        prompt: JSON.stringify({ ...payload, coverReview: "Extract every project intent from the covered user passages, even if an assistant already said it. Also return coverage:[{passage:'p1',status:'no_knowledge'|'pending',reason:'question'|'assistant_request'|'no_project_content',explanation:'brief reason'}] for passages producing no unit. Choose no_knowledge only when no durable project fact, choice, intent or constraint is stated. Uncertain cases are pending." }),
+        validate: value => {
+          const parsed = request.validate(value);
+          const rows = (value as { coverage?: unknown })?.coverage;
+          const coverage: Record<string, string> = {};
+          if (Array.isArray(rows)) for (const row of rows) {
+            const entry = row as Record<string, unknown>, material = proof.get(String(entry?.passage));
+            if (!material || entry.status !== "no_knowledge" || !["question", "assistant_request", "no_project_content"].includes(String(entry.reason))
+              || typeof entry.explanation !== "string" || !entry.explanation.trim() || STATES_INTENT.test(bodyOf(material)) || CHOICE_SENTENCE.test(bodyOf(material))) continue;
+            coverage[material.id] = String(entry.reason) + ": " + entry.explanation.slice(0, 180);
+          }
+          return { ...parsed, coverage };
+        },
+      });
+      const duplicates = new Set<string>();
       for (const unit of answer.units) {
         const index = batchOf.get(unit.evidence.evidenceId);
         if (index === undefined || !results[index]) continue;
-        if (results[index].units.some(other => similarStatements(other.statement, unit.statement))) continue;
+        // Equivalent wording cannot erase independent user evidence or stance.
+        if (results[index].units.some(other => other.evidence.evidenceId === unit.evidence.evidenceId
+          && other.evidence.role === unit.evidence.role && other.evidence.pasted === unit.evidence.pasted
+          && other.kind === unit.kind && other.adoption.status === unit.adoption.status && similarStatements(other.statement, unit.statement))) {
+          duplicates.add(unit.evidence.evidenceId);
+          continue;
+        }
         results[index] = { ...results[index], units: [...results[index].units, unit] }; coverUnits++;
       }
-    } catch { signal.throwIfAborted(); }
+      for (const material of pack) {
+        const index = batchOf.get(material.id)!;
+        const covered = results[index].units.some(unit => unit.evidence.evidenceId === material.id);
+        const reason = answer.coverage[material.id];
+        results[index] = recordCoverage(material, results[index], covered ? duplicates.has(material.id) ? "duplicate" : "covered" : reason ? "no_knowledge" : "pending",
+          covered ? undefined : reason ?? "No supported unit or conclusive disposition returned", true);
+      }
+    } catch (error) {
+      signal.throwIfAborted();
+      for (const material of pack) {
+        const index = batchOf.get(material.id)!;
+        results[index] = recordCoverage(material, results[index], "failed", error instanceof Error ? error.message.slice(0, 180) : "Recovery request failed", true);
+      }
+    }
   };
   // Passages comparing other products, read once more for each product they name (PRODUCT_RULES). A unit the second
   // read states again is not added; when it says whose point it is and the first did not, the first is tagged.
@@ -548,13 +646,17 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
   };
   await Promise.all([...packs.slice(0, COVER_REQUESTS).map(cover), ...candidates.map(compare)]);
   // Each batch read again, or with nothing to read, is checked: what is still without a unit stays noted.
-  const asked = new Set(packs.slice(0, COVER_REQUESTS).flat().map(material => material.id));
   for (const [index, result] of results.entries()) {
-    if (!result || result.status !== "ok" || result.skipped || result.coverChecked === COVER_RULES) continue;
-    if ((result.uncovered ?? []).some(id => byId.has(id) && !asked.has(id))) continue;
-    const still = uncoveredIn(batches[index].filter(material => !leftOut(material)), result.units);
-    const next: WikiUnitBatch = { ...result, coverChecked: COVER_RULES };
-    if (still.length) next.uncovered = still; else delete next.uncovered;
+    if (!result || result.status !== "ok" || result.skipped) continue;
+    const missing = uncoveredIn(batches[index].filter(material => !leftOut(material)), result.units);
+    const unresolved = missing.filter(id => {
+      const material = byId.get(id);
+      const outcome = material && coverageOf(material, result);
+      return !outcome || !["no_knowledge", "duplicate", "covered"].includes(outcome.status);
+    });
+    const next = { ...result };
+    if (unresolved.length) delete next.coverChecked;
+    else next.coverChecked = COVER_RULES;
     results[index] = next;
   }
   // A figure the source message gives beside a word the unit names, which its statement and details dropped
@@ -651,12 +753,30 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
   });
   // Ask once per batch and rules version about remaining drift.
   const messageOf = (unit: WikiKnowledgeUnit) => whole.get(JSON.stringify([unit.evidence.conversationId, unit.evidence.messageId])) ?? (byMaterial.get(unit.evidence.evidenceId) ? bodyOf(byMaterial.get(unit.evidence.evidenceId)!) : "");
-  const unchecked = results.flatMap((batch, index) => batch && batch.status === "ok" && !batch.skipped && batch.fidelityChecked !== FIDELITY_RULES ? [index] : []);
-  const flagged = unchecked.flatMap(index => results[index].units.flatMap(unit => { const body = messageOf(unit); const reasons = body ? statementDrift(unit, body) : []; return reasons.length ? [{ unit, body, reasons }] : []; }));
-  const repair = flagged.length ? await repairedStatements(flagged, ai, locale, signal) : { statements: new Map<string, string>(), requests: 0, failed: 0 };
+  const unchecked = results.flatMap((batch, index) => batch && batch.status === "ok" && !batch.skipped
+    && batch.units.some(unit => batch.fidelityResults?.[unit.id]?.version !== FIDELITY_RULES || batch.fidelityResults?.[unit.id]?.signature !== fidelitySignature(unit)) ? [index] : []);
+  const flagged = unchecked.flatMap(index => results[index].units.flatMap(unit => {
+    const checked = results[index].fidelityResults?.[unit.id];
+    if (checked?.version === FIDELITY_RULES && checked.signature === fidelitySignature(unit)) return [];
+    const body = messageOf(unit), reasons = body ? statementDrift(unit, body) : [];
+    return reasons.length ? [{ unit, body, reasons }] : [];
+  }));
+  const repair = flagged.length ? await repairedStatements(flagged, ai, locale, signal) : { statements: new Map<string, string>(), checked: new Set<string>(), requests: 0, failed: 0 };
   for (const index of unchecked) {
     const batch = results[index];
-    results[index] = { ...batch, units: batch.units.map(unit => repair.statements.has(unit.id) ? { ...unit, statement: repair.statements.get(unit.id)! } : unit), ...(repair.failed ? {} : { fidelityChecked: FIDELITY_RULES }) };
+    const units = batch.units.map(unit => repair.statements.has(unit.id) ? { ...unit, statement: repair.statements.get(unit.id)! } : unit);
+    const fidelityResults = { ...batch.fidelityResults };
+    for (const unit of units) {
+      if (repair.checked.has(unit.id) || !statementDrift(unit, messageOf(unit)).length) {
+        const remaining = statementDrift(unit, messageOf(unit)).length;
+        fidelityResults[unit.id] = { version: FIDELITY_RULES, signature: fidelitySignature(unit), ...(remaining ? { remaining } : {}) };
+      }
+    }
+    const complete = units.every(unit => fidelityResults[unit.id]?.signature === fidelitySignature(unit) && fidelityResults[unit.id]?.version === FIDELITY_RULES);
+    const result = { ...batch, units, fidelityResults };
+    if (complete) result.fidelityChecked = FIDELITY_RULES;
+    else delete result.fidelityChecked;
+    results[index] = result;
   }
   // Another project the conversation discusses, which extraction left untagged ("针对 ChatAtlas 生成的综述……"): its
   // points were written as this project's design, and confirmed as its decisions. Tagged here, they are put to the user
@@ -683,17 +803,45 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
   }
   // Recheck the final units: supplementing a batch or correcting a quote's
   // author can change which source blocks still have no knowledge point.
-  for (const [index, result] of results.entries()) {
+  for (const [index, saved] of results.entries()) {
+    let result = saved;
     if (result.status !== "ok" || result.skipped) continue;
-    const uncovered = uncoveredIn(batches[index].filter(material => !leftOut(material)), result.units);
+    const own = batches[index].filter(material => !leftOut(material));
+    for (const material of own.filter(material => roleOf(material) === "user" && !pasted(material))) {
+      const covered = result.units.some(unit => unit.evidence.evidenceId === material.id);
+      const outcome = coverageOf(material, result);
+      if (covered && !["covered", "duplicate"].includes(outcome?.status ?? "")) result = recordCoverage(material, result, "covered");
+      else if (!covered && (outcome?.status === "covered" || outcome?.status === "duplicate")) {
+        result = recordCoverage(material, result, "pending", "Source or role validation did not retain a unit from this user passage");
+      }
+      else if (!covered && !outcome && (onlyAsks(bodyOf(material).trim()) || assistantRequest(bodyOf(material)))) {
+        result = recordCoverage(material, result, "no_knowledge", "Local review: a question or request to the assistant without a project choice");
+      }
+    }
+    const uncovered = uncoveredIn(own, result.units).filter(id => {
+      const material = byId.get(id);
+      return !material || coverageOf(material, result)?.status !== "no_knowledge";
+    });
+    for (const id of uncovered) {
+      const material = byId.get(id)!;
+      if (!coverageOf(material, result)) result = recordCoverage(material, result, "pending", "Not reviewed within this run's recovery budget");
+    }
     if (uncovered.length) result.uncovered = uncovered;
     else delete result.uncovered;
+    if (uncovered.length) delete result.coverChecked;
+    else result.coverChecked = COVER_RULES;
+    results[index] = result;
   }
   const countMessages = (ids: string[]) => new Set(ids.flatMap(id => {
     const material = byId.get(id);
     return material ? [JSON.stringify([material.conversationId, material.messageId])] : [];
   })).size;
   const uncoveredMessages = countMessages(results.flatMap(batch => batch.uncovered ?? []));
+  const coverageOutcomes: Record<string, number> = {};
+  for (const result of results) for (const material of result.sourceIds.flatMap(id => byId.get(id) ?? []).filter(material => !leftOut(material))) {
+    const outcome = coverageOf(material, result);
+    if (outcome) coverageOutcomes[outcome.status] = (coverageOutcomes[outcome.status] ?? 0) + 1;
+  }
   const units = results.flatMap(batch => batch.units);
   const covered = new Set(units.map(unit => unit.evidence.evidenceId));
   const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: Date.now(), status: results.every(batch => batch.status === "ok") ? "complete" : "partial", materials: materials.length, batches: results, ...(input.previous?.decisions ? { decisions: input.previous.decisions, ...(input.previous.decisionsAt ? { decisionsAt: input.previous.decisionsAt } : {}) } : {}), ...(input.previous?.coexisting ? { coexisting: input.previous.coexisting } : {}),
@@ -703,7 +851,7 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
     // So are the user's answers before writing, and the points they said are another project's.
     ...(input.previous?.userAnswers ? { userAnswers: input.previous.userAnswers } : {}), ...(input.previous?.userOwners ? { userOwners: input.previous.userOwners } : {}),
     ...(skippedNow().size ? { skippedMessages: [...skippedNow()] } : {}), ...((input.sourceChoices?.() ?? input.previous?.sourceChoices) ? { sourceChoices: input.sourceChoices?.() ?? input.previous!.sourceChoices } : {}) };
-  return { ledger, report: { requests: Object.values(reread).reduce((sum, count) => sum + count, 0), ...reread, ...(conditionalSuggestionsRecovered ? { conditionalSuggestionsRecovered } : {}), coverRetries: coverRequests, ...(coverUnits ? { coverUnits } : {}), uncoveredMessages, firstPassUncoveredMessages: countMessages(pending.flatMap(item => item.missing)), ...(figuresRecovered ? { figuresRecovered } : {}), ...(codesMoved ? { codesMoved } : {}), ...(quotesRefit ? { quotesRefit } : {}), ...(quotesTrimmed ? { quotesTrimmed } : {}), ...(flagged.length ? { statementsDrifting: flagged.length, statementsRepaired: repair.statements.size, fidelityRequests: repair.requests } : {}), ...(discussed.size ? { discussedOtherProject: discussed.size } : {}), ...(ownNames.size ? { ownNamesUntagged: ownNames.size } : {}), ...(questionsRead ? { questionsReadAsPlans: questionsRead } : {}), ...(pointsUnsaid ? { pointsUnsaid } : {}), ...(splitRetries ? { splitRetries } : {}), ...(productRequests ? { productRequests, productUnits, productTagged } : {}), reused, failed: results.filter(batch => batch.status === "failed").length, units: units.length, rejected: results.reduce((sum, batch) => sum + Object.values(batch.rejected).reduce((total, count) => total + count, 0), 0), materials: materials.length, coveredMaterials: covered.size, ...(skippedMaterials ? { skippedMaterials, skippedCharacters } : {}), totalCharacters: materials.reduce((sum, material) => sum + material.text.length, 0), pastedCharacters: materials.filter(material => roleOf(material) === "user" && pasted(material)).reduce((sum, material) => sum + material.text.length, 0) } };
+  return { ledger, report: { requests: Object.values(reread).reduce((sum, count) => sum + count, 0), ...reread, coverageCovered: coverageOutcomes.covered ?? 0, coverageDuplicate: coverageOutcomes.duplicate ?? 0, coverageNoKnowledge: coverageOutcomes.no_knowledge ?? 0, coverageFailed: coverageOutcomes.failed ?? 0, coveragePending: coverageOutcomes.pending ?? 0, fidelityPendingUnits: results.reduce((sum, batch) => sum + Object.values(batch.fidelityResults ?? {}).filter(result => result.remaining).length, 0), fidelityFailedRequests: repair.failed, fidelityUncheckedUnits: flagged.filter(item => !repair.checked.has(item.unit.id)).length, ...(conditionalSuggestionsRecovered ? { conditionalSuggestionsRecovered } : {}), coverRetries: coverRequests, ...(coverUnits ? { coverUnits } : {}), uncoveredMessages, firstPassUncoveredMessages: countMessages(initialCoverageGaps), ...(figuresRecovered ? { figuresRecovered } : {}), ...(codesMoved ? { codesMoved } : {}), ...(quotesRefit ? { quotesRefit } : {}), ...(quotesTrimmed ? { quotesTrimmed } : {}), ...(flagged.length ? { statementsDrifting: flagged.length, statementsRepaired: repair.statements.size, fidelityRequests: repair.requests } : {}), ...(discussed.size ? { discussedOtherProject: discussed.size } : {}), ...(ownNames.size ? { ownNamesUntagged: ownNames.size } : {}), ...(questionsRead ? { questionsReadAsPlans: questionsRead } : {}), ...(pointsUnsaid ? { pointsUnsaid } : {}), ...(splitRetries ? { splitRetries } : {}), ...(productRequests ? { productRequests, productUnits, productTagged } : {}), reused, failed: results.filter(batch => batch.status === "failed").length, units: units.length, rejected: results.reduce((sum, batch) => sum + Object.values(batch.rejected).reduce((total, count) => total + count, 0), 0), materials: materials.length, coveredMaterials: covered.size, ...(skippedMaterials ? { skippedMaterials, skippedCharacters } : {}), totalCharacters: materials.reduce((sum, material) => sum + material.text.length, 0), pastedCharacters: materials.filter(material => roleOf(material) === "user" && pasted(material)).reduce((sum, material) => sum + material.text.length, 0) } };
 }
 
 /** A product the discussion talks about as a product ("ChatAtlas 当前能收集……", "针对 ChatAtlas 生成的综述", "升级

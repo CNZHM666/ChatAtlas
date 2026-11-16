@@ -7,7 +7,7 @@ import { getMessagesForConversation } from "./messages";
 export interface SourceVersion { id: string; conversationId: string; fingerprint: string; messages: ConversationMessage[]; capturedAt: number }
 export function sourceVersion(conversationId: string, messages: ConversationMessage[], capturedAt: number): SourceVersion {
   const ordered = [...messages].sort((a, b) => a.messageIndex - b.messageIndex);
-  const fingerprint = sourceMessageSignature(JSON.stringify(ordered.map(message => [message.id, message.role, message.messageIndex, message.content, message.replyToMessageId ?? "", ...(message.uiParts?.length ? [message.uiParts] : [])])));
+  const fingerprint = sourceMessageSignature(JSON.stringify(ordered.map(message => [message.id, message.role, message.messageIndex, message.content, message.replyToMessageId ?? "", ...(message.uiParts?.length ? [message.uiParts] : []), ...(message.contentKind ? [{ contentKind: message.contentKind }] : [])])));
   return { id: JSON.stringify([conversationId, fingerprint]), conversationId, fingerprint, messages: ordered, capturedAt };
 }
 

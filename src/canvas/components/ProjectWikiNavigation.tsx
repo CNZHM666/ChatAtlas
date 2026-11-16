@@ -1,9 +1,10 @@
 import {wikiDisplayGroups} from "../../shared/wiki-display-groups";
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Pencil, Plus } from "lucide-react";
 import type { FocusSession } from "../../shared/focus-session";
 import { wikiSections, localizedWikiTitle } from "../../shared/wiki-navigation";
-import {wikiDocument} from "../wiki-document";
+import {wikiNavigationHeadings} from "../wiki-document";
+import {useProjectReadingCache} from "../project-reading-cache";
 
 export function ProjectWikiNavigation({ session, activeId, zh, onRead, adjusting = false, onDone, onCollapse, onEdit, onMove, onCreateGroup, onCreatePage, onDropPage, disabled = false }: {
   session: FocusSession; activeId?: string; zh: boolean; onRead: (id: string,heading?:string) => void;
@@ -17,7 +18,8 @@ export function ProjectWikiNavigation({ session, activeId, zh, onRead, adjusting
 }) {
   const [newGroup, setNewGroup] = useState<string>();
   const [openSubtopics,setOpenSubtopics]=useState<Record<string,boolean>>({});
-  const subtopics=useMemo(()=>new Map(session.sections.map(section=>[section.id,wikiDocument(section.body,!section.userEdited&&!section.origin).headings.filter(heading=>heading.depth===2)])),[session.sections]);
+  const readingCache=useProjectReadingCache();
+  const subtopics=readingCache.get(session,"navigation-headings",()=>new Map(session.sections.map(section=>[section.id,wikiNavigationHeadings(section.body,!section.userEdited&&!section.origin)])));
   const [newPage, setNewPage] = useState<{title:string;body:string;group:string}>();
   // One list in directory order: the chapters are few and the category groups added a step without helping reading.
   const categorized=false;

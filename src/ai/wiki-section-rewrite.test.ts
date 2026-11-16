@@ -30,8 +30,8 @@ it("sends only the selected chapter's bound originals once and returns a candida
   expect(ai.generateStructured).toHaveBeenCalledOnce();
   const payload = JSON.parse(ai.generateStructured.mock.calls[0][0].prompt);
   const request=ai.generateStructured.mock.calls[0][0];
-  expect(request.maxAttempts).toBe(1);expect(request.system).toContain("Article depth v7");expect(request.system).toContain("a checklist of proposed acceptance criteria is not a test result");expect(payload.version).toBe(8);
-  expect(request.system).toContain("subject AND operating mode");expect(request.system).toContain("Neither wording alone proves replacement");expect(request.system).toContain("retaining the union of supported details");
+  expect(request.maxAttempts).toBe(1);expect(request.system).toContain("Content edition v3");expect(request.system).toContain("plans, dated reports and verified implementation");expect(payload.version).toBe(8);
+  expect(request.system).toContain("Match subject, actor, entry point, mode, exact stage and prerequisites");expect(request.system).toContain("Use time for chronology and explicit evidence for adoption or replacement");expect(request.system).toContain("every distinct supported detail" );
   expect(payload.originalPassages).toHaveLength(1); expect(JSON.stringify(payload)).not.toContain("Private unrelated");
   expect(payload.editorialRequest).toBe("保留细节");
   expect(payload.projectBoundary.project.name).toBe(session.title);

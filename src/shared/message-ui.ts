@@ -1,13 +1,15 @@
 import type { ConversationMessage } from "./types";
 import { platformWidgetRanges, codeRanges } from "./conversation-text";
 import { DIL_PAYLOAD, dilRanges } from "./dil-source";
+import { toolProtocolRanges } from "./tool-traffic";
 
 export type MessagePresentation = { kind: "text"; text: string; sourceStart?: number } | { kind: "ui"; raw: string; fallbackText?: string; truncated?: boolean; partIndex?: number };
 
 /** Split only actual platform parts, never ordinary JSON, user text or code examples. */
 export function messagePresentation(content: string, uiParts: ConversationMessage["uiParts"], literal = false, locations = false): MessagePresentation[] {
   if (literal) return [{ kind: "text", text: content, ...(locations ? { sourceStart: 0 } : {}) }];
-  const ranges = platformWidgetRanges(content).map(range => ({ ...range, raw: range.payload, fallbackText: "", truncated: false, partIndex: undefined as number | undefined }));
+  const ranges = platformWidgetRanges(content).map(range => ({ ...range, raw: range.payload, fallbackText: "", truncated: false, partIndex: undefined as number | undefined, omit: false }));
+  for (const range of toolProtocolRanges(content)) ranges.push({ ...range, kind: "tool", payload: "", raw: "", fallbackText: "", truncated: false, partIndex: undefined, omit: true });
   const protectedRanges = codeRanges(content);
   let ordinal = 0;
   for (const match of content.matchAll(/【原平台交互内容】/gu)) {
@@ -15,21 +17,21 @@ export function messagePresentation(content: string, uiParts: ConversationMessag
     if (!part || protectedRanges.some(([from, to]) => match.index! >= from && match.index! < to)) continue;
     const end = match.index! + match[0].length;
     const fallbackText = typeof part.fallbackText === "string" && content.slice(end).startsWith(`\n${part.fallbackText}`) ? part.fallbackText : "";
-    ranges.push({ start: match.index!, end: end + (fallbackText ? fallbackText.length + 1 : 0), kind: "genui", payload: "", raw: typeof part.raw === "string" ? part.raw : "", fallbackText, truncated: Boolean(part.truncated), partIndex: uiParts!.indexOf(part) });
+    ranges.push({ start: match.index!, end: end + (fallbackText ? fallbackText.length + 1 : 0), kind: "genui", payload: "", raw: typeof part.raw === "string" ? part.raw : "", fallbackText, truncated: Boolean(part.truncated), partIndex: uiParts!.indexOf(part), omit: false });
   }
   // ChatGPT component source in the text is folded into one readable card.
-  for (const range of dilRanges(content)) ranges.push({ start: range.start, end: range.end, kind: "dil", payload: "", raw: JSON.stringify({ type: DIL_PAYLOAD, source: content.slice(range.start, range.end) }), fallbackText: "", truncated: false, partIndex: undefined });
+  for (const range of dilRanges(content)) ranges.push({ start: range.start, end: range.end, kind: "dil", payload: "", raw: JSON.stringify({ type: DIL_PAYLOAD, source: content.slice(range.start, range.end) }), fallbackText: "", truncated: false, partIndex: undefined, omit: false });
   ranges.sort((a, b) => a.start - b.start);
   const segments: MessagePresentation[] = [];
   let copied = 0;
-  for (const range of ranges.slice(0, 32)) {
+  for (const range of ranges) {
     if (range.start < copied) continue;
     if (range.start > copied) segments.push({ kind: "text", text: content.slice(copied, range.start), ...(locations ? { sourceStart: copied } : {}) });
-    segments.push({ kind: "ui", raw: range.raw, fallbackText: range.fallbackText, truncated: range.truncated, ...(locations ? { partIndex: range.partIndex } : {}) });
+    if (!range.omit) segments.push({ kind: "ui", raw: range.raw, fallbackText: range.fallbackText, truncated: range.truncated, ...(locations ? { partIndex: range.partIndex } : {}) });
     copied = range.end;
   }
   if (copied < content.length) segments.push({ kind: "text", text: content.slice(copied), ...(locations ? { sourceStart: copied } : {}) });
-  return segments.length ? segments : [{ kind: "text", text: content, ...(locations ? { sourceStart: 0 } : {}) }];
+  return segments.length || copied > 0 ? segments : [{ kind: "text", text: content, ...(locations ? { sourceStart: 0 } : {}) }];
 }
 
 /** Recognize supplied markup only. A component ID/schema is not a downloaded UI. */

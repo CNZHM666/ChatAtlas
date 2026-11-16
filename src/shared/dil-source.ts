@@ -7,7 +7,7 @@ const TAG_NAME = new RegExp(`^<(/?)(${TAGS.join("|")})(?=[\\s/>])`, "u");
 const START = new RegExp(`(^|\\n)[ \\t]*(?=\\{@body\\b|\\{#(?:if|each)\\b|<(?:${TAGS.join("|")})[\\s/>])`, "gu");
 const ACTION_TAGS = new Set(["button", "pressable"]);
 
-type Token =
+export type DILToken =
   | { type: "body" | "open-block" | "else-block" | "close-block" | "expr"; start: number; end: number; text: string }
   | { type: "open-tag" | "close-tag" | "self-tag"; start: number; end: number; name: string; text: string }
   | { type: "text"; start: number; end: number; text: string };
@@ -38,7 +38,7 @@ function tagEnd(source: string, start: number): number {
   return -1;
 }
 
-function token(source: string, at: number): Token | undefined {
+export function dilToken(source: string, at: number): DILToken | undefined {
   if (source[at] === "{") {
     const end = braceEnd(source, at);
     if (end < 0) return undefined;
@@ -72,7 +72,7 @@ export function dilRanges(content: string): Array<{ start: number; end: number }
       let next = at;
       while (next < content.length && /\s/u.test(content[next])) next++;
       if (next >= content.length) break;
-      const item = token(content, next);
+      const item = dilToken(content, next);
       if (!item || depth === 0 && (item.type === "text" || item.type === "expr")) break;
       if (item.type === "open-block" || item.type === "open-tag") depth++;
       if (item.type === "close-block" || item.type === "close-tag") depth--;
@@ -105,7 +105,7 @@ export function dilSummary(source: string): DILSummary {
     else add(items, text);
   };
   for (let at = 0; at < source.length;) {
-    const item = token(source, at);
+    const item = dilToken(source, at);
     if (!item) break;
     if (item.type === "text") run.push(item.text);
     else if (item.type === "expr") run.push(" … ");

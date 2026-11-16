@@ -60,9 +60,9 @@ it("keeps mixed proposal and discussion qualifications in the descriptions witho
  const result=knowledgeArticlePresentation(body);
  expect(result).not.toMatch(/Documented|Proposal|状态/u);expect(result).toContain("以下为讨论记录：不遮挡正文");expect(result).toContain("讨论提出以下设计：历史查找与上下文收藏");expect(knowledgeArticlePresentation(result)).toBe(result);
 });
-it("presents deep generated headings as quiet labels while retaining examples and source headings",()=>{
+it("keeps deep headings structural rather than converting them into inconsistent bold paragraphs",()=>{
  const body="## 主小节\n\n#### 短要点\n\n保留条件与细节。\n\n##### 补充条件\n\n输入失败时保留原稿。\n\n```md\n#### literal\n```";
- const result=knowledgeArticlePresentation(body);expect(result).toContain("## 主小节");expect(result).toContain("**短要点**");expect(result).toContain("**补充条件**");expect(result).toContain("#### literal");expect(knowledgeArticlePresentation(result)).toBe(result);
+ const result=knowledgeArticlePresentation(body);expect(result).toContain("## 主小节");expect(result).toContain("#### 短要点");expect(result).toContain("##### 补充条件");expect(result).toContain("#### literal");expect(knowledgeArticlePresentation(result)).toBe(result);
  expect(knowledgeArticlePresentation(body,true,[body])).toBe(body);
 });
 

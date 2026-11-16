@@ -28,7 +28,7 @@ it("replaces page contents with quiet main-section navigation, preserving nested
  expect(screen.queryByText("页内目录")).toBeNull();
  const menu=screen.getByRole("navigation",{name:"本章快捷导航"});
  expect(within(menu).getAllByRole("button")).toHaveLength(2);
- expect(screen.getByText("验证记录")).toBeVisible();expect(screen.queryByRole("heading",{name:"验证记录"})).toBeNull();
+ expect(screen.getByRole("heading",{name:"验证记录",level:4})).toBeVisible();
  const target=within(menu).getByRole("button",{name:"密钥管理"}),heading=screen.getByRole("heading",{name:"密钥管理"}),scroll=vi.fn();
  Object.defineProperty(heading,"scrollIntoView",{value:scroll});
  fireEvent.pointerEnter(menu);expect(menu).toHaveClass("is-expanded");
@@ -195,15 +195,14 @@ it("shows chapter evolution as a compact card whose marker opens the record's ow
  fireEvent.click(card.querySelector(".wiki-claim-marker")!);
  expect(open).toHaveBeenCalledWith(expect.objectContaining({id:"e1"}),expect.objectContaining({claim:"直接生成采购清单 → 先生成操作计划再确认"}));
 });
-it("takes the reader to each sentence naming a stance no cited message backs",()=>{
+it("uses the evidence review without the retired stance confirmation bar",()=>{
  const session=projectSession(),ref={...session.evidence[0],id:"p1",messageId:"m1",excerpt:"首页只保留搜索入口。"};session.evidence.push(ref);
- const proposal=(text:string)=>({text,quote:ref.excerpt,evidenceIds:["p1"],workStatus:"proposed" as const});
- const section={...session.sections[0],body:"首页只保留搜索入口。\n\n用户明确要求侧栏默认收起。\n\n导出提供 Markdown。",claims:[proposal("首页只保留搜索入口"),proposal("导出提供 Markdown")]};
- const view=render(<WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/>);
- const notice=screen.getByRole("button",{name:/正文有 1 处写到你的表态/u});
- fireEvent.click(notice);
- const target=view.container.querySelector(".is-stance-target");
- expect(target?.textContent).toContain("用户明确要求侧栏默认收起");
+ const section={...session.sections[0],body:"用户明确要求侧栏默认收起。",claims:[{text:"用户明确要求侧栏默认收起",quote:ref.excerpt,evidenceIds:["p1"],workStatus:"proposed" as const}]};
+ const open=vi.fn();
+ render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
+ expect(screen.queryByRole("button",{name:/正文有.*写到你的表态/u})).toBeNull();
+ expect(screen.queryByText("表述符合我的意思")).toBeNull();expect(screen.queryByText("改写这句")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:/核对依据/u}));expect(open).toHaveBeenCalledOnce();
 });
 it("adds a claim whose meaning the originals do not carry to the review, with the reason",()=>{
  const session=projectSession(),open=vi.fn(),ref={...session.evidence[0],id:"p1",messageId:"m1",excerpt:"可以考虑用 Orama 做全文索引。"};session.evidence.push(ref);

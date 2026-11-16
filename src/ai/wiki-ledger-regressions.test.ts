@@ -12,7 +12,8 @@ import { curateWikiUnits } from "./wiki-knowledge-select";
 import { holderRunClaims, validateFinalClaims, writeLedgerDraft } from "./wiki-knowledge-write";
 import { ledgerDocument } from "./wiki-ledger-document";
 import { wikiVersionQuestions, withVersionAnswer } from "./wiki-key-decisions";
-import { exclusiveWikiVersions } from "./wiki-version-conflict";
+import { exclusiveWikiVersions, wikiCredentialStorageCheck } from "./wiki-version-conflict";
+import { deduplicateWikiNumberProblems, recheckWikiNumberProblem, unsupportedWikiNumbers } from "./wiki-number-diagnostics";
 import { foreignDetail, ownSection, wikiUnitDetails, CRITICAL_PROBLEM, scopedWikiDraft, wikiDraftMarkdown, type WikiDraftChapter, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiDraftClaim } from "../shared/wiki-knowledge";
 import { contextKnowledge } from "../test/context-fixture";
 
@@ -20,6 +21,53 @@ const unit = (n: number, statement: string, extra: Partial<WikiKnowledgeUnit> = 
 const book = (units: WikiKnowledgeUnit[]): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: units.length, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "项目", aliases: [], unitIds: units.map(unit => unit.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "项目", question: "如何继续？", group: "", subtopics: [{ title: "方案", subjectIds: ["s"] }] }] } });
 const chapter = (units: WikiKnowledgeUnit[], text: string, claims: WikiDraftClaim[] = [{ text, unitIds: units.map(unit => unit.id) }]): WikiDraftChapter => ({ id: "ch", title: "项目", question: "如何继续？", group: "", body: text, paragraphs: [{ subtopic: "方案", text, unitIds: units.map(unit => unit.id), claims }], problems: [] });
 const withDraft = (ledger: WikiKnowledgeLedger, chapters: WikiDraftChapter[]): WikiKnowledgeLedger => ({ ...ledger, draft: { version: 1, generatedAt: 5, status: "complete", chapters, report: {} } });
+
+it("verifies an entire identifier without using its digits to support a count", () => {
+  expect(unsupportedWikiNumbers("Library uses LGPLv3 and supports 3 devices.", "Library uses LGPLv3 and supports 8 devices.", new Set())).toEqual({ identifiers: [], numbers: ["3"], ranges: [] });
+  expect(unsupportedWikiNumbers("Phase 7 supports 7 devices.", "Phase 9 supports 7 devices.", new Set()).identifiers).toEqual(["phase7"]);
+});
+
+it("accepts a phase identifier from the bound heading and keeps a different phase flagged", () => {
+  const point = unit(1, "Run the accessibility checks.", {
+    evidence: { ...unit(1, "").evidence, section: "Phase 12 — Release tests" },
+  });
+  const units = new Map([[point.id, point]]);
+  for (const phase of [12, 13]) {
+    const text = `Phase ${phase} includes the accessibility checks.`;
+    const warning = `"${text}…" has identifiers its units do not state: phase${phase}`;
+    expect(recheckWikiNumberProblem(warning, [text], [{ text, unitIds: [point.id] }], [], units, new Set()))
+      .toBe(phase === 12 ? undefined : warning);
+  }
+});
+
+it("resolves an identifier from its own table row and deduplicates the old cell warning", () => {
+  const row = "| Example Tool | LGPLv3 license |";
+  const proof = unit(1, "Example Tool uses the LGPLv3 license.", { about: { name: "Example Tool", role: "reference" } });
+  const unrelated = unit(2, "Other Tool uses the GPLv3 license.", { about: { name: "Other Tool", role: "reference" } });
+  const units = new Map([proof, unrelated].map(point => [point.id, point]));
+  const warnings = ['"LGPLv3 license…" has numbers its units do not state: 3', '"| Example Tool | LGPLv3…" has numbers its units do not state: 3'];
+  expect(deduplicateWikiNumberProblems(warnings, [row])).toHaveLength(1);
+  expect(recheckWikiNumberProblem(warnings[0], [row], [{ text: "LGPLv3 license", unitIds: [unrelated.id] }], [], units, new Set())).toBeUndefined();
+  const wrong = "| Other Tool | LGPLv3 license |";
+  expect(recheckWikiNumberProblem(warnings[0], [wrong], [{ text: "LGPLv3 license", unitIds: [proof.id] }], [], units, new Set())).toBe(warnings[0]);
+});
+
+it("keeps platform and user keys separate and flags an unspecified owner", () => {
+  const server = unit(1, "平台 API Key 仅在服务器端使用，绝不暴露给浏览器。");
+  const browser = unit(2, "用户 API Key 保存在浏览器 sessionStorage。");
+  expect(wikiCredentialStorageCheck([server, browser])).toBeUndefined();
+  const ambiguous = unit(3, "API Key 保存在浏览器 sessionStorage。");
+  expect(wikiCredentialStorageCheck([server, ambiguous])).toEqual({ ambiguousOwner: true, unitIds: [server.id, ambiguous.id] });
+  const ledger = book([server, browser]);
+  ledger.organization!.relations = [{ older: server.id, newer: browser.id, kind: "replaces", status: "resolved" }];
+  expect(resolveWikiReading(ledger).organization?.relations[0].kind).toBe("coexists");
+});
+
+it("keeps a personal motivation as the user's view", () => {
+  const intent = unit(1, "用户认为硬件方向与专业贴合，不应放弃。", { kind: "decision", adoption: { status: "user_decision" },
+    evidence: { ...unit(1, "").evidence, role: "user", quote: "我不应该因为难度就放弃硬件方向。" } });
+  expect(wikiUnitStatuses([intent], { relations: [] }).get(intent.id)).toBe("stated");
+});
 
 it("uses the same derived replacement in the ledger and the document without changing source decisions", () => {
   const old = unit(1, "API Key 只能使用服务端环境变量。"), next = unit(9, "确定采用 BYOK 模式，由用户提供 API 密钥，而非仅使用服务端环境变量。");
@@ -58,11 +106,11 @@ it("requires evidence for adoption and keeps a user asking about their own idea 
   expect(statuses.get(idea.id)).toBe("stated");
   expect(statuses.get(assistant.id)).toBe("proposal");
   const { sections: [read], evidence } = ledgerDocument(ledger, {});
-  expect(read.body).toContain(`你曾提议：${idea.statement}`);
+  expect(read.body).toContain(`项目发起人曾提议：${idea.statement}`);
   expect(read.body).toContain(`AI 建议：${assistant.statement}`);
   expect(read.claims?.some(claim => claim.holder === "decided")).toBe(false);
   const session = { ...contextKnowledge().session, sourceConversationIds: ["c"], evidence, wikiKnowledge: ledger };
-  const saved = { ...read, body: `${idea.statement}\n\n${assistant.statement}`, claims: read.claims?.map(claim => ({ ...claim, text: claim.text.replace(/^(?:你曾提议|AI 建议)：/u, ""), holder: "decided" as const, userDecided: true })) };
+  const saved = { ...read, body: `${idea.statement}\n\n${assistant.statement}`, claims: read.claims?.map(claim => ({ ...claim, text: claim.text.replace(/^(?:你曾提议|项目发起人曾提议|AI 建议)：/u, ""), holder: "decided" as const, userDecided: true })) };
   const reviewed = reviewWikiChapter(saved, session);
   expect(reviewed.body).toContain(`你曾提议：${idea.statement}`);
   expect(reviewed.body).toContain(`AI 建议：${assistant.statement}`);

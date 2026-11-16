@@ -1,6 +1,9 @@
 import { createContentHash, normalizeMessageText, previewMessage } from "./message-identity";
 import { chatGPTConversationId,type NativeMessageIdentity } from "../shared/native-discussion";
 import { findQuestionBlock, looseText, sameQuestionText } from "./question-text";
+import { domImageMarkdown, retainDomImages } from "./dom-images";
+import { DOM_TOOL_TRAFFIC, stripDomToolTraffic } from "./dom-tool-traffic";
+import { domUISnapshot } from "./dom-ui-snapshot";
 
 import type {DetectedConversation,ParsedChatMessage} from "./capture-adapter";
 export type {DetectedConversation,ParsedChatMessage} from "./capture-adapter";
@@ -135,7 +138,10 @@ export function chatGPTEntryAnchor(conversation: boolean): { anchor: HTMLElement
 }
 
 function elementText(element: HTMLElement): string {
+  if (element instanceof HTMLImageElement) return domImageMarkdown(element);
   const copy = element.cloneNode(true) as HTMLElement;
+  stripDomToolTraffic(copy);
+  retainDomImages(copy, element);
   copy.querySelectorAll('button, [role="button"], script, style, [hidden], [aria-hidden="true"]').forEach(node => node.remove());
   for (const pre of copy.querySelectorAll("pre")) {
     const code = pre.querySelector("code");
@@ -185,17 +191,16 @@ function nativeMessageElement(identity:MessageIdentity):HTMLElement|null {
 function contentElement(roleElement: HTMLElement, role: "user" | "assistant"): HTMLElement {
   if (role === "assistant") {
     // Rich replies may have several writing/code blocks instead of one Markdown root.
-    const blocks = [...roleElement.querySelectorAll<HTMLElement>(`.markdown, pre, [data-atlas-ui-part], ${UI_SELECTOR}`)].filter(block => !block.closest("[hidden],[aria-hidden=true]") && !block.parentElement?.closest(`.markdown, pre, [data-atlas-ui-part], ${UI_SELECTOR}`));
+    const blocks = [...roleElement.querySelectorAll<HTMLElement>(`.markdown, pre, img, [data-atlas-ui-part], ${UI_SELECTOR}`)].filter(block => !block.closest("[hidden],[aria-hidden=true]") && !block.parentElement?.closest(`.markdown, pre, [data-atlas-ui-part], ${UI_SELECTOR}`));
     if (blocks.length === 1) return blocks[0];
     if (blocks.length > 1) { const wrapper = document.createElement("div"); for (const block of blocks) wrapper.append(block.cloneNode(true)); return wrapper; }
     return roleElement;
   }
-  return roleElement.querySelector<HTMLElement>(".whitespace-pre-wrap") ?? roleElement;
+  return roleElement.querySelector("img") ? roleElement : roleElement.querySelector<HTMLElement>(".whitespace-pre-wrap") ?? roleElement;
 }
 
 // Recognized source components and semantic image frames. Never infer a UI from TS/JSON code.
 const UI_SELECTOR = '[data-testid*="genui"], [data-testid*="widget"], [data-component-type="interactive"], iframe, svg[role="img"]';
-const snapshotStyles = "display flex-direction flex-wrap align-items justify-content gap grid-template-columns padding margin border border-radius background-color color font-family font-size font-weight line-height text-align white-space box-shadow".split(" ");
 
 function capturedArticle(element: HTMLElement, role: "user" | "assistant"): { text: string; uiParts?: ParsedChatMessage["uiParts"] } {
   if (role === "user") return { text: normalizeMessageText(elementText(element)) };
@@ -206,29 +211,15 @@ function capturedArticle(element: HTMLElement, role: "user" | "assistant"): { te
   const nonce = `ATLAS_UI_${crypto.randomUUID()}_`;
   let retained = 0;
   for (const source of sourceElements) {
-    if (source.closest("pre, code, [hidden], [aria-hidden=true]") || source.parentElement?.closest(UI_SELECTOR) && element.contains(source.parentElement.closest(UI_SELECTOR))) continue;
+    if (source.closest(`pre, code, [hidden], [aria-hidden=true], ${DOM_TOOL_TRAFFIC}`) || source.parentElement?.closest(UI_SELECTOR) && element.contains(source.parentElement.closest(UI_SELECTOR))) continue;
     const recognized = source.matches(UI_SELECTOR);
     if (!recognized) continue;
     const clone = copyElements[sourceElements.indexOf(source)];
     if (!clone || !copy.contains(clone) && clone !== copy || uiParts.length >= 32) continue;
-    const snapshot = source.cloneNode(true) as HTMLElement;
-    const descendants = [source, ...source.querySelectorAll<HTMLElement>("*")];
-    const snapshotDescendants = [snapshot, ...snapshot.querySelectorAll<HTMLElement>("*")];
-    const oversized = descendants.length > 500;
-    if (!oversized && source.tagName !== "IFRAME") descendants.forEach((node, index) => {
-      const styles = getComputedStyle(node);
-      snapshotDescendants[index].setAttribute("style", snapshotStyles.map(property => {
-        const value = styles.getPropertyValue(property);
-        // Pixel-sized tracks reflect the source viewport, not the reader width.
-        // Preserve their proportions while allowing the snapshot to fit its container.
-        const columns = property === "grid-template-columns" && /^(?:[\d.]+px\s*)+$/u.test(value) ? value.trim().split(/\s+/u) : undefined;
-        const responsive = columns?.length && columns.length <= 6 ? columns.map(column => `minmax(0,${Math.max(1, parseFloat(column))}fr)`).join(" ") : value;
-        return `${property}:${responsive}`;
-      }).join(";") + ";min-width:0;max-width:100%");
-    });
-    snapshot.querySelectorAll("script").forEach(node => node.remove());
+    const snapshot = source.tagName === "IFRAME" ? { html: "", truncated: false } : domUISnapshot(source);
+    const oversized = snapshot.truncated;
     const height = source.getBoundingClientRect().height;
-    const raw = source.tagName === "IFRAME" ? JSON.stringify({ type: "interactive", title: source.getAttribute("title") ?? "" }) : JSON.stringify({ type: "html", text: oversized ? "" : snapshot.outerHTML, ...(height >= 80 && Number.isFinite(height) ? { height: Math.ceil(height) } : {}) });
+    const raw = source.tagName === "IFRAME" ? JSON.stringify({ type: "interactive", title: source.getAttribute("title") ?? "" }) : JSON.stringify({ type: "html", text: snapshot.html, ...(height >= 80 && Number.isFinite(height) ? { height: Math.ceil(height) } : {}) });
     const truncated = oversized || raw.length + retained > 200_000;
     // Temporary tokens are replaced after text normalization, so each occurrence stays stable.
     const fallbackText = source.tagName === "IFRAME" ? "" : normalizeMessageText(elementText(source));

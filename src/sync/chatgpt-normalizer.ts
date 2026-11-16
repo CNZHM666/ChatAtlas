@@ -1,9 +1,11 @@
 import type { Conversation, ConversationCapture, ConversationMessage } from "../shared/types";
 import { createContentHash, normalizeMessageText, previewMessage } from "../content/message-identity";
+import { importedImage } from "../shared/conversation-images";
+import { materializeCaptureImages } from "../shared/capture-images";
 
 export interface RawHistoryItem { id?: string; conversation_id?: string; title?: string; create_time?: number; update_time?: number; message_count?: number }
 export interface RawConversationPage { items?: RawHistoryItem[]; total?: number }
-export interface RawMessageNode { id?: string; message?: { id?: string; author?: { role?: string }; content?: { parts?: unknown[]; text?: string }; create_time?: number }; parent?: string | null; children?: string[] }
+export interface RawMessageNode { id?: string; message?: { id?: string; author?: { role?: string }; recipient?: string; recipient_name?: string; channel?: string; content?: { content_type?: string; parts?: unknown[]; text?: string }; create_time?: number }; parent?: string | null; children?: string[] }
 export interface RawConversation extends RawHistoryItem { mapping?: Record<string, RawMessageNode>; current_node?: string }
 
 function time(value: number | undefined, fallback = Date.now()): number { return value ? value * 1000 : fallback; }
@@ -13,14 +15,17 @@ function sourceTime(value: number | undefined): number | undefined {
   return milliseconds >= Date.UTC(2000, 0, 1) && milliseconds <= Date.now() + 86_400_000 ? milliseconds : undefined;
 }
 
-function messageText(content: RawMessageNode["message"], uiParts: NonNullable<ConversationMessage["uiParts"]>): string {
+function messageText(content: RawMessageNode["message"], uiParts: NonNullable<ConversationMessage["uiParts"]>, imagesOnly = false): string {
   if (!content?.content) return "";
   const parts = content.content.parts;
   let ordinal = 0, retainedBytes = 0;
   if (Array.isArray(parts)) return normalizeMessageText(parts.map(part => {
-    if (typeof part === "string") { ordinal += part.split("【原平台交互内容】").length - 1; return part; }
+    if (typeof part === "string") { if (imagesOnly) return ""; ordinal += part.split("【原平台交互内容】").length - 1; return part; }
     if (!part || typeof part !== "object") return "";
     const record = part as Record<string, unknown>;
+    const image = importedImage(record);
+    if (image) return image;
+    if (imagesOnly) return "";
     const text = typeof record.text === "string" ? record.text : typeof record.text === "object" && record.text && "value" in record.text && typeof record.text.value === "string" ? record.text.value : undefined;
     const type = record.type ?? record.content_type;
     if (type === "code" && text !== undefined) {
@@ -79,10 +84,13 @@ export async function normalizeHistoryConversation(raw: RawConversation, capture
   const userByNode = new Map<string, string>();
   let lastUserId: string | undefined;
   for (const { key: nodeKey, node } of activePath(raw)) {
-    const role = node.message?.author?.role;
+    const originalRole = node.message?.author?.role;
+    // Image generation can live in a tool result; retain its image output without importing tool commands.
+    const generatedImages = originalRole === "tool" && node.message?.content?.parts?.some(part => importedImage(part));
+    const role = generatedImages ? "assistant" : originalRole;
     if (role !== "user" && role !== "assistant") continue;
     const uiParts: NonNullable<ConversationMessage["uiParts"]> = [];
-    const content = messageText(node.message, uiParts);
+    const content = messageText(node.message, uiParts, Boolean(generatedImages));
     if (!content) continue;
     const contentHash = await createContentHash(`${role}\n${content}`);
     const occurrenceKey = `${role}:${contentHash}`;
@@ -94,7 +102,9 @@ export async function normalizeHistoryConversation(raw: RawConversation, capture
     let parent = node.parent;
     const visited = new Set<string>();
     while (role === "assistant" && parent && !visited.has(parent) && !userByNode.has(parent)) { visited.add(parent); parent = raw.mapping?.[parent]?.parent; }
-    messages.push({ id, conversationId: conversation.id, platformMessageId, replyToMessageId: role === "assistant" ? (parent ? userByNode.get(parent) : undefined) ?? lastUserId : undefined, messageIndex: messages.length, role, content, ...(uiParts.length ? { uiParts } : {}), preview: previewMessage(content), contentHash, sourceCreatedAt: sourceTime(node.message?.create_time), createdAt: time(node.message?.create_time, capturedAt), updatedAt: capturedAt });
+    const recipient = node.message?.recipient ?? node.message?.recipient_name;
+    const tool = role === "assistant" && !generatedImages && recipient && recipient !== "all";
+    messages.push({ id, conversationId: conversation.id, platformMessageId, replyToMessageId: role === "assistant" ? (parent ? userByNode.get(parent) : undefined) ?? lastUserId : undefined, messageIndex: messages.length, role, content, ...(tool ? { contentKind: "tool" as const } : {}), ...(uiParts.length ? { uiParts } : {}), preview: previewMessage(content), contentHash, sourceCreatedAt: sourceTime(node.message?.create_time), createdAt: time(node.message?.create_time, capturedAt), updatedAt: capturedAt });
   }
-  return { conversation: { ...conversation, messageCount: messages.length, importState: "complete", hydrationState: "hydrated" }, messages, capturedAt };
+  return materializeCaptureImages({ conversation: { ...conversation, messageCount: messages.length, importState: "complete", hydrationState: "hydrated" }, messages, capturedAt });
 }

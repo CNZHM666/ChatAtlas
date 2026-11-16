@@ -542,8 +542,12 @@ export interface ConversationMessage {
   messageIndex: number;
   role: "user" | "assistant";
   content: string;
+  /** Provider-marked execution process retained for traceability, excluded from normal reading. */
+  contentKind?: "tool";
   /** Original typed UI parts, keyed by placeholder occurrence in content. Never executable in the extension. */
   uiParts?: Array<{ ordinal: number; raw: string; fallbackText?: string; truncated?: boolean }>;
+  /** Original source→local resource associations, retained when a later page snapshot cannot reload an image. */
+  imageSources?: Array<{ reference: string; assetId: string }>;
   preview: string;
   contentHash: string;
   createdAt: number;
@@ -551,6 +555,8 @@ export interface ConversationMessage {
 }
 
 export interface ConversationCapture {
+  /** Local raster resources transported with a capture, stored separately from searchable messages. */
+  imageAssets?: import("./conversation-images").ConversationImageAsset[];
   conversation: Conversation;
   messages: ConversationMessage[];
   capturedAt: number;

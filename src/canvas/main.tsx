@@ -6,13 +6,16 @@ import "./reader-code-theme.css";
 import App from "./App";
 import { PreferencesProvider } from "./preferences";
 import { PanelBoundary } from "./components/PanelBoundary";
+import {installUiFailureCapture} from "./ui-failure";
 import {preferredTheme} from "../shared/appearance";
 import { installBrandFavicon } from "../shared/brand-assets";
 import "./styles.css";
+import "./reader-media.css";
 import "./reading-workspace.css";
 import "./history-workbench.css";
 
 document.documentElement.dataset.theme = preferredTheme();
+installUiFailureCapture();
 installBrandFavicon();
 document.documentElement.lang = localStorage.getItem("atlas-locale") === "zh-CN" ? "zh-CN" : "en";
 

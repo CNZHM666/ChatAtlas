@@ -12,7 +12,6 @@ const WIDTH_KEY = "atlas-navigator-width";
 /** Host shell only. Project text and notes stay in the extension-origin frame. */
 export class ConversationNavigator {
   private trigger: HTMLButtonElement | null = null;
-  private workbenchTrigger: HTMLButtonElement | null = null;
   private host: HTMLDivElement | null = null;
   private frame: HTMLIFrameElement | null = null;
   private conversationId: string | null = null;
@@ -34,13 +33,13 @@ export class ConversationNavigator {
     // Repair an entry removed during delayed hydration or a replaced host root.
     this.entryTimer=window.setInterval(()=>{if(!document.hidden){this.syncPage();this.ensureTrigger();}},2000);
     window.addEventListener("pagehide", this.onPageHide); window.addEventListener("message", this.onMessage);
-    this.entryObserver = new MutationObserver(records => { if(records.some(record => record.type === "childList" || !(record.target instanceof Element) || !record.target.closest(".atlas-navigator-trigger,.atlas-workbench-trigger,#atlas-conversation-navigator"))) this.scheduleEntry(); });
+    this.entryObserver = new MutationObserver(records => { if(records.some(record => record.type === "childList" || !(record.target instanceof Element) || !record.target.closest(".atlas-navigator-trigger,#atlas-conversation-navigator"))) this.scheduleEntry(); });
     this.entryObserver.observe(document.documentElement, {childList:true,subtree:true,attributes:true,attributeFilter:["class","style","hidden","aria-hidden","data-theme"]});
     window.addEventListener("focus",this.scheduleEntry);document.addEventListener("visibilitychange",this.scheduleEntry);window.addEventListener("resize",this.scheduleEntry);document.addEventListener("scroll",this.scheduleEntry,{capture:true,passive:true});document.addEventListener("click",this.scheduleEntry);document.addEventListener("transitionend",this.scheduleEntry);
     window.addEventListener("popstate",this.scheduleEntry);window.addEventListener("hashchange",this.scheduleEntry);document.addEventListener("load",this.scheduleEntry,true);
     void chrome.storage.local.get(WIDTH_KEY).then(stored => { if (typeof stored[WIDTH_KEY] === "number") this.setWidth(stored[WIDTH_KEY]); }).catch(() => undefined);
   }
-  stop = (): void => { this.active=false;window.clearInterval(this.entryTimer);this.entryTimer=undefined;this.entryObserver?.disconnect(); this.entryObserver=undefined; this.close(); this.trigger?.remove(); this.trigger = null; this.workbenchTrigger?.remove(); this.workbenchTrigger = null; window.removeEventListener("pagehide", this.onPageHide);window.removeEventListener("pageshow",this.onPageShow); window.removeEventListener("message", this.onMessage);window.removeEventListener("focus",this.scheduleEntry);document.removeEventListener("visibilitychange",this.scheduleEntry);window.removeEventListener("resize",this.scheduleEntry);window.removeEventListener("popstate",this.scheduleEntry);window.removeEventListener("hashchange",this.scheduleEntry);document.removeEventListener("load",this.scheduleEntry,true);document.removeEventListener("scroll",this.scheduleEntry,true);document.removeEventListener("click",this.scheduleEntry);document.removeEventListener("transitionend",this.scheduleEntry);if(this.entryFrame!==undefined)cancelAnimationFrame(this.entryFrame);this.entryFrame=undefined; };
+  stop = (): void => { this.active=false;window.clearInterval(this.entryTimer);this.entryTimer=undefined;this.entryObserver?.disconnect(); this.entryObserver=undefined; this.close(); this.trigger?.remove(); this.trigger = null; window.removeEventListener("pagehide", this.onPageHide);window.removeEventListener("pageshow",this.onPageShow); window.removeEventListener("message", this.onMessage);window.removeEventListener("focus",this.scheduleEntry);document.removeEventListener("visibilitychange",this.scheduleEntry);window.removeEventListener("resize",this.scheduleEntry);window.removeEventListener("popstate",this.scheduleEntry);window.removeEventListener("hashchange",this.scheduleEntry);document.removeEventListener("load",this.scheduleEntry,true);document.removeEventListener("scroll",this.scheduleEntry,true);document.removeEventListener("click",this.scheduleEntry);document.removeEventListener("transitionend",this.scheduleEntry);if(this.entryFrame!==undefined)cancelAnimationFrame(this.entryFrame);this.entryFrame=undefined; };
   private onPageHide=(event:PageTransitionEvent):void=>{this.stop();if(event.persisted)window.addEventListener("pageshow",this.onPageShow,{once:true});};
   private onPageShow=():void=>{this.start();};
   private scheduleEntry=(event?:Event):void=>{if(event&&event.type!=="scroll")this.clippedAnchors=new WeakSet();if(this.entryFrame!==undefined)return;this.entryFrame=requestAnimationFrame(()=>{this.entryFrame=undefined;this.syncPage();this.ensureTrigger();});};
@@ -52,7 +51,6 @@ export class ConversationNavigator {
     this.syncTheme();
   }
   ensureTrigger(): void {
-    this.ensureWorkbenchTrigger();
     let target = chatGPTEntryAnchor(Boolean(this.conversationId));
     if(target&&this.clippedAnchors.has(target.anchor))target={anchor:document.body,placement:"prepend",variant:"edge"};
     const anchor=target?.anchor;
@@ -73,26 +71,6 @@ export class ConversationNavigator {
     if(target.variant!=="edge"&&!chatGPTEntryVisible(button)){
       this.clippedAnchors.add(anchor);button.className="atlas-navigator-trigger atlas-navigator-trigger--edge";document.body.prepend(button);
     }
-  }
-  /** A separate direct workspace action on the start page, independent of host headers. */
-  private ensureWorkbenchTrigger(): void {
-    if (location.pathname !== "/" || !document.body) { this.workbenchTrigger?.remove(); this.workbenchTrigger = null; return; }
-    if (!document.getElementById("atlas-workbench-trigger-style")) {
-      const style = document.createElement("style"); style.id = "atlas-workbench-trigger-style";
-      style.textContent = `.atlas-workbench-trigger{position:fixed;top:12px;right:64px;z-index:60;display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;box-sizing:border-box;margin:0;padding:0 12px;border:1px solid color-mix(in srgb,CanvasText 15%,transparent);border-radius:9px;background:Canvas;color:CanvasText;font:500 13px system-ui,sans-serif;line-height:1;white-space:nowrap;cursor:pointer;box-shadow:0 1px 3px #00000008}.atlas-workbench-trigger:hover{border-color:#16a34a80;background:color-mix(in srgb,Canvas 94%,#16a34a)}.atlas-workbench-trigger:focus-visible{outline:2px solid #22c55e;outline-offset:3px}.atlas-workbench-trigger svg{flex:none;color:light-dark(#15803d,#4ade80)}@media(max-width:640px){.atlas-workbench-trigger{top:64px;right:12px}body:has(>.atlas-workbench-trigger)>.atlas-navigator-trigger--edge{top:110px}}`;
-      (document.head ?? document.documentElement).append(style);
-    }
-    const button = this.workbenchTrigger?.isConnected ? this.workbenchTrigger : this.button("", "atlas-workbench-trigger", () => {
-      void chrome.runtime.sendMessage({ type: "ATLAS_OPEN" } satisfies AtlasMessage).catch(() => undefined);
-    });
-    const label = this.zh ? "ChatAtlas 工作台" : "ChatAtlas Workbench";
-    button.setAttribute("aria-label", label); button.title = this.zh ? "打开 ChatAtlas 工作台" : "Open ChatAtlas workbench";
-    if (!button.firstChild) {
-      button.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M12 8h6M12 12h6M12 16h4"/></svg><span></span>';
-    }
-    const text = button.querySelector("span")!; if (text.textContent !== label) text.textContent = label;
-    this.workbenchTrigger = button;
-    if (!button.isConnected) { document.body.append(button); this.syncTheme(); }
   }
   async open(): Promise<void> {
     const native=await chrome.runtime.sendMessage({type:"ATLAS_OPEN_SIDEPANEL"} satisfies AtlasMessage).catch(()=>undefined);
@@ -130,7 +108,6 @@ export class ConversationNavigator {
     this.dark = dark;
     const logo = chrome.runtime.getURL(brandLogos[dark ? "dark" : "light"].replace(/^\//u, ""));
     for (const image of [this.trigger?.querySelector<HTMLImageElement>("img"), this.host?.shadowRoot?.querySelector<HTMLImageElement>(".brand img")]) if (image && image.getAttribute("src") !== logo) image.src = logo;
-    if (this.workbenchTrigger) this.workbenchTrigger.style.colorScheme = dark ? "dark" : "light";
     this.host?.classList.toggle("dark", dark); this.frame?.contentWindow?.postMessage({ type: "ATLAS_SIDECAR_APPEARANCE", theme: dark ? "dark" : "light" }, "*");
   }
   private setWidth(value: number): void { this.width = Math.min(480, Math.max(280, Math.round(value))); if (this.host && !this.collapsed) this.host.style.width = `${this.width}px`; }

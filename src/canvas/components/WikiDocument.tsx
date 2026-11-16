@@ -1,4 +1,5 @@
-import {projectKnowledgeReading} from "../../shared/project-knowledge-view";
+import {projectKnowledgeReading,projectKnowledgeReadingContext} from "../../shared/project-knowledge-view";
+import {useProjectReadingCache} from "../project-reading-cache";
 import { WorkspaceEvidenceContext, needsConfirmation } from "../workspace-evidence-context";
 import { EvidenceReviewButton } from "./EvidenceReviewButton";
 import { localizedWikiTitle, wikiReadingLocation } from "../../shared/wiki-navigation";
@@ -15,9 +16,6 @@ import { RecordDetailDrawer } from "./RecordDetailDrawer";
 import { WikiDiagram } from "./WikiDiagram";
 import { WikiSources } from "./WikiSources";
 import { WikiSectionLocator } from "./WikiSectionLocator";
-import {stanceKey,wikiChapterNotice,wikiUnbackedStances} from "../../shared/wiki-chapter-status";
-import {ProjectKnowledgeActions} from "../project-knowledge-actions";
-import {jumpToSentence} from "../stance-jump";
 import {wikiTitleReviewIncomplete} from "../../shared/wiki-title-review";
 import {WikiChapterOverview} from "./WikiChapterOverview";
 import { ChevronLeft, ChevronRight, History, Layers, PencilLine, Quote, Tags, X } from "lucide-react";
@@ -51,22 +49,31 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   const sourceIds=new Set([...section.evidenceIds,...(section.claims??[]).flatMap(claim=>claim.evidenceIds)]);
   const sources=session.evidence.filter(ref=>sourceIds.has(ref.id));
   const location=review?section.origin==="user"?zh?"我的理解":"My understanding":section.kind==="proposal"?zh?"AI 建议":"AI proposal":section.kind==="open_question"?zh?"待确认":"Open question":zh?"复习章节":"Review chapter":wikiReadingLocation(section,zh);
-  const reading=useMemo(()=>projectKnowledgeReading(section,session),[section,session]);
-  const page=useMemo(()=>wikiDocument(reading.body,!section.userEdited&&!section.origin,session.evidence.filter(ref=>section.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt),reading.claims?.flatMap(claim=>[claim.text,...claim.formulations??[]])),[reading,section,session]),content=useRef<HTMLDivElement>(null);
+  const readingCache=useProjectReadingCache();
+  // Previews can supply an updated chapter before it is in session.sections.
+  const readingSession=useMemo(()=>session.sections.includes(section)?session:{...session,sections:session.sections.map(chapter=>chapter.id===section.id?section:chapter)},[session,section]);
+  const reading=readingCache.get(readingSession,`chapter:${section.id}`,()=>{
+   if(section.userEdited||section.origin)return section;
+   const context=readingCache.get(readingSession,"chapter-context",()=>projectKnowledgeReadingContext(readingSession));
+   return projectKnowledgeReading(context.chapters.find(chapter=>chapter.id===section.id)??section,readingSession,context.view,context.chapters,true);
+  });
+  const page=readingCache.get(readingSession,`chapter-page:${section.id}`,()=>wikiDocument(reading.body,!section.userEdited&&!section.origin,session.evidence.filter(ref=>section.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt),reading.claims?.flatMap(claim=>[claim.text,...claim.formulations??[]]))),content=useRef<HTMLDivElement>(null);
   // Point-by-point evidence: each claim found in the prose gets a marker; the panel
   // steps through markers in reading order, then through claims with no position.
   const generated=!section.userEdited&&!section.origin;
   // Evolution: structured Product Evolution records first, then real "历史：" notes.
-  const history=useMemo(()=>generated?wikiHistoryEntries(session,section):[],[generated,session,section]);
+  const history=useMemo(()=>generated?readingCache.get(readingSession,`chapter-history:${section.id}`,()=>wikiHistoryEntries(session,section)):[],[generated,readingCache,readingSession,session,section]);
   const historyPoints=useMemo(()=>wikiHistoryPoints(section,history,session.evidence,zh),[section,history,session.evidence,zh]);
   const points=useMemo(()=>{
    if(!generated||editor)return [];
    // One point per sentence and holder: a chapter saved with two claims on one sentence showed two 已定 marks after it.
-   const seen=new Set<string>(),claims=wikiEvidencePoints(reading,session.evidence,zh).filter(point=>{const key=`${point.claim}\u0000${point.holder??""}`;if(seen.has(key))return false;seen.add(key);return true;});
-   // Chapters saved without claim records still get points, matched locally and labelled as approximate.
-   const prose=claims.length?claims:wikiApproximatePoints(reading,session.evidence,reading.body,zh);
-   return [...prose,...historyPoints.points];
-  },[generated,editor,reading,session,zh,historyPoints]);
+   return readingCache.get(readingSession,`chapter-points:${section.id}:${zh}`,()=>{
+    const seen=new Set<string>(),claims=wikiEvidencePoints(reading,session.evidence,zh).filter(point=>{const key=`${point.claim}\u0000${point.holder??""}`;if(seen.has(key))return false;seen.add(key);return true;});
+    // Chapters saved without claim records still get points, matched locally and labelled as approximate.
+    const prose=claims.length?claims:wikiApproximatePoints(reading,session.evidence,reading.body,zh);
+    return [...prose,...historyPoints.points];
+   });
+  },[generated,editor,reading,readingCache,readingSession,session,section.id,zh,historyPoints]);
   const {rootRef:articleRef,claimMarkers,ordered,open:openPoint,markerContext}=useEvidencePoints(points,onLocate,zh,[page,editor,section.wikiDiagram]);
   // Source marks (你, 资料) and the colour each mark tints its text with stay out of the prose until the reader turns
   // them on, checking included: the check highlights only the sentence it is on. 已定, 未定 and 此前 always show.
@@ -124,26 +131,6 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   // Wiki reads prose directly. Only an already saved, current, visible diagram
   // belongs here; topic keywords must not inject a generation suggestion card.
   const hasDiagram=!review&&hasChapterDiagram(section,session)&&!section.wikiDiagram?.hidden;
-  const chapterStatus=wikiChapterNotice(section,zh,session.wikiKnowledge?.documentType==="learning");
-  // The notice about the user's stance takes the reader to each such sentence in turn, to confirm or edit it.
-  const stances=useMemo(()=>review||editor?[]:wikiUnbackedStances(section),[review,editor,section]);
-  const [stanceAt,setStanceAt]=useState(0);
-  useEffect(()=>setStanceAt(0),[section.id]);
-  // The jump runs after the render the click causes, so the re-rendered prose keeps its highlight.
-  const [stanceJump,setStanceJump]=useState<{sentence:string;count:number}>();
-  // The opening paragraphs render in the chapter overview above the body, so the whole article is searched.
-  useEffect(()=>{if(stanceJump)jumpToSentence(articleRef.current,stanceJump.sentence);},[stanceJump,articleRef]);
-  // After a jump, the reader decides: these are my words (kept, no longer flagged), rewrite it, or go to the next one.
-  const knowledgeActions=useContext(ProjectKnowledgeActions);
-  const [stanceSaving,setStanceSaving]=useState(false);
-  const keepStance=async()=>{
-   if(!stanceJump||!knowledgeActions||stanceSaving)return;
-   const key=stanceKey(stanceJump.sentence);setStanceSaving(true);
-   try{await knowledgeActions.save(current=>({...current,sections:current.sections.map(item=>item.id===section.id?{...item,wikiStancesKept:[...new Set([...item.wikiStancesKept??[],key])]}:item)}));setStanceJump(undefined);setStanceAt(0);}
-   catch{/* The notice stays; the reader can try again. */}
-   finally{setStanceSaving(false);}
-  };
-  const jumpToStance=()=>{if(!stances.length)return;const at=stanceAt%stances.length;setStanceJump(current=>({sentence:stances[at],count:(current?.count??0)+1}));setStanceAt(at+1);};
   const readingBody=!review?page.overview?.readingBody??page.body:page.body;
   const parts=wikiDiagramParts(readingBody,section.wikiDiagram?.afterHeading??suggestedDiagramHeading(section));
   const read=(body:string)=>body.trim()?<div className="chapter-guide"><ReaderGuide hideCitationAnnotations content={body} sourceTexts={session.evidence.filter(ref=>section.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt)} zh={zh} complete hideEvidenceMarkers={!section.userEdited&&section.origin!=="user"} claimMarkers={claimMarkers}/></div>:null;
@@ -156,8 +143,6 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
       {!review&&(changes.length||session.wikiSuggestions?.[section.id])?<button type="button" className="wiki-tool" aria-label={zh?"相关更新":"Related updates"} title={zh?"相关更新":"Related updates"} onClick={()=>setUpdatesOpen(true)}><History size={17} aria-hidden="true"/></button>:null}
     </nav>:null}<header className="wiki-document-heading"><div className="wiki-document-location"><span>{location}</span>{editor&&onFinishEdit?<div><button type="button" onClick={onFinishEdit}>{zh?"保存并结束编辑":"Save and finish editing"}</button></div>:null}</div><h1 title={section.title}>{localizedWikiTitle(section,zh)}</h1>{section.userEdited?<small className="muted">{zh?"个人编辑内容":"Your edited content"}</small>:null}</header>
     {!editor&&wikiTitleReviewIncomplete(section.wikiTitleReview)?<p className="muted" role="status">{zh?"标题未整理完成，已保留原名和正文。":"Title editing could not finish. The original name and prose are preserved."}</p>:null}
-    {!review&&!editor&&chapterStatus?<p className="wiki-chapter-status muted">{stances.length?<button type="button" className="wiki-stance-jump" title={zh?"跳到正文中的这句话":"Go to the sentence in the text"} onClick={jumpToStance}>{chapterStatus}{stances.length>1?` · ${zh?"查看":"show"} ${stanceAt%stances.length+1}/${stances.length}`:""}</button>:chapterStatus}</p>:null}
-    {!review&&!editor&&stanceJump&&stances.length?<div className="wiki-stance-actions" role="group" aria-label={zh?"处理这句表态":"Resolve this stance"}><span>{zh?"高亮的表述符合你的意思吗？保留文字不会将建议记录为已采纳。":"Does the wording match your meaning? Keeping text does not record adoption."}</span>{knowledgeActions?<button type="button" className="primary" disabled={stanceSaving} onClick={()=>void keepStance()}>{zh?"表述符合我的意思":"The wording matches my meaning"}</button>:null}{onEdit?<button type="button" onClick={()=>onEdit(stanceJump.sentence)}>{zh?"改写这句":"Rewrite it"}</button>:null}{stances.length>1?<button type="button" onClick={jumpToStance}>{zh?"下一处":"Next"}</button>:null}<button type="button" className="wiki-stance-dismiss" aria-label={zh?"收起":"Dismiss"} onClick={()=>setStanceJump(undefined)}>×</button></div>:null}
     {issue?<div className="wiki-issue-bar" role="status"><span>{zh?`待处理 ${issue.index+1}/${issue.total}`:`To review ${issue.index+1}/${issue.total}`}</span><strong>{issueLabel(issue.issue,zh)}</strong>
       <span className="wiki-issue-actions"><button type="button" aria-label={zh?"上一处":"Previous"} disabled={!issue.index} onClick={()=>onIssueStep?.(-1)}><ChevronLeft size={15} aria-hidden="true"/></button><button type="button" aria-label={zh?"下一处":"Next"} disabled={issue.index>=issue.total-1} onClick={()=>onIssueStep?.(1)}><ChevronRight size={15} aria-hidden="true"/></button>
         {onEdit?<button type="button" onClick={()=>onEdit(issueText)}>{zh?"编辑本章":"Edit chapter"}</button>:null}<button type="button" aria-label={zh?"关闭":"Close"} onClick={onIssueClose}><X size={15} aria-hidden="true"/></button></span></div>:null}

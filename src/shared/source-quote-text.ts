@@ -5,6 +5,7 @@ import { GFM_OPTIONS } from "./markdown-gfm";
 
 const parser = unified().use(remarkParse).use(remarkGfm, GFM_OPTIONS);
 const cache = new Map<string, string>();
+const TEXT_CACHE_ENTRIES = 512;
 interface TextNode { type: string; value?: string; children?: TextNode[]; position?: { start: {offset?:number}; end: {offset?:number} } }
 const visibleText = (node: TextNode): string => node.type === "html" ? "" : node.value ?? (node.children ?? []).map(visibleText).join("");
 
@@ -13,8 +14,10 @@ export function sourceQuoteText(value: string): string {
   const cached = cache.get(value);
   if (cached !== undefined) return cached;
   const text = visibleText(parser.parse(value) as TextNode);
-  cache.set(value, text);
-  if (cache.size > 64) cache.delete(cache.keys().next().value!);
+  if (value.length <= 2048) {
+    cache.set(value, text);
+    if (cache.size > TEXT_CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
+  }
   return text;
 }
 

@@ -13,6 +13,7 @@ import { approximatePoints } from "../wiki-evidence";
 import { useEvidencePoints } from "../use-evidence-points";
 import { WikiClaimMarkerContext } from "../wiki-claim-marker-context";
 import { documentReview } from "../document-review";
+import {useProjectReadingCache} from "../project-reading-cache";
 import "../document-overview.css";
 
 /** Saved prose and its reading order; opening this view never schedules AI work. */
@@ -27,7 +28,8 @@ export function DocumentOverview({ session, zh, title, preview = false, onRead, 
   scope?:ReactNode;
 }) {
   // One numbered list: part labels are AI groupings that add reading load here.
-  const pages = wikiSections(session), overview = projectOverviewContent(session);
+  const readingCache=useProjectReadingCache();
+  const pages = wikiSections(session), overview = readingCache.get(session,"overview",()=>projectOverviewContent(session));
   const [editTarget,setEditTarget]=useState<HTMLSpanElement|null>(null);
   // A chapter row is its title: the overview above already says what each chapter covers.
   const chapter = (page: FocusSection) => <li key={page.id}><button type="button" onClick={() => onRead(page.id)}>
@@ -35,12 +37,12 @@ export function DocumentOverview({ session, zh, title, preview = false, onRead, 
   </button></li>;
   const references = session.evidence.filter(ref => overview.evidenceIds.includes(ref.id));
   // Evidence still to look at across the workspace; it feeds the one check button, not a row of counts.
-  const review = useMemo(() => session.mode === "work" && !preview && onReview ? documentReview(session, zh) : undefined, [session, preview, zh, onReview]);
+  const review = session.mode === "work" && !preview && onReview ? readingCache.get(session,`document-review:${zh}`,()=>documentReview(session, zh)) : undefined;
   const unchecked = review?.unchecked.reduce((sum, item) => sum + item.count, 0) ?? 0;
   // The overview is checked point by point too: each sentence that reuses a cited
   // original gets a marker; without a match in its own sources, any project source may serve.
   const personal = Boolean(session.briefUserEdited || session.projectMaintenance?.overview !== undefined);
-  const readingText = projectOverviewReadingText(session, overview);
+  const readingText = readingCache.get(session,"overview-text",()=>projectOverviewReadingText(session, overview));
   const points = useMemo(() => {
     if (personal || preview) return [];
     const own = approximatePoints("overview", session.evidence.filter(ref => overview.evidenceIds.includes(ref.id)), readingText, zh, 12);

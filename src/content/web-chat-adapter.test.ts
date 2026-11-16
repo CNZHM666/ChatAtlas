@@ -5,6 +5,21 @@ import {fillProjectComposer} from "./project-handoff";
 import {webConversation,type WebCapturePlatform} from "../shared/web-capture";
 import {createContentHash,previewMessage} from "./message-identity";
 afterEach(()=>{document.body.innerHTML="";document.title="";});
+it.each<[{ platform: WebCapturePlatform; url: string; user: string; assistant: string }]>([
+ [{ platform: "claude", url: "https://claude.ai/chat/photos", user: 'class="font-user-message"', assistant: 'class="font-claude-response"' }],
+ [{ platform: "gemini", url: "https://gemini.google.com/app/photos", user: 'class="query-text"', assistant: 'class="response-content" data-message-author-role="assistant"' }],
+ [{ platform: "deepseek", url: "https://chat.deepseek.com/a/chat/s/photos", user: 'data-message-author-role="user"', assistant: 'class="ds-markdown"' }],
+ [{ platform: "doubao", url: "https://www.doubao.com/chat/123", user: 'data-testid="send_message"', assistant: 'data-testid="receive_message"' }],
+ [{ platform: "kimi", url: "https://kimi.com/chat/photos", user: 'class="segment-user"', assistant: 'class="segment-assistant"' }],
+ [{ platform: "qwen", url: "https://chat.qwen.ai/c/photos", user: 'class="qwen-chat-message-user"', assistant: 'class="qwen-chat-message-assistant"' }],
+])("retains $platform uploads, generated images and native component positions", ({ platform, url, user, assistant }) => {
+ const response = `<div ${assistant}><p>Before</p><img src="https://example.test/generated.png"><section data-component-type="interactive"><h2>Options</h2><input type="checkbox"></section><p>After</p></div>`;
+ document.body.innerHTML = `<main><div ${user}><button><img src="https://example.test/upload.png"></button></div>${platform === "gemini" ? `<model-response>${response}</model-response>` : response}</main>`;
+ const messages = new WebChatAdapter(platform, () => url).parseMessages();
+ expect(messages).toHaveLength(2); expect(messages[0].text).toContain("upload.png");
+ expect(messages[1].text).toMatch(/Before[\s\S]*generated.png[\s\S]*【原平台交互内容】[\s\S]*After/u);
+ expect(messages[1].uiParts).toHaveLength(1);
+});
 it.each<[{platform:WebCapturePlatform;url:string;editor:string}]>([
  [{platform:"claude",url:"https://claude.ai/chat/a",editor:'<div class="ProseMirror" contenteditable="true"></div>'}],
  [{platform:"gemini",url:"https://gemini.google.com/app/a",editor:'<rich-textarea><div contenteditable="true"></div></rich-textarea>'}],

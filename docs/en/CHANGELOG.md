@@ -7,6 +7,13 @@
 [简体中文](../../CHANGELOG.md) · **English**
 
 
+## 0.1.4 — Early Preview
+
+- Chrome and Edge share one ZIP, with a direct download and three installation steps in the README.
+- Export the project overview and Wiki chapters together, with reference examples available as a separate Markdown file.
+- Clearer project stages, decisions, evidence, example titles and source links.
+- Improvements to long-conversation reading, source navigation and imports, plus recovery when a preview fails.
+
 ## 0.1.3 — Early Preview
 
 - Wiki checks keep thresholds tied to their original feature, audience and observation window. Unsupported claims are flagged in place.

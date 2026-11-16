@@ -7,7 +7,7 @@ export function createManifest(_apiBaseUrl = "") {
   manifest_version: 3,
   name: "ChatAtlas",
   short_name: "ChatAtlas",
-  version: "0.1.3",
+  version: "0.1.4",
   description: "Review past AI conversations in context and build a personal knowledge reading path.",
   icons: {
     16: "src/assets/brand/icon-16.png",
@@ -16,6 +16,10 @@ export function createManifest(_apiBaseUrl = "") {
     128: "src/assets/brand/icon-128.png",
   },
   permissions: ["storage", "tabs", "alarms", "scripting", "sidePanel"],
+  sandbox: { pages: ["reader-preview.html"] },
+  content_security_policy: {
+    sandbox: "sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-src 'self' about:; connect-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'",
+  },
   host_permissions: ["https://chatgpt.com/*",...allWebCapturePatterns()],
   optional_host_permissions: ["https://*/*", "http://*/*"],
   side_panel: { default_path: "sidecar.html?native=1" },

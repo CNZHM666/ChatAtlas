@@ -1,16 +1,15 @@
 import type { ImportRecord } from "./importers";
-import { readImportRecords } from "./zip-import";
+import { openImportRecordSource } from "./zip-import";
 
 type WorkerRequest = { type: "start"; file: File } | { type: "next" };
 type WorkerResponse = { type: "ready"; total: number; errors: Array<{ name: string; message: string }> }
-  | { type: "record"; record: ImportRecord }
+  | { type: "record"; record: ImportRecord; errors?: Array<{ name: string; message: string }> }
   | { type: "done" }
   | { type: "error"; message: string };
 
 async function mainThreadRecords(file: File, onEntryError?: (name: string, message: string) => void) {
-  const records: ImportRecord[] = [];
-  for await (const record of readImportRecords(file, onEntryError)) records.push(record);
-  return { total: records.length, records: (async function* () { yield* records; })() };
+  const source = await openImportRecordSource(file, onEntryError);
+  return { total: source.records.length, records: (async function* () { for (const record of source.records) yield await source.resolve(record); })() };
 }
 
 /** Keep ZIP decompression and JSON parsing off the ChatAtlas page's main thread. */
@@ -53,6 +52,7 @@ export async function openExportRecordStream(file: File, onEntryError?: (name: s
         const next = await request({ type: "next" });
         if (next.type === "error") throw new Error(next.message);
         if (next.type !== "record") throw new Error("The export parser stopped before all conversations were read.");
+        for (const error of next.errors ?? []) onEntryError?.(error.name, error.message);
         yield next.record;
       }
     } finally { worker.terminate(); }

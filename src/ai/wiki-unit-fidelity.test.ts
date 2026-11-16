@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { repairedStatements, statementDrift, trimmedQuote } from "./wiki-unit-fidelity";
 import type { WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import type { StructuredAIRequest } from "./provider";
+import { AIProviderResponseError } from "./provider-errors";
 
 const unit = (statement: string, quote: string, role: "user" | "assistant" = "assistant"): WikiKnowledgeUnit => ({ id: `u:${statement.length}`, subject: "订单", statement, kind: "plan", details: [], delivery: "unknown", adoption: { status: role === "assistant" ? "proposal" : "unknown" },
   evidence: { evidenceId: "e", conversationId: "c", messageId: "m", messageIndex: 1, role, pasted: false, quote } });
@@ -53,4 +54,25 @@ it("takes a rewrite only when it drifts less, and keeps the statement when the r
   expect([...statements]).toEqual([[drifting.id, "不要让客服直接修改退款金额。"]]);
   const failing = { generateStructured: async () => { throw new Error("down"); } };
   expect(await repairedStatements(flagged, failing, "zh-CN", new AbortController().signal)).toMatchObject({ failed: 1, requests: 1 });
+});
+
+it("splits truncated repairs and keeps the successful half", async () => {
+  const body = "建议本地保存配置。";
+  const flagged = Array.from({ length: 4 }, (_, index) => {
+    const source = { ...unit("必须本地保存配置。", body), id: "point-" + index };
+    return { unit: source, body, reasons: statementDrift(source, body) };
+  });
+  const sizes: number[] = [];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const rows = JSON.parse(request.prompt).units as Array<{ id: string; statement: string }>;
+    sizes.push(rows.length);
+    if (rows.length > 2) throw new AIProviderResponseError("PROVIDER_OUTPUT_TRUNCATED");
+    if (sizes.length === 3) throw new Error("offline");
+    return request.validate({ units: rows.map(row => ({ id: row.id, statement: body })) });
+  } };
+  const result = await repairedStatements(flagged, ai, "zh-CN", new AbortController().signal);
+  expect(sizes).toEqual([4, 2, 2]);
+  expect(result.statements.size).toBe(2);
+  expect(result.checked.size).toBe(2);
+  expect(result.failed).toBe(1);
 });

@@ -12,12 +12,18 @@ export function knowledgeOverlap(first:string,second:string){
  return [...left].filter(term=>right.has(term));
 }
 export function knowledgeVersion(text:string){return normalized(text).match(/\bv\d+(?:\.\d+)*(?:[-\w.]*)?/iu)?.[0].replace(/\.+$/u,"");}
+export function knowledgeStage(text:string){
+ const value=normalized(text);
+ return knowledgeVersion(value)??value.match(/\b(?:phase|milestone|stage)(?:\s+[a-z]|\s*\d+(?:\.\d+)*)\b|第\s*[一二三四五六七八九十\d]+\s*(?:版|阶段)|首版/iu)?.[0].replace(/\s+/gu,"");
+}
 export function knowledgeOwner(text:string){
  const value=normalized(text);
- return /byok|用户.{0,12}(?:密钥|api\s*key)|user.{0,15}(?:key|credential)/u.test(value)?"user-key":/平台.{0,12}(?:密钥|api\s*key)|platform.{0,15}(?:key|credential)/u.test(value)?"platform-key":"";
+ const user=/\bbyok\b|用户.{0,12}(?:密钥|api\s*key)|user.{0,15}(?:key|credential)/u.test(value);
+ const platform=/平台.{0,12}(?:密钥|api\s*key)|platform.{0,15}(?:key|credential)/u.test(value);
+ return user===platform?"":user?"user-key":"platform-key";
 }
 export function knowledgeScopesAgree(...texts:string[]){
- const versions=new Set(texts.flatMap(text=>knowledgeVersion(text)?[knowledgeVersion(text)!]:[]));
+ const versions=new Set(texts.flatMap(text=>knowledgeVersion(text)??[]));
  const owners=new Set(texts.flatMap(text=>knowledgeOwner(text)?[knowledgeOwner(text)]:[]));
  return versions.size<=1&&owners.size<=1;
 }

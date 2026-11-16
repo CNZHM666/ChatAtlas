@@ -5,7 +5,7 @@ import { clearDiscussionHighlightCache } from "../sidecar/discussion-highlights"
 
 /** Local knowledge only. Credentials, transient tasks, usage logs and derived indexes stay out. */
 export const BACKUP_STORES = [
-  "canvases", "cards", "edges", "conversations", "messages", "anchors", "viewports", "conversationGraphs",
+  "canvases", "cards", "edges", "conversations", "messages", "imageAssets", "anchors", "viewports", "conversationGraphs",
   "organizationPlans", "knowledgeCards", "canvasMemberships", "knowledgeRelations", "sourceRelations",
   "semanticProfiles", "questionSnapshots", "readingProgress", "reviewMarks", "focusSessions", "projectQueryThreads", "sourceVersions", "contextFavorites", "discussionHighlights",
 ] as const;
@@ -41,7 +41,7 @@ export function parseAtlasBackup(text: string): AtlasBackup {
   if (file.format !== "atlas-local-backup" || file.version !== 1 || !file.stores || typeof file.stores !== "object") throw new Error("Unsupported ChatAtlas backup.");
   for (const name of BACKUP_STORES) {
     // Version 1 backups created before goal-based reading have no sessions.
-    if ((name === "focusSessions" || name === "projectQueryThreads" || name === "sourceVersions" || name === "contextFavorites" || name === "discussionHighlights") && file.stores[name] === undefined) file.stores[name] = [];
+    if ((name === "imageAssets" || name === "focusSessions" || name === "projectQueryThreads" || name === "sourceVersions" || name === "contextFavorites" || name === "discussionHighlights") && file.stores[name] === undefined) file.stores[name] = [];
     const records = file.stores[name];
     const key = keyField(name);
     if (!Array.isArray(records) || records.some((record) => !record || typeof record !== "object" || typeof record[key] !== "string" || !record[key])) throw new Error(`Invalid ${name} records.`);

@@ -2,6 +2,8 @@ import type { ConversationCapture, ConversationMessage } from "../shared/types";
 import type { CaptureAdapter, ParsedChatMessage } from "./capture-adapter";
 import { createContentHash, previewMessage } from "./message-identity";
 import { sourceMessageSignature } from "../shared/source-signature";
+import { captureImageResources } from "./capture-image-resources";
+import { materializeCaptureImages } from "../shared/capture-images";
 
 function localMessageId(conversationId: string, message: ParsedChatMessage, hash: string, occurrence: number, platform: string, question?: string, answer = 0): string {
   const prefix = platform === "chatgpt" ? `chatgpt:${conversationId}` : conversationId;
@@ -49,7 +51,7 @@ export async function buildConversationCapture(
     });
   }
 
-  return {
+  return materializeCaptureImages({
     conversation: {
       id: detected.id,
       platform,
@@ -62,7 +64,7 @@ export async function buildConversationCapture(
     },
     messages,
     capturedAt,
-  };
+  }, await captureImageResources(parsed));
 }
 
 export function captureFingerprint(capture: ConversationCapture): string {

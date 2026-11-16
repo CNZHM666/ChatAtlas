@@ -1,11 +1,17 @@
 import { normalizeMessageText } from "./message-identity";
+import { domImageMarkdown } from "./dom-images";
+import { DOM_TOOL_TRAFFIC } from "./dom-tool-traffic";
 
 const OMIT = 'button,[role="button"],svg,script,style,nav,aside,textarea,input,[contenteditable="true"],[hidden],[aria-hidden="true"],[data-testid*="thinking"],.ds-think-content,.toolcall-container';
 /** Extract saved discussion prose; never operate the page or execute supplied HTML. */
 export function domMessageText(element: HTMLElement): string {
   const render = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
-    if (!(node instanceof Element) || node.matches(OMIT)) return "";
+    if (!(node instanceof Element)) return "";
+    if (node.matches(DOM_TOOL_TRAFFIC)) return [...node.querySelectorAll<HTMLImageElement>("img")].map(domImageMarkdown).join("\n");
+    if (node.matches('button,[role="button"]') && !node.closest('[hidden],[aria-hidden="true"]')) return [...node.querySelectorAll<HTMLImageElement>("img")].map(domImageMarkdown).join("\n");
+    if (node.matches(OMIT)) return "";
+    if (node instanceof HTMLImageElement) return `\n${domImageMarkdown(node)}\n`;
     const tag = node.tagName.toLowerCase(), children = () => [...node.childNodes].map(render).join("");
     if (tag === "br") return "\n";
     if (tag === "pre") {

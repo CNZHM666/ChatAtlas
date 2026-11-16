@@ -1,5 +1,6 @@
 import { wikiLedgerUnits, type WikiKnowledgeLedger, type WikiKnowledgeUnit } from "./wiki-knowledge";
 import { messageCode } from "./wiki-source-code";
+import {wikiUiCopy,wikiUiCopySupports} from "./wiki-ui-copy";
 
 /** A message as the sections pass reads it. */
 export interface WikiSectionMessage { id: string; conversationId: string; messageIndex: number; content: string }
@@ -93,7 +94,8 @@ export function withWikiSections(ledger: WikiKnowledgeLedger, messages: WikiSect
   };
   // The code block the quote stands in or introduces, shown as written after the paragraph citing it.
   const withCode = (unit: WikiKnowledgeUnit, message: WikiSectionMessage): WikiKnowledgeUnit => {
-    const code = messageCode(message.content, unit.evidence.quote), had = unit.evidence.code;
+    const candidate = messageCode(message.content, unit.evidence.quote), had = unit.evidence.code;
+    const code=candidate&&wikiUiCopy(candidate)&&!wikiUiCopySupports(candidate,unit)?undefined:candidate;
     if (code ? had?.language === code.language && had.text === code.text : !had) return unit;
     changed = true;
     if (code) return { ...unit, evidence: { ...unit.evidence, code } };

@@ -9,6 +9,7 @@ import {aiAdvicePresentation} from "./ai-advice-presentation";
 import {readingEmphasisMarkdown} from "./reading-emphasis";
 import {currentWikiOverview} from "./wiki-overview";
 import {qualifyWikiOverviewClaims} from "../ai/wiki-claim-review";
+import type {resolveWikiReading} from "../ai/wiki-knowledge-reading";
 
 /** A common emphasis projection for overview UI and every export. */
 export function projectOverviewReadingText(session:FocusSession,overview=projectOverviewContent(session)){
@@ -35,19 +36,19 @@ export function projectOverviewText(session:FocusSession) {
 
 /** A connected overview in natural paragraphs, without a dashboard of headings
  * or another model summary. Complete saved facts retain their source pointers. */
-export function projectOverviewContent(session:FocusSession){
+export function projectOverviewContent(session:FocusSession,reading?:ReturnType<typeof resolveWikiReading>){
  const intro=projectIntroduction(session),saved=projectOverviewText(session);
  if(intro.source==="personal")return {text:saved,evidenceIds:intro.evidenceIds};
- const base=qualifyWikiOverviewClaims(saved,session);
+ const base=qualifyWikiOverviewClaims(saved,session,reading);
  const generated=currentWikiOverview(session);
  if(generated)return {text:aiAdvicePresentation(base),evidenceIds:generated.evidenceIds};
  const parts=base.trim()?[base.trim().replace(/\s*\n\s*/gu," ")]:[],ids=new Set(intro.evidenceIds);
  const sentence=(part:string)=>/[。！？.!?]$/u.test(part)?part:part+(session.locale==="en"?".":"。");
- const blocks=projectSnapshot(session);
- const scope=projectKnowledgeView(session).current.filter(fact=>fact.role==="scope"&&!fact.contested&&!fact.sourceChanged).map(fact=>({text:knowledgeFactText(fact,session.locale!=="en"),evidenceIds:fact.claim.evidenceIds}));
+ const view=projectKnowledgeView(session),blocks=projectSnapshot(session,view);
+ const scope=view.current.filter(fact=>fact.role==="scope"&&!fact.contested&&!fact.sourceChanged).map(fact=>({text:knowledgeFactText(fact,session.locale!=="en"),evidenceIds:fact.claim.evidenceIds}));
  let characters=parts.join("\n\n").length;
  // Current state comes only from user confirmations and reports, never from suggestions.
- const view=projectKnowledgeView(session),state:string[]=[];
+ const state:string[]=[];
  for(const fact of [...view.current.filter(fact=>!fact.contested&&fact.adoption==="accepted").slice(0,2),...view.current.filter(fact=>!fact.contested&&fact.implementation==="reported").slice(0,2)]){
   const text=knowledgeFactText(fact,session.locale!=="en"),key=factTextKey(text);
   if([...parts,...state].some(part=>factTextKey(part).includes(key))||characters+text.length>1100)continue;

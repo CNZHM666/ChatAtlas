@@ -1,6 +1,7 @@
 import type { StructuredAIRequest } from "./provider";
 import { AIProviderResponseError, AIProviderValidationError } from "./provider-errors";
 import { knowledgeTerms } from "../shared/knowledge-subject";
+import type { WikiCandidateIndex } from "./wiki-candidate-index";
 import { sourceMessageSignature } from "../shared/source-signature";
 import { coreHeldBy, modalityConflict, protectedDifference, type WikiExplanationGroup, type WikiKnowledgeUnit, type WikiProgressFn, type WikiSubject } from "../shared/wiki-knowledge";
 
@@ -27,14 +28,19 @@ export const GROUP_RULES = 4;
 export interface GroupCandidate { a: string; b: string; overlap: number }
 
 const aboutKey = (unit: WikiKnowledgeUnit) => unit.about?.name.toLocaleLowerCase() ?? "";
-const termsOf = (unit: WikiKnowledgeUnit) => knowledgeTerms(`${unit.statement} ${unit.details.join(" ")}`);
 
 /** Pairs of units likely to state one core, across subjects and discussion windows: about the same
  * thing, not one requiring what the other forbids, sharing enough uncommon terms. Each unit keeps its
  * GROUP_CANDIDATES best; a pair is kept once. */
-export function recallGroupCandidates(units: WikiKnowledgeUnit[]): GroupCandidate[] {
-  const terms = new Map(units.map(unit => [unit.id, termsOf(unit)])), byTerm = new Map<string, string[]>();
-  for (const unit of units) for (const term of terms.get(unit.id)!) byTerm.set(term, [...byTerm.get(term) ?? [], unit.id]);
+export function recallGroupCandidates(units: WikiKnowledgeUnit[], index?: WikiCandidateIndex): GroupCandidate[] {
+  const terms = new Map(units.map(unit => {
+    const text = unit.details.length ? `${unit.statement} ${unit.details.join(" ")}` : unit.statement;
+    return [unit.id, index?.terms(text) ?? knowledgeTerms(text)] as const;
+  })), byTerm = new Map<string, string[]>();
+  for (const unit of units) for (const term of terms.get(unit.id)!) {
+    const existing = byTerm.get(term);
+    if (existing) existing.push(unit.id); else byTerm.set(term, [unit.id]);
+  }
   const common = Math.max(3, Math.ceil(units.length * COMMON_TERM_SHARE)), byId = new Map(units.map(unit => [unit.id, unit]));
   const pairs = new Map<string, GroupCandidate>();
   for (const unit of units) {

@@ -2,25 +2,32 @@ import {expect,it} from "vitest";
 import zh from "../../README.md?raw";
 import en from "../../README.en.md?raw";
 import principles from "../../PRODUCT_PRINCIPLES.md?raw";
+import {version} from "../../package.json";
 
-it("makes no-key basic search visible before the product introduction, and shows the product before what it does, in both languages",()=>{
- expect(zh.indexOf("基础搜索不需要 AI Key")).toBeLessThan(zh.indexOf("ChatAtlas 是"));
- expect(en.indexOf("Basic search needs no AI key")).toBeLessThan(en.indexOf("ChatAtlas is"));
- expect(zh.indexOf("docs/images/sidecar-chatgpt-light.png")).toBeLessThan(zh.indexOf("## 能做什么"));
- expect(en.indexOf("docs/images/sidecar-chatgpt-light.png")).toBeLessThan(en.indexOf("## What it does"));
+it("introduces search without an API key before installation",()=>{
+ expect(zh.split("## 安装到")[0]).toContain("搜索和阅读不需要 API Key");
+ expect(en.split("## Install on")[0]).toContain("Search and reading need no API key");
 });
-it("publishes no empty timing table and walks through installing the release ZIP in both languages",()=>{
- expect(zh).not.toContain("## 生成耗时");expect(en).not.toContain("## Generation time");
- for(const text of [zh,en]){expect(text).toContain("releases/latest");expect(text).toContain("ChatAtlas-extension-v");expect(text).toContain("chrome://extensions");expect(text).toContain("manifest.json");}
- expect(zh).toContain("加载已解压的扩展程序");expect(en).toContain("Load unpacked");
- // A prompt to install with an AI: from the official release only, never asking for secrets.
- expect(zh).toContain("### 让 AI 帮你安装");expect(en).toContain("### Let an AI install it for you");
- for(const text of [zh,en]){const prompt=text.split("```text")[1]?.split("```")[0]??"";expect(prompt).toContain("https://github.com/CNZHM666/ChatAtlas/releases/latest");expect(prompt).toMatch(/API Key|API key/u);}
+it("links directly to the current preview ZIP and explains loading it in both browsers",()=>{
+ const download=`https://github.com/CNZHM666/ChatAtlas/releases/download/v${version}/ChatAtlas-extension-v${version}.zip`;
+ for(const [text,heading,load] of [[zh,"## 安装到","加载已解压的扩展程序"],[en,"## Install on","Load unpacked"]]){
+  const install=text.slice(text.indexOf(heading)).split("\n## ")[0];
+  expect(install).toContain(download);
+  expect(install).toContain("chrome://extensions");
+  expect(install).toContain("edge://extensions");
+  expect(install).toContain(load);
+  expect(install).toContain("manifest.json");
+  expect(install.match(/^\d\. /gmu)).toHaveLength(3);
+ }
 });
 it("retains the product principles' import and native-integration boundaries in both editions",()=>{
  const scope=principles.split("\n")[6];
- for(const platform of ["ChatGPT","Claude","Gemini","Google Takeout JSON","DeepSeek"]){expect(scope).toContain(platform);expect(zh).toContain(platform);expect(en).toContain(platform);}
- expect(zh).toContain("浏览器授予网站权限后默认自动运行");expect(en).toContain("run automatically after browser website permission");
+ for(const platform of ["ChatGPT","Claude","Gemini","Google Takeout JSON","DeepSeek"]){
+  expect(scope).toContain(platform);
+  expect(zh).toContain(platform);
+  expect(en).toContain(platform);
+ }
+ expect(zh).toContain("获得网站权限后会保存已加载的消息");
+ expect(en).toContain("saves loaded messages after site permission is granted");
  for(const text of [zh,en])for(const platform of ["Kimi","Qwen"])expect(text).toContain(platform);
- expect(zh).toContain("仅保存当前已加载的消息，不保证完整历史");expect(en).toContain("saves currently loaded messages, not guaranteed full history");
 });

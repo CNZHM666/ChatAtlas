@@ -12,7 +12,8 @@ it("adds derived stores to version 22 while preserving raw records and existing 
   const metadata = { id: "c", title: "保留讨论", platform: "claude", updatedAt: 1 };
   await legacy.put("messages", raw); await legacy.put("conversations", metadata); await legacy.put("semanticVectors", { id: "v", values: [1, 0] }); await legacy.put("focusSessions", { id: "old-result", title: "历史项目", updatedAt: 1 }); legacy.close();
   const { getDatabase } = await import("./db"), upgraded = await getDatabase();
-  expect(upgraded.version).toBe(24); expect(await upgraded.get("messages", "m")).toEqual(raw); expect(await upgraded.get("conversations", "c")).toEqual(metadata);
+  expect(upgraded.version).toBe(26); expect(await upgraded.count("imageAssets")).toBe(0); expect(await upgraded.get("messages", "m")).toEqual(raw); expect(await upgraded.get("conversations", "c")).toEqual(metadata);
+  expect(upgraded.transaction("focusSessions").store.indexNames.contains("by-run")).toBe(true);
   expect(await upgraded.count("discussionHighlights")).toBe(0);
   expect(await upgraded.getAllFromIndex("messages", "by-conversation", "c")).toEqual([raw]); expect([...upgraded.transaction("messages").store.indexNames]).toEqual(["by-conversation", "by-updated"]);
   expect(await upgraded.get("semanticVectors", "v")).toEqual({ id: "v", values: [1, 0] });

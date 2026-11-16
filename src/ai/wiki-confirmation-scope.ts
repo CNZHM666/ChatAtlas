@@ -69,6 +69,40 @@ export const wikiConfirmationCovers = (text: string, details: string[]) => {
   return details.every(detail => known.has(detail) || /[^\d\s.%]/u.test(detail) && !/\d/u.test(detail) && key.includes(detail));
 };
 
+/** Compare a scoped local choice with its literal or a status-only restatement. */
+export function wikiDecisionRestatement(text: string, choice: string) {
+  const key = (value: string) => compact(value).replace(/[。.!?！？]$/u, "");
+  const exact = key(choice);
+  const framed = text.replace(/^(?:\*\*|__)*/u, "")
+    .replace(/^(?:现行决定是|[^，。；：:]{1,24}?(?:已确认|确认为|已决定|决定为|确认采用)|(?:项目发起人)?(?:已确认|已决定|确认采用)|决定(?=先|采用|保留|暂缓|不))\s*[：:]?\s*/u, "");
+  const named = key(text).replace(/^([^：:，。；]{1,26}?)确认为/u, "$1:");
+  const releaseChoice = exact.match(/^发布(v\d+(?:\.\d+)+(?:-[\w.-]+)?)标签$/iu)?.[1];
+  const releaseRestatement = key(text).match(/^(?:首个公开版本|首发版本|发布标签)(?:已)?确认为(v\d+(?:\.\d+)+(?:-[\w.-]+)?)标签$/iu)?.[1];
+  return Boolean(exact && (key(text) === exact || key(framed) === exact || named === exact || releaseChoice && releaseChoice === releaseRestatement));
+}
+
+export function wikiChoiceTrigger(question: string, answer: string) {
+  if (!/触发|时机|何时|什么时候|\b(?:trigger|when)\b/iu.test(question)) return;
+  return answer.match(/^(?:当|在)?(.{2,40}?(?:时|后|前))(?=\s*(?:自动|才|生成|执行|显示|运行|发送))/u)?.[1]
+    ?? answer.match(/^((?:when|after|before|upon)\s+[^.!?]{4,80})$/iu)?.[1];
+}
+
+/** A deferral bound to the release and the capability the choice asked about. */
+export function wikiReleaseDeferral(question: string, answer: string) {
+  if (!/暂缓|推迟|延期|排除|不纳入|后续阶段|\b(?:defer|postpone|exclude|later release)\b/iu.test(answer)) return;
+  const choice = question.match(/^([^，。！？：:\n]{2,38}?)\s*是否(?:纳入|列入|加入|计入)\s*(v\d+(?:\.\d+)*|第[一二三四五六七八九十\d]+(?:版|阶段)|首版)/iu)
+    ?? question.match(/^should\s+([^,?]{2,55}?)\s+be\s+(?:part of|included in)\s+(v\d+(?:\.\d+)*)\b/iu);
+  return choice ? { feature: choice[1].trim(), stage: choice[2] } : undefined;
+}
+
+/** A hold on a numbered layer cannot name the parent subsystem as its subject. */
+export function wikiLayerDeferral(question: string, answer: string) {
+  if (!/^(?:维持现状[，,、\s]*)?(?:暂不(?:开发|实现)|继续预留)[。]?$/u.test(answer.trim())) return;
+  const layer = question.match(/^(Level\s+\d+(?:\s*\([^()\n]{2,35}\))?|第[一二三四五六七八九十\d]+层(?:\s*[（(][^）)\n]{2,35}[）)])?)\s*(?=目前|当前|现阶段|暂|仅)/iu)?.[1];
+  if (!layer || !/仅预留|只预留/u.test(question)) return;
+  return `${layer}：维持预留，暂不开发。`;
+}
+
 export interface WikiScopedClaim { before: string; parts: Array<{ text: string; unit?: WikiKnowledgeUnit }> }
 
 /** Confirmation may cover the leading choice while the following clause names

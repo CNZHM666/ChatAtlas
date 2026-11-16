@@ -20,7 +20,12 @@ async function savedVectors(modelKey: string, statements: string[]): Promise<Map
   const found = new Map<string, number[]>();
   try {
     const db = await getDatabase();
-    for (const statement of new Set(statements)) { const row = await db.get("semanticVectors", vectorId(modelKey, statement)); if (row?.textHash === statement) found.set(statement, row.values); }
+    const tx = db.transaction("semanticVectors");
+    await Promise.all([...new Set(statements)].map(async statement => {
+      const row = await tx.store.get(vectorId(modelKey, statement));
+      if (row?.textHash === statement) found.set(statement, row.values);
+    }));
+    await tx.done;
   } catch { /* No store: every statement is embedded. */ }
   return found;
 }
@@ -29,9 +34,13 @@ async function saveVectors(modelKey: string, rows: Array<[string, number[]]>) {
   if (!rows.length) return;
   try {
     const db = await getDatabase(), now = Date.now();
-    for (const [statement, values] of rows) await db.put("semanticVectors", { id: vectorId(modelKey, statement), modelKey, textHash: statement, values, updatedAt: now });
-    const kept = (await db.getAll("semanticVectors")).filter(row => row.id.includes(":wiki-unit:")).sort((a, b) => b.updatedAt - a.updatedAt);
-    for (const row of kept.slice(KEPT_VECTORS)) await db.delete("semanticVectors", row.id);
+    const tx = db.transaction("semanticVectors", "readwrite");
+    await Promise.all(rows.map(([statement, values]) => tx.store.put({ id: vectorId(modelKey, statement), modelKey, textHash: statement, values, updatedAt: now })));
+    if (await tx.store.count() > KEPT_VECTORS) {
+      const kept = (await tx.store.getAll()).filter(row => row.id.includes(":wiki-unit:")).sort((a, b) => b.updatedAt - a.updatedAt);
+      await Promise.all(kept.slice(KEPT_VECTORS).map(row => tx.store.delete(row.id)));
+    }
+    await tx.done;
   } catch { /* Not kept: the next run embeds them again. */ }
 }
 /** Cosine at which two statements are asked about as one point, and at which the guard stops requiring shared
@@ -51,27 +60,32 @@ export async function unitVectors(units: WikiKnowledgeUnit[], embeddings: Embedd
   const vectors: UnitVectors = new Map(), saved = await savedVectors(embeddings.modelKey, units.map(unit => unit.statement)), fresh: Array<[string, number[]]> = [];
   for (const unit of units) { const values = saved.get(unit.statement); if (values) vectors.set(unit.id, normalized(values)); }
   if (vectors.size) report.semantic_reused = vectors.size;
-  const left = units.filter(unit => !vectors.has(unit.id)), batches: WikiKnowledgeUnit[][] = [];
+  const left = [...new Set(units.filter(unit => !vectors.has(unit.id)).map(unit => unit.statement))], batches: string[][] = [];
   for (let start = 0; start < left.length; start += BATCH) batches.push(left.slice(start, start + BATCH));
-  let next = 0;
-  try {
-    const worker = async () => {
-      while (next < batches.length) {
-        const batch = batches[next++];
+  let next = 0, failed = false;
+  const worker = async () => {
+    while (!failed && next < batches.length) {
+      const batch = batches[next++];
+      try {
         signal.throwIfAborted();
-        const values = await embeddings.embedBatch(batch.map(unit => unit.statement), signal);
         report.semantic_requests = (report.semantic_requests ?? 0) + 1;
-        batch.forEach((unit, index) => { vectors.set(unit.id, normalized(values[index])); fresh.push([unit.statement, values[index]]); });
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
-  } catch {
-    signal.throwIfAborted();
+        const values = await embeddings.embedBatch(batch, signal);
+        if (values.length !== batch.length || values.some(vector => !vector?.length)) throw new Error("Missing Wiki vectors");
+        batch.forEach((statement, index) => { fresh.push([statement, values[index]]); });
+      } catch { failed = true; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
+  signal.throwIfAborted();
+  await saveVectors(embeddings.modelKey, fresh);
+  if (failed) {
     report.semantic_failed = 1;
     return undefined;
   }
+  const byStatement = new Map(fresh.map(([statement, values]) => [statement, normalized(values)]));
+  for (const unit of units) { const vector = byStatement.get(unit.statement); if (vector) vectors.set(unit.id, vector); }
   report.semantic_units = vectors.size;
-  await saveVectors(embeddings.modelKey, fresh);
+  if (units.length > left.length + (report.semantic_reused ?? 0)) report.semantic_identical_reused = units.length - left.length - (report.semantic_reused ?? 0);
   return vectors;
 }
 
@@ -118,13 +132,13 @@ export function placeByContent(chapters: Chapter[], subjects: Array<{ id: string
 /** Groups of units likely to state one point: each unit joins its closest neighbours at or above the threshold,
  * when compatible allows the pair (about the same thing), and no group grows past CLUSTER. Groups of two or more,
  * largest first, members in the given order. */
-export function semanticClusters(units: WikiKnowledgeUnit[], vectors: UnitVectors, compatible: (a: WikiKnowledgeUnit, b: WikiKnowledgeUnit) => boolean, threshold = SEMANTIC_CANDIDATE): string[][] {
+export function semanticClusters(units: WikiKnowledgeUnit[], vectors: UnitVectors, compatible: (a: WikiKnowledgeUnit, b: WikiKnowledgeUnit) => boolean, threshold = SEMANTIC_CANDIDATE, similar = vectorSimilarity(vectors)): string[][] {
   const live = units.filter(unit => vectors.has(unit.id)), pairs: Array<{ a: number; b: number; score: number }> = [];
   for (let i = 0; i < live.length; i++) {
-    const own = vectors.get(live[i].id)!, near: Array<{ b: number; score: number }> = [];
+    const near: Array<{ b: number; score: number }> = [];
     for (let j = 0; j < live.length; j++) {
       if (i === j) continue;
-      const score = dot(own, vectors.get(live[j].id)!);
+      const score = similar(live[i].id, live[j].id);
       if (score >= threshold && compatible(live[i], live[j])) near.push({ b: j, score });
     }
     for (const { b, score } of near.sort((x, y) => y.score - x.score).slice(0, NEIGHBOURS)) if (i < b) pairs.push({ a: i, b, score });

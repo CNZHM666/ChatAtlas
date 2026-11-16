@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { comparedProducts, discussedProjects, droppedExceptions, movedCodes, extractWikiKnowledge, fittingQuote, ownNamesTaggedAsOthers, wikiUnitBatches, wikiUnitRequest, droppedFigures, uncoveredSentences } from "./wiki-knowledge-units";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
-import { missingWikiConditions, pastedUserText, quotedDetails, wikiUnitConditions, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { missingWikiConditions, pastedUserText, quotedDetails, wikiUnitConditions, wikiUncoveredMessageCount, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
 
@@ -23,6 +23,22 @@ it("preserves a literal condition with the claim it qualifies, and rejects a con
   // An older ledger with the same quote can still supply the prerequisite.
   expect(wikiUnitConditions({ ...found, conditions: undefined })).toEqual([condition]);
   expect(wikiUnitConditions({ ...found, conditions: undefined, evidence: { ...found.evidence, quote: `如果用户登录，开启导出。${statement}` } })).toEqual([]);
+});
+
+it("counts a split uncovered message once in document quality", () => {
+  expect(wikiUncoveredMessageCount([{ sourceIds: [], status: "ok", units: [], rejected: {},
+    uncovered: ["e:c1:7:1", "e:c1:7:2", "e:c1:8:1"] }])).toBe(2);
+});
+
+it("keeps a leading condition on its own clause across a contrast", () => {
+  const condition = "如果本地性能验证通过";
+  const consequent = "可自行调整索引结构";
+  const invariant = "所有导出必须保持稳定 ID";
+  const all = [material(0, "assistant", `${condition}，${consequent}，但${invariant}。`)];
+  const found = reply(all, all, { units: [unit({ statement: invariant, details: [], conditions: [condition] })] }).units[0];
+  expect(wikiUnitConditions(found)).toEqual([]);
+  expect(wikiUnitConditions({ ...found, statement: consequent })).toEqual([condition]);
+  expect(wikiUnitConditions({ ...found, statement: invariant, conditions: [condition] })).toEqual([]);
 });
 
 it("recovers a separate conditional proposal quoted with an experiment, including on cache hits", async () => {
@@ -260,13 +276,15 @@ it("reads the user's own words that produced no unit once more, and records what
   expect(prompts).toHaveLength(2);
   expect(prompts[1].cover).toHaveLength(1);
   expect(result.ledger.batches[0].uncovered).toEqual([all[1].id]);
-  expect(result.ledger.batches[0].coverChecked).toBe(1);
+  expect(result.ledger.batches[0].coverChecked).toBeUndefined();
+  expect(result.ledger.batches[0].coverage?.[all[1].id]?.status).toBe("pending");
   expect(result.report).toMatchObject({ requests: 1, coverRetries: 1, uncoveredMessages: 1 });
-  // Read again with the earlier ledger, it is not asked a third time.
+  // A pending gap is reviewed again while the successful extraction is reused.
   prompts.length = 0;
   const reused = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai, previous: result.ledger });
-  expect(prompts).toHaveLength(0);
-  expect(reused.report).toMatchObject({ firstPassUncoveredMessages: 0, uncoveredMessages: 1 });
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0].cover).toHaveLength(1);
+  expect(reused.report).toMatchObject({ firstPassUncoveredMessages: 1, uncoveredMessages: 1 });
 });
 
 it("keeps what the user's uncovered message gives when read again, with the batch it belongs to", async () => {
@@ -277,6 +295,79 @@ it("keeps what the user's uncovered message gives when read again, with the batc
   expect(result.ledger.batches[0].units.map(item => item.statement)).toContain("首屏展示类似 ChatGPT 的欢迎页。");
   expect(result.ledger.batches[0].uncovered).toBeUndefined();
   expect(result.report).toMatchObject({ coverRetries: 1, coverUnits: 1, firstPassUncoveredMessages: 1, uncoveredMessages: 0 });
+});
+
+it("retries failed recovery on a reused extraction and retains the user's independent evidence", async () => {
+  const statement = "第一版使用离线索引，文件保存到用户自己的设备。";
+  const all = [material(0, "assistant", statement), material(1, "user", "我决定" + statement)];
+  let fail = true, normal = 0;
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt);
+    if (data.cover && fail) throw new Error("temporary network failure");
+    if (!data.cover) normal++;
+    return request.validate({ units: [unit({ statement, details: [], kind: "decision", adoption: data.cover ? "user_decision" : "proposal" })] });
+  } };
+  const first = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
+  expect(first.ledger.batches[0].coverage?.[all[1].id]?.status).toBe("failed");
+  expect(first.ledger.batches[0].coverChecked).toBeUndefined();
+  fail = false;
+  const next = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai, previous: first.ledger });
+  expect(normal).toBe(1);
+  expect(next.report).toMatchObject({ reused: 1, coverageFailed: 0, uncoveredMessages: 0 });
+  expect(next.ledger.batches[0].units.filter(unit => unit.statement === statement).map(unit => unit.evidence.role).sort()).toEqual(["assistant", "user"]);
+  expect(next.ledger.batches[0].coverage?.[all[1].id]).toMatchObject({ status: "covered", attempts: 2 });
+});
+
+it("records why a passage has no project knowledge, but preserves an unexplained intent as pending", async () => {
+  const all = [material(0, "user", "这个产品方向到底还有多少潜在的市场空间"), material(1, "user", "我想让用户自己配置并保管模型调用密钥")];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => request.validate({
+    units: [], coverage: [
+      { passage: "p1", status: "no_knowledge", reason: "question", explanation: "Only requests a market assessment" },
+      { passage: "p2", status: "no_knowledge", reason: "no_project_content", explanation: "No durable point" },
+    ],
+  }) };
+  const result = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
+  expect(result.ledger.batches[0].coverage?.[all[0].id]).toMatchObject({ status: "no_knowledge", reason: expect.stringContaining("market") });
+  expect(result.ledger.batches[0].coverage?.[all[1].id]?.status).toBe("pending");
+  expect(result.ledger.batches[0].uncovered).toEqual([all[1].id]);
+});
+
+it("resumes only the fidelity statements whose request failed", async () => {
+  const body = "不要让客服直接修改退款金额。", all = [material(0, "assistant", body)];
+  const units: WikiKnowledgeUnit[] = Array.from({ length: 12 }, (_, index) => ({
+    id: "repair-" + index, subject: "退款审核", statement: "严禁客服直接修改退款金额。", kind: "constraint", details: [],
+    adoption: { status: "proposal" }, delivery: "unknown",
+    evidence: { evidenceId: all[0].id, conversationId: "c1", messageId: "m0", messageIndex: 0, role: "assistant", pasted: false, quote: body },
+  }));
+  const previous = { version: 1 as const, generatedAt: 1, status: "complete" as const, materials: 1,
+    batches: [{ sourceIds: [all[0].id], status: "ok" as const, units, rejected: {} }] };
+  let failing = true;
+  const sizes: number[] = [];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt);
+    expect(data.presentation).toBe("wiki_unit_fidelity");
+    sizes.push(data.units.length);
+    if (data.units.length === 2 && failing) throw new Error("temporarily offline");
+    return request.validate({ units: data.units.map((row: { id: string }) => ({ id: row.id, statement: body })) });
+  } };
+  const first = await extractWikiKnowledge({ materials: all, previous, locale: "zh-CN", signal, ai });
+  expect(first.report.fidelityUncheckedUnits).toBe(2);
+  expect(Object.keys(first.ledger.batches[0].fidelityResults ?? {})).toHaveLength(10);
+  sizes.length = 0; failing = false;
+  const next = await extractWikiKnowledge({ materials: all, previous: first.ledger, locale: "zh-CN", signal, ai });
+  expect(sizes).toEqual([2]);
+  expect(next.report).toMatchObject({ reused: 1, fidelityUncheckedUnits: 0 });
+});
+
+it("recovers a short user constraint that the main extraction omitted", async () => {
+  const statement = "不要云同步", all = [material(0, "user", statement)];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt);
+    return request.validate({ units: data.cover ? [unit({ statement, kind: "constraint", details: [], adoption: "user_decision" })] : [] });
+  } };
+  const result = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
+  expect(result.report).toMatchObject({ coverRetries: 1, uncoveredMessages: 0 });
+  expect(result.ledger.batches[0].units[0]).toMatchObject({ statement, evidence: { role: "user" } });
 });
 
 it("reads material put to the user last, leaves out what the user skips, and keeps the skips for later updates", async () => {
@@ -414,7 +505,7 @@ it("reads a batch that failed whole as two halves, keeping every half's units", 
     calls++;
     const passages = (JSON.parse(request.prompt).passages as Array<{ id: string; context?: boolean }>).filter(passage => !passage.context);
     // The whole batch is over the input budget; each half fits.
-    if (passages.length > 2) throw new Error("AI task exceeds its input budget (15358/14000 estimated tokens).");
+    if (passages.length > 2) throw Object.assign(new Error("AI task exceeds its input budget (15358/14000 estimated tokens)."), { code: "LOCAL_INPUT_BUDGET" });
     return request.validate({ units: passages.map(passage => unit({ quoteKey: `${passage.id}:1` })) });
   } };
   const { ledger, report } = await extractWikiKnowledge({ materials, locale: "zh-CN", signal, ai });
@@ -423,6 +514,29 @@ it("reads a batch that failed whole as two halves, keeping every half's units", 
   expect(ledger.batches[0]).toMatchObject({ status: "ok" });
   expect(ledger.batches[0].units.map(item => item.evidence.evidenceId)).toEqual(materials.map(item => item.id));
   expect(report.splitRetries).toBe(1);
+});
+
+it("keeps a successful half of an incomplete batch and only asks for the failed half next time", async () => {
+  const materials = [0, 1, 2, 3].map(index => material(index, "assistant", `${proposal}第 ${index} 条。`));
+  let available = false, calls = 0;
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const data = JSON.parse(request.prompt);
+    if (data.presentation !== "wiki_unit_extract") return request.validate({ units: [] });
+    calls++;
+    const passages = (data.passages as Array<{ id: string; context?: boolean }>).filter(passage => !passage.context);
+    if (passages.length > 2) throw Object.assign(new Error("budget"), { code: "LOCAL_INPUT_BUDGET" });
+    if (calls === 3 && !available) throw new Error("provider disconnected");
+    return request.validate({ units: passages.map(passage => unit({ quoteKey: `${passage.id}:1` })) });
+  } };
+  const input = { materials, locale: "zh-CN", signal, ai };
+  const first = await extractWikiKnowledge(input);
+  expect(first.ledger.status).toBe("partial");
+  expect(first.ledger.batches[0].units).toHaveLength(2);
+  available = true;
+  const next = await extractWikiKnowledge({ ...input, previous: first.ledger });
+  expect(calls).toBe(4);
+  expect(next.ledger.status).toBe("complete");
+  expect(next.ledger.batches[0].units).toHaveLength(4);
 });
 
 it("reads a passage comparing other products once more, for each product it names, and tags what the first read left untagged", async () => {

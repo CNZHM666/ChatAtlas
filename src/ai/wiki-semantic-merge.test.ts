@@ -25,6 +25,31 @@ it("gives no vectors when the provider fails, so the organizer recalls by words"
   expect(report.semantic_failed).toBe(1);
 });
 
+it("embeds an identical statement once while keeping each unit's vector addressable", async () => {
+  const units = [unit(31, "向量测试重复原句"), unit(32, "向量测试重复原句"), unit(33, "另一条向量测试原句")];
+  const asked: string[] = [], report: Record<string, number> = {};
+  const embeddings = { ...provider({}), modelKey: "dedupe", embedBatch: async (texts: string[]) => { asked.push(...texts); return texts.map(() => [1, 0]); } };
+  const vectors = await unitVectors(units, embeddings, new AbortController().signal, report);
+  expect(asked).toEqual([units[0].statement, units[2].statement]);
+  expect(vectors?.size).toBe(3);
+  expect(report.semantic_identical_reused).toBe(1);
+});
+
+it("keeps completed embedding batches when another batch fails", async () => {
+  const units = Array.from({ length: 11 }, (_, index) => unit(40 + index, `恢复向量 ${index}`));
+  const embeddings = { ...provider({}), modelKey: "partial", embedBatch: async (texts: string[]) => {
+    if (texts.length === 1) throw new Error("down");
+    return texts.map(() => [1, 0]);
+  } };
+  const signal = new AbortController().signal;
+  expect(await unitVectors(units, embeddings, signal, {})).toBeUndefined();
+  const asked: string[] = [], report: Record<string, number> = {};
+  const retry = { ...embeddings, embedBatch: async (texts: string[]) => { asked.push(...texts); return texts.map(() => [1, 0]); } };
+  expect((await unitVectors(units, retry, signal, report))?.size).toBe(11);
+  expect(asked).toEqual([units[10].statement]);
+  expect(report.semantic_reused).toBe(10);
+});
+
 it("moves a subject to the chapter its statements are clearly closer to, never emptying a chapter or subtopic", () => {
   const vectors = new Map([["u1", [1, 0, 0]], ["u2", [.98, .2, 0]], ["u3", [0, 1, 0]], ["u4", [0, .98, .2]], ["u5", [.97, .24, 0]], ["u6", [0, 0, 1]]].map(([id, values]) => [id as string, Float32Array.from(values as number[])]));
   // s5 talks like the competitor chapter but was planned under architecture; s6 is alone in its chapter.

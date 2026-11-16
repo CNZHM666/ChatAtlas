@@ -42,12 +42,16 @@ it("asks the writer's questions one at a time, moves on after an answer, and sta
   fireEvent.click(screen.getByRole("radio", { name: /放 IndexedDB/u }));
   expect(screen.getByText("2 / 2")).toBeVisible();expect(screen.getByText("第一版用 MIT 开源吗？")).toBeVisible();
   expect(saved.decisions).toMatchObject({ u2: { verdict: "confirmed" }, u1: { verdict: "rejected" } });
+  expect(screen.getByRole("heading", { name: "开源许可" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("radio", { name: /用 MIT/u }), { detail: 2 });
+  expect(screen.getByRole("radio", { name: /用 MIT/u })).toHaveAttribute("aria-checked", "false");
   fireEvent.click(screen.getByRole("radio", { name: /用 MIT/u }));
   expect(saved.decisions).toMatchObject({ u3: { verdict: "confirmed" } });
   expect(screen.getByRole("button", { name: "直接写作" })).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "上一题" }));
   expect(screen.getByRole("radio", { name: /放 IndexedDB/u })).toHaveAttribute("aria-checked", "true");
-  fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
+  fireEvent.click(screen.getByRole("radio", { name: /放 IndexedDB/u }));
+  expect(saved.userAnswers).toHaveLength(2);
   fireEvent.click(screen.getByRole("button", { name: "开始写作" }));
   expect(onDone).toHaveBeenCalled();
 });
@@ -113,4 +117,8 @@ it("shows the writer's questions as they come while writing, and says writing go
   expect(saved.userAnswers?.[0]).toMatchObject({ questionId: "w1", answer: "Phase" });
   expect(saved.decisions?.u1).toBeUndefined();
   expect(screen.getByText("2 / 2")).toBeVisible();
+  view.rerender(<DecisionSteps ledger={saved} zh writing questions={[ask("w1", "开发路线"), ask("w2", "里程碑数量")]} onChange={change => { saved = change(saved); }} onDone={onDone} />);
+  fireEvent.click(screen.getByRole("radio", { name: "里程碑" }));
+  const update = screen.getByRole("button", { name: "按回答更新" });
+  expect(screen.getByRole("button", { name: "清除回答" }).nextElementSibling).toBe(update);
 });

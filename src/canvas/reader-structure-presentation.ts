@@ -8,21 +8,36 @@ import type { Paragraph, PhrasingContent, Root, RootContent } from "mdast";
  *   as a strip of steps.
  * - A long paragraph with no emphasis of its own leads with its first sentence, set apart, so it can be skimmed. */
 const ARROW = /\s*(?:→|->|—>|=>)\s*/u;
-const STEP = String.raw`(?:[^，,。；;：:（）()「」『』“”\n→>=—-]|-(?!>)|=(?!>)|—(?!>)){1,18}`;
+const STEP = String.raw`(?:[^，,。；;：:（）()「」『』“”\n→>=—-]|-(?!>)|=(?!>)|—(?!>))+`;
 const FLOW = new RegExp(`${STEP}(?:\\s*(?:→|->|—>|=>)\\s*${STEP}){2,}`, "gu");
 /** A paragraph this long is skimmed by its first sentence. */
-const LEAD_LENGTH = 150, LEAD_MAX = 80;
 
 const emphasis = (hName: string, children: PhrasingContent[]): PhrasingContent => ({ type: "emphasis", data: { hName }, children } as PhrasingContent);
 const text = (value: string): PhrasingContent => ({ type: "text", value });
 
 /** The text with each arrow run as a strip: steps and the arrows between them, as they were written. */
 function withFlows(value: string): PhrasingContent[] | undefined {
+  // A chain embedded in an explanatory sentence stays ordinary prose.
+  if (/[「」“”『』…]|\.{3}|范围有分歧|版本未定/u.test(value)) return;
+  if (/[，,。；;!?！？]/u.test(value.trim().replace(/[。.!?！？]$/u, ""))) {
+    const parts:PhrasingContent[]=[];let last=0;
+    for(const match of value.matchAll(/->|=>|—>|→/gu)){
+      if(match.index!>last)parts.push(text(value.slice(last,match.index)));
+      parts.push(emphasis("atlas-flow-arrow",[text(match[0])]));last=match.index!+match[0].length;
+    }
+    if(!parts.length)return;
+    if(last<value.length)parts.push(text(value.slice(last)));
+    return parts;
+  }
   const result: PhrasingContent[] = [];
   let last = 0;
   for (const match of value.matchAll(FLOW)) {
-    const run = match[0].trim(), start = match.index! + match[0].indexOf(run), steps = run.split(ARROW), arrows = run.match(new RegExp(ARROW.source, "gu")) ?? [];
-    if (steps.length < 3 || steps.some(step => !step.trim())) continue;
+    let run = match[0].trim(), start = match.index! + match[0].indexOf(run);
+    const intro=/^(?:.{0,18}?(?:流程|路径|主链|顺序|链路)(?:首选|优先|为|是)?\s*[:：]?\s*|(?:deployment\s+)?(?:path|workflow|pipeline)\s+(?:is\s+)?)/iu.exec(run)?.[0];
+    if(intro){start+=intro.length;run=run.slice(intro.length);}
+    const steps = run.split(ARROW), arrows = run.match(new RegExp(ARROW.source, "gu")) ?? [];
+    // Match entire clauses first. A bounded regex used to cut identifiers in half ("Vali" + "dator").
+    if (steps.length < 3 || steps.some(step => !step.trim() || step.trim().length > 60)) continue;
     if (start > last) result.push(text(value.slice(last, start)));
     result.push(emphasis("atlas-flow", steps.flatMap((step, index) => [emphasis("atlas-flow-step", [text(step)]), ...(arrows[index] ? [emphasis("atlas-flow-arrow", [text(arrows[index])])] : [])])));
     last = start + run.length;
@@ -32,15 +47,6 @@ function withFlows(value: string): PhrasingContent[] | undefined {
   return result;
 }
 
-const plain = (node: RootContent): string => "value" in node && typeof node.value === "string" ? node.value : "children" in node ? (node.children as RootContent[]).map(plain).join("") : "";
-
-function leadSentence(paragraph: Paragraph) {
-  const first = paragraph.children[0];
-  if (first?.type !== "text" || plain(paragraph).length < LEAD_LENGTH || paragraph.children.some(child => child.type === "strong")) return;
-  const end = first.value.search(/[。！？!?]/u);
-  if (end < 8 || end + 1 > LEAD_MAX) return;
-  paragraph.children.splice(0, 1, emphasis("atlas-lead", [text(first.value.slice(0, end + 1))]), ...(first.value.slice(end + 1) ? [text(first.value.slice(end + 1))] : []));
-}
 
 /** Whose a block is, as its caption's last words say it (wiki-source-code readableSourceCaptions). */
 const WHOSE: Array<[RegExp, string]> = [[/^(?:AI\s*建议|AI suggestion)$/u, "atlas-caption-ai"], [/^(?:你确认|你提供|confirmed by you|provided by you)$/u, "atlas-caption-mine"], [/^(?:早期方案，已被替换|earlier version, since replaced)$/u, "atlas-caption-old"]];
@@ -69,9 +75,8 @@ function blockCaption(paragraph: Paragraph, next: RootContent | undefined): Phra
 
 export function readerStructurePresentation() {
   return (tree: Root) => {
-    const visit = (node: RootContent | Root, inList = false) => {
-      if (node.type === "code" || node.type === "inlineCode" || node.type === "link" || node.type === "table") return;
-      if (node.type === "paragraph" && !inList) leadSentence(node);
+    const visit = (node: RootContent | Root) => {
+      if (node.type === "code" || node.type === "inlineCode" || node.type === "link" || node.type === "table" || node.type === "blockquote") return;
       if (!("children" in node)) return;
       const children = node.children as RootContent[];
       for (let index = 0; index < children.length; index++) {
@@ -83,7 +88,7 @@ export function readerStructurePresentation() {
           if (parts) { children.splice(index, 1, ...(parts as RootContent[])); index += parts.length - 1; }
           continue;
         }
-        visit(child, inList || node.type === "listItem");
+        visit(child);
       }
     };
     visit(tree);

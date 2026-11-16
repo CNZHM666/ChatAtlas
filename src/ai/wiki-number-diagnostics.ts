@@ -3,6 +3,20 @@ import { wikiUnitDetails, type WikiKnowledgeUnit } from "../shared/wiki-knowledg
 import { sourceBlockSupportsRows } from "../shared/wiki-source-code";
 
 const VERSION = /\b[vV]\d+(?:\.\d+)*\b/gu;
+// These labels make a claim about an identifier as a whole. Their digits
+// cannot support a measurement or a differently named stage.
+const IDENTIFIER = /\b(?:(?:[a-z][a-z0-9-]*?v|phase\s+|milestone\s+|stage\s+)\d+(?:\.\d+)*|[MP]\d+(?:\.\d+)*)\b/giu;
+const identifierKey = (text: string) => text.toLowerCase().replace(/\s+/gu, "");
+const ownerKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+export function wikiNumberRowSources(row: string, candidates: Iterable<WikiKnowledgeUnit>, cited: WikiKnowledgeUnit[]) {
+  const name = ownerKey(row.trim().replace(/^\|/u, "").split("|")[0]);
+  if (name.length < 3) return cited;
+  const labels = new Set([...row.matchAll(IDENTIFIER)].map(match => identifierKey(match[0])));
+  if (!labels.size) return cited;
+  const owner = (unit: WikiKnowledgeUnit) => ownerKey(unit.about?.name ?? "");
+  const matching = [...candidates].filter(unit => owner(unit) === name && [...unit.statement.matchAll(IDENTIFIER)].some(match => labels.has(identifierKey(match[0]))));
+  return [...new Set([...cited.filter(unit => !owner(unit) || owner(unit) === name), ...matching])];
+}
 const ORDINAL = /第\s*\d+|[（(]\d{1,2}[)）]|(?<![\d.])\d{1,2}(?=[、)）]|\.\s)/gu;
 const RANGE = /(\d[\d,]*(?:\.\d+)?)\s*[-–—~～至到]\s*(\d[\d,]*(?:\.\d+)?)/gu;
 const DIGIT: Record<string, string> = { 一: "1", 二: "2", 两: "2", 三: "3", 四: "4", 五: "5", 六: "6", 七: "7", 八: "8", 九: "9", 十: "10" };
@@ -15,15 +29,19 @@ const thousands = (text: string) => text.replace(/(?<=\d),(?=\d{3}(?:,\d{3})*(?!
 const numbers = (text: string) => thousands(text).replace(ORDINAL, " ").match(/\d+(?:\.\d+)?/gu) ?? [];
 export const wikiNumberRanges = (text: string) => [...text.matchAll(RANGE)].map(match => `${match[1].replace(/,/gu, "")}-${match[2].replace(/,/gu, "")}`);
 const valuesIn = (text: string, versions: ReadonlySet<string>) => {
-  const cleaned = text.replace(VERSION, version => versions.has(version.toLowerCase()) ? " " : version);
-  return { numbers: new Set(numbers(cleaned)), ranges: new Set(wikiNumberRanges(cleaned)) };
+  const identifiers = new Set<string>();
+  const cleaned = text.replace(IDENTIFIER, label => { identifiers.add(identifierKey(label)); return " "; })
+    .replace(VERSION, version => versions.has(version.toLowerCase()) ? " " : version);
+  return { numbers: new Set(numbers(cleaned)), ranges: new Set(wikiNumberRanges(cleaned)), identifiers };
 };
 
-export function unsupportedWikiNumbers(text: string, known: string, versions: ReadonlySet<string>) {
+export function unsupportedWikiNumbers(text: string, known: string, versions: ReadonlySet<string>, labelSources = known) {
   const stated = valuesIn(text, versions), sourced = valuesIn(withDigits(known), versions);
+  const sourcedLabels = labelSources === known ? sourced.identifiers : valuesIn(labelSources, versions).identifiers;
   return {
     numbers: [...stated.numbers].filter(value => !sourced.numbers.has(value)),
     ranges: [...stated.ranges].filter(value => !sourced.ranges.has(value)),
+    identifiers: [...stated.identifiers].filter(value => !sourcedLabels.has(value)),
   };
 }
 
@@ -34,7 +52,7 @@ const SENTENCE = /(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*`%]\.)\s+(?!\d)/u;
 const withoutMarks = (text: string) => text.replace(/\*\*|__|\[S-\d+-[\w-]+\]|〔[^〕\n]+〕|\[(?:Decided|Open|Earlier|AI suggestion)[^\]\n]*\]/gu, "");
 const DRAFT_EXCERPT = /来源待核对的草稿原句「[^」]*」|Draft excerpt requiring source review “[^”]*”/gu;
 const key = (text: string) => withoutMarks(text).replace(LIST_LEAD, "").normalize("NFKC").replace(/\s+/gu, "");
-const parts = (text: string) => text.replace(DRAFT_EXCERPT, "").replace(/\n+/gu, " ").split(SENTENCE).map(line => line.trim()).filter(Boolean);
+const parts = (text: string) => text.replace(DRAFT_EXCERPT, "").replace(/^\s*(?:\d+[.)]\s+|\d+、\s*)/gmu, "").replace(/\n+/gu, " ").split(SENTENCE).map(line => line.trim()).filter(Boolean);
 export function wikiNumberSpans(body: string): string[] {
   if (!/\d/u.test(body)) return [];
   return wikiDocumentBlocks(body).flatMap(block => {
@@ -46,11 +64,25 @@ export function wikiNumberSpans(body: string): string[] {
   });
 }
 
-const PROBLEM = /^"([\s\S]+?)…" (?:has numbers its units do not state: (.+)|states the range (\S+) that no cited unit states as a range(?:;.*)?)$/u;
+const PROBLEM = /^"([\s\S]+?)…" (?:has numbers its units do not state: (.+)|states the range (\S+) that no cited unit states as a range(?:;.*)?|has identifiers its units do not state: (.+))$/u;
 export const isWikiNumberProblem = (problem: string) => PROBLEM.test(problem);
 export function wikiNumberProblemValues(problem: string) {
   const match = problem.match(PROBLEM);
-  return match?.[2] ?? match?.[3];
+  return match?.[2] ?? match?.[3] ?? match?.[4];
+}
+/** A former cell warning and its final row warning can name the same value. */
+export function deduplicateWikiNumberProblems(problems: string[], spans: string[]) {
+  const seen = new Set<string>();
+  return problems.filter(problem => {
+    const match = problem.match(PROBLEM);
+    if (!match) return true;
+    const anchor = key(match[1]), rows = spans.filter(span => /^\s*\|/u.test(span) && key(span).includes(anchor));
+    if (rows.length !== 1) return true;
+    const identity = JSON.stringify([key(rows[0]), match[2] ?? match[3] ?? match[4]]);
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
 }
 interface Binding { text: string; unitIds?: readonly string[] }
 
@@ -58,8 +90,8 @@ interface Binding { text: string; unitIds?: readonly string[] }
 export function recheckWikiNumberProblem(problem: string, spans: string[], claims: readonly Binding[], paragraphs: readonly Binding[], units: ReadonlyMap<string, WikiKnowledgeUnit>, versions: ReadonlySet<string>) {
   const match = problem.match(PROBLEM);
   if (!match) return problem;
-  const [, head, figures, range] = match, anchor = key(head.split("\n")[0]);
-  const wanted = range ? [range] : figures.split(/,\s*/u);
+  const [, head, figures, range, identifiers] = match, anchor = key(head.split("\n")[0]);
+  const wanted = range ? [range] : (figures ?? identifiers).split(/,\s*/u);
   if (!anchor) return problem;
   const remaining = new Set<string>();
   for (const span of spans) {
@@ -71,18 +103,21 @@ export function recheckWikiNumberProblem(problem: string, spans: string[], claim
     if (!anchored && !normalized.startsWith(anchor) && !key(span.replace(LIST_LABEL, "")).startsWith(anchor)) continue;
     const values = valuesIn(withoutMarks(anchored?.text ?? span), versions);
     for (const value of wanted) {
-      const kind = value.includes("-") ? "ranges" : "numbers";
-      if (!values[kind].has(value)) continue;
+      const kind = identifiers ? "identifiers" : range ? "ranges" : "numbers";
+      const legacyLabels = kind === "numbers" ? [...values.identifiers].filter(label => label.match(/\d+(?:\.\d+)*/gu)?.includes(value)) : [];
+      if (!values[kind].has(value) && !legacyLabels.length) continue;
       const claim = anchored ?? claims.find(claim => {
         const own = key(claim.text);
         return own && (normalized.includes(own) || own.includes(normalized)) && valuesIn(claim.text, versions)[kind].has(value);
       });
       const binding = claim ?? paragraphs.find(paragraph => key(paragraph.text).includes(normalized));
-      const cited = (binding?.unitIds ?? []).flatMap(id => units.get(id) ?? []);
-      if (cited.some(unit => {
-        const source = [unit.statement, ...wikiUnitDetails(unit), unit.evidence.quote].join(" ");
-        return valuesIn(withDigits(source), versions)[kind].has(value) || unit.evidence.code && sourceBlockSupportsRows(span, unit.evidence.code);
-      })) continue;
+      const bound = (binding?.unitIds ?? []).flatMap(id => units.get(id) ?? []);
+      const cited = (kind === "identifiers" || !values[kind].has(value) && legacyLabels.length) && /^\s*\|/u.test(span)
+        ? wikiNumberRowSources(span, units.values(), bound) : bound;
+      const known = valuesIn(withDigits(cited.map(unit => [unit.statement, ...wikiUnitDetails(unit), unit.evidence.section ?? "", unit.evidence.quote].join(" ")).join(" ")), versions);
+      const hasValue = !values[kind].has(value) || known[kind].has(value);
+      if (hasValue && legacyLabels.every(label => known.identifiers.has(label))
+        || cited.some(unit => unit.evidence.code && sourceBlockSupportsRows(span, unit.evidence.code))) continue;
       remaining.add(value);
     }
   }

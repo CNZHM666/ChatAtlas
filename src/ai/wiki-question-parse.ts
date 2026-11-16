@@ -1,8 +1,10 @@
 import { UNDECIDED } from "../shared/open-words";
 import { wikiMeasure } from "../shared/wiki-section-status";
-import { knowledgeTerms } from "../shared/knowledge-subject";
-import type { WikiAnswerAction, WikiKnowledgeLedger, WikiKnowledgeUnit, WikiScopeAnswer, WikiWritingQuestion } from "../shared/wiki-knowledge";
-import { wikiConfirmationCovers, wikiUnitConfirmationDetails } from "./wiki-confirmation-scope";
+import { knowledgeTerms, knowledgeVersion } from "../shared/knowledge-subject";
+import type { WikiAnswerAction, WikiKnowledgeLedger, WikiKnowledgeUnit, WikiScopeAnswer, WikiUserAnswer, WikiWritingQuestion } from "../shared/wiki-knowledge";
+import { sourceMessageSignature } from "../shared/source-signature";
+import { wikiChoiceTrigger, wikiConfirmationCovers, wikiLayerDeferral, wikiReleaseDeferral, wikiUnitConfirmationDetails } from "./wiki-confirmation-scope";
+import { wikiWorkflowScopes } from "./wiki-workflow-scope";
 
 /** Questions a model asks the user about the material, read from its answer: ids it was sent, answers from the actions
  * the ledger keeps, at least two answers each, nothing asked twice. Never throws: no questions is a valid answer.
@@ -37,7 +39,8 @@ export function readQuestions(value: unknown, real: Map<string, string>, organiz
     });
     if (answers.length < 2) continue;
     asked.add(key);
-    questions.push({ id: `ask:${organization}:${options.prefix ? `${options.prefix}:` : ""}${questions.length + 1}`, about, ask, unitIds: [...new Set(unitIds)], options: answers, organization, ...(options.stage ? { stage: options.stage } : {}) });
+    const identity = sourceMessageSignature(JSON.stringify([about, ask, key, answers]));
+    questions.push({ id: `ask:${organization}:${options.prefix ? `${options.prefix}:` : ""}${identity}`, about, ask, unitIds: [...new Set(unitIds)], options: answers, organization, ...(options.stage ? { stage: options.stage } : {}) });
     if (questions.length >= limit) break;
   }
   return questions;
@@ -62,18 +65,53 @@ export function labelContradicts(label: string, statement: string): boolean {
 }
 const confirmedBy = (option: WikiWritingQuestion["options"][number]) => option.actions.flatMap(action => action.do === "confirm" || action.do === "both" ? action.units : []);
 
+const answerKey = (value: string) => value.normalize("NFKC").toLowerCase().replace(/[\s。.!?！？]+/gu, "");
+const restoredQuestion = (question: WikiWritingQuestion) => question.options.length === 1 && !question.options[0].actions.length;
+
+/** Older writer questions used a positional ID. A regenerated question at
+ * that position can describe a different choice and reuse the same option ID. */
+function switchedQuestion(question: WikiWritingQuestion, answer: WikiUserAnswer) {
+  const selected = question.options.find(option => option.id === answer.optionId);
+  return Boolean(answer.optionId && answer.question.trim() && answer.unitIds.length && question.id.startsWith("ask:") && selected
+    && (!question.unitIds.some(id => answer.unitIds.includes(id))
+      || answerKey(question.ask) !== answerKey(answer.question) && answerKey(selected.label) !== answerKey(answer.answer)));
+}
+
+export function withOriginalAnswerQuestions(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  const answers = new Map(ledger.userAnswers?.map(answer => [answer.questionId, answer]));
+  const decisions = { ...ledger.decisions };
+  let changed = false;
+  const writingQuestions = ledger.writingQuestions?.map(question => {
+    const answer = answers.get(question.id);
+    if (!answer || !switchedQuestion(question, answer)) return question;
+    changed = true;
+    for (const id of question.unitIds) {
+      if (!answer.unitIds.includes(id) && decisions[id]?.at === answer.at && !decisions[id]?.wholeUnit) delete decisions[id];
+    }
+    return { ...question, ask: answer.question, unitIds: answer.unitIds, options: [{ id: answer.optionId!, label: answer.answer, actions: [] }] };
+  });
+  return changed ? { ...ledger, writingQuestions, ...(ledger.decisions ? { decisions } : {}) } : ledger;
+}
+
 /** Link the effective verdict to the action that set it. An answer's unitIds
  * include other options, so they cannot establish confirmation by themselves. */
 export function wikiLocalConfirmation(stored: WikiKnowledgeLedger, reading: WikiKnowledgeLedger, unitId: string): "choice" | "verdict" | undefined {
   const verdict = reading.decisions?.[unitId];
   if (verdict?.verdict !== "confirmed") return;
-  const answer = (reading.userAnswers ?? []).find(answer => {
-    if (answer.at !== verdict.at) return false;
-    const option = reading.writingQuestions?.find(question => question.id === answer.questionId)?.options.find(option => option.id === answer.optionId);
-    return option && (unitId === `answer:${answer.questionId}:${option.id}` || confirmedBy(option).includes(unitId));
-  });
-  if (answer) return "choice";
+  if (wikiLocalAnswer(reading, unitId)) return "choice";
   if (stored.decisions?.[unitId]?.verdict === "confirmed" && stored.decisions[unitId].at === verdict.at) return "verdict";
+}
+
+export function wikiLocalAnswer(reading: WikiKnowledgeLedger, unitId: string) {
+  const verdict = reading.decisions?.[unitId];
+  if (verdict?.verdict !== "confirmed") return;
+  return reading.userAnswers?.find(answer => {
+    if (answer.at !== verdict.at) return false;
+    const question = reading.writingQuestions?.find(question => question.id === answer.questionId);
+    const option = question?.options.find(option => option.id === answer.optionId);
+    return question && option && !switchedQuestion(question, answer)
+      && (unitId === `answer:${answer.questionId}:${option.id}` || confirmedBy(option).includes(unitId));
+  });
 }
 /** A later answer on a broader question cannot turn an earlier selected
  * option's unconfirmed details into an inferred rejection. */
@@ -107,10 +145,12 @@ export function soundQuestion(question: WikiWritingQuestion, statementOf: (id: s
 /** The ledger with only the answers its questions can give, for reading: an answer the question should not have
  * offered is not taken, and the decisions it made, unless changed since, are withdrawn. The stored ledger stays. */
 export function withSoundAnswers(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  ledger = withOriginalAnswerQuestions(ledger);
   if (!ledger.writingQuestions?.length) return ledger;
   const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
   const project = ledger.organization?.projectName, sound = new Map<string, WikiWritingQuestion | undefined>();
-  for (const question of ledger.writingQuestions) sound.set(question.id, soundQuestion(question, id => units.get(id)?.statement, project, id => units.get(id)));
+  for (const question of ledger.writingQuestions) sound.set(question.id, restoredQuestion(question) && ledger.userAnswers?.some(answer => answer.questionId === question.id)
+    ? question : soundQuestion(question, id => units.get(id)?.statement, project, id => units.get(id)));
   if ([...sound].every(([id, question]) => question === ledger.writingQuestions!.find(item => item.id === id))) return ledger;
   const decisions = { ...ledger.decisions };
   const userAnswers = (ledger.userAnswers ?? []).filter(answer => {
@@ -140,16 +180,64 @@ const terms = (text: string) => new Set(text.toLowerCase().split(/[^a-z0-9㐀-�
  * One run listed the user's answer among the open questions and marked the account decided. The stored ledger stays. */
 export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
   if (!ledger.userAnswers?.length || !ledger.writingQuestions?.length) return ledger;
-  const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
+  const all = ledger.batches.flatMap(batch => batch.units);
+  const units = new Map(all.map(unit => [unit.id, unit] as const));
+  const answerUnits = all.filter(unit => unit.id.startsWith("answer:"));
+  const repeated = answerUnits.length !== new Set(answerUnits.map(unit => unit.id)).size;
   const decisions = { ...ledger.decisions }, added = new Map<string, WikiKnowledgeUnit>();
+  const workflow = wikiWorkflowScopes(ledger,units).narrowed;
   for (const answer of [...ledger.userAnswers].sort((a, b) => b.at - a.at)) {
     const question: WikiWritingQuestion | undefined = (ledger.writingQuestions ?? []).find(item => item.id === answer.questionId);
     const option: WikiWritingQuestion["options"][number] | undefined = question?.options.find(item => item.id === answer.optionId);
     if (!question || !option) continue;
+    const answerId: string = `answer:${question.id}:${option.id}`;
+    // A derived ledger can enter this pass again when drawing the preview.
+    if (units.has(answerId) && decisions[answerId]?.verdict === "confirmed" && decisions[answerId].at === answer.at) continue;
+    const scopedWorkflow=workflow.get(question.id);
+    if(scopedWorkflow&&!added.has(scopedWorkflow.anchor.id)){
+      const {anchor,statement,feedbackIds}=scopedWorkflow,id=answerId;
+      for(const related of [anchor.id,...feedbackIds])if(decisions[related]?.at===answer.at&&decisions[related]?.verdict==="confirmed")delete decisions[related];
+      added.set(anchor.id,{...anchor,id,statement,kind:"decision",details:[],conditions:undefined,adoption:{status:"user_decision"},delivery:"unknown",about:undefined,relation:undefined,evidence:{...anchor.evidence,evidenceId:`${anchor.evidence.evidenceId}:${id}`,pasted:false,code:undefined}});
+      decisions[id]={verdict:"confirmed",at:answer.at};
+      continue;
+    }
+    if (restoredQuestion(question)) {
+      if (UNDECIDED.test(answer.answer)) continue;
+      const choice = knowledgeTerms(answer.answer);
+      const version = knowledgeVersion(answer.answer);
+      const anchors = answer.unitIds.flatMap(id => units.get(id) ?? []).filter(unit => !unit.about && unit.kind !== "question");
+      const overlap = (unit: WikiKnowledgeUnit) => [...knowledgeTerms(unit.statement)].filter(term => choice.has(term)).length
+        + (version && version === knowledgeVersion(unit.statement) ? 1 : 0);
+      const anchor = anchors.sort((a, b) => overlap(b) - overlap(a))[0];
+      if (anchor && !added.has(anchor.id) && overlap(anchor) >= 2) {
+        const id = answerId;
+        const label = answer.answer.trim();
+        const proposition = /^必须/u.test(label) && !/还是|或者|或(?:者)?应/u.test(answer.question)
+          ? answer.question.match(/^是否(.{2,110}必须[^？?]{2,})[？?]$/u)?.[1] : undefined;
+        const said = proposition ?? label;
+        const statement = /[.!?。！？]$/u.test(said) ? said : `${said}${/\p{Script=Han}/u.test(said) ? "。" : "."}`;
+        added.set(anchor.id, { ...anchor, id, statement, kind: "decision", details: [], conditions: undefined, adoption: { status: "user_decision" }, delivery: "unknown", about: undefined, relation: undefined,
+          evidence: { ...anchor.evidence, evidenceId: `${anchor.evidence.evidenceId}:${id}`, pasted: false, code: undefined } });
+        decisions[id] = { verdict: "confirmed", at: answer.at };
+      }
+      continue;
+    }
     const confirmed = option.actions.flatMap(action => action.do === "confirm" ? action.units : []).flatMap(id => {
       const unit = units.get(id), verdict = decisions[id];
       return unit && (!verdict || verdict.verdict === "confirmed") ? [unit] : [];
     });
+    // Some options express a positive alternative by rejecting the only recorded
+    // proposal. Keep that answer as its own scoped decision, never as adoption of
+    // the rejected source's other clauses.
+    if(!confirmed.length&&option.actions.length&&option.actions.every(action=>action.do==="reject")&&/^(?:支持|包含|采用|使用|开启|允许|完整|(?:support|include|use|enable|allow)\b)/iu.test(option.label)&&question.about?.trim()){
+      const anchor=option.actions.flatMap(action=>action.units).flatMap(id=>units.get(id)??[])[0];
+      if(anchor&&!added.has(anchor.id)){
+        const id=answerId,statement=`${question.about}${/\p{Script=Han}/u.test(question.about)?"：":": "}${answer.answer}${/\p{Script=Han}/u.test(answer.answer)?"。":"."}`;
+        added.set(anchor.id,{...anchor,id,statement,kind:"decision",details:[],conditions:undefined,adoption:{status:"user_decision"},delivery:"unknown",about:undefined,relation:undefined,evidence:{...anchor.evidence,evidenceId:`${anchor.evidence.evidenceId}:${id}`,pasted:false,code:undefined}});
+        decisions[id]={verdict:"confirmed",at:answer.at};
+      }
+      continue;
+    }
     const scoped = confirmed.some(unit => !decisions[unit.id] && answerLeavesDetailsOpen(unit, question, answer.answer));
     if (!confirmed.length || confirmed.some(unit => DECIDING.includes(unit.kind) && (!scoped || decisions[unit.id]?.verdict === "confirmed"))) continue;
     if (added.has(confirmed[0].id)) continue;
@@ -167,22 +255,43 @@ export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeL
     // The quote stays the anchor's own words, from the message it was said in: one run gave the answer "ask → answer"
     // as its quote, found in no message, and checking the claims against the originals dropped it, its 〔已定〕 and its
     // row among the key decisions. The decision itself is the user's, kept in decisions below.
-    const anchor = confirmed[0], label = option.label.trim(), answerId = `answer:${question.id}:${option.id}`;
+    const anchor = confirmed[0], label = option.label.trim();
     // A short label ("380px") says nothing read alone: one run wrote 「380px.〔已定〕」 as its own paragraph and key
     // decision. It goes after what the question is about: 「Popup 宽度：380px。」.
     // A Chinese label is short by its length alone: 「使用“完成专注 X 轮”」 has spaces around its X, read as three words.
     const words = /\p{Script=Han}/u.test(label) ? false : /\s\S+\s\S+/u.test(label);
     const about = question.about?.trim(), bare = !words && label.length <= 16 && about && !label.includes(about);
-    const said = bare ? `${about}${/\p{Script=Han}/u.test(about!) ? "：" : ": "}${label}` : label, han = /\p{Script=Han}/u.test(said);
+    const defer = wikiReleaseDeferral(question.ask, label);
+    const said = wikiLayerDeferral(question.ask, label) ?? (defer ? /\p{Script=Han}/u.test(question.ask) ? `${defer.stage} 暂缓${/^[A-Za-z]/u.test(defer.feature) ? " " : ""}${defer.feature}` : `${defer.stage} defers ${defer.feature}`
+      : bare ? `${about}${/\p{Script=Han}/u.test(about!) ? "：" : ": "}${label}` : label);
+    const han = /\p{Script=Han}/u.test(said);
     const statement = /[.!?。！？]$/u.test(said) ? said : `${said}${han ? "。" : "."}`;
     added.set(anchor.id, { ...anchor, id: answerId, statement, kind: "decision", details: [], conditions: undefined, adoption: { status: "user_decision" }, delivery: "unknown", about: undefined, relation: undefined,
       evidence: { ...anchor.evidence, evidenceId: `${anchor.evidence.evidenceId}:${answerId}`, pasted: false, code: undefined } });
     decisions[answerId] = { verdict: "confirmed", at: answer.at };
   }
-  if (!added.size) return ledger;
+  if (!added.size && !repeated) return ledger;
   const clean = (unit: WikiKnowledgeUnit) => { const copy = { ...unit, evidence: { ...unit.evidence } }; delete copy.about; delete copy.relation; delete copy.evidence.code; return copy; };
-  const batches = ledger.batches.map(batch => batch.units.some(unit => added.has(unit.id)) ? { ...batch, units: batch.units.flatMap(unit => added.has(unit.id) ? [unit, clean(added.get(unit.id)!)] : [unit]) } : batch);
-  const organization = ledger.organization && { ...ledger.organization, subjects: ledger.organization.subjects.map(subject => subject.unitIds.some(id => added.has(id)) ? { ...subject, unitIds: subject.unitIds.flatMap(id => added.has(id) ? [id, added.get(id)!.id] : [id]) } : subject) };
+  const refreshed = new Map([...added.values()].map(unit => [unit.id, clean(unit)]));
+  const emitted = new Set<string>();
+  const batches = ledger.batches.map(batch => {
+    const members = batch.units.flatMap(unit => {
+      if (unit.id.startsWith("answer:")) {
+        if (emitted.has(unit.id)) return [];
+        emitted.add(unit.id);
+        return [refreshed.get(unit.id) ?? units.get(unit.id)!];
+      }
+      const choice = added.get(unit.id);
+      if (!choice || units.has(choice.id) || emitted.has(choice.id)) return [unit];
+      emitted.add(choice.id);
+      return [unit, refreshed.get(choice.id)!];
+    });
+    return members.length === batch.units.length && members.every((unit, index) => unit === batch.units[index]) ? batch : { ...batch, units: members };
+  });
+  const organization = ledger.organization && { ...ledger.organization, subjects: ledger.organization.subjects.map(subject => {
+    const unitIds = [...new Set(subject.unitIds.flatMap(id => added.has(id) ? [id, added.get(id)!.id] : [id]))];
+    return unitIds.length === subject.unitIds.length && unitIds.every((id, index) => id === subject.unitIds[index]) ? subject : { ...subject, unitIds };
+  }) };
   return { ...ledger, batches, decisions, ...(organization ? { organization } : {}) };
 }
 
@@ -265,6 +374,8 @@ export function withAnsweredOpenPoints(ledger: WikiKnowledgeLedger): WikiKnowled
 /** Version names ("V0.1") are not values. Compare clauses separately so a
  * 25/5 choice does not approve the same plan's separate 15-minute break. */
 export function answerLeavesDetailsOpen(unit: WikiKnowledgeUnit, question: WikiWritingQuestion, answer: string) {
+  const trigger = wikiChoiceTrigger(`${question.about} ${question.ask}`, answer);
+  if (trigger && !unit.statement.replace(/\s+/gu, "").toLowerCase().includes(trigger.replace(/\s+/gu, "").toLowerCase())) return true;
   const details = wikiUnitConfirmationDetails(unit);
   if (!details.length) return false;
   const yes = /^(?:是|确认|同意|可以|采用|yes|confirm|approved?|agree)[。.!！]?$/iu.test(answer.trim()) && !/还是|或者|\b(?:or|versus|vs\.?)\b/iu.test(question.ask);

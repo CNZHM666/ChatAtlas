@@ -145,8 +145,8 @@ it("lists a reported count as dated data, not as work done, and drops reading ad
   count.evidence.conversationSpan = { start: new Date(2026, 5, 6, 12).getTime(), end: new Date(2026, 5, 6, 13).getTime() };
   const built = user(2, "急救流程已完成上线。", "急救流程已完成上线", { kind: "report" });
   expect(reportedStatusRows([count, built], new Set([count.id, built.id]))).toEqual([
-    { text: count.statement, done: false, status: "measured", when: "6月6日", at: count.evidence.conversationSpan.start },
-    { text: built.statement, done: true, status: "built" },
+    { text: count.statement, done: false, status: "measured", unitId: count.id, when: "6月6日", at: count.evidence.conversationSpan.start },
+    { text: built.statement, done: true, status: "built", unitId: built.id },
   ]);
   expect(withoutReadingAdvice("该项目定位为面向成年男性的AI戒色守护Agent。建议优先阅读“产品定位与合规”章节，以深入理解产品的核心目标用户群体。")).toBe("该项目定位为面向成年男性的AI戒色守护Agent。");
   expect(withoutReadingAdvice("该项目帮助用户恢复理解。它以本地存储为主。")).toBe("该项目帮助用户恢复理解。它以本地存储为主。");

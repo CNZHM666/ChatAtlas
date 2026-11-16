@@ -53,6 +53,22 @@ describe("a chapter's lead", () => {
   });
 });
 
+it("uses the later proposed next step in the development summary without promoting it to a decision", () => {
+  const early = unit("early", "按顺序执行：M1 搭建界面，M2 完成数据模型，M3 加入校验。");
+  const next = unit("next", "项目进入 Milestone 5，建议冻结大功能，集中验证真实场景。");
+  next.evidence.messageIndex = early.evidence.messageIndex + 2;
+  const source: WikiKnowledgeLedger = { version: 1, generatedAt: 1, status: "complete", materials: 1,
+    batches: [{ sourceIds: [], status: "ok", rejected: {}, units: [early, next] }],
+    organization: organization([["s", [early.id, next.id]]], [["dev", "开发实施与测试", [["实施路线", ["s"]]]]]),
+    draft: { version: 1, generatedAt: 1, status: "complete", report: {}, chapters: [{ id: "dev", title: "开发实施与测试",
+      question: "", group: "", openingUnitIds: [early.id], body: `${early.statement}\n\n### 实施路线\n\n${next.statement}`,
+      problems: [], paragraphs: [{ subtopic: "实施路线", text: next.statement, unitIds: [next.id] }] }] },
+  };
+  expect(wikiChapterLeads(resolveWikiReading(source)).get("dev")).toEqual([
+    expect.objectContaining({ unit: expect.objectContaining({ id: next.id }), status: "proposal", nextStep: true }),
+  ]);
+});
+
 it("tells a confirmation no cited point backs as proposed, and drops it where it repeats a decision told elsewhere", () => {
   const decided = unit("d", "长期方向扩展为“年轻男性状态恢复/自律成长”，保留戒色作为获客入口。", { kind: "decision" });
   const proposal = unit("p", "建议优先深耕“戒色”单一垂直领域，待用户稳定后再拓展相邻需求。", { kind: "decision" });
@@ -94,10 +110,15 @@ it.skipIf(!existsSync(SAMPLE))("exports the 1112a sample without the breaks it h
   // Figures said weeks apart read as two dated rows, not two views of one open question.
   expect(md).not.toMatch(/另一视角|未统一说法/u);
   expect(md).not.toMatch(/\*\*稳定在22人\*\*/u);
-  expect(md).toMatch(/\| 6月14日—7月7日 \| 稳定在22人 \|[^\n]*\n\| 8月18日 \| 卡在40左右 \|/u);
+  const formatDate = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" });
+  const sourceSpan = (text: string) => wikiLedgerUnits(ledger).find(unit => unit.statement.includes(text))!.evidence.conversationSpan!;
+  const older = sourceSpan("稳定在22人"), later = sourceSpan("卡在40左右");
+  const olderDate = `${formatDate.format(older.start)}—${formatDate.format(older.end)}`;
+  const laterDate = formatDate.format(later.start);
+  expect(md).toMatch(new RegExp(`\\| ${olderDate} \\| 稳定在22人 \\|[^\\n]*\\n\\| ${laterDate} \\| 卡在40左右 \\|`, "u"));
   // Chapters open on what was decided.
-  expect(md).toMatch(/\| 产品定位与范围 \| [^|]*〔已定〕/u);
-  expect(md).toMatch(/\| 用户界面与交互 \| 首屏应仅保留[^|]*〔已定〕/u);
+  expect(md).toMatch(/## 产品定位与范围\n\n> [^\n]*〔已定〕/u);
+  expect(md).toMatch(/## 用户界面与交互\n\n> 首屏应仅保留[^\n]*〔已定〕/u);
   // A citation stands apart from the sentence after it.
   expect(md).not.toMatch(/\[S-\d+-[a-z0-9]+\](?=[\p{Script=Han}*])/u);
 }, 120000);

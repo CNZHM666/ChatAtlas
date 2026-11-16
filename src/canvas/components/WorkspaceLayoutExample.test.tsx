@@ -42,8 +42,8 @@ it("exports the document and traces its original discussion without AI calls", a
   render(<WorkspaceLayoutExample zh onClose={vi.fn()}/>);
   fireEvent.click(screen.getByRole("button", { name: "导出" }));
   const dialog=await screen.findByRole("dialog", { name: "导出项目文件" });
-  expect(within(dialog).getByRole("checkbox", { name: "项目总览" })).toBeChecked();
-  expect(within(dialog).getByRole("checkbox", { name: "Wiki 章节" })).toBeChecked();
+  expect(within(dialog).getByRole("checkbox", { name: "项目 Wiki" })).toBeChecked();
+  expect(within(dialog).getByRole("button", { name: "选择 Wiki 章节" })).toHaveAttribute("aria-expanded", "false");
   expect(within(dialog).getByRole("combobox", { name: "文件格式" })).toHaveValue("md");
   fireEvent.click(within(dialog).getByRole("button", { name: "关闭导出" }));
   fireEvent.click(screen.getByRole("button", { name: "查看来源对话" }));

@@ -60,7 +60,7 @@ it("says which values of a subtopic are the user's when most are not", () => {
 it("lists what the user reported, built or not working yet, once each", () => {
   const user = (id: string, statement: string) => unit(id, statement, { kind: "report", evidence: { evidenceId: id, conversationId: "c", messageId: id, messageIndex: 1, role: "user", pasted: false, quote: statement } });
   const rows = reportedStatusRows([user("a", "Adding and editing transactions are built."), user("b", "CSV export does not work yet."), user("c", "CSV export does not work yet."), unit("d", "Charts are built.")], new Set(["a", "b", "c", "d"]));
-  expect(rows).toEqual([{ text: "Adding and editing transactions are built.", done: true, status: "built" }, { text: "CSV export does not work yet.", done: false, status: "not_yet" }]);
+  expect(rows).toEqual([{ text: "Adding and editing transactions are built.", done: true, status: "built", unitId: "a" }, { text: "CSV export does not work yet.", done: false, status: "not_yet", unitId: "b" }]);
   // Built and not built in one report is partly built, not Built.
   expect(reportedStatusRows([user("e", "Three core features are implemented, CSV export is unfinished.")], new Set(["e"]))[0].status).toBe("partial");
   // Placed under a message it says nothing of, it is no report of the user's.

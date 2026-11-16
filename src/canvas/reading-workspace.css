@@ -2709,10 +2709,6 @@
 .wiki-chapter-previous { margin: 0 0 20px; padding: 4px 0 4px 16px; border-left: 2px solid var(--border); color: var(--muted); }
 .wiki-chapter-status { margin: 0 0 12px; }
 /* The stance notice is a link to the sentences it names; the target paragraph glows for a moment. */
-.wiki-stance-jump { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
-.wiki-stance-jump:hover, .wiki-stance-jump:focus-visible { color: var(--accent); }
-.is-stance-target { border-radius: 6px; background: var(--accent-soft); box-shadow: 0 0 0 6px var(--accent-soft); transition: background .4s, box-shadow .4s; }
-@media (prefers-reduced-motion: reduce) { .is-stance-target { transition: none; } }
 .wiki-chapter-status-tag { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--surface-muted); color: var(--muted); font-size: 12px; line-height: 1.6; cursor: help; }
 .wiki-chapter-review { padding: 14px; margin: 0 0 16px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid); }
 .wiki-chapter-review > p { color: var(--muted); font-size: var(--text-sm); margin: 0 0 10px; }
@@ -2824,9 +2820,10 @@
 .project-export-body legend { margin-bottom:10px; padding:0; font-size:12px; font-weight:500; color:var(--muted); }
 .project-export-body label { display:flex; align-items:center; gap:10px; min-height:42px; margin:0; padding:0 12px; font-size:14px; line-height:1.5; cursor:pointer; }
 .project-export-selection { overflow:hidden; border:1px solid var(--border); border-radius:10px; }
+.project-export-selection > * + * { border-top:1px solid var(--border); }
 .project-export-choice:hover,.project-export-chapters-heading:hover { background:var(--surface-muted); }
-.project-export-chapters { border-top:1px solid var(--border); }
-.project-export-ledger { border-top:1px solid var(--border); }
+.project-export-choice:has(> input:checked),.project-export-chapters-heading[data-selected=true] { background:color-mix(in srgb,var(--accent) 7%,var(--surface-solid)); }
+.project-export-choice:has(> input:checked):hover,.project-export-chapters-heading[data-selected=true]:hover { background:color-mix(in srgb,var(--accent) 11%,var(--surface-solid)); }
 .project-export-ledger > small { margin-left:auto; color:var(--muted); font-size:12px; }
 .project-export-dialog .project-export-body input[type=checkbox] { flex:none; width:16px; min-width:16px; max-width:16px; height:16px; min-height:16px; margin:0; padding:0; border-radius:3px; accent-color:var(--accent); }
 .project-export-chapters-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; padding-right:6px; }
@@ -2848,18 +2845,31 @@
 .project-export-wiki > label > input { margin-top:2px!important; }
 .project-export-wiki > label > span { min-width:0; overflow-wrap:anywhere; }
 .project-export-options { display:grid; gap:10px; margin-top:18px; padding:0; border:0; }
-.project-export-body .project-export-format { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,180px); gap:16px; min-height:36px; margin:0; padding:0; cursor:default; color:var(--text); font-size:13px; }
-.project-export-dialog .project-export-format select { width:100%; min-width:0; height:36px; min-height:36px; padding:5px 10px; margin:0; border:1px solid var(--border); border-radius:7px; background:var(--surface-solid); font-size:13px; line-height:1.5; cursor:pointer; }
-.project-export-options > .project-export-source { min-height:32px; padding:0; color:var(--muted); font-size:13px; }
+.project-export-body .project-export-format { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,208px); align-items:center; gap:16px; min-height:36px; margin:0; padding:0; cursor:default; color:var(--text); font-size:13px; }
+.project-export-select { position:relative; display:block; min-width:0; }
+.project-export-select > svg { position:absolute; inset-inline-end:10px; top:50%; transform:translateY(-50%); color:var(--muted); pointer-events:none; }
+.project-export-dialog .project-export-select > select { appearance:none; display:block; width:100%; min-width:0; height:36px; min-height:36px; padding:5px 10px; padding-inline-end:32px; margin:0; border:1px solid var(--border); border-radius:7px; background:var(--surface-solid); color:var(--text); font-size:13px; line-height:1.5; cursor:pointer; }
+.project-export-dialog .project-export-select > select:hover { border-color:var(--border-strong); }
+.project-export-dialog .project-export-select > select:disabled { cursor:default; color:var(--muted); border-color:var(--border); background:var(--surface-muted); }
+.project-export-dialog .project-export-select > select:focus { border-color:var(--accent); outline:none; }
+.project-export-dialog .project-export-select > select:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.project-export-source > p { margin:7px 0 0; color:var(--muted); font-size:12px; line-height:1.5; }
 .project-export-dialog > footer { display:flex; flex:none; flex-wrap:nowrap; justify-content:space-between; align-items:center; gap:16px; margin-top:18px; padding-top:16px; border-top:1px solid var(--border); }
 .project-export-dialog .project-export-status { min-width:0; color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .project-export-dialog .project-export-status[data-state=success] { color:var(--accent); }
 .project-export-dialog .project-export-status[data-state=error] { color:var(--text); }
 .project-export-dialog footer button { display:inline-flex; flex:none; align-items:center; justify-content:center; gap:7px; min-width:86px; min-height:36px; padding:7px 14px; margin:0; border-radius:7px; font-size:13px; line-height:1.5; }
-.project-export-dialog :is(button,select,input):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.project-export-dialog :is(button,input):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.project-export-dialog .project-export-selection input[type=checkbox]:focus-visible { outline:none; }
+.project-export-selection > label:has(> input:focus-visible),.project-export-chapters-heading:has(> label > input:focus-visible),.project-export-wiki > label:has(> input:focus-visible) { outline:2px solid var(--accent); outline-offset:-2px; border-radius:4px; }
 @media(max-width:480px) {
  .project-export-dialog { padding:20px; max-height:calc(100dvh - 24px); }
- .project-export-body .project-export-format { grid-template-columns:minmax(0,1fr) minmax(0,160px); gap:12px; }
+ .project-export-body .project-export-format { grid-template-columns:minmax(0,1fr) minmax(0,min(208px,68%)); gap:12px; }
+}
+@media(forced-colors:active) {
+ .project-export-dialog .project-export-select > select { appearance:auto; padding-inline-end:10px; }
+ .project-export-select > svg { display:none; }
+ .project-export-dialog .project-export-select > select:focus-visible { outline-color:Highlight; }
 }
 @media(max-width:720px) {
  .project-context-dialog { width:calc(100vw - 24px); height:calc(100dvh - 24px); padding:16px; }
@@ -2999,11 +3009,6 @@
 .wiki-claim-marker[data-claim-highlighted] { background: rgba(250, 204, 21, .45); }
 
 /* After jumping to a stance sentence: decide on it right there. */
-.wiki-stance-actions { display: flex; width: fit-content; max-width: 100%; flex-wrap: wrap; align-items: center; gap: 8px; margin: -4px 0 14px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-muted); font-size: 13px; }
-.wiki-stance-actions > span { flex: 0 1 auto; color: var(--muted); }
-.wiki-stance-actions > button { min-height: 30px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
-.wiki-stance-actions > button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
-.wiki-stance-actions > button.wiki-stance-dismiss { min-height: 0; padding: 2px 8px; border: 0; background: transparent; color: var(--muted); font-size: 16px; }
 
 /* Reader reads like the native chat platforms: one 16px prose column, the user's
    question as a right-aligned bubble, no per-turn role labels and a single emphasis
@@ -3154,3 +3159,20 @@
 .focus-workspace .chapter-text-editor-confirm button.is-danger { border-color: #dc2626; background: #dc2626; color: #fff; }
 .focus-workspace .chapter-text-editor-confirm button.is-danger:hover { background: #b91c1c; }
 @media (max-width: 600px) { .chapter-text-editor-bar { flex-wrap: wrap; } .chapter-text-editor-state { flex-basis: 100%; order: 9; margin: 0; } }
+
+.preview-content-pending {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px;
+  color: var(--muted); font-size: 13px; line-height: 1.5;
+}
+.preview-content-pending > button {
+  min-height: 32px; padding: 4px 6px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--accent); font: inherit; font-weight: 550;
+}
+.preview-content-pending > button:hover { background: var(--accent-soft); }
+.preview-content-pending > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.focus-partial-preview > article:has(> .preview-content > .preview-content-pending) { padding: 14px 16px; }
+.focus-partial-preview > article:has(> .preview-content > .preview-content-pending) > h2 { margin-bottom: 4px; }
+.focus-partial-preview > article:has(> .preview-content > .preview-content-pending) > .focus-partial-outline-status { margin-bottom: 2px; }
+.preview-render-error { margin: 24px; padding: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--text); }
+.preview-render-error > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.preview-raw-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 65vh; overflow: auto; font: inherit; }

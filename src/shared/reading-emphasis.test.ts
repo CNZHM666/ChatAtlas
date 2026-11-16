@@ -3,6 +3,7 @@ import {readingEmphasisMarkdown} from "./reading-emphasis";
 import {wikiDocument} from "../canvas/wiki-document";
 import {projectDocument} from "../export/project-document";
 import {contextKnowledge} from "../test/context-fixture";
+import {wikiReadingFormat} from "./wiki-reading-format";
 import {projectOverviewContent,projectOverviewReadingText} from "./project-overview";
 
 const filler="原始讨论按照发生顺序保存，阅读时可以逐步找回此前已经形成的理解。".repeat(8);
@@ -19,7 +20,7 @@ it("shares short literal emphasis across Reader and export and protects personal
  const reader=wikiDocument(page.body,true,[],[phrase]).body;
  expect(highlights(reader)).toEqual([`不得${phrase}`]);
  const selection={overview:false,wikiIds:[page.id],matters:false,history:false,sources:false};
- expect(projectDocument(session,selection,"md").text).toContain(reader.replace("## 操作边界","### 操作边界"));
+ expect(projectDocument(session,selection,"md").text).toContain(wikiReadingFormat(reader,{}).replace("## 操作边界","### 操作边界"));
  expect(projectDocument(session,selection,"html").text).toContain(`<strong>不得${phrase}</strong>`);
  for(const personal of [{userEdited:true},{userEdited:false,origin:"user" as const}]){
   Object.assign(page,personal);expect(projectDocument(session,selection,"md").text).not.toContain("**");
@@ -126,10 +127,12 @@ it("never bolds an English clause of one or two words, a list item or a lone wor
  expect(highlights(body).filter(phrase=>phrase.trim().split(/\s+/u).length<3)).toEqual([]);
 });
 
-it("leaves a list line opening on a bold label without a second bold",()=>{
+it("uses plain labels consistently in long explanatory lists without a second emphasis pass",()=>{
  const list="- **Built**: Adding and editing transactions and the monthly spending chart are built by the team.\n- **Unfinished**: CSV export functionality does not work yet and needs fixing before the beta.\n- **Criticality**: Export and backup features are critical because browser storage can be cleared, leading to data loss.";
  const body=readingEmphasisMarkdown(`## Status\n\n${list}`,{sectioned:true,phrases:["CSV export functionality does not work yet","Export and backup features are critical"]});
- expect(highlights(body)).toEqual(["Built","Unfinished","Criticality"]);
+ expect(highlights(body)).toEqual([]);
+ expect(body).toContain("- Built: Adding and editing transactions");
+ expect(body).toContain("- Unfinished: CSV export functionality does not work yet");
 });
 
 it("keeps a label line with only a note in brackets after it bold, and a bolded sentence start still re-chosen", () => {

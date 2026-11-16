@@ -110,6 +110,21 @@ describe("DOMChatGPTAdapter", () => {
     expect(JSON.parse(message.uiParts![0].raw).text).toContain("M1 1L5 5");
     expect(document.querySelector("[data-testid=genui-steps]")).not.toBeNull();
   });
+  it("retains image-only uploads and generated pictures outside Markdown blocks in order", () => {
+    document.body.innerHTML = '<main><div data-message-author-role="user"><button><img src="https://example.test/upload.png" alt="上传图片"></button><div class="whitespace-pre-wrap">解释图片</div></div><div data-message-author-role="assistant"><div class="markdown">生成结果</div><img src="https://example.test/generated.png" alt="生成图片"><div class="markdown">后续说明</div></div></main>';
+    const messages = new DOMChatGPTAdapter().parseMessages();
+    expect(messages).toHaveLength(2);
+    expect(messages[0].text).toContain("upload.png");
+    expect(messages[1].text).toMatch(/生成结果[\s\S]*generated.png[\s\S]*后续说明/u);
+    expect(document.querySelectorAll("img")).toHaveLength(2);
+  });
+  it("removes tool execution chrome while preserving generated images inside its result", () => {
+    document.body.innerHTML = '<main><div data-message-author-role="assistant"><div class="markdown"><p>说明</p><div data-testid="tool-call">bash -lc internal-command</div><div data-testid="tool-result">execution log<img src="https://example.test/generated.png"></div><p>结论</p></div></div></main>';
+    const [message] = new DOMChatGPTAdapter().parseMessages();
+    expect(message.text).toContain("generated.png");
+    expect(message.text).not.toContain("internal-command"); expect(message.text).not.toContain("execution log");
+    expect(message.text).toMatch(/说明[\s\S]*generated.png[\s\S]*结论/u);
+  });
   it("retains inaccessible iframe locations without fetching or losing adjacent text", () => {
     document.body.innerHTML = '<main><div data-message-author-role="assistant"><div class="markdown">正文</div><iframe title="Interactive quiz"></iframe><div class="markdown">后续</div></div></main>';
     const [message] = new DOMChatGPTAdapter().parseMessages();

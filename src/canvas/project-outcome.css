@@ -1345,6 +1345,7 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .decision-steps > footer button.primary { padding-inline: 16px; background: var(--accent); color: #fff; }
 .decision-steps > footer button.primary:hover { background: var(--accent); filter: brightness(1.05); }
 .decision-steps > footer .decision-steps-skip { margin-left: -12px; }
+.decision-steps-actions { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; }
 /* A pending problem the overview sent the reader to: named above the chapter, its paragraph marked. */
 .wiki-issue-bar { position: sticky; top: 8px; z-index: 3; box-sizing: border-box; width: 100%; max-width: var(--wiki-reading-width); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; padding: 8px 10px 8px 14px; border: 1px solid #f0d9a8; border-radius: 10px; background: #fff8e8; font-size: 13px; }
 .wiki-issue-bar > span:first-child { color: #8a5300; font-variant-numeric: tabular-nums; }

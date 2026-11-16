@@ -2,7 +2,7 @@ import type {WikiPreviousChapter} from "./wiki-topic-plan";
 import {trimWikiClaimOverflow,wikiClaimIssues,withWikiClaimDetails,wikiClaimRepairRequest} from "./wiki-claim-repair";
 import {applyWikiTitleEdits,renameWikiHeadings,wikiTitleEdits} from "./wiki-title-pass";
 import {wikiExistingExplanations,wikiWritingJobs} from "./wiki-writing-context";
-import {WIKI_COMPOSITION_INSTRUCTIONS,EDITION6_WIKI_COMPOSITION_INSTRUCTIONS,EDITION5_WIKI_COMPOSITION_INSTRUCTIONS,EDITION4_WIKI_COMPOSITION_INSTRUCTIONS,EDITION2_WIKI_COMPOSITION_INSTRUCTIONS,EDITION3_WIKI_COMPOSITION_INSTRUCTIONS,LEGACY_WIKI_COMPOSITION_INSTRUCTIONS,V4_WIKI_COMPOSITION_INSTRUCTIONS} from "./wiki-composition-instructions";
+import {WIKI_COMPOSITION_INSTRUCTIONS,EDITION8_WIKI_COMPOSITION_INSTRUCTIONS,EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,EDITION6_WIKI_COMPOSITION_INSTRUCTIONS,EDITION5_WIKI_COMPOSITION_INSTRUCTIONS,EDITION4_WIKI_COMPOSITION_INSTRUCTIONS,EDITION2_WIKI_COMPOSITION_INSTRUCTIONS,EDITION3_WIKI_COMPOSITION_INSTRUCTIONS,LEGACY_WIKI_COMPOSITION_INSTRUCTIONS,V4_WIKI_COMPOSITION_INSTRUCTIONS} from "./wiki-composition-instructions";
 import {withCrossChapterDuplicates} from "../shared/wiki-cross-duplicates";
 import {refreshWikiChapterOpenings,type WikiOpeningReport} from "./wiki-chapter-openings";
 import {assignGuideOwners,wikiChapterGuide,wikiChapterGuideAllowance,wikiCurrentGuide,wikiGuideCatalogue,type WikiGuideCatalogue} from "./wiki-current-guide";
@@ -85,6 +85,12 @@ export interface CoverageResult {
   sections: FocusSection[];
   brief?: FocusBrief;
 }
+const WRITING_INSTRUCTIONS={
+ 1:V4_WIKI_COMPOSITION_INSTRUCTIONS,2:EDITION2_WIKI_COMPOSITION_INSTRUCTIONS,3:EDITION3_WIKI_COMPOSITION_INSTRUCTIONS,
+ 4:EDITION4_WIKI_COMPOSITION_INSTRUCTIONS,5:EDITION5_WIKI_COMPOSITION_INSTRUCTIONS,6:EDITION6_WIKI_COMPOSITION_INSTRUCTIONS,
+ 7:EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,8:EDITION8_WIKI_COMPOSITION_INSTRUCTIONS,9:WIKI_COMPOSITION_INSTRUCTIONS,
+};
+type WritingEdition=keyof typeof WRITING_INSTRUCTIONS;
 interface CompositionCheckpoint {
  current:CoverageMaterial[];topicPlan:DirectoryPage[];wikiScopeReview?:WikiScopeReview;
  retired:WikiRetiredProof[];globalWritingGuide:string;sourceOutlines:FocusSourceOutline[];
@@ -93,7 +99,7 @@ interface CompositionCheckpoint {
  knowledgeBatches:ProjectKnowledgeBatch[];batchCount:number;
  /** Writing input scale frozen for this composition, so a resumed run rebuilds the same batches. */
  writingScale?:number;
- writingEdition?:1|2|3|4|5|6|7;
+ writingEdition?:WritingEdition;
 }
 interface WritingCheckpoint {result?:CoverageResult;draft?:CoverageResult;parts?:CoverageResult[];claimDraft?:unknown}
 
@@ -458,8 +464,8 @@ async function createCoveragePipeline(input:CoverageInput) {
     void titleEdits?.catch(()=>undefined);
     const current=preparation?(topicPlan?assignWikiOwners(preparation.current,topicPlan):preparation.current):raw;
     const retired=preparation?.retired??[],globalWritingGuide=preparation?.globalWritingGuide??"",writingScale=preparation?.writingScale??1;
-    const writingEdition=preparation?preparation.writingEdition:7;
-    const workInstructions=writingEdition===7?WIKI_COMPOSITION_INSTRUCTIONS:writingEdition===6?EDITION6_WIKI_COMPOSITION_INSTRUCTIONS:writingEdition===5?EDITION5_WIKI_COMPOSITION_INSTRUCTIONS:writingEdition===4?EDITION4_WIKI_COMPOSITION_INSTRUCTIONS:writingEdition===3?EDITION3_WIKI_COMPOSITION_INSTRUCTIONS:writingEdition===2?EDITION2_WIKI_COMPOSITION_INSTRUCTIONS:writingEdition===1?V4_WIKI_COMPOSITION_INSTRUCTIONS:LEGACY_WIKI_COMPOSITION_INSTRUCTIONS;
+    const writingEdition=preparation?preparation.writingEdition:9;
+    const workInstructions=writingEdition===undefined?LEGACY_WIKI_COMPOSITION_INSTRUCTIONS:WRITING_INSTRUCTIONS[writingEdition];
     const factCatalogue=topicPlan?preparation?.factCatalogue:undefined,ownerTitles=new Map(topicPlan?.map(page=>[page.ownerId??page.sectionIds[0],page.title]));
     // Batch sizing reserves the largest per-request catalogue, never less than the
     // full one. A Han filler is estimated at the highest per-character rate.
@@ -983,7 +989,7 @@ const validGuideCatalogue=(value:unknown):value is WikiGuideCatalogue=>{
 /** Validate old editions before reusing their exact writing prompts. */
 function restoreWikiWriting(saved:CompositionCheckpoint,raw:CoverageMaterial[]):WritingPreparation {
    if(saved.wikiScopeReview?.unreviewed?.some(item=>item.reason!=="context_omitted"))throw new Error("Scope metadata needs a new review");
-   if(saved.writingEdition!==undefined&&saved.writingEdition!==1&&saved.writingEdition!==2&&saved.writingEdition!==3&&saved.writingEdition!==4&&saved.writingEdition!==5&&saved.writingEdition!==6&&saved.writingEdition!==7)throw new Error("Unknown writing edition");
+   if(saved.writingEdition!==undefined&&(typeof saved.writingEdition!=="number"||!Object.hasOwn(WRITING_INSTRUCTIONS,saved.writingEdition)))throw new Error("Unknown writing edition");
    const known=new Set(raw.map(item=>item.id));
    if(!Array.isArray(saved.current)||!saved.current.length||saved.current.some(item=>!item||typeof item.id!=="string"||typeof item.text!=="string"||!Array.isArray(item.rawEvidenceIds)||!item.rawEvidenceIds.length||item.rawEvidenceIds.some(id=>!known.has(id)))||!Array.isArray(saved.sourceOutlines)||!Array.isArray(saved.knowledgeBatches)||!Array.isArray(saved.retired)||typeof saved.globalWritingGuide!=="string"||!Number.isInteger(saved.batchCount))throw new Error("Invalid composition checkpoint");
    const valid=validateWikiDirectory({pages:saved.topicPlan},saved.current.map(item=>({id:item.id,title:item.title,body:item.text,kind:"finding",transition:"",evidenceIds:item.rawEvidenceIds})),true);assertWikiOutline(valid);
@@ -993,7 +999,7 @@ function restoreWikiWriting(saved:CompositionCheckpoint,raw:CoverageMaterial[]):
 interface WritingPreparation {
  current:CoverageMaterial[];topicPlan?:DirectoryPage[];wikiScopeReview?:WikiScopeReview;
  retired:WikiRetiredProof[];globalWritingGuide:string;writingScale:number;factCatalogue?:WikiGuideCatalogue;guideExtras?:string;
- writingEdition:1|2|3|4|5|6|7|undefined;sourceOutlines:FocusSourceOutline[];knowledgeBatches:ProjectKnowledgeBatch[];batchCount:number;
+ writingEdition:WritingEdition|undefined;sourceOutlines:FocusSourceOutline[];knowledgeBatches:ProjectKnowledgeBatch[];batchCount:number;
 }
 interface PreparationContext {
  next:CoverageMaterial[];writing:Array<{notes:CoverageMaterial[];facts:ProjectState|undefined;batch:CoverageMaterial[]}>;
@@ -1002,7 +1008,7 @@ interface PreparationContext {
  excludeKeys:Set<string>;sameQuestions:ReturnType<typeof sameQuestionGroups>;
  sourceCompleted:Map<string,number>;sourceTotals:Map<string,number>;completedRaw:Set<string>;
  startedAt:number;reusedBatches:number;level:number;sourceOutlines:FocusSourceOutline[];
- knowledgeBatches:ProjectKnowledgeBatch[];batchCount:number;writingEdition:1|2|3|4|5|6|7|undefined;
+ knowledgeBatches:ProjectKnowledgeBatch[];batchCount:number;writingEdition:WritingEdition|undefined;
  compositionId?:string;checkpoints?:ReturnType<typeof createWikiPlanningCheckpoints>;
 }
 

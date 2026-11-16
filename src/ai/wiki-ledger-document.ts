@@ -1,11 +1,18 @@
 import { LEAVES_OUT } from "../shared/negation";
+import {retainWikiDecisions,reviewWikiEditorial} from "./wiki-editorial-review";
+import {placeWikiChoices} from "./wiki-choice-placement";
+import {wikiUnconfirmedWorkflowFeedback} from "./wiki-workflow-scope";
+import { retainCapabilityReports } from "./wiki-capability-state";
+import { wikiDecisionRestatement } from "./wiki-confirmation-scope";
+import {wikiProjectVoice} from "../shared/wiki-project-voice";
+import {restoreWikiChapterLiterals} from "../shared/wiki-block-presentation";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { FIRST_VERSION_ZH, ITERATION_ZH, PHASE } from "../shared/stage-words";
 import { claimSourceUnits, claimSupported, unitClaimText } from "./wiki-claim-support";
 import { qualifiedDiscussionIdea, qualifyWikiDatedReport, qualifyWikiOpeningOffer, wikiUserIdea } from "./wiki-claim-review";
 import type { FocusEvidence, FocusSection } from "../shared/focus-session";
 import type { WikiClaim } from "../shared/wiki-claims";
-import { DECIDING_KINDS, statesCore, wikiLedgerUnits, type WikiDraftClaim, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
+import { conditionKept, DECIDING_KINDS, groupMemberConditions, statesCore, wikiLedgerUnits, type WikiDraftClaim, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { wikiHolderOf } from "../shared/wiki-holder";
 import { knowledgeTerms } from "../shared/knowledge-subject";
@@ -19,6 +26,7 @@ import { decidedAgainstDeclined, differingPlans, lengthAgainstDecided, outgrownC
 import { currentCaptions } from "../shared/wiki-source-code";
 import { daysIn, figuresIn } from "../shared/wiki-figures";
 import { rowFields } from "../shared/wiki-row-sentence";
+import { wikiChapterIntegrity } from "./wiki-integrity";
 
 
 /** The flag that keeps new documents on the earlier pipeline, a fallback while the ledger replaces it. */
@@ -192,6 +200,13 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
   const draft = reading.draft;
   if (!draft || !organization) return { sections: [], evidence: [] };
   const units = new Map(all.map(unit => [unit.id, unit]));
+  const groupConditions = new Map<string, string[]>();
+  for (const group of organization.groups ?? []) for (const member of group.members) {
+    const unit = units.get(member.unitId);
+    if (!unit) continue;
+    const conditions = groupMemberConditions(member, unit);
+    if (conditions.length) groupConditions.set(unit.id, [...groupConditions.get(unit.id) ?? [], ...conditions]);
+  }
   const roles = reading.documentType === "learning" ? reading.learningRoles ?? {} : undefined;
   const confirmed = all.filter(unit => statuses.get(unit.id) === "confirmed");
   // An AI suggestion a later reply set aside for the user's idea (outgrownCentralNames) reads as an earlier version: moved under
@@ -252,7 +267,8 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     const content = [...terms].map(term => term.replace(/[.,;:!?)"'’”]+$/u, "").toLowerCase()).filter(term => term && !FUNCTION_WORD.test(term));
     const confirmedContent = new Set([...confirmedTerms].map(term => term.replace(/[.,;:!?)"'’”]+$/u, "").toLowerCase()));
     const contentCover = content.filter(term => confirmedContent.has(term)).length / Math.max(1, content.length);
-    const widened = !sayingDecision && listedStatuses.length > 0 && listedStatuses.every(value => value === "confirmed") && contentCover < DECISION_SAYS;
+    const exactChoice = decided && own.some(unit => unit.id.startsWith("answer:") && wikiDecisionRestatement(text, unit.statement));
+    const widened = !sayingDecision && !exactChoice && listedStatuses.length > 0 && listedStatuses.every(value => value === "confirmed") && contentCover < DECISION_SAYS;
     // A decision the sentence says on its own, an analysis or suggestion cited beside it only repeating it: "The confirmed
     // frontend stack is React + Vite + TypeScript, operating as a web-only application." cited the stack decision and the
     // AI's summary of it, and lost 〔已定〕. Not when an earlier, open or contested point is cited too.
@@ -273,8 +289,9 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     // 〔你〕 is what the user wrote or answered, not the AI's answer to a question they asked: "建议在同一个对话中继续" from
     // "我是新开个对话还是在这个对话里面继续" was marked as theirs.
     const wrote = !roles || own.some(unit => unit.evidence.role === "user" && !unit.evidence.pasted && (roles[unit.id] === "exercise" || !ASKS.test(unit.evidence.quote)));
-    const holder = !roles ? settled : own.some(unit => roles[unit.id] === "mistake") ? "corrected" as const : (settled === "decided" || settled === "user") && wrote ? "user" as const : settled === "earlier" ? settled : undefined;
-    return { text: text.trim(), quote: own[0].evidence.quote, evidenceIds: own.map(cite), ...(status ? { workStatus: status } : {}), ...(decided && !reasonOnly ? { userDecided: true } : {}), ...(holder ? { holder } : {}), unitIds: own.map(unit => unit.id), ...(markOnly ? { markOnly: true } : {}) };
+    const feedback = !roles && wikiUnconfirmedWorkflowFeedback(text);
+    const holder = !roles ? feedback ? "ai" as const : settled : own.some(unit => roles[unit.id] === "mistake") ? "corrected" as const : (settled === "decided" || settled === "user") && wrote ? "user" as const : settled === "earlier" ? settled : undefined;
+    return { text: text.trim(), quote: own[0].evidence.quote, evidenceIds: own.map(cite), ...(feedback ? {workStatus:"proposed" as const} : status ? { workStatus: status } : {}), ...(decided && !reasonOnly && !feedback ? { userDecided: true } : {}), ...(holder ? { holder } : {}), unitIds: own.map(unit => unit.id), ...(markOnly ? { markOnly: true } : {}) };
   };
   // A sentence joining the user's decision with a point they never confirmed ("采用浅色极简首页……，并认可推开式分屏",
   // the second half only from a pasted summary) is not decided as a whole: its last clauses, said by an unconfirmed
@@ -928,7 +945,7 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
       const text = kept.join("").trim();
       if (text && text !== opening) { body = body.replace(opening, () => text); changed = true; }
     }
-    const dropped = chapter.problems.flatMap(problem => { const match = problem.match(/^"(.+)…" drops the condition "(.+)" of k\d+/u); return match ? [{ head: match[1].replace(/\*\*/gu, ""), condition: match[2].trim() }] : []; });
+    const dropped = chapter.problems.flatMap(problem => { const match = problem.match(/^"(.+)…" drops the condition "(.+)" of k\d+/u); return match ? [{ head: match[1].replace(/\*\*/gu, ""), prefix: match[2].trim() }] : []; });
     const paragraphs = chapter.paragraphs.map(paragraph => {
       let text = paragraph.text, claims = paragraph.claims ?? [];
       claims = claims.map(claim => {
@@ -940,17 +957,23 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
         text = text.replace(claim.text, () => said);
         return { ...claim, text: said };
       });
-      for (const { head, condition } of dropped) {
+      for (const { head, prefix } of dropped) {
         const plainText = text.replace(/\*\*/gu, "");
-        if (!plainText.startsWith(head) || plainText.includes(condition) || /\n/u.test(text.trim())) continue;
+        if (!plainText.startsWith(head) || /\n/u.test(text.trim())) continue;
+        // Diagnostic excerpts are capped. Restore only the full condition from a bound member.
+        const matches = paragraph.unitIds.flatMap(id => (groupConditions.get(id) ?? [])
+          .filter(condition => condition.startsWith(prefix)).map(condition => ({ id, condition })));
+        const unique = new Map(matches.map(match => [match.condition, match]));
+        if (unique.size !== 1) continue;
+        const { id, condition } = [...unique.values()][0];
+        if (plainText.includes(condition) || conditionKept(condition, plainText)) continue;
         // Said already in other words: 「而非用户主动寻找战友或创建队伍」 is 「不再提供手动创建或寻找战友入口」.
         const own = [...knowledgeTerms(condition)], present = knowledgeTerms(plainText), shared = own.filter(term => present.has(term)).length;
         if (own.length && shared / own.length >= UNCLAIMED_SAID) continue;
         if (/^(?:不再|不|无需|禁止|取消)/u.test(condition) && /而非|而不是|不再|无需/u.test(plainText) && shared >= SAYS_SHARED) continue;
-        const holder = claims.find(claim => claim.text.replace(/\*\*/gu, "").startsWith(head.slice(0, 12))) ?? claims[0];
         const sentence = `${condition.replace(/[。.；;]$/u, "")}。`;
         text = `${text.trimEnd()}${sentence}`;
-        if (holder) claims = [...claims, { text: sentence, unitIds: holder.unitIds }];
+        claims = [...claims, { text: sentence, unitIds: [id] }];
       }
       const lines = text.split("\n"), head = lines.findIndex(line => /^\s*\|/u.test(line));
       if (head >= 0 && /^\s*\|?\s*:?-{3,}/u.test(lines[head + 1] ?? "")) {
@@ -2796,8 +2819,21 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     ["keptUserPoints", keptUserPoints], ["repeatedFigures", repeatedFigures], ["movedByLabel", movedByLabel], ["earlierFollowsCurrent", earlierFollowsCurrent],
     ["earlierReportJoined", perChapter(earlierReportJoined)], ["qualifiedAlternatives", perChapter(qualifiedAlternatives)], ["measuredOpening", perChapter(measuredOpening)], ["openingOfferAttribution", perChapter(openingOfferAttribution)], ["tidyBody", perChapter(tidyBody)],
   ];
-  const chapters = passes.reduce((written, [name, pass]) => { const next = pass(written); ledgerPassProbe?.(name, written, next); return next; }, draft.chapters);
-  const sections = chapters.filter(chapter => chapter.paragraphs.length).map((chapter): FocusSection => {
+  const chapters = passes.reduce((written, [name, pass]) => {
+    const originals=written.map(chapter=>({...chapter,paragraphs:chapter.paragraphs.map(paragraph=>({...paragraph}))}));
+    const next = restoreWikiChapterLiterals(originals,pass(written)); ledgerPassProbe?.(name, originals, next); return next;
+  }, draft.chapters)
+    .map(chapter => {
+      const checked = wikiChapterIntegrity(chapter, id => units.get(id), zhDraft);
+      return checked.repaired ? { ...chapter, body: checked.body, paragraphs: checked.paragraphs } : chapter;
+    });
+  const reviewed = ledger.documentType === "learning" ? chapters : placeWikiChoices(retainWikiDecisions(reviewWikiEditorial(chapters, reading), reading, new Set(confirmed.map(unit => unit.id)), zhDraft), reading);
+  if (ledger.documentType !== "learning") retainCapabilityReports(reviewed, all, statuses);
+  if (ledger.documentType !== "learning") for (const chapter of reviewed) {
+    chapter.body = wikiProjectVoice(chapter.body);
+    chapter.paragraphs = chapter.paragraphs.map(paragraph => ({ ...paragraph, text: wikiProjectVoice(paragraph.text), claims: paragraph.claims?.map(claim => ({ ...claim, text: wikiProjectVoice(claim.text) })) }));
+  }
+  const sections = reviewed.filter(chapter => chapter.paragraphs.length).map((chapter): FocusSection => {
     const chapterUnits = [...new Set([...chapter.openingUnitIds ?? [], ...chapter.paragraphs.flatMap(paragraph => paragraph.unitIds)])].flatMap(id => units.get(id) ?? []);
     // The opening has no claims of its own: a decision it states ("优先实现复制上下文功能……") gets one on the sentence
     // saying it, so its mark shows there too.

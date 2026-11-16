@@ -16,6 +16,17 @@ export interface WikiHeading {
 export interface WikiOutlineItem extends WikiHeading { children: WikiOutlineItem[] }
 export interface WikiChapterOverview { blocks:Array<{text:string;context?:string}>; readingBody:string; kind:"opening"|"excerpt" }
 
+/** Navigation needs real level-two headings only, not a full prose/emphasis render of every chapter. */
+export function wikiNavigationHeadings(body:string,generated=false):WikiHeading[] {
+ const tree=parser.parse(generated?generatedProse(body).body:body);
+ let headingIndex=0;
+ return tree.children.flatMap(node=>{
+  if(node.type!=="heading")return [];
+  const index=headingIndex++;
+  return node.depth===2?[{title:nodeText(node),depth:node.depth,headingIndex:index}]:[];
+ });
+}
+
 /** Only a chapter's own opening is an overview. Missing legacy openings stay
  * absent; paragraphs sampled from child topics do not summarize the chapter. */
 function chapterOverview(body:string,nodes:RootContent[]):WikiChapterOverview|undefined {

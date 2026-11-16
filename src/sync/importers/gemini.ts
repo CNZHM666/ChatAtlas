@@ -1,4 +1,5 @@
 import { sourceMessageSignature } from "../../shared/source-signature";
+import { imageMarkdown } from "../../shared/conversation-images";
 import { baseConversation, captureFromDrafts, importRevision, isRecord, sourceTimestamp, type DraftMessage, type PlatformImporter } from "./types";
 
 /** Google Takeout → My Activity → Gemini Apps, JSON format. Takeout stores one
@@ -24,8 +25,16 @@ const decodeEntities = (text: string) => text.replace(/&(#x[\da-f]+|#\d+|\w+);/g
  * small set of structural tags to Markdown and drop the rest. */
 export function geminiHtmlText(html: string): string {
   const code: string[] = [];
+  const images: string[] = [];
   const withCode = html.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/giu, (_, body: string) => { code.push(decodeEntities(body.replace(/<[^>]+>/gu, ""))); return `${code.length - 1}`; });
   const text = withCode
+    .replace(/<img\b([^>]*)>/giu, (_, attributes: string) => {
+      const src = /\bsrc=["']([^"']+)["']/iu.exec(attributes)?.[1];
+      const alt = /\balt=["']([^"']*)["']/iu.exec(attributes)?.[1];
+      if (!src) return "";
+      images.push(imageMarkdown(decodeEntities(src), alt ? decodeEntities(alt) : undefined));
+      return `\n\n${images.length - 1}\n\n`;
+    })
     .replace(/<br\s*\/?>/giu, "\n")
     .replace(/<h([1-6])[^>]*>/giu, (_, level: string) => `\n\n${"#".repeat(Number(level))} `)
     .replace(/<li[^>]*>/giu, "\n- ")
@@ -34,7 +43,7 @@ export function geminiHtmlText(html: string): string {
     .replace(/<(?:strong|b)>([\s\S]*?)<\/(?:strong|b)>/giu, "**$1**")
     .replace(/<code[^>]*>([\s\S]*?)<\/code>/giu, "`$1`")
     .replace(/<[^>]+>/gu, "");
-  return decodeEntities(text).replace(/(\d+)/gu, (_, index: string) => `\n\n\`\`\`\n${code[Number(index)].replace(/\n+$/u, "")}\n\`\`\`\n\n`).replace(/\n{3,}/gu, "\n\n").trim();
+  return decodeEntities(text).replace(/(\d+)/gu, (_, index: string) => `\n\n\`\`\`\n${code[Number(index)].replace(/\n+$/u, "")}\n\`\`\`\n\n`).replace(/(\d+)/gu, (_, index: string) => images[Number(index)]).replace(/\n{3,}/gu, "\n\n").trim();
 }
 
 /** Group newest-first activity into chronological sessions split by idle gaps. */

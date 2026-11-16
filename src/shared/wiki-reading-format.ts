@@ -1,10 +1,16 @@
 import {wikiNarration} from "./wiki-narration";
+import {wikiNumberedProse} from "./wiki-numbered-prose";
 import {isSourceCaption,readableSourceCaptions,readableUiSketches,withoutPlaceholderFences} from "./wiki-source-code";
 import {unified} from "unified";
 import remarkParse from "remark-parse";
 import type {FocusSection} from "./focus-session";
 import {extractHistoryNotes} from "./wiki-history";
 import {aiAdvicePresentation} from "./ai-advice-presentation";
+import {restoreWikiLiteralPayloads,wikiBlockPresentation} from "./wiki-block-presentation";
+import {wikiDocumentBlocks} from "./wiki-document-blocks";
+import {wikiSupplementRanges} from "./wiki-source-supplements";
+import type {WikiKnowledgeUnit} from "./wiki-knowledge";
+import {withoutUnrelatedScopeNotes} from "./wiki-scope-identity";
 
 const parser=unified().use(remarkParse);
 /** Older saved exports may contain a "> **演变记录**" block; it still renders collapsed. */
@@ -45,6 +51,46 @@ const grams=(text:string)=>{const chars=Array.from(text.normalize("NFKC").replac
 /** Share of `a`'s wording that `b` already says. */
 const covered=(a:Set<string>,b:Set<string>)=>{if(!a.size)return 0;let shared=0;for(const gram of a)if(b.has(gram))shared++;return shared/a.size;};
 const removeRanges=(body:string,ranges:Array<[number,number]>)=>{for(const [start,end] of ranges.sort((a,b)=>b[0]-a[0]))body=body.slice(0,start)+body.slice(end);return body.replace(/\n{3,}/gu,"\n\n").trim();};
+
+/** A generic routing summary adds no scope when the next sentence explains
+ * the same local/remote split with its actual criteria. */
+function dropRepeatedRoutingLead(body:string):string {
+ const short=/^(?:AI\s*规划)?采用混合解析策略[：:]简单命令(?:由)?本地(?:零成本)?处理[，,]复杂需求才调用\s*LLM(?:[，,]以优化速度、成本和可靠性)?。\s*/u;
+ const specific=/^通过\s*[\w().]+\s*区分\s*Simple[（(][^）)\n]+[）)]\s*和\s*Complex[（(][^）)\n]+[）)]/u;
+ const attachments=wikiSupplementRanges(body);
+ for(const block of wikiDocumentBlocks(body).reverse()){
+  if(block.kind!=="paragraph"||attachments.some(([start,end])=>block.start>=start&&block.end<=end))continue;
+  const lead=short.exec(block.text)?.[0];
+  if(!lead||!specific.test(block.text.slice(lead.length)))continue;
+  body=body.slice(0,block.start)+block.text.slice(lead.length)+body.slice(block.end);
+ }
+ return body;
+}
+
+/** Clarify wording that makes a historical proposal sound like an
+ * engineering guarantee. The saved claim and literal sources stay intact. */
+function clarifyGeneratedProse(body:string,zh:boolean):string {
+ if(!zh||!/数据库保证电气兼容性|学习路线规划|关闭(?:浏览器|页面).*消失/u.test(body))return body;
+ const ranges=wikiSupplementRanges(body);
+ const blocks=wikiDocumentBlocks(body);
+ for(let index=blocks.length-1;index>=0;index--){
+  const block=blocks[index];
+  if(ranges.some(([start,end])=>block.start>=start&&block.end<=end))continue;
+  let revised=block.text;
+  if(block.kind==="heading"&&/^#{1,6} 学习路线规划$/u.test(revised)){
+   const next=blocks[index+1];
+   if(next?.kind==="paragraph"&&/^(?:V\d+|第一版).{0,45}(?:功能边界|支持范围|范围)/u.test(next.text))revised=revised.replace("学习路线规划","第一版范围与识别边界");
+  }else if(block.kind==="paragraph"||block.kind==="list"){
+   if(/^(?:[“「>]|\s*`)/u.test(revised))continue;
+   revised=revised
+    .replace(/(规则引擎[^。！\n]{0,35})数据库保证电气兼容性/gu,"$1目录提供元件参数，由规则引擎检查已知电气约束")
+    .replace(/（sessionStorage）[，,]\s*关闭浏览器后消失/gu,"（sessionStorage），按标签页会话管理。刷新和恢复会话时需单独核对保留行为")
+    .replace(/(关闭页面时[“「]仅本次使用[”」]的\s*Key\s*消失)(?=\s*[。\n]|$)/gu,"验证「仅本次使用」的 Key 在新会话中不可用，并单独测试刷新和会话恢复");
+  }
+  if(revised!==block.text)body=body.slice(0,block.start)+revised+body.slice(block.end);
+ }
+ return body;
+}
 
 /** A paragraph restating another adds length, not knowledge. The chapter's two
  * opening paragraphs often say the same thing twice (a summary, then a longer
@@ -101,9 +147,11 @@ function promotePseudoHeadings(body:string):string {
  * chapter's evolution card shows them), restated paragraphs go, bare label lines
  * become sub-headings, long paragraphs split. Saved text and personal chapters
  * are unchanged. */
-export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin">):string {
+export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin">,options:{zh?:boolean;units?:WikiKnowledgeUnit[]}={}):string {
  // Personal text stays as written; only block captions, which are labels and not its words, read like the rest.
  if(section.userEdited||section.origin)return readableSourceCaptions(body);
  // Narration cleanup runs here too, so exports read like the Reader ("AI发现了", not "AI建议发现了"; no "据讨论，" lead-ins).
- return readableUiSketches(readableSourceCaptions(splitLongParagraphs(promotePseudoHeadings(dropRepeatedParagraphs(wikiNarration(aiAdvicePresentation(extractHistoryNotes(withoutPlaceholderFences(body)).body)))))));
+ const prose=wikiNarration(aiAdvicePresentation(extractHistoryNotes(withoutUnrelatedScopeNotes(withoutPlaceholderFences(body))).body));
+ const formatted=readableUiSketches(readableSourceCaptions(splitLongParagraphs(promotePseudoHeadings(dropRepeatedParagraphs(wikiNumberedProse(dropRepeatedRoutingLead(prose))))),true));
+ return wikiBlockPresentation(restoreWikiLiteralPayloads(body,clarifyGeneratedProse(formatted,options.zh??true)),options).body;
 }

@@ -58,7 +58,7 @@ describe("source code blocks", () => {
     expect(readableSourceCaptions(chapters[0].body)).toContain("*界面草图*");
   });
 
-  it("shows only the last drawing of one screen, and no list the paragraph above already says", () => {
+  it("preserves distinct drawings of one screen, and no list the paragraph above already says", () => {
     const at = (id: string, index: number, code: { language: string; text: string }) => { const own = unit(id, id, code); own.evidence.messageIndex = index; return own; };
     const first = { language: "text", text: "┌────────┐\n│ 恢复精力 戒7天 │\n│ 今日任务 0/1 │\n│ [开始守护] │\n└────────┘" };
     const last = { language: "text", text: "┌────────┐\n│ 今日守护 戒7天 │\n│ 今日任务 0/1 │\n│ [开始守护] │\n└────────┘" };
@@ -67,13 +67,13 @@ describe("source code blocks", () => {
     const chapters: WikiDraftChapter[] = [
       { id: "x", title: "X", question: "", group: "", body: "首页先给出守护入口。\n\n后来首页改成今日守护。\n\n功能包括打卡记录、冲动日志和守护小组。", paragraphs: [{ subtopic: "", text: "首页先给出守护入口。", unitIds: ["a"] }, { subtopic: "", text: "后来首页改成今日守护。", unitIds: ["b"] }, { subtopic: "", text: "功能包括打卡记录、冲动日志和守护小组。", unitIds: ["c"] }] } as WikiDraftChapter,
     ];
-    expect(placedSourceCode(chapters, id => units.get(id), () => undefined, true)).toBe(1);
+    expect(placedSourceCode(chapters, id => units.get(id), () => undefined, true)).toBe(2);
     expect(chapters[0].body).toContain("今日守护 戒7天");
-    expect(chapters[0].body).not.toContain("恢复精力 戒7天");
+    expect(chapters[0].body).toContain("恢复精力 戒7天");
     expect(chapters[0].body).not.toContain("```text\n打卡记录");
   });
 
-  it("knows one screen drawn again by the pieces both versions keep, and leaves out a lone expression", () => {
+  it("retains both drawings that share pieces, and leaves out a lone expression", () => {
     const at = (id: string, index: number, code: { language: string; text: string }) => { const own = unit(id, id, code); own.evidence.messageIndex = index; return own; };
     const card = { language: "text", text: "不导 · 今日守护                     中风险\n\n主要诱因：独处、熬夜、短视频\n\n[开始今晚准备]" };
     const page = { language: "text", text: "晚上好，卡夫卡\n┌ 不导 · 今日守护                  今晚风险：中 ┐\n│ 主要诱因：独处、熬夜、短视频                 │\n│ [完成今晚准备]                               │\n└──────────────────────────┘" };
@@ -82,9 +82,9 @@ describe("source code blocks", () => {
     const chapters: WikiDraftChapter[] = [
       { id: "x", title: "X", question: "", group: "", body: "卡片先这样。\n\n首页后来这样。\n\n重度模式隐藏入口。", paragraphs: [{ subtopic: "", text: "卡片先这样。", unitIds: ["a"] }, { subtopic: "", text: "首页后来这样。", unitIds: ["b"] }, { subtopic: "", text: "重度模式隐藏入口。", unitIds: ["c"] }] } as WikiDraftChapter,
     ];
-    expect(placedSourceCode(chapters, id => units.get(id), () => undefined, true)).toBe(1);
+    expect(placedSourceCode(chapters, id => units.get(id), () => undefined, true)).toBe(2);
     expect(chapters[0].body).toContain("晚上好，卡夫卡");
-    expect(chapters[0].body).not.toContain("中风险");
+    expect(chapters[0].body).toContain("中风险");
     expect(chapters[0].body).not.toContain("urgeLevel");
   });
 
@@ -133,9 +133,9 @@ describe("source code blocks", () => {
     const units = new Map([["a", unit("a", "q", { language: "table", text: table })], ["b", unit("b", "q", { language: "table", text: table })], ["c", unit("c", "q")]]);
     const mine = "| Budget Type | Characteristics |\n| --- | --- |\n| Monthly | Simpler |\n| Pay period | Harder |";
     const chapters = [{ id: "x", title: "X", question: "", group: "", body: `### Budgets\n\nBudgets reset by period.\n\n${mine}\n\nThe choice is open.`, paragraphs: [{ subtopic: "Budgets", text: "Budgets reset by period.", unitIds: ["a", "c"] }, { subtopic: "Budgets", text: mine, unitIds: ["b"] }, { subtopic: "Budgets", text: "The choice is open.", unitIds: ["c"] }], problems: [] }] as unknown as WikiDraftChapter[];
-    expect(placedSourceCode(chapters, id => units.get(id), id => id === "a" ? "history" : "proposal", false)).toBe(1);
+    expect(placedSourceCode(chapters, id => units.get(id), id => id === "a" ? "history" : "proposal", false)).toBe(2);
     const projected = withoutSourceBlockRepeats(chapters[0], id => units.get(id));
-    expect(projected.body).toBe(`### Budgets\n\nBudgets reset by period.\n\n*Table from the discussion · earlier version, since replaced*\n\n${table}\n\n${mine}\n\nThe choice is open.`);
+    expect(projected.body).toBe(`### Budgets\n\nBudgets reset by period.\n\n*Table from the discussion · earlier version, since replaced*\n\n${table}\n\n${mine}\n\n*Table from the discussion · AI suggestion, not confirmed*\n\n${table}\n\nThe choice is open.`);
     expect(projected.removed).toHaveLength(0);
   });
 
@@ -144,7 +144,11 @@ describe("source code blocks", () => {
     const body = `### A\n\nFirst point here.\n\n${caption}\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nSecond point here.\n\n${caption}\n\n| c | d |\n|---|---|\n| 3 | 4 |\n\nThird.\n\n${code}\n\n\`\`\`ts\nx\n\`\`\`\n\nMore.\n\n${code}\n\n\`\`\`ts\ny\n\`\`\``;
     const section = { id: "s", title: "T", body, evidenceIds: ["e"], kind: "finding", transition: "", claims: [] } as unknown as FocusSection;
     const read = wikiReadingFormat(wikiReadingCleanup(body, section), section);
-    expect(read.match(/^\*(?:Table|Code example)\*$/gmu)).toHaveLength(4);
+    expect(read.match(/^\*Table\*$/gmu)).toHaveLength(2);
+    expect(read).toContain("参考示例 · 2 项");
+    expect(read.match(/^#### \d+\. 代码示例$/gmu)).toHaveLength(2);
+    expect(read).toContain("```ts\nx\n```");
+    expect(read).toContain("```ts\ny\n```");
   });
 
   it("gives a unit the block of its stored message", () => {
@@ -226,6 +230,7 @@ describe("readableSourceCaptions", () => {
     expect(readableSourceCaptions("*讨论中的原文代码 · 你确认的；你随后的决定优先：只支持美元*")).toBe("*代码 · 你确认 · 以你后来的决定为准：只支持美元*");
     expect(readableSourceCaptions("*讨论中的原文表格 · 早期版本，已被替换*")).toBe("*对照表 · 早期方案，已被替换*");
     expect(readableSourceCaptions("*Table from the discussion · AI suggestion, not confirmed*")).toBe("*Table*");
+    expect(readableSourceCaptions("*讨论中的原文表格 · AI 建议，未确认 · v2；你随后的决定优先：仅使用美元*")).toBe("*对照表 · v2 · 以你后来的决定为准：仅使用美元*");
   });
   it("names what a block shows and the section it sits in, read from the block", () => {
     const shown = (block: string) => readableSourceCaptions(`### 首页布局引导\n\n*讨论中的原文代码 · AI 建议，未确认*\n\n\`\`\`text\n${block}\n\`\`\``).split("\n")[2];

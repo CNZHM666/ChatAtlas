@@ -128,6 +128,50 @@ export function plannedCapabilityWords(chapters: WikiDraftChapter[], units: Wiki
   }
   return changed;
 }
+
+/** Keep a source author's observed limit beside the plan it qualifies. A
+ * capability table may point only to plans, so its citations alone cannot
+ * supply the historical boundary. */
+export function retainCapabilityReports(chapters: WikiDraftChapter[], units: WikiKnowledgeUnit[], statuses: Map<string, WikiUnitStatus>): number {
+  let changed = 0;
+  for (const report of reportsOf(units, statuses)) {
+    if (report.unit.about || report.unit.evidence.role !== "user") continue;
+    const limit = report.text.replace(/\s*(?:当前|目前)(?=\s*(?:不|未|没有))/u, " ");
+    const options = doers(report, units).filter(unit => !unit.about && statuses.get(unit.id) !== "history");
+    const plans = new Set(options.filter(unit => unit.evidence.role === "assistant" && unit.delivery !== "user_reported").map(unit => unit.id));
+    if (!plans.size) continue;
+    const laterReports = new Set(options.filter(unit => builtAfter(unit, report.unit, statuses)).map(unit => unit.id));
+    const candidates = chapters.flatMap(chapter => chapter.paragraphs.flatMap(paragraph => {
+      if (!chapter.body.includes(paragraph.text) || /^>|```|~~~/u.test(paragraph.text) || !paragraph.unitIds.some(id => plans.has(id))) return [];
+      const text = paragraph.unitIds.some(id => laterReports.has(id)) || paragraph.text.startsWith("|") ? paragraph.text
+        : paragraph.text.split(/(?<=[。！？\n])/u).map(sentence => planned(sentence, report.objects)).join("");
+      return [{ chapter, paragraph, text }];
+    }));
+    const home = candidates.find(item => item.text !== item.paragraph.text) ?? candidates[0];
+    if (!home) continue;
+    for (const {chapter, paragraph, text} of candidates) {
+      if (text === paragraph.text) continue;
+      chapter.body = replaceParagraph(chapter.body, paragraph.text, text);
+      for (const claim of paragraph.claims ?? []) {
+        const next = planned(claim.text, report.objects);
+        if (text.includes(next)) claim.text = next;
+      }
+      paragraph.text = text;
+      changed++;
+    }
+    const stated = chapters.some(chapter => chapter.paragraphs.some(paragraph => paragraph.unitIds.includes(report.unit.id)
+      && chapter.body.includes(paragraph.text) && squeeze(paragraph.text).includes(squeeze(limit))));
+    if (stated) continue;
+    const { chapter, paragraph } = home;
+    const lead = report.unit.evidence.pasted ? "项目发起人提供的资料记录了当时的实现边界" : "项目发起人当时报告";
+    const text = `${lead}，${limit}。`;
+    const paragraphIndex = chapter.paragraphs.indexOf(paragraph);
+    chapter.body = replaceParagraph(chapter.body, paragraph.text, `${paragraph.text}\n\n${text}`);
+    chapter.paragraphs.splice(paragraphIndex + 1, 0, { text, subtopic: paragraph.subtopic, unitIds: [report.unit.id], claims: [{ text, unitIds: [report.unit.id] }] });
+    changed++;
+  }
+  return changed;
+}
 /** A sentence telling a check of the objects as had, told as planned: "计划" before the verb that starts its clause
  * (实现、新增、建立) or before the check itself. A list item's label stays first. */
 function planned(sentence: string, objects: string[]): string {

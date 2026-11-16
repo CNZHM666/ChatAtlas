@@ -1,6 +1,12 @@
 import { expect, it } from "vitest";
 import { wikiHolderOf, withHolderMarks } from "./wiki-holder";
 
+it("isolates a locally confirmed sentence from adjacent proposed behavior",()=>{
+ const body="建议采用缓存架构。团队上限为10人。后续增加多人编辑。";
+ const out=withHolderMarks(body,[{text:"团队上限为10人。",holder:"decided",reference:" [S-1-a] 〔发起人在整理时确认 · C-1-a〕"}],true);
+ expect(out).toBe("建议采用缓存架构。\n\n团队上限为10人。〔已定〕 [S-1-a] 〔发起人在整理时确认 · C-1-a〕\n\n后续增加多人编辑。");
+});
+
 it("holds a sentence as decided only when every unit is the user's decision, and as the weakest holder otherwise", () => {
   expect(wikiHolderOf(["confirmed", "confirmed"])).toBe("decided");
   expect(wikiHolderOf(["confirmed", "proposal"])).toBe("ai");

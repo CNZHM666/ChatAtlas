@@ -1,4 +1,5 @@
 import type { WikiKnowledgeUnit, WikiTopicChain } from "./wiki-knowledge";
+import { knowledgeScopesAgree, knowledgeTerms } from "./knowledge-subject";
 
 /** A rename of one named item: 将“今日任务0/7”改为“今日重点0/1”. */
 const RENAME = /将?“([^”]{1,16})”(?:模块|按钮|入口|卡片)?(?:升级为|改为|改成|更名为|调整为|替换为|命名为)“([^”]{1,20})”/u;
@@ -78,16 +79,34 @@ export function differingPlans(units: WikiKnowledgeUnit[], statusOf: (id: string
   }
   // One flow given two sets of steps from the same start: 选择目标→设置高风险时间→开启挑战→完成首次打卡→获得即时反馈, and
   // 选择目标-高危时间-生成计划-打卡-加入小组.
-  const paths = new Map<string, WikiKnowledgeUnit[]>();
+  const paths = new Map<string, Array<{ unit: WikiKnowledgeUnit; steps: string[]; context: Set<string> }>>();
   for (const unit of fresh) {
-    const path = unit.statement.match(STEP_PATH)?.[0];
+    const path = unit.statement.match(STEP_PATH);
     if (!path) continue;
-    const steps = path.split(/\s*(?:→|->|－|-)\s*/u), start = steps[0];
-    if (!(paths.get(start) ?? []).some(other => other.statement.match(STEP_PATH)![0].split(/\s*(?:→|->|－|-)\s*/u).join("|") === steps.join("|"))) paths.set(start, [...paths.get(start) ?? [], unit]);
+    const steps = path[0].split(/\s*(?:→|->|－|-)\s*/u), start = steps[0];
+    const group = paths.get(start) ?? [];
+    group.push({ unit, steps, context: knowledgeTerms(unit.statement.slice(0, path.index).trim()) });
+    paths.set(start, group);
   }
   for (const [start, list] of paths) {
-    if (list.length !== 2) continue;
-    found.push({ unitIds: list.map(unit => unit.id), note: `从「${start}」开始的流程有两种写法：${list.map(unit => bare(unit.statement)).join("；")}。` });
+    const paired = new Set<string>();
+    for (const [index, a] of list.entries()) {
+      if (paired.has(a.unit.id)) continue;
+      const b = list.slice(index + 1).find(b => {
+        if (paired.has(b.unit.id) || !knowledgeScopesAgree(a.unit.statement, b.unit.statement)
+          || a.unit.facet && b.unit.facet && a.unit.facet !== b.unit.facet) return false;
+        // A shared step can belong to many flows. Require the surrounding text
+        // to name the same operation, and leave additive steps together.
+        const shared = [...a.context].filter(term => b.context.has(term)).length;
+        return shared >= 3 && shared / Math.max(1, Math.min(a.context.size, b.context.size)) >= .6
+          && (!a.unit.conditions?.length && !b.unit.conditions?.length
+            || JSON.stringify(a.unit.conditions ?? []) === JSON.stringify(b.unit.conditions ?? []))
+          && !a.steps.every(step => b.steps.includes(step)) && !b.steps.every(step => a.steps.includes(step));
+      });
+      if (!b) continue;
+      paired.add(a.unit.id); paired.add(b.unit.id);
+      found.push({ unitIds: [a.unit.id, b.unit.id], note: `从「${start}」开始的流程有两种写法：${bare(a.unit.statement)}；${bare(b.unit.statement)}。` });
+    }
   }
   // When payment first shows, said two ways: a paywall on day 3 beside a free trial of 7 days.
   const wall = fresh.find(unit => PAYWALL_DAY.test(unit.statement)), trial = fresh.find(unit => FREE_DAYS.test(unit.statement));

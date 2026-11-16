@@ -4,6 +4,7 @@ import type { ConversationCapture, ConversationMessage } from "../shared/types";
 import { getDatabase } from "./db";
 import { getMessagesForConversation, saveConversationCapture, searchStoredDiscussions, invalidateStoredMessageSearchIndex } from "./messages";
 import { onMessageSearchInvalidation } from "../search/message-search-invalidation";
+import { materializeCaptureImages } from "../shared/capture-images";
 
 const message = (id: string, index: number, content: string, capturedAt: number): ConversationMessage => ({
   id,
@@ -39,6 +40,16 @@ const capture = (messages: ConversationMessage[], capturedAt: number): Conversat
 });
 
 describe("conversation capture storage", () => {
+  it("preserves a locally saved image when a later snapshot cannot download its source again", async () => {
+    const content = "![Upload](<https://example.test/upload.png>)";
+    const original = await materializeCaptureImages(capture([message("image", 0, content, 1)], 1), [{ references: ["https://example.test/upload.png"], dataUrl: "data:image/png;base64,AQ==" }]);
+    await saveConversationCapture(original, { warmIndex: false });
+    const first = (await getMessagesForConversation("conversation-storage", { cache: false }))[0];
+    await saveConversationCapture(capture([message("image", 0, content, 2)], 2), { replace: false, warmIndex: false });
+    const updated = (await getMessagesForConversation("conversation-storage", { cache: false }))[0];
+    expect(updated.content).toBe(first.content); expect(updated.contentHash).toBe(first.contentHash);
+    expect((await (await getDatabase()).get("imageAssets", original.imageAssets![0].id))?.dataUrl).toBe("data:image/png;base64,AQ==");
+  });
   it("merges visible multi-AI windows by saved message anchors without mixing new replies into old turns",async()=>{
     const original=Array.from({length:4},(_,index)=>message(`web-${index}`,index,`Original ${index}`,1));
     const first=capture(original,1);first.conversation={...first.conversation,platform:"claude",source:"claude_export"};await saveConversationCapture(first,{warmIndex:false});
