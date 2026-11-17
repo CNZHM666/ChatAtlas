@@ -1,10 +1,16 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { DocumentOverview } from "./DocumentOverview";
 import { contextKnowledge } from "../../test/context-fixture";
 import { WorkspaceEvidenceContext } from "../workspace-evidence-context";
+import type { WikiKnowledgeUnit } from "../../shared/wiki-knowledge";
+import { sourceMessageSignature } from "../../shared/source-signature";
+import { readSessionSource } from "../../storage/source-versions";
 
 afterEach(cleanup);
+vi.mock("../../storage/source-versions", async importOriginal => ({
+ ...await importOriginal<typeof import("../../storage/source-versions")>(), readSessionSource: vi.fn(),
+}));
 it("shows incomplete title editing and lets users review a suggested name without applying it automatically",()=>{
  const session=contextKnowledge().session,onRename=vi.fn();
  session.wikiTitleReview={version:2,status:"partial",requested:3,accepted:2,rejected:[{id:"c:0",reason:"missing"}]};
@@ -62,6 +68,54 @@ it("lays out its heading as a chapter does, actions above the title, and scope i
  expect(scope.parentElement).toHaveClass("document-overview");
  expect(heading.compareDocumentPosition(scope)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  expect(container.querySelector(".document-overview-heading small")).toBeNull();
+});
+it("shows sourced milestones and preserves an existing personal plan below the timeline",async()=>{
+ const {session,messages}=contextKnowledge(),onLocate=vi.fn();
+ const units:WikiKnowledgeUnit[]=[];
+ const originals = [
+  {text:"我们决定第一版采用本地全文搜索。",kind:"decision",role:"user",adoption:"user_decision",delivery:"unknown",time:Date.UTC(2026,9,12)},
+  {text:"我们已经实现 Wiki 来源定位。",kind:"report",role:"user",adoption:"unknown",delivery:"user_reported",time:undefined},
+  {text:"我们已经发布 Reader 第一版。",kind:"report",role:"user",adoption:"unknown",delivery:"user_reported",time:Date.UTC(2026,10,2)},
+  {text:"下一步计划实现混合检索。",kind:"plan",role:"assistant",adoption:"proposal",delivery:"unknown",time:Date.UTC(2026,10,6)},
+ ] as const;
+ for(const [index,{text,kind,role,adoption,delivery,time}] of originals.entries()){
+  const id=`step-${index}`, messageId=`original-${index}`;
+  const info={conversationId:"c",messageId,role,messageIndex:messages.length};
+  const quote=index===0?`${text.slice(0,-1)}，因为用户需要在本地快速找回对话。`:text;
+  const signature=sourceMessageSignature(quote);
+  session.evidence.push({id,conversationId:"c",messageId,title:"项目记录",excerpt:quote,sourceSignature:signature});
+  session.sourceSignatures!.c[messageId]=signature;
+  session.sourceRoles!.c[messageId]=role;
+  messages.push({...messages[0],id:messageId,role,content:quote,messageIndex:info.messageIndex,sourceCreatedAt:time,createdAt:time??Date.UTC(2026,10,16)});
+  units.push({id,subject:id,statement:text,kind,details:[],delivery,adoption:{status:adoption},
+   evidence:{...info,evidenceId:id,pasted:false,quote}});
+ }
+ const primary=session.evidence.find(ref=>ref.id==="step-0")!;
+ const repeat={...primary,id:"step-repeat",messageId:"original-repeat",excerpt:originals[0].text,sourceSignature:undefined};
+ session.evidence.push(repeat);
+ units.push({...units[0],id:repeat.id,evidence:{...units[0].evidence,evidenceId:repeat.id,messageId:repeat.messageId,messageIndex:messages.length,quote:repeat.excerpt}});
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",documentType:"project",materials:units.length,
+  decisions:{"step-0":{verdict:"confirmed",at:Date.UTC(2026,10,16),wholeUnit:true}},
+  batches:[{sourceIds:units.map(unit=>unit.id),status:"ok",rejected:{},units}]};
+ session.projectMaintenance={currentPlan:"v0.1 先交付全文搜索。"};
+ vi.mocked(readSessionSource).mockResolvedValue(messages);
+ render(<DocumentOverview session={session} zh onRead={vi.fn()} onLocate={onLocate}/>);
+ const region=await screen.findByRole("region",{name:"产品演进"}),timeline=within(region);
+ expect(timeline.getAllByRole("listitem")).toHaveLength(3);
+ expect(timeline.getByText("已确认决定")).toBeVisible();
+ expect(timeline.getByText("用户报告完成")).toBeVisible();
+ expect(timeline.getByText("用户报告发布")).toBeVisible();
+ expect(timeline.getByText("因为用户需要在本地快速找回对话")).toBeVisible();
+ expect(timeline.queryByText(originals[3].text)).toBeNull();
+ await waitFor(()=>expect(region.querySelectorAll("time")).toHaveLength(2));
+ expect(timeline.getByText("日期未记录")).toBeVisible();
+ expect(region.querySelector("time")).toHaveAttribute("datetime","2026-10-12T00:00:00.000Z");
+ fireEvent.click(timeline.getByRole("button",{name:"来源 2"}));
+ expect(onLocate).toHaveBeenCalledWith(primary,{references:[primary,repeat],mode:"view"});
+ fireEvent.click(within(timeline.getByText(originals[2].text).closest("li")!).getByRole("button",{name:"来源"}));
+ expect(onLocate).toHaveBeenCalledWith(session.evidence.find(ref=>ref.id==="step-2"));
+ expect(screen.getByText("已保存的规划").closest("details")).not.toHaveAttribute("open");
+ expect(screen.queryByRole("region",{name:"当前规划"})).toBeNull();
 });
 it("checks overview statements point by point",()=>{
  const session=contextKnowledge().session,open=vi.fn();session.projectState=undefined;

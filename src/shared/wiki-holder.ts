@@ -24,7 +24,7 @@ const LABELS: Record<WikiHolder, [string, string]> = { decided: ["已定", "Deci
 const TITLES: Record<WikiHolder, [string, string]> = {
   decided: ["你确认的决定", "Your confirmed decision"],
   open: ["仍在讨论，尚未决定", "Still open, not decided"],
-  earlier: ["此前的方案，已被后来的取代", "An earlier version, since replaced"],
+  earlier: ["保留的早期方案或历史讨论", "An earlier proposal or discussion kept for reference"],
   user: ["你的看法或报告", "Your own view or report"],
   material: ["你提供的资料，未见你确认", "Material you provided, not confirmed by you"],
   ai: ["AI 的建议或分析，所选来源未见采纳记录", "AI suggestion or analysis; no adoption record in selected sources"],
@@ -43,6 +43,13 @@ export const wikiShownHolder = (holder: WikiHolder, text: string): WikiHolder =>
 /** The default holder carries no mark: unmarked text is the assistant's suggestion or analysis. */
 export const wikiUnmarkedHolder = (holder: WikiHolder) => holder === "ai";
 export const wikiHolderTitle = (holder: WikiHolder, zh: boolean) => TITLES[holder][zh ? 0 : 1];
+export function wikiHolderReadingLabel(holder: WikiHolder, zh: boolean, reported = false, learning = false) {
+  if (holder === "user" && reported) return zh ? "用户报告" : "User report";
+  if (holder === "user" && !learning) return zh ? "用户陈述" : "User statement";
+  if (holder === "material") return zh ? "引用资料" : "Source material";
+  if (holder === "ai") return zh ? "AI 建议" : "AI suggestion";
+  return wikiHolderLabel(holder, zh);
+}
 /** In a learning record the user's mark is their own work: code, answers, what they reported. */
 export const learningTitle = (holder: WikiHolder, zh: boolean, learning: boolean) => learning && holder === "user" ? zh ? "你写的代码、回答或报告" : "Your own code, answer or report" : wikiHolderTitle(holder, zh);
 

@@ -57,7 +57,8 @@ const GlobalCanvas = lazy(() => import("./views/GlobalCanvas").then((module) => 
 
 const ReadingSession = lazy(() => import("./components/ReadingSession").then((module) => ({ default: module.ReadingSession })));
 const OriginalReader = lazy(() => import("./components/OriginalReader").then((module) => ({ default: module.OriginalReader })));
-const FocusWorkspace = lazy(() => import("./components/FocusWorkspace").then((module) => ({ default: module.FocusWorkspace })));
+const loadFocusWorkspace=()=>import("./components/FocusWorkspace").then(module=>({default:module.FocusWorkspace}));
+const FocusWorkspace = lazy(loadFocusWorkspace);
 const KnowledgeOverview = lazy(() => import("./views/KnowledgeOverview").then((module) => ({ default: module.KnowledgeOverview })));
 const KnowledgeSpaceCreate = lazy(() => import("./components/KnowledgeSpaceCreate").then((module) => ({ default: module.KnowledgeSpaceCreate })));
 const OrganizationTaskWorkspace = lazy(() => import("./components/OrganizationTaskWorkspace").then((module) => ({ default: module.OrganizationTaskWorkspace })));
@@ -738,6 +739,7 @@ function AtlasApp() {
     openSpace(id);
     const revision = projectOpenRevision.current;
     setProjectOpening(true);
+    void loadFocusWorkspace().catch(()=>undefined);
     try {
       const session = await projectReader(project);
       if (revision !== projectOpenRevision.current) return;

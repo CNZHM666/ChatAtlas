@@ -2,13 +2,16 @@ import {PreviewContent} from "./PreviewContent";
 import {recordUiFailure} from "../ui-failure";
 import {remapWikiSectionReferences} from "../../shared/wiki-topic-merge";
 import {ProjectReadingCacheContext} from "../project-reading-cache";
-import {createProjectReadingCache} from "../../shared/project-reading-cache";
+import {createProjectReadingCache,sameProjectReadingInputs} from "../../shared/project-reading-cache";
+import { refreshWikiReading } from "../wiki-reading-background";
+import type { WikiReadingProjection } from "../wiki-reading-worker";
 import type {ComponentProps} from "react";
 import { ChapterTextEditor } from "./ChapterTextEditor";
 import { ChevronDown, BookMarked, Download, RefreshCw, Save } from "lucide-react";
 import { ProjectVersionPicker } from "./ProjectVersionPicker";
 import { generationFailureReason } from "../generation-notice";
 import {savedWikiProjectBoundary} from "../../shared/wiki-project-boundary";
+import { restoreWikiSourceNegation } from "../../shared/wiki-source-negation";
 import {WikiChapterBody} from "./WikiChapterOverview";
 import {WikiScopeNotice,type WikiScopeChoice} from "./WikiScopeNotice";
 import {editableWikiTopic} from "../../shared/wiki-directory";
@@ -31,8 +34,9 @@ import { WikiDocument } from "./WikiDocument";
 import { ProjectSourcePicker } from "./ProjectSourcePicker";
 import { ProjectWikiNavigation } from "./ProjectWikiNavigation";
 import { useWikiReadingPosition } from "../hooks/useWikiReadingPosition";
+import { useWikiPageReading } from "../hooks/useWikiPageReading";
 import { ReaderBackButton } from "./ReaderBackButton";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { carryReviewNotes } from "../review-notes";
 import { hasSourceChange, sourceChanges, type SourceChange } from "../source-freshness";
@@ -53,10 +57,10 @@ import { keepWikiDraft, wikiEditorialSignature } from "../../shared/wiki-review"
 import { WikiRewritePreview } from "./WikiRewritePreview";
 import { readSessionSource } from "../../storage/source-versions";
 import { withDecision } from "../../ai/wiki-key-decisions";
-import { ledgerRewriteNeeded } from "../../ai/wiki-draft-fit";
+import { ledgerCoverageRetryNeeded, ledgerRewriteNeeded } from "../../ai/wiki-draft-fit";
 import { DecisionSteps } from "./DecisionSteps";
 import { pendingWritingQuestions, wikiNamedProjects, withAnswersFrom } from "../../ai/wiki-writing-questions";
-import { documentReview } from "../document-review";
+import { documentEvidenceReview, pendingWikiEvidence } from "../document-review";
 import { wikiBlockIssues } from "../../shared/wiki-explanations";
 /** How long the step before writing waits for a first answer before writing goes on without one. */
 const DECISION_GATE_WAIT_MS = 3 * 60_000;
@@ -122,6 +126,10 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   const { locale } = usePreferences();
   const zh = locale === "zh-CN";
   const [session, setSession] = useState(initialSession?.status === "preview" ? undefined : initialSession);
+  const deferredSession = useDeferredValue(session);
+  const [readingRefresh, setReadingRefresh] = useState<{ basis: FocusSession } & ({ previous: FocusSession; projection?: never } | { previous?: never; projection: WikiReadingProjection })>();
+  const readingRefreshAbort = useRef<AbortController>();
+  useEffect(() => () => readingRefreshAbort.current?.abort(), []);
   const [phase, setPhase] = useState<"sources" | "scope" | "generating" | "preview" | "reading" | "error">(initialSession ? initialSession.status === "preview" ? "preview" : "reading" : request?.sourceIds?.length ? request.scope ? "generating" : "scope" : "sources");
   const confirmedScope = useRef<FocusScope | undefined>(initialSession?.scope ?? request?.scope);
   const confirmedMode = useRef<FocusMode>(initialSession?.mode ?? request?.mode ?? "work");
@@ -148,11 +156,12 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   const [wikiHeadingTarget,setWikiHeadingTarget]=useState<{id:string;title:string;revision:number}>();
   // The knowledge ledger is a page of its own beside the document overview, reached from the sidebar.
   const [ledgerPage, setLedgerPage] = useState(false);
+  const wikiPages = useWikiPageReading(phase === "reading" ? session : undefined, zh);
   const [overview, setOverview] = useState(Boolean(initialSession && (initialSession.mode === "work" || !initialSession.activeSectionId)));
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [revisionIds,setRevisionIds]=useState<string[]>([]);
   // Generation paused after the directory is planned, waiting on the user's verdicts before anything is written.
-  const [docReview,setDocReview]=useState<{kind:"issues";index:number}|{kind:"evidence";sectionId:string;revision:number}>();
+  const [docReview,setDocReview]=useState<{kind:"issues";index:number}|{kind:"evidence";sectionId:string;revision:number;opened?:boolean}>();
   // Another wiki or version (chapter ids repeat across versions) starts without a pending review or an open source.
   const shownSessionId=session?.id;
   useEffect(()=>{setDocReview(undefined);setFocusedEvidence(undefined);setSourceSelection(undefined);},[shownSessionId]);
@@ -176,6 +185,8 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   const [wikiRevisionProgress,setWikiRevisionProgress]=useState<{done:number;total:number;stage?:"preparing"|"planning"|"writing"|"checking";cached?:number}>();
   const [openSourceId, setOpenSourceId] = useState<string>();
   const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
+  const [wikiToolsHost, setWikiToolsHost] = useState<HTMLDivElement | null>(null);
+  const [scopeUpdateIds, setScopeUpdateIds] = useState<string[]>();
   const [navigationTab, setNavigationTab] = useState<"chapters" | "sources">("chapters");
   const [wikiAdjusting, setWikiAdjusting] = useState(false);
   const [exportOpen,setExportOpen]=useState(false);
@@ -350,7 +361,14 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
     await saves.save(next, true);
     if (activeGenerationTask.current) await updateFocusGenerationTask(activeGenerationTask.current, { status: "preview", sessionId: next.id }).catch(() => undefined);
   };
-  const update = (patch: Partial<FocusSession>) => { if (sessionRef.current && !busy) { const next = { ...sessionRef.current, ...patch, updatedAt: Date.now() }; sessionRef.current = next; setSession(next); void saves.save(next).catch(() => undefined); } };
+  const update = (patch: Partial<FocusSession>) => {
+    if (!sessionRef.current || busy) return;
+    const next = { ...sessionRef.current, ...patch, updatedAt: Date.now() };
+    sessionRef.current = next;
+    setSession(next);
+    void saves.save(next).catch(() => undefined);
+    return next;
+  };
   // The open editor holds a draft: these save it, and say whether leaving would drop it.
   const editorSave = useRef<(() => Promise<void>) | undefined>(undefined), editorDirty = useRef(false);
   const markEditorDirty = useCallback((dirty: boolean) => { editorDirty.current = dirty; }, []);
@@ -385,10 +403,11 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       }
       const sectionRevision = (scope ?? (expansion ? "section" : revisionScope)) === "section";
       const { generateFocusSession } = await import("../../ai/focus-session");
-      const incremental = complete && !revise && session?.scope?.kind !== "goal" && Boolean(session);
+      const incremental = complete && !revise && Boolean(session);
       const execute: typeof generateFocusSession = incremental ? async (...args) => {
         const { generateFocusUpdate } = await import("../../ai/focus-update");
-        return generateFocusUpdate(session!, args[2], args[3], args[4], args[6], args[7], args[8]);
+        const scope = discussionScope !== session?.scope ? discussionScope : undefined;
+        return generateFocusUpdate(session!, args[2], args[3], args[4], args[6], args[7], args[8], { ...args[9], scope });
       } : generateFocusSession;
       abort.signal.throwIfAborted();
       let result = await execute(goal, revise ? session?.mode ?? confirmedMode.current : confirmedMode.current, sources as Conversation[], locale, abort.signal, revise && session ? { instruction: expansion ?? instruction, sections: session.sections, evidence: session.evidence, sectionId: sectionRevision ? session.activeSectionId : undefined, title: session.title, completedSectionIds: session.completedSectionIds, locale: session.locale } : undefined, (state) => {
@@ -416,7 +435,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       if(abort.signal.aborted)return;
       // A revision becomes a separate reviewable result. The original and user edits remain saved.
       const previous = session ?? proposal;
-      const nextProposal: FocusSession = { ...result, status: "preview", scope: complete ? { kind: "all" } : discussionScope ?? result.scope, ...(previous ? { rootSessionId: previous.rootSessionId ?? previous.id, previousSessionId: previous.id } : {}), sourceOutlines: revise ? session?.sourceOutlines : result.sourceOutlines, brief: revise && sectionRevision ? session?.brief : result.brief, coverage: revise && sectionRevision ? session?.coverage : result.coverage, ...(incremental ? {} : previous ? carryReviewNotes(previous, result, revise && sectionRevision) : { notes: "" }), visitedSectionIds: incremental ? result.visitedSectionIds : revise && sectionRevision ? session?.visitedSectionIds : undefined, sourceSignatures: revise && sectionRevision ? session?.sourceSignatures : result.sourceSignatures, sourceMessageOrder: revise && sectionRevision ? session?.sourceMessageOrder : result.sourceMessageOrder, sourceRoles: revise && sectionRevision ? session?.sourceRoles : result.sourceRoles, canvasId: session?.canvasId ?? proposal?.canvasId ?? request?.scopeCanvasId };
+      const nextProposal: FocusSession = { ...result, status: "preview", scope: incremental ? result.scope ?? previous?.scope : complete ? { kind: "all" } : discussionScope ?? result.scope, ...(previous ? { rootSessionId: previous.rootSessionId ?? previous.id, previousSessionId: previous.id } : {}), sourceOutlines: revise ? session?.sourceOutlines : result.sourceOutlines, brief: revise && sectionRevision ? session?.brief : result.brief, coverage: revise && sectionRevision ? session?.coverage : result.coverage, ...(incremental ? {} : previous ? carryReviewNotes(previous, result, revise && sectionRevision) : { notes: "" }), visitedSectionIds: incremental ? result.visitedSectionIds : revise && sectionRevision ? session?.visitedSectionIds : undefined, sourceSignatures: revise && sectionRevision ? session?.sourceSignatures : result.sourceSignatures, sourceMessageOrder: revise && sectionRevision ? session?.sourceMessageOrder : result.sourceMessageOrder, sourceRoles: revise && sectionRevision ? session?.sourceRoles : result.sourceRoles, canvasId: session?.canvasId ?? proposal?.canvasId ?? request?.scopeCanvasId };
       setProposal(nextProposal); setStatus(""); setPhase("preview");
       // Saving a completed preview never replaces the original accepted result.
       try {
@@ -621,10 +640,12 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       setFreshness({sessionId:session.id,items});
       if (conversations.some(source=>session.sourceConversationIds.includes(source.id)&&!isCurrentHydrationComplete(source))) {
         setStatus(zh ? "来源正在同步，稍后再检查。" : "Sources are syncing. Check again shortly.");
-      } else if (!items.some(item=>hasSourceChange(item)||item.unknown) && !ledgerRewriteNeeded(session.wikiKnowledge)) {
+      } else if (items.some(item=>hasSourceChange(item)||item.unknown) && session.scope?.kind === "goal") {
+        setScopeUpdateIds(session.scope.sourceConversationIds ?? session.sourceConversationIds);
+        setPhase("scope");
+      } else if (!items.some(item=>hasSourceChange(item)||item.unknown) && !ledgerCoverageRetryNeeded(session.wikiKnowledge) && !ledgerRewriteNeeded(session.wikiKnowledge) && !(session.wikiKnowledge && !session.wikiKnowledge.draft)) {
         setStatus(zh ? "没有发现来源变化。" : "No source changes found.");
-      } else if (session.scope?.kind === "goal") setPhase("scope");
-      else void generate(session.goal, session.sourceConversationIds, false, undefined, true);
+      } else void generate(session.goal, session.sourceConversationIds, false, undefined, true);
     } catch { setStatus(zh?"暂时无法检查来源，请重试。":"Could not check sources. Try again."); }
     finally { checkingSources.current=false; }
   };
@@ -635,16 +656,16 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   const versions=currentVersion?workspaceFocusVersions(availableSessions??projectSessions,currentVersion):[];
   const projectPicker=versions.length>0&&onOpenSession&&currentVersion?<ProjectVersionPicker versions={versions} currentId={currentVersion.id} zh={zh} disabled={busy||editing||Boolean(wikiRewrite)} onSelect={async id=>{try{await saves.flush();onOpenSession(id);}catch{setStatus(zh?"保存失败，请重试后切换版本。":"Save failed. Retry before switching versions.");}}} onDelete={onDeleteVersion?async id=>{try{await saves.flush();await onDeleteVersion(id);}catch{setStatus(zh?"保存失败，版本已保留，请重试。":"Save failed. The version was retained; retry.");}}:undefined}/>:null;
   if (phase === "scope") {
-    const ids = confirmedScope.current?.sourceConversationIds ?? confirmed?.ids ?? request?.sourceIds ?? session?.sourceConversationIds ?? [];
+    const ids = scopeUpdateIds ?? confirmedScope.current?.sourceConversationIds ?? confirmed?.ids ?? request?.sourceIds ?? session?.sourceConversationIds ?? [];
     const goal = confirmed?.goal ?? session?.goal ?? request?.goal ?? "";
     const scopeSources = ids.flatMap((id) => { const source = conversations.find((item) => item.id === id); return source ? [source] : []; });
-    return <FocusScopePicker goal={goal} mode={confirmedMode.current} sources={scopeSources} zh={zh} returningToReading={Boolean(session || proposal)} initialScope={confirmedScope.current} onConfigureAI={onSettings} onBack={session || proposal ? () => { const previous = proposal ?? session!; confirmedScope.current = previous.scope; confirmedMode.current = previous.mode; setPhase(proposal ? "preview" : "reading"); } : (nextGoal, nextMode) => { void saves.flush().catch(() => undefined); onReturnToWorkbench(nextGoal, ids, nextMode); }} onConfirm={(scope, nextGoal, nextMode) => { confirmedScope.current = scope; confirmedMode.current = nextMode; const included = scope.kind === "goal" ? ids.filter((id) => scope.blocks?.some((block) => block.conversationId === id)) : ids; void generate(nextGoal, included); }} />;
+    return <FocusScopePicker goal={goal} mode={confirmedMode.current} sources={scopeSources} zh={zh} returningToReading={Boolean(session || proposal)} initialScope={confirmedScope.current} updating={Boolean(scopeUpdateIds)} onConfigureAI={onSettings} onBack={session || proposal ? () => { setScopeUpdateIds(undefined); const previous = proposal ?? session!; confirmedScope.current = previous.scope; confirmedMode.current = previous.mode; setPhase(proposal ? "preview" : "reading"); } : (nextGoal, nextMode) => { void saves.flush().catch(() => undefined); onReturnToWorkbench(nextGoal, ids, nextMode); }} onConfirm={(scope, nextGoal, nextMode) => { setScopeUpdateIds(undefined); confirmedScope.current = scopeUpdateIds ? { ...scope, documentType: session?.scope?.documentType } : scope; confirmedMode.current = nextMode; const included = scope.kind === "goal" ? ids.filter((id) => scope.blocks?.some((block) => block.conversationId === id)) : ids; void generate(nextGoal, included, false, undefined, Boolean(scopeUpdateIds)); }} />;
   }
 
   if (phase === "sources") return <main className="focus-error-screen"><section className="focus-error-card"><h1>{zh ? "请先确认来源材料" : "Confirm sources first"}</h1><p>{zh ? "在工作台选择已同步的对话，再生成阅读预览。" : "Choose synced conversations on the Workbench before creating a preview."}</p><div className="focus-error-actions"><button className="primary" onClick={adjustSources}>{zh ? "返回工作台" : "Back to Workbench"}</button></div></section></main>;
   if (phase === "error") return <main className="focus-error-screen"><FocusGenerationErrorCard zh={zh} message={error} code={errorInfo?.code} progress={analysisProgress} diagnostics={errorDetails} onRetry={confirmed ? retryGeneration : undefined} onSources={adjustSources} onSettings={onSettings} onAuthorize={needsConnectionPermission ? authorize : undefined} status={status} /></main>;
   if (phase === "generating") {
-    const progress = <FocusGenerationProgress compact={Boolean(partialPreview)} zh={zh} mode={session?.mode ?? confirmedMode.current} scopeKind={lastGeneration.current?.complete ? "all" : confirmedScope.current?.kind} detail={analysisProgress} sourceCount={analysisProgress?.totalSources ?? confirmed?.ids.length ?? request?.sourceIds?.length ?? 0} retrying={retrying} onCancel={() => { controller.current?.abort(); setStatus(""); if (session) setPhase("reading"); else adjustSources(); }} />;
+    const progress = <FocusGenerationProgress compact={Boolean(partialPreview)} zh={zh} mode={session?.mode ?? confirmedMode.current} scopeKind={confirmedScope.current?.kind ?? (lastGeneration.current?.complete ? "all" : undefined)} detail={analysisProgress} sourceCount={analysisProgress?.totalSources ?? confirmed?.ids.length ?? request?.sourceIds?.length ?? 0} retrying={retrying} onCancel={() => { controller.current?.abort(); setStatus(""); if (session) setPhase("reading"); else adjustSources(); }} />;
     return <main className={`focus-wait${partialPreview ? " has-partial-preview" : ""}`}>
       {writerAsk&&!writerAsk.done&&writerAsk.questions.length ? <div className="focus-decision-gate"><DecisionSteps writing questions={writerAsk.questions} busy={!writerAsk.settle} ledger={writerAsk.ledger} zh={zh} onInteract={()=>setWriterAsk(ask=>ask&&!ask.touched?{...ask,touched:true}:ask)} onChange={change=>setWriterAsk(ask=>ask?{...ask,touched:true,ledger:change(ask.ledger)}:ask)} onDone={()=>{const ask=writerAskRef.current;if(ask?.settle)ask.settle();else setWriterAsk(current=>current?{...current,done:true}:current);}}/></div> : null}
       {decisionGate ? <div className="focus-decision-gate"><DecisionSteps ledger={decisionGate.original} zh={zh} onInteract={()=>setDecisionGate(gate=>gate&&!gate.touched?{...gate,touched:true}:gate)} onChange={change=>setDecisionGate(gate=>gate?{...gate,touched:true,ledger:change(gate.ledger)}:gate)} onDone={()=>decisionGate.resolve(decisionGate.ledger)}/></div> : null}
@@ -670,14 +691,14 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
           <div className="focus-preview-heading"><div className="focus-preview-title-row"><h1>{proposal.title}</h1></div></div>
           {projectPreview&&session?<div ref={setUpdateSummaryHost} className="focus-update-summary-slot"/>:null}
           {projectPreview&&!proposal.wikiKnowledge ? <WikiScopeNotice readerHost={focusedEvidence?null:scopeReaderHost} onRead={()=>{setFocusedEvidence(undefined);setSourceSelection(undefined);}} key={`scope:${proposal.id}`} session={proposal} zh={zh} busy={busy} onRetry={()=>void generate(proposal.goal,proposal.sourceConversationIds,false,undefined,false,undefined,false,{includeKeys:proposal.wikiScopeReview?.includeKeys??[],excludeKeys:proposal.wikiScopeReview?.excludeKeys??[],ignoredKeys:proposal.wikiScopeReview?.ignoredKeys??[]})} onSource={ref=>{setSourceSelection(undefined);setFocusedEvidence(ref);}} onApply={choice=>void applyScopeChoice(choice)}/> : null}
-          {projectPreview ? <PreviewContent raw={proposal.brief?.summary??proposal.title} zh={zh}><DocumentOverview session={proposal} zh={zh} preview onRead={() => undefined} onLocate={ref=>{setSourceSelection(undefined);setFocusedEvidence(ref);}} /></PreviewContent> : null}
+          {projectPreview ? <PreviewContent raw={proposal.brief?.summary??proposal.title} zh={zh}><DocumentOverview session={proposal} zh={zh} preview onRead={() => undefined} onLocate={(ref,options)=>{setSourceSelection(options);setFocusedEvidence(ref);}} /></PreviewContent> : null}
           {session ? <FocusUpdatePreview summaryHost={projectPreview?updateSummaryHost:undefined} previous={session} next={proposal} zh={zh} renderSection={renderChapter} pendingSectionId={wikiRewrite?.original.id}/> : <ol>{proposal.sections.map(chapter => <li key={chapter.id}>{renderChapter(chapter, <>{projectPreview?<WikiChapterBody section={chapter} zh={zh} statusInHeading/>:<ReaderGuide content={chapter.body} zh={zh} complete hideEvidenceMarkers/>}</>)}</li>)}</ol>}
           <div className="preview-action-feedback" aria-live="polite">{error ? <p role="alert">{generationFailureReason(error,errorInfo?.code,zh)}</p> : null}{status ? <><p role="status">{generationFailureReason(status,undefined,zh)}</p>{status.includes("失败") || status.startsWith("Save failed") ? <button disabled={busy} onClick={() => void savePreview(proposal).catch(() => undefined)}>{zh ? "重试保存" : "Retry save"}</button> : null}</> : null}</div>
           <div className="focus-preview-actions">{onDeleteVersion && !session ? <button className="focus-preview-delete" disabled={busy} onClick={() => { controller.current?.abort(); void saves.flush().catch(() => undefined).then(() => { onDeleteVersion(proposal.id); onClose(); }); }}>{zh ? "删除此预览" : "Delete this preview"}</button> : null}<button disabled={busy} onClick={adjustSources}>{zh ? "调整来源" : "Change sources"}</button><button className="primary" disabled={busy || Boolean(wikiRewrite)} onClick={() => void accept()}>{busy ? zh ? "处理中…" : "Working…" : projectPreview ? zh ? "保存并查看" : "Save and view" : zh ? "确认并开始" : "Confirm and start"}</button></div>
         </div>
       </div>
       {projectPreview ? <PreviewChapterLocator contentRef={previewBaseRef} zh={zh}/> : null}
-      {projectPreview && focusedEvidence ? <WorkspaceSourcePanel session={proposal} reference={focusedEvidence} references={sourceSelection?.references} sectionId={sourceSelection?.sectionId} quote={sourceSelection?.quote} claim={sourceSelection?.claim} conversationTitle={conversations.find(source => source.id === focusedEvidence.conversationId)?.title} zh={zh} onSelect={ref=>{setFocusedEvidence(ref);}} onClose={() => {setFocusedEvidence(undefined);setSourceSelection(undefined);}}/> : focusedEvidence ? <div ref={sourceOverlayRef} tabIndex={-1} className="project-source-reader" role="region" aria-label={zh ? "预览来源" : "Preview source"} onKeyDown={event => {if(event.key === "Escape"){setFocusedEvidence(undefined);event.stopPropagation();}}}><Suspense fallback={<p role="status">{zh ? "读取对话…" : "Loading conversation…"}</p>}>{conversations.find(source => source.id === focusedEvidence.conversationId) ? <FocusSourceReader conversation={conversations.find(source => source.id === focusedEvidence.conversationId)!} session={proposal} zh={zh} targetMessageId={focusedEvidence.messageId} targetExcerpt={focusedEvidence.excerpt} sourceVersionId={focusedEvidence.sourceVersionId} onBack={() => setFocusedEvidence(undefined)}/> : <><ReaderBackButton onClick={() => setFocusedEvidence(undefined)} label={zh ? "返回预览" : "Back to preview"}/><blockquote>{focusedEvidence.excerpt}</blockquote></>}</Suspense></div> : null}
+      {projectPreview && focusedEvidence ? <WorkspaceSourcePanel session={proposal} reference={focusedEvidence} references={sourceSelection?.references} sectionId={sourceSelection?.sectionId} quote={sourceSelection?.quote} tableTarget={sourceSelection?.tableTarget} claim={sourceSelection?.claim} conversationTitle={conversations.find(source => source.id === focusedEvidence.conversationId)?.title} zh={zh} onSelect={ref=>{setFocusedEvidence(ref);}} onClose={() => {setFocusedEvidence(undefined);setSourceSelection(undefined);}}/> : focusedEvidence ? <div ref={sourceOverlayRef} tabIndex={-1} className="project-source-reader" role="region" aria-label={zh ? "预览来源" : "Preview source"} onKeyDown={event => {if(event.key === "Escape"){setFocusedEvidence(undefined);event.stopPropagation();}}}><Suspense fallback={<p role="status">{zh ? "读取对话…" : "Loading conversation…"}</p>}>{conversations.find(source => source.id === focusedEvidence.conversationId) ? <FocusSourceReader conversation={conversations.find(source => source.id === focusedEvidence.conversationId)!} session={proposal} zh={zh} targetMessageId={focusedEvidence.messageId} targetExcerpt={focusedEvidence.excerpt} sourceVersionId={focusedEvidence.sourceVersionId} onBack={() => setFocusedEvidence(undefined)}/> : <><ReaderBackButton onClick={() => setFocusedEvidence(undefined)} label={zh ? "返回预览" : "Back to preview"}/><blockquote>{focusedEvidence.excerpt}</blockquote></>}</Suspense></div> : null}
     </main>;
   }
   if (!session) return <main className="focus-error-screen"><section className="focus-error-card" role="alert"><h1>{zh?"预览暂未就绪":"Preview is not ready"}</h1><p>{zh?"请返回工作台重新打开已保存的草稿。":"Return to the Workbench and reopen the saved draft."}</p><button type="button" onClick={()=>{recordUiFailure(new Error("preview-state-unavailable"),"preview-state");onClose();}}>{zh?"返回工作台":"Back to Workbench"}</button></section></main>;
@@ -697,9 +718,9 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   // Worked out only while the reader steps through problems; saved records, local and quick.
   const reviewIssues=docReview?.kind==="issues"&&session.mode==="work"?wikiBlockIssues(session):[];
   const startReview=(kind:"issues"|"evidence")=>{
-    const found=documentReview(session,zh);
-    if(kind==="issues"&&found.issues[0]){setDocReview({kind,index:0});move(found.issues[0].sectionId);}
-    if(kind==="evidence"&&found.unchecked[0]){setDocReview({kind,sectionId:found.unchecked[0].sectionId,revision:Date.now()});move(found.unchecked[0].sectionId);}
+    const first=kind==="issues"?wikiBlockIssues(session)[0]:documentEvidenceReview(session,zh)[0];
+    if(!first)return;
+    setDocReview(kind==="issues"?{kind,index:0}:{kind,sectionId:first.sectionId,revision:performance.now()});move(first.sectionId);
   };
   const stepIssue=(delta:number)=>{if(docReview?.kind!=="issues")return;const index=Math.max(0,Math.min(reviewIssues.length-1,docReview.index+delta)),next=reviewIssues[index];if(!next)return;setDocReview({kind:"issues",index});if(next.sectionId!==section.id)move(next.sectionId);};
   const currentIssue=docReview?.kind==="issues"?reviewIssues[Math.min(docReview.index,reviewIssues.length-1)]:undefined;
@@ -716,30 +737,68 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   const sourceConversation = conversations.find(item => item.id === (focusedEvidence?.conversationId ?? openSourceId));
   const sourceReadingOpen = Boolean(openSourceId || focusedEvidence && (session.mode !== "work" || fullSourceReader));
   const closeSourceReading = () => { if (fullSourceReader && session.mode === "work" && focusedEvidence && !sourceSelection?.reader) { setFullSourceReader(false); return; } setOpenSourceId(undefined); setFocusedEvidence(undefined); setFullSourceReader(false); };
-  const openEvidence = (ref:FocusEvidence, options?:WorkspaceEvidenceOptions) => { if(session.mode!=="work"){setFocusedEvidence(ref);return;} const top=bodyRef.current?.scrollTop; setFullSourceReader(Boolean(options?.reader)); setOpenSourceId(undefined); setSourcesOpen(false); setNotesOpen(false); setMobileNavigation(false); const chapter=!overview?session.sections.find(item=>item.id===session.activeSectionId):undefined; setSourceSelection(options?.sectionId||options?.points?options:chapter?{...options,sectionId:chapter.id,references:chapterEvidence(session,chapter)}:options); setFocusedEvidence(ref); window.requestAnimationFrame(()=>{if(bodyRef.current&&top!==undefined)bodyRef.current.scrollTop=top;}); };
+  const openEvidence = (ref:FocusEvidence, options?:WorkspaceEvidenceOptions) => { if(session.mode!=="work"){setFocusedEvidence(ref);return;} const top=bodyRef.current?.scrollTop; setFullSourceReader(Boolean(options?.reader)); setOpenSourceId(undefined); setSourcesOpen(false); setNotesOpen(false); setMobileNavigation(false); const chapter=!overview?session.sections.find(item=>item.id===session.activeSectionId):undefined; setSourceSelection(chapter?{...options,sectionId:options?.sectionId??chapter.id,references:options?.references??chapterEvidence(session,chapter)}:options); setFocusedEvidence(ref); window.requestAnimationFrame(()=>{if(bodyRef.current&&top!==undefined)bodyRef.current.scrollTop=top;}); };
   const originalPanelOpen = Boolean(focusedEvidence && session.mode === "work" && !sourceReadingOpen);
-  // A sentence's status is its mark: switching it marks every claim of that sentence in its chapter and records the
-  // verdict on the units it states, so the next organizing and writing keep it. The prose is not touched.
+  // Let the sidebar acknowledge a verdict before rebuilding the reading projection.
+  const prepared = readingRefresh && sameProjectReadingInputs(readingRefresh.basis, session) ? readingRefresh : undefined;
+  const readingSession = prepared ? prepared.projection ? session : prepared.previous
+    : originalPanelOpen && deferredSession?.id === session.id && deferredSession.activeSectionId === session.activeSectionId ? deferredSession : session;
+  const readingSection = readingSession === session ? section : readingSession.sections.find(item => item.id === section.id) ?? section;
   // A workspace check started from the overview goes on to the next chapter with points to look at.
   const nextReviewChapter = (() => {
     if (docReview?.kind !== "evidence" || docReview.sectionId !== section.id) return undefined;
-    const chapters = documentReview(session, zh).unchecked, at = chapters.findIndex(item => item.sectionId === section.id), following = chapters[at + 1];
+    const chapters = documentEvidenceReview(session,zh).filter(item=>item.sectionId!==section.id);
+    const following = chapters[0];
     if (!following) return undefined;
     const page = session.sections.find(item => item.id === following.sectionId);
-    return { label: zh ? `下一章：${page?.wikiDisplayTitle || page?.title || ""}（还有 ${chapters.length - at - 1} 章）` : `Next chapter: ${page?.wikiDisplayTitle || page?.title || ""} (${chapters.length - at - 1} left)`,
-      onNext: () => { setDocReview({ kind: "evidence", sectionId: following.sectionId, revision: Date.now() }); move(following.sectionId); } };
+    return { label: zh ? `下一章：${page?.wikiDisplayTitle || page?.title || ""}（还有 ${chapters.length} 章）` : `Next chapter: ${page?.wikiDisplayTitle || page?.title || ""} (${chapters.length} left)`,
+      onNext: () => { setDocReview({ kind: "evidence", sectionId: following.sectionId, revision: performance.now() }); move(following.sectionId); } };
   })();
-  const switchHolder = (point: EvidencePoint, holder: WikiHolder) => {
+  const switchHolder = (point: EvidencePoint, holder: WikiHolder|undefined) => {
+    const current = sessionRef.current;
+    if (!current || busy) return false;
     const sectionId = sourceSelection?.sectionId ?? point.key.slice(0, point.key.lastIndexOf(":"));
-    const page = session.sections.find(item => item.id === sectionId);
-    const matching = page?.claims?.filter(claim => claim.text === point.claim) ?? [];
-    if (!page || !matching.length) return;
+    const savedPage = current.sections.find(item => item.id === sectionId);
+    if(!savedPage||savedPage.userEdited||savedPage.origin)return false;
+    const refs=new Set(point.references.map(ref=>ref.id));
+    const exactOf=(page:FocusSection)=>page.claims?.filter(claim=>(claim.text===point.claim||claim.formulations?.includes(point.claim))&&claim.evidenceIds.some(id=>refs.has(id)))??[];
+    const page=exactOf(savedPage).length?savedPage:restoreWikiSourceNegation(savedPage,current);
+    const exact=exactOf(page);
+    const bound=exact.length?[]:page.claims?.filter(claim=>claim.unitIds?.length&&claim.unitIds.length===point.unitIds?.length
+      && claim.unitIds.every(id=>point.unitIds!.includes(id))&&claim.evidenceIds.some(id=>refs.has(id)))??[];
+    const sameQuote=exact.length||bound.length?[]:page.claims?.filter(claim=>claim.quote===point.quote&&claim.evidenceIds.some(id=>refs.has(id)))??[];
+    const matching=exact.length?exact:bound.length===1?bound:sameQuote.length===1?sameQuote:[];
+    const evidenceIds=current.evidence.filter(ref=>refs.has(ref.id)).map(ref=>ref.id);
+    if(!matching.length&&!evidenceIds.length)return false;
     const verdict = holder === "decided" ? "confirmed" as const : holder === "open" ? "open" as const : holder === "earlier" ? "rejected" as const : undefined;
+    const changed=holder!==undefined&&(holder!==point.holder||matching.some(claim=>claim.holder!==holder));
     const unitIds = [...new Set(matching.flatMap(claim => claim.unitIds ?? []))];
-    // Answered: the sentence keeps its new status and is not asked about again.
-    update({ sections: session.sections.map(item => item.id !== page.id ? item : { ...item, claims: item.claims?.map(claim => claim.text === point.claim ? { ...claim, holder, holderMark: true, userDecided: holder === "decided", checked: true } : claim) }),
-      ...(unitIds.length && session.wikiKnowledge ? { wikiKnowledge: withDecision(session.wikiKnowledge, unitIds, verdict, undefined, [point.claim]) } : {}) });
+    const answer={holder,holderMark:Boolean(holder),userDecided:holder==="decided",checked:true};
+    const claims=matching.length?page.claims?.map(claim=>matching.includes(claim)?{...claim,...(changed?answer:{checked:true})}:claim)
+      : [...page.claims??[],{text:point.claim,quote:point.quote??point.reference.excerpt,evidenceIds,...answer}];
+    const next = update({ sections: current.sections.map(item => item.id !== page.id ? item : { ...page, claims }),
+      ...(changed&&unitIds.length&&current.wikiKnowledge ? { wikiKnowledge: withDecision(current.wikiKnowledge, unitIds, verdict, undefined, [point.claim]) } : {}) });
     setSourceSelection(value => value && { ...value, points: value.points?.map(item => item.key === point.key ? { ...item, holder, holderMark: true, checked: true } : item) });
+    if (next?.wikiKnowledge?.draft) {
+      readingRefreshAbort.current?.abort();
+      const abort = new AbortController();
+      readingRefreshAbort.current = abort;
+      setReadingRefresh({basis:next,previous:readingSession});
+      const timer=window.setTimeout(()=>{
+        if(abort.signal.aborted)return;
+        const pending=refreshWikiReading(next,abort.signal);
+        if(!pending){setReadingRefresh(undefined);return;}
+        void pending.then(projection=>{if(!abort.signal.aborted)setReadingRefresh(projection?{basis:next,projection}:undefined);});
+      },60);
+      abort.signal.addEventListener("abort",()=>window.clearTimeout(timer),{once:true});
+    }
+    return Boolean(next);
+  };
+  const moveEvidencePoint = (index: number) => {
+    const point = sourceSelection?.points?.[index];
+    if (!point) return;
+    setFocusedEvidence(point.reference);
+    setSourceSelection(current => current && { ...current, references: point.references, quote: point.quote, claim: point.claim, pointIndex: index });
   };
   // The full Reader keeps the chapter's evidence order: previous / next evidence, then back to the chapter.
   const readerEvidenceSteps = ((): ReaderEvidenceSteps | undefined => {
@@ -767,7 +826,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       <button type="button" role="tab" id="project-sources-tab" tabIndex={navigationTab === "sources" ? 0 : -1} aria-controls="project-navigation-list" aria-selected={navigationTab === "sources"} onClick={() => setNavigationTab("sources")}>{zh ? "来源" : "Sources"}<small>{session.sourceConversationIds.length}</small></button>
     </div>
     <div id="project-navigation-list" role="tabpanel" aria-labelledby={navigationTab === "chapters" ? "project-chapters-tab" : "project-sources-tab"} className="project-navigation-list">
-      {navigationTab === "chapters" ? session.mode === "work" ? <ProjectWikiNavigation key={session.id} session={session} activeId={!overview ? section.id : undefined} zh={zh} onRead={move} adjusting={wikiAdjusting} onDone={() => setWikiAdjusting(false)} onCollapse={(group, collapsed) => update({ wikiCollapsedGroups: { ...sessionRef.current?.wikiCollapsedGroups, [group]: collapsed } })} onEdit={saveWikiPage} onMove={saveWikiOrder} onCreateGroup={saveWikiGroup} disabled={busy||editing} onDropPage={dropWikiPage} /> : session.sections.map((item, index) => <button key={item.id} className="outline-item" aria-current={!overview && item.id === section.id ? "step" : undefined} onClick={() => move(item.id)}><span>{session.mode === "work" ? index + 1 : session.completedSectionIds.includes(item.id) ? "✓" : session.reviewNeeds?.[item.id] ? "?" : index + 1}</span><strong>{item.title}{session.mode !== "work" && session.reviewNeeds?.[item.id] ? <small className="outline-review-need">{zh ? "待复习" : "Revisit"} · {session.reviewNeeds[item.id]}</small> : null}</strong></button>) : <ProjectSourceList ids={session.sourceConversationIds} conversations={conversations} fallbackTitle={id => session.evidence.find(item => item.conversationId === id)?.title} zh={zh} onOpen={id => { void saves.flush().catch(() => undefined); setOpenSourceId(id); }} />}
+      {navigationTab === "chapters" ? session.mode === "work" ? <ProjectWikiNavigation key={session.id} session={readingSession} activeId={!overview ? section.id : undefined} zh={zh} onRead={move} adjusting={wikiAdjusting} onDone={() => setWikiAdjusting(false)} onCollapse={(group, collapsed) => update({ wikiCollapsedGroups: { ...sessionRef.current?.wikiCollapsedGroups, [group]: collapsed } })} onEdit={saveWikiPage} onMove={saveWikiOrder} onCreateGroup={saveWikiGroup} disabled={busy||editing} onDropPage={dropWikiPage} /> : session.sections.map((item, index) => <button key={item.id} className="outline-item" aria-current={!overview && item.id === section.id ? "step" : undefined} onClick={() => move(item.id)}><span>{session.mode === "work" ? index + 1 : session.completedSectionIds.includes(item.id) ? "✓" : session.reviewNeeds?.[item.id] ? "?" : index + 1}</span><strong>{item.title}{session.mode !== "work" && session.reviewNeeds?.[item.id] ? <small className="outline-review-need">{zh ? "待复习" : "Revisit"} · {session.reviewNeeds[item.id]}</small> : null}</strong></button>) : <ProjectSourceList ids={session.sourceConversationIds} conversations={conversations} fallbackTitle={id => session.evidence.find(item => item.conversationId === id)?.title} zh={zh} onOpen={id => { void saves.flush().catch(() => undefined); setOpenSourceId(id); }} />}
     </div>
     {navigationTab === "sources" && session.mode === "work" && session.scope?.kind!=="goal" ? <div className="project-source-management"><button type="button" className="outline-item" disabled={busy} onClick={() => setSourcePickerOpen(true)}><FileText size={18} aria-hidden="true" /><strong>{zh ? "添加对话" : "Add conversations"}</strong></button></div> : null}
     {session.mode !== "work" ? <ReaderProgress zh={zh} completed={session.completedSectionIds.length} total={session.sections.length} work={false} /> : null}
@@ -795,9 +854,9 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       {session.mode!=="review"?<SourceUpdateNotice session={session} changes={changes} conversations={conversations} zh={zh} onUpdate={updateProject} />:null}
 
 
-      {overview ? session.mode === "work" ? ledgerPage && session.wikiKnowledge?.organization ? <KnowledgeLedger session={session} zh={zh} onLocate={openEvidence} onApplyDecisions={updateProject}/> : <DocumentOverview onReview={startReview} onRename={name=>{setSpaceName(name);setRenamingProject(true);}} title={savedProjectName || space?.title || space?.name} key={session.id} session={session} zh={zh} onLocate={openEvidence} onRead={move} onSources={()=>{setNavigationTab("sources");setMobileNavigation(true);}} onMaintain={async projectMaintenance => { const current = sessionRef.current; if (current) await persistRoute({ ...current, projectMaintenance, updatedAt: Date.now() }); }} scope={session.wikiKnowledge?undefined:<WikiScopeNotice readerHost={focusedEvidence||sourceReadingOpen?null:scopeReaderHost} onRead={()=>{setFocusedEvidence(undefined);setSourceSelection(undefined);setFullSourceReader(false);}} key={`scope:${session.id}`} session={session} zh={zh} busy={busy} onRetry={()=>void generate(session.goal,session.sourceConversationIds,false,undefined,false,undefined,false,{includeKeys:session.wikiScopeReview?.includeKeys??[],excludeKeys:session.wikiScopeReview?.excludeKeys??[],ignoredKeys:session.wikiScopeReview?.ignoredKeys??[]})} onSource={openEvidence} onApply={choice=>void applyScopeChoice(choice)}/>}/>
+      {overview ? session.mode === "work" ? ledgerPage && session.wikiKnowledge?.organization ? <KnowledgeLedger session={session} pageReading={wikiPages} zh={zh} onLocate={openEvidence} onApplyDecisions={updateProject}/> : <DocumentOverview reviewSession={session} onReview={startReview} onRename={name=>{setSpaceName(name);setRenamingProject(true);}} title={savedProjectName || space?.title || space?.name} key={session.id} session={wikiPages === undefined ? readingSession : session} pageReading={wikiPages} zh={zh} onLocate={openEvidence} onRead={move} onSources={()=>{setNavigationTab("sources");setMobileNavigation(true);}} onMaintain={async projectMaintenance => { const current = sessionRef.current; if (current) await persistRoute({ ...current, projectMaintenance, updatedAt: Date.now() }); }} scope={session.wikiKnowledge?undefined:<WikiScopeNotice readerHost={focusedEvidence||sourceReadingOpen?null:scopeReaderHost} onRead={()=>{setFocusedEvidence(undefined);setSourceSelection(undefined);setFullSourceReader(false);}} key={`scope:${session.id}`} session={session} zh={zh} busy={busy} onRetry={()=>void generate(session.goal,session.sourceConversationIds,false,undefined,false,undefined,false,{includeKeys:session.wikiScopeReview?.includeKeys??[],excludeKeys:session.wikiScopeReview?.excludeKeys??[],ignoredKeys:session.wikiScopeReview?.ignoredKeys??[]})} onSource={openEvidence} onApply={choice=>void applyScopeChoice(choice)}/>}/>
        : <><FocusOverview showSourceNavigation={false} route={<ProjectUnderstanding adaptive onDelete={deleteUnderstandingCard} onAnalyze={session.mode==="review"?undefined:() => void structureAnalysis.analyze()} analyzing={structureAnalysis.running} analysisError={structureAnalysis.error} readingRoute={<FocusUnderstandingPath sections={session.sections} activeId={section.id} zh={zh} onRead={move} onSave={draft => saveRoute(draft, true)} onMove={moveRoute} />} session={session} zh={zh} onRead={move} onLocate={openEvidence} onSave={async projectUnderstanding => { const current = sessionRef.current; if (!current) throw new Error("No reading result"); await persistRoute({ ...current, projectUnderstanding, updatedAt: Date.now() }); }} />} session={session} conversations={conversations} zh={zh} onRead={move} onLocate={openEvidence} onOpenSource={(id) => { void saves.flush().catch(() => undefined); setOpenSourceId(id); }} onAdjustScope={session.mode!=="review" && session.scope?.kind === "goal" ? () => setPhase("scope") : undefined} onAnalyze={session.mode==="review"?undefined:() => void generate(session.goal, session.sourceConversationIds, false, undefined, true)} >{session.brief ? <FocusBrief hideOpenQuestions session={session} zh={zh} onOpenEvidence={setFocusedEvidence} onChange={(brief) => update({ brief, briefUserEdited: true })} /> : null}</FocusOverview></> : <>
-      <WikiDocument scrollRef={bodyRef} key={section.id} issue={currentIssue&&currentIssue.sectionId===section.id?{issue:currentIssue,index:reviewIssues.indexOf(currentIssue),total:reviewIssues.length}:undefined} onIssueStep={stepIssue} onIssueClose={()=>setDocReview(undefined)} autoReview={docReview?.kind==="evidence"&&docReview.sectionId===section.id?docReview.revision:undefined} onAutoReviewed={()=>setDocReview(value=>value?.kind==="evidence"?undefined:value)} headingTarget={wikiHeadingTarget?.id===section.id?wikiHeadingTarget:undefined} section={section} session={session} zh={zh} updatedConversationIds={changes.filter(change => change.added || change.changed || change.removed || change.reordered).map(change => change.conversationId)} structure={chapterStructure} editor={chapterEditor} onEdit={startEditing} onLocate={openEvidence} onCurrent={() => setOverview(true)} />
+      <WikiDocument scrollRef={bodyRef} key={section.id} issue={currentIssue&&currentIssue.sectionId===section.id?{issue:currentIssue,index:reviewIssues.indexOf(currentIssue),total:reviewIssues.length}:undefined} onIssueStep={stepIssue} onIssueClose={()=>setDocReview(undefined)} pendingReview={session.mode==="work"?pendingWikiEvidence(section,session,zh):undefined} autoReview={docReview?.kind==="evidence"&&docReview.sectionId===section.id&&!docReview.opened?docReview.revision:undefined} onAutoReviewed={()=>setDocReview(value=>value?.kind==="evidence"?{...value,opened:true}:value)} headingTarget={wikiHeadingTarget?.id===section.id?wikiHeadingTarget:undefined} section={readingSection} session={readingSession} readingProjection={prepared?.projection} toolsHost={originalPanelOpen ? wikiToolsHost : null} zh={zh} updatedConversationIds={changes.filter(change => change.added || change.changed || change.removed || change.reordered).map(change => change.conversationId)} structure={chapterStructure} editor={chapterEditor} onEdit={target=>{setFocusedEvidence(undefined);setSourceSelection(undefined);startEditing(target);}} onLocate={openEvidence} onCurrent={() => setOverview(true)} />
 
 
       {session.mode !== "work" && session.completedSectionIds.length === session.sections.length ? <section className="focus-completed"><strong>{zh ? "本次阅读已完成" : "Review complete"}</strong></section> : null}
@@ -818,8 +877,8 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
     {followUpOpen ? <FocusFollowUp zh={zh} title={revisionScope === "whole" ? session.title : section.title} instruction={instruction} scope={revisionScope} chapters={session.mode==="work"?session.sections.map(chapter=>({id:chapter.id,title:chapter.wikiDisplayTitle||chapter.title,disabled:Boolean(chapter.origin||chapter.userEdited)})):undefined} currentId={section.id} selectedIds={revisionIds} onSelection={setRevisionIds} onInstruction={setInstruction} onScope={setRevisionScope} onClose={() => setFollowUpOpen(false)} onSubmit={() => { setFollowUpOpen(false); if(session.mode==="work")void reviseProjectWiki();else void generate(session.goal, session.sourceConversationIds, true); }}  /> : null}
     </div>
     {exportOpen ? <Suspense fallback={null}><ProjectExportDialog session={session} zh={zh} onClose={()=>setExportOpen(false)}/></Suspense> : null}
-    {sourcePickerOpen ? <ProjectSourcePicker conversations={conversations} existingIds={session.sourceConversationIds} suggestedIds={session.sidecarConversationIds} zh={zh} onSync={()=>{setSourcePickerOpen(false);void saves.flush().then(()=>onReturnToWorkbench(session.goal,[...new Set([...session.sourceConversationIds,...session.sidecarConversationIds??[]])],session.mode)).catch(()=>setError(zh?"保存失败，请重试。":"Save failed; retry."));}} onClose={() => setSourcePickerOpen(false)} onConfirm={ids => { setSourcePickerOpen(false); void generate(session.goal, [...session.sourceConversationIds, ...ids], false, undefined, true); }} /> : null}
-    {originalPanelOpen && focusedEvidence ? <WorkspaceSourcePanel conversationTitle={sourceConversation?.title} session={session} reference={focusedEvidence} references={sourceSelection?.references} sectionId={sourceSelection?.sectionId} quote={sourceSelection?.quote} claim={sourceSelection?.claim} points={sourceSelection?.points} pointIndex={sourceSelection?.pointIndex} onPoint={index=>{const points=sourceSelection?.points,point=points?.[index];if(point)openEvidence(point.reference,{references:point.references,quote:point.quote,claim:point.claim,points,pointIndex:index,mode:sourceSelection?.mode});}} zh={zh} onSelect={ref=>{setFocusedEvidence(ref);}} onClose={()=>{setFocusedEvidence(undefined);setSourceSelection(undefined);}} onReader={()=>setFullSourceReader(true)} onHolder={switchHolder} next={nextReviewChapter} mode={sourceSelection?.mode} onEditClaim={point=>{setFocusedEvidence(undefined);setSourceSelection(undefined);startEditing(point.claim);}} /> : null}
+    {sourcePickerOpen ? <ProjectSourcePicker conversations={conversations} existingIds={session.sourceConversationIds} suggestedIds={session.sidecarConversationIds} zh={zh} onSync={()=>{setSourcePickerOpen(false);void saves.flush().then(()=>onReturnToWorkbench(session.goal,[...new Set([...session.sourceConversationIds,...session.sidecarConversationIds??[]])],session.mode)).catch(()=>setError(zh?"保存失败，请重试。":"Save failed; retry."));}} onClose={() => setSourcePickerOpen(false)} onConfirm={ids => { setSourcePickerOpen(false); const sourceIds = [...session.sourceConversationIds, ...ids]; if (session.scope?.kind === "goal") { setScopeUpdateIds(sourceIds); setPhase("scope"); } else void generate(session.goal, sourceIds, false, undefined, true); }} /> : null}
+    {originalPanelOpen && focusedEvidence ? <WorkspaceSourcePanel conversationTitle={sourceConversation?.title} session={readingSession} reference={focusedEvidence} references={sourceSelection?.references} sectionId={sourceSelection?.sectionId} quote={sourceSelection?.quote} tableTarget={sourceSelection?.tableTarget} claim={sourceSelection?.claim} points={sourceSelection?.points} pointIndex={sourceSelection?.pointIndex} onPoint={moveEvidencePoint} zh={zh} onSelect={ref=>{setFocusedEvidence(ref);}} onClose={()=>{setFocusedEvidence(undefined);setSourceSelection(undefined);setDocReview(value=>value?.kind==="evidence"?undefined:value);}} onReader={()=>setFullSourceReader(true)} onHolder={overview?undefined:switchHolder} next={nextReviewChapter} mode={sourceSelection?.mode} locationRevision={sourceSelection?.locationRevision} onToolsHost={!overview ? setWikiToolsHost : undefined} onEditClaim={point=>{setFocusedEvidence(undefined);setSourceSelection(undefined);startEditing(point.claim);}} /> : null}
     
     {sourceReadingOpen && sourceConversation ? <div ref={sourceOverlayRef} tabIndex={-1} className="project-source-reader" role="region" aria-label={zh ? "原文阅读" : "Original discussion reader"} onKeyDown={event => { if (event.key === "Escape") { closeSourceReading(); event.stopPropagation(); } }}><Suspense fallback={<p role="status">{zh ? "读取对话…" : "Loading conversation…"}</p>}><FocusSourceReader key={sourceConversation.id} conversation={sourceConversation} session={session} zh={zh} targetMessageId={focusedEvidence?.messageId} targetExcerpt={focusedEvidence?.excerpt} sourceVersionId={focusedEvidence?.sourceVersionId} onBack={closeSourceReading} evidenceSteps={readerEvidenceSteps} /></Suspense></div> : null}
     {sourceReadingOpen && !sourceConversation ? <div ref={sourceOverlayRef} tabIndex={-1} role="complementary" onKeyDown={event => { if (event.key === "Escape") { closeSourceReading(); event.stopPropagation(); } }} className="focus-context-panel" aria-label={zh ? "当时的问题与上下文" : "Original question and context"}><div className="focus-context-header"><ReaderBackButton onClick={closeSourceReading} label={zh ? "返回阅读原位置" : "Back to Brief / reading"} /><strong>{focusedEvidence?.title}</strong></div>{focusedEvidence ? <FocusDiscussion key={focusedEvidence.id} evidence={[focusedEvidence]} focusMessageId={focusedEvidence.messageId} focusExcerpt={focusedEvidence.excerpt} zh={zh} /> : <p>{zh ? "该来源已不在本地。" : "This source is no longer available locally."}</p>}</div> : null}

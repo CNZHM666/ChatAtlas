@@ -7,6 +7,13 @@
 [简体中文](../../CHANGELOG.md) · **English**
 
 
+## 0.1.5 — Alpha
+
+- Export the overview and selected Wiki chapters as one Markdown document, with optional reference examples.
+- Improved evidence review, status filters, and source navigation, including direct links to original tables.
+- The overview includes a source-linked product timeline. The overview and ledger share background computation to speed up switching.
+- Wiki recovery splits reads against the full request budget, reuses successful results, and flags sources still awaiting review.
+
 ## 0.1.4 — Early Preview
 
 - Chrome and Edge share one ZIP, with a direct download and three installation steps in the README.

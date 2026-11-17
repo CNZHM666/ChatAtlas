@@ -3,6 +3,7 @@ import { replaceParagraph } from "../shared/wiki-body-text";
 import { claimSupported } from "./wiki-claim-support";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { rowFields } from "../shared/wiki-row-sentence";
+import { wikiHistoricalTransition } from "../shared/wiki-history-layout";
 
 const bare = (text: string) => text.toLowerCase().replace(/[\s*`"'“”‘’]/gu, "").replace(/[.。]$/u, "");
 
@@ -703,16 +704,18 @@ function separatedEarlier(claim: NonNullable<WikiDraftChapter["paragraphs"][numb
 export function earlierVersionsLast(chapters: WikiDraftChapter[], statusOf: (id: string) => string | undefined, zh: boolean, unitOf: (id: string) => WikiKnowledgeUnit | undefined = () => undefined): number {
   const heading = zh ? "早先版本" : "Earlier versions";
   let moved = 0;
-  const replaced = (ids: string[]) => ids.length > 0 && ids.some(id => statusOf(id) === "history");
+  const replaced = (ids: string[]) => ids.length > 0 && ids.every(id => statusOf(id) === "history");
   for (const chapter of chapters) {
     const earlier: WikiDraftChapter["paragraphs"] = [];
     chapter.paragraphs = chapter.paragraphs.flatMap(paragraph => {
       if (paragraph.subtopic === heading) return [paragraph];
       const claims = paragraph.claims ?? [];
       const sourceBlock = /^\*[^*\n]+\*\n\n/u.test(paragraph.text.trimStart());
+      const describedChange = wikiHistoricalTransition(paragraph.text) && paragraph.unitIds.some(id => statusOf(id) === "history")
+        && paragraph.unitIds.every(id => statusOf(id) === "history" || statusOf(id) === "confirmed");
       // A source block whose every carrier was replaced, or a paragraph each claim of which tells a replaced point.
       const whole = sourceBlock ? paragraph.unitIds.length > 0 && paragraph.unitIds.every(id => statusOf(id) === "history")
-        : !/^\s*\|/u.test(paragraph.text) && claims.length > 0 && claims.every(claim => replaced(claim.unitIds)) && paragraph.unitIds.every(id => ["history", "confirmed"].includes(statusOf(id) ?? ""));
+        : !/^\s*\|/u.test(paragraph.text) && (describedChange || claims.length > 0 && claims.every(claim => replaced(claim.unitIds)) && replaced(paragraph.unitIds));
       if (whole) {
         chapter.body = chapter.body.includes(`\n\n${paragraph.text}`) ? chapter.body.replace(`\n\n${paragraph.text}`, () => "") : replaceParagraph(chapter.body, paragraph.text, () => "");
         earlier.push({ ...paragraph, subtopic: heading });

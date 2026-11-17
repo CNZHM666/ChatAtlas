@@ -501,7 +501,7 @@ const CHOSEN_OVER = /(?:而非|而不是|\binstead of|\brather than)(?:仅|只|�
  * "而非所有多 AI 用户" and "而非隐藏默认" are contrasts. */
 const MECHANISM = /环境变量|服务端|服务器|后端|本地|云端|数据库|存储|localStorage|sessionStorage|IndexedDB|SQLite|[A-Z][A-Za-z]{2,}/u;
 /** An earlier statement saying not to use something states a rule, not the approach left. */
-const REFUSES_ANY = /不依赖|不使用|不直接|不显示|不得|无需|避免|禁止|严禁|而非|而不是|不再|\b(?:not|never|avoid|instead of|rather than)\b/iu, SWITCH_TERMS = 3, SWITCH_COVER = .6;
+const REFUSES_ANY = /不依赖|不使用|不直接|不显示|不得|无需|避免|禁止|严禁|而非|而不是|不再|替代|取代|\b(?:not|never|avoid|instead of|rather than|replace(?:s|d)?)\b/iu, SWITCH_TERMS = 3, SWITCH_COVER = .6;
 export function explicitSwitches(organization: WikiKnowledgeOrganization, units: Map<string, WikiKnowledgeUnit>, report: Record<string, number> = {}): WikiKnowledgeOrganization {
   const live = organization.subjects.flatMap(subject => subject.unitIds).map(id => units.get(id)).filter((unit): unit is WikiKnowledgeUnit => Boolean(unit) && !unit!.about);
   const related = new Set(organization.relations.flatMap(relation => [`${relation.older}|${relation.newer}`, `${relation.newer}|${relation.older}`]));
@@ -509,7 +509,7 @@ export function explicitSwitches(organization: WikiKnowledgeOrganization, units:
   for (const choice of live) {
     // A choice of one approach over another ("确定采用 X，而非 Y"), not a contrast ("定位为……而非单纯的历史搜索").
     const match = choice.statement.match(CHOSEN_OVER), left = match?.[1]?.trim(), leftTerms = left ? [...knowledgeTerms(left)] : [];
-    if (!match || !left || leftTerms.length < SWITCH_TERMS || !MECHANISM.test(left) || !CHOOSES.test(choice.statement.slice(0, match.index))) continue;
+    if (choice.evidence.pasted || !match || !left || leftTerms.length < SWITCH_TERMS || !MECHANISM.test(left) || !CHOOSES.test(choice.statement.slice(0, match.index))) continue;
     for (const earlier of live) {
       if (earlier === choice || !wikiSaidLater(choice, earlier) || related.has(`${earlier.id}|${choice.id}`) || REFUSES_ANY.test(earlier.statement)) continue;
       const theirs = knowledgeTerms(earlier.statement);

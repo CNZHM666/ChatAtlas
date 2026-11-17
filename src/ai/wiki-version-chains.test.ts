@@ -81,14 +81,18 @@ it("reuses an unchanged version check and asks again when a user verdict changes
   expect(requests).toBe(2);
 });
 
-it("reads statuses from the chains: earlier holds no longer, open stays open until the user chooses", () => {
+it("checks history separately from a chain's ordering and preserves the user's explicit choices", () => {
   const units = [unit("now", "首屏100%为AI Agent驾驶舱。"), unit("old", "首屏应改为状态询问结构。"), unit("mine", "中间加号按钮直接跳转AI界面。", { role: "user", kind: "plan" }), unit("theirs", "中央按钮改为守护入口。")];
   const topics: WikiTopicChain[] = [{ id: "t1", name: "首屏", current: ["now"], earlier: ["old"], open: false }, { id: "t2", name: "中央按钮", current: ["mine", "theirs"], earlier: [], open: true }];
   const statuses = wikiUnitStatuses(units, { relations: [], topics });
-  expect([statuses.get("old"), statuses.get("mine"), statuses.get("theirs")]).toEqual(["history", "open", "open"]);
+  expect([statuses.get("old"), statuses.get("mine"), statuses.get("theirs")]).toEqual(["proposal", "open", "open"]);
   const chosen = wikiUnitStatuses(units, { relations: [], topics }, { mine: { verdict: "confirmed", at: 1 } } as unknown as WikiKnowledgeLedger["decisions"]);
-  expect([chosen.get("mine"), chosen.get("theirs")]).toEqual(["confirmed", "history"]);
-  const version = wikiUnitVersion("old", topics, statuses, id => ({ statement: id === "now" ? "首屏100%为AI Agent驾驶舱。" : "", chapter: "系统架构" }));
+  expect([chosen.get("mine"), chosen.get("theirs")]).toEqual(["confirmed", "proposal"]);
+  expect(wikiUnitVersion("old",topics,statuses,()=>undefined)).toBeUndefined();
+  const superseded = wikiUnitStatuses(units, { relations: [{kind:"replaces",older:"old",newer:"now",status:"resolved",evidence:"确定首屏改为 AI Agent 驾驶舱。"}], topics }, {
+    now: {verdict:"confirmed",at:3},
+  });
+  const version = wikiUnitVersion("old", topics, superseded, id => ({ statement: id === "now" ? "首屏100%为AI Agent驾驶舱。" : "", chapter: "系统架构" }));
   expect(version).toEqual({ topic: "首屏", is: "earlier", holdsNow: [{ statement: "首屏100%为AI Agent驾驶舱。", chapter: "系统架构" }] });
   const notes = differingPlans(units, id => statuses.get(id), true, topics);
   expect(notes[0]).toEqual({ unitIds: ["mine", "theirs"], note: "中央按钮：你提议中间加号按钮直接跳转AI界面；AI 建议中央按钮改为守护入口。" });

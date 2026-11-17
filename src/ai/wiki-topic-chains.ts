@@ -165,8 +165,11 @@ export async function wikiTopicChains(organization: WikiKnowledgeOrganization, l
 export function wikiUnitVersion(id: string, topics: WikiTopicChain[] | undefined, statuses: Map<string, WikiUnitStatus>, describe: (id: string) => { statement: string; chapter?: string } | undefined) {
   const topic = topics?.find(item => item.current.includes(id) || item.earlier.includes(id));
   if (!topic) return undefined;
+  const status = statuses.get(id);
+  if (status !== "history" && status !== "confirmed" && status !== "open" && status !== "contested") return undefined;
   const settledBy = [...topic.current, ...topic.earlier].filter(other => statuses.get(other) === "confirmed");
-  const is = statuses.get(id) === "history" || topic.earlier.includes(id) && !settledBy.includes(id) || settledBy.length && !settledBy.includes(id) && !topic.current.includes(id) ? "earlier" : topic.open && !settledBy.length ? "open" : "current";
-  const holdsNow = (settledBy.length ? settledBy : topic.current).filter(other => other !== id).flatMap(other => describe(other) ?? []).slice(0, 2);
+  const is = status === "history" ? "earlier" : status === "confirmed" ? "current" : "open";
+  const candidates = is === "earlier" ? settledBy : topic.current.filter(other => statuses.get(other) !== "history");
+  const holdsNow = candidates.filter(other => other !== id).flatMap(other => describe(other) ?? []).slice(0, 2);
   return { topic: topic.name, is, ...(is !== "current" && holdsNow.length ? { [is === "open" ? "otherVersions" : "holdsNow"]: holdsNow } : {}) };
 }

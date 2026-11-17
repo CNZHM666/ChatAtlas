@@ -158,6 +158,8 @@ export interface ProjectMaintenance {
   nextMatter?: {id:string;type:"question"|"decision"|"boundary"};
   evolutionEvents?: Record<string, { hidden?:boolean; updatedAt:number; edited?:ProjectEvolutionEdit; personal?:boolean }>;
   overview?: string;
+  /** The plan the user wants readers to follow, independent of discussion and implementation status. */
+  currentPlan?: string;
   modules?: Record<string, ProjectModule & { basisSignature?: string; wikiSectionIds?: string[] }>;
   actions?: Record<string, { text: string; done: boolean }>;
   decisions?: Record<string, ProjectMatterDetails & { text: string; basisText?: string; confirmed: boolean; hidden?: boolean }>;

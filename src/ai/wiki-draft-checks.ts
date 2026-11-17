@@ -91,7 +91,7 @@ export function scopeDisagreements(chapters: WikiDraftChapter[], decided: Set<st
       const parts = whole ? item.split(/[/、,，]|和|与|及/u).map(part => part.trim()).filter(part => part.length >= 2) : names.length ? names : [item];
       // A Latin name is a whole word ("Code" is not in "Hardcode"), and an item of several names needs them all ("Code
       // Generation" is not "禁止大量 Hardcode").
-      const mentions = (clause: string) => (names.length > 1 && !whole ? parts.every(part => nameAt(clause, part) >= 0) : parts.some(part => nameAt(clause, part) >= 0)) || ALL_SYNC.test(item) && MANY_SYNC.test(clause);
+      const mentions = (clause: string) => wikiScopeNamesAgree(item,clause)&&((names.length > 1 && !whole ? parts.every(part => nameAt(clause, part) >= 0) : parts.some(part => nameAt(clause, part) >= 0)) || ALL_SYNC.test(item) && MANY_SYNC.test(clause));
       // Or proposed elsewhere as a thing to use ("不实现 Wokwi 仿真" beside "利用 Wokwi 进行浏览器端仿真"): it reads as
       // done now unless the reader is told the first version leaves it out.
       // "不接入实时比价" says not to use it: a use word after a negation is no proposal.

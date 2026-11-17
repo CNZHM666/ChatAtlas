@@ -26,7 +26,7 @@ export interface OrganizationAnalysis {
   diagnostics?: AnalysisDiagnostics;
   synthetic?: boolean;
   statusScope: "wiki" | "run";
-  outcomes?: { wiki: "ready"; architecture: "ready" | "failed" | "unavailable"; history: "ready" | "failed" | "partial" | "unavailable" };
+  outcomes?: { wiki: "ready" | "partial" | "needs_review"; architecture: "ready" | "failed" | "unavailable"; history: "ready" | "failed" | "partial" | "unavailable" };
   readingCacheHits?: number;
   cacheHits: number;
   embeddingTokens: number;
@@ -98,6 +98,8 @@ export function analyzeOrganizationRuns(runs: OrganizationRun[], events: AIUsage
   const synthetic: OrganizationRun[] = [...eventsByRun].filter(([id]) => !knownIds.has(id)).map(([id, usage]) => ({ id, title: usage.some((event) => event.taskType === "focus_session") ? "目标阅读与查找 / Goal reading" : usage.every((event) => event.taskType === "embedding") ? "语义索引 / Semantic index" : `${aiFeatureLabel(usageFeature(usage[0]),true)} / ${aiFeatureLabel(usageFeature(usage[0]),false)}`, targetType: "conversation", targetIds: [...new Set(usage.flatMap((event) => event.conversationIds))], startedAt: Math.min(...usage.map((event) => event.requestStartedAt ?? event.createdAt)), updatedAt: Math.max(...usage.map((event) => event.createdAt)), status: inferredStatus(usage), stage: "proposal_ready", progress: 100, events: [] }));
   return [...runs, ...synthetic].sort((a, b) => b.startedAt - a.startedAt).map((run) => {
     const focus = focusByRun.get(run.id);
+    const quality=focus?.wikiKnowledge?.draft?.quality;
+    const wikiOutcome=quality&&(quality.uncovered||quality.sources==="partial"||quality.organization==="partial")?"partial":quality&&!quality.passed?"needs_review":"ready";
     const usage = eventsByRun.get(run.id) ?? [];
     const requests = usage.filter((event) => isSentUsage(event));
     const tasks = new Map<string, { feature?:import("./ai-diagnostics").AIFeature; task: AIUsageEvent["taskType"]; requests: number; tokens: number; durationMs: number }>();
@@ -135,7 +137,7 @@ export function analyzeOrganizationRuns(runs: OrganizationRun[], events: AIUsage
       byStage:[...stages.values()],
       run: focus ? { ...run, status: "completed" as const } : run.diagnosticOnly ? {...run,status:run.pipelineSpans?.some(span=>span.status==="failed"&&!run.pipelineSpans?.some(next=>next.phase===span.phase&&next.status==="completed"&&next.startedAt>=span.startedAt))?"failed" as const:run.pipelineSpans?.some(span=>span.phase==="wiki:generation"&&span.status==="completed"&&!usage.some(event=>event.status==="failed"&&event.createdAt>span.startedAt+span.durationMs))?"completed" as const:inferredStatus(usage)} : run,
       statusScope: focus ? "wiki" as const : "run" as const,
-      outcomes: focus ? { wiki: "ready" as const, architecture: focus.projectStateAnalysis?.status === "failed" ? "failed" as const : focus.projectState ? "ready" as const : "unavailable" as const, history: focus.projectHistoryStatus?.status ?? (focus.projectHistoryAnalysis ? "ready" as const : "unavailable" as const) } : undefined,
+      outcomes: focus ? { wiki: wikiOutcome, architecture: focus.projectStateAnalysis?.status === "failed" ? "failed" as const : focus.projectState ? "ready" as const : "unavailable" as const, history: focus.projectHistoryStatus?.status ?? (focus.projectHistoryAnalysis ? "ready" as const : "unavailable" as const) } : undefined,
       focusCoverage: focus?.coverage,
       focusPlan: usage.flatMap((event) => event.coveragePlan ? [event.coveragePlan] : []).sort((a, b) => b.plannedBatches - a.plannedBatches)[0],
       sentInputTokensEstimate: usage.filter((event) => isSentUsage(event)).reduce((sum, event) => sum + (event.estimatedInputTokens ?? 0), 0),

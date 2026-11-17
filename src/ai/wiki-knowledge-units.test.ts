@@ -4,6 +4,7 @@ import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
 import { missingWikiConditions, pastedUserText, quotedDetails, wikiUnitConditions, wikiUncoveredMessageCount, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
+import { requestBudget } from "./request-policy";
 
 const material = (index: number, role: "user" | "assistant", body: string, conversationId = "c1"): CoverageMaterial => ({ id: `e:${conversationId}:${index}:1`, role, conversationId, sourceConversationIds: [conversationId], title: "讨论", messageId: `m${index}`, messageIndex: index, text: `${role}: ${body}`, rawEvidenceIds: [`e:${conversationId}:${index}:1`] });
 const signal = new AbortController().signal;
@@ -330,6 +331,30 @@ it("records why a passage has no project knowledge, but preserves an unexplained
   expect(result.ledger.batches[0].coverage?.[all[0].id]).toMatchObject({ status: "no_knowledge", reason: expect.stringContaining("market") });
   expect(result.ledger.batches[0].coverage?.[all[1].id]?.status).toBe("pending");
   expect(result.ledger.batches[0].uncovered).toEqual([all[1].id]);
+});
+
+it("packs all 92 unresolved passages by the full request budget and reuses the read batches", async () => {
+ const all=Array.from({length:92},(_,index)=>material(index,"user",`当时记录的讨论内容编号${index}。${"历史材料仅描述讨论背景。".repeat(18)}`));
+ let recovering=false,firstPass=0;
+ const packSizes:number[]=[];
+ const ai={modelId:"qwen/qwen3.8-flash",generateStructured:async <T,>(request:StructuredAIRequest<T>):Promise<T>=>{
+  const data=JSON.parse(request.prompt);
+  if(!data.cover){firstPass++;return request.validate({units:[]});}
+  const budget=requestBudget(request,ai.modelId);
+  expect(budget.inputTokens).toBeLessThanOrEqual(budget.maxInputTokens);
+  if(!recovering)throw new Error("temporary recovery failure");
+  packSizes.push(data.cover.length);
+  return request.validate({units:[],coverage:data.cover.map((passage:string)=>({passage,status:"no_knowledge",reason:"no_project_content",explanation:"Background only"}))});
+ }};
+ const first=await extractWikiKnowledge({materials:all,locale:"zh-CN",signal,ai});
+ expect(first.report.uncoveredMessages).toBe(92);
+ const reads=firstPass;
+ recovering=true;
+ const retry=await extractWikiKnowledge({materials:all,locale:"zh-CN",signal,ai,previous:first.ledger});
+ expect(firstPass).toBe(reads);
+ expect(packSizes.length).toBeGreaterThan(1);
+ expect(packSizes.reduce((sum,count)=>sum+count,0)).toBe(92);
+ expect(retry.report).toMatchObject({coverageNoKnowledge:92,uncoveredMessages:0});
 });
 
 it("resumes only the fidelity statements whose request failed", async () => {

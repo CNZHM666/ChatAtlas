@@ -54,7 +54,7 @@ it("exports the document and traces its original discussion without AI calls", a
 it("returns from chapter evidence to the current document", async () => {
   render(<WorkspaceLayoutExample zh onClose={vi.fn()}/>);
   fireEvent.click(navigation().getByRole("button", { name: /产品定位$/ }));
-  fireEvent.click(within(screen.getByRole("article", { name: "Wiki 文档" })).getByRole("button", { name: /^(?:核对依据|原文已定位)/ }));
+  fireEvent.click(within(screen.getByRole("article", { name: "Wiki 文档" })).getByRole("button", { name: /^(?:核对依据|来源已定位)/ }));
   await waitFor(()=>expect(screen.getByRole("dialog", { name: "原文依据" })).toHaveTextContent("我们想做 Circuit Studio"));
   fireEvent.click(screen.getByRole("button", { name: "关闭原文面板" }));
   expect(screen.getByRole("article", { name: "Wiki 文档" })).toBeVisible(); noWork();

@@ -6,9 +6,16 @@ import { listCards } from "./cards";
 /** Open locally saved reading; project navigation never triggers AI. */
 export async function projectReader(project: AtlasCanvas): Promise<FocusSession> {
   const db = await getDatabase();
-  const saved = (await db.getAllFromIndex("focusSessions", "by-updated")).reverse().filter(session => session.canvasId === project.id);
-  const existing = saved.find(session => session.status !== "preview" && session.sections.length) ?? saved.find(session => session.sections.length) ?? saved[0];
-  if (existing) return existing;
+  const saved = db.transaction("focusSessions").store.index("by-updated");
+  let preview:FocusSession|undefined, empty:FocusSession|undefined;
+  for(let cursor=await saved.openCursor(null,"prev");cursor;cursor=await cursor.continue()){
+    const session=cursor.value;
+    if(session.canvasId!==project.id||session.deletedAt||session.ledgerTest)continue;
+    if(session.sections.length&&session.status!=="preview")return session;
+    if(session.sections.length)preview??=session;
+    else empty??=session;
+  }
+  if(preview||empty)return preview??empty!;
   const now = Date.now();
   const legacyCards = (await db.getAll("cards")).filter(card => card.canvasId === project.id);
   const hidden = new Set(legacyCards.filter(card => card.ghost || card.kind === "portal").map(card => card.id));

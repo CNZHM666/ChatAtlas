@@ -11,8 +11,33 @@ import {wikiDocumentBlocks} from "./wiki-document-blocks";
 import {wikiSupplementRanges} from "./wiki-source-supplements";
 import type {WikiKnowledgeUnit} from "./wiki-knowledge";
 import {withoutUnrelatedScopeNotes} from "./wiki-scope-identity";
+import {consolidateWikiPlanTables} from "./wiki-plan-tables";
 
 const parser=unified().use(remarkParse);
+const GENERATED_LINK = /<Link\s+url=(?:"([^"\n]+)"|'([^'\n]+)'|\{(turn\w+\.url\.uri)\})\s+title=(?:"([^"\n]+)"|'([^'\n]+)')\s*\/\s*>/giu;
+const SOURCE_SHAPE = /\s*(?:[（(](?:(?:涉及|包含|includes?)\s+)?(?:table\s*,\s*\d+\s+rows?|[\w+#.-]+\s*,\s*\d+\s+lines?)[)）])/giu;
+
+/** Old generated prose sometimes includes tool-only links or request metadata.
+ * Keep the title and evidence wording, and surface a missing URL explicitly. */
+function cleanGeneratedAnnotations(body:string,zh:boolean):string {
+ if(!/<Link\b|<badge\b|\d+\s+(?:rows?|lines?)\s*[)）]/iu.test(body))return body;
+ for(const block of wikiDocumentBlocks(body).reverse()){
+  if(!["paragraph","table","list","html"].includes(block.kind))continue;
+  const original=body.slice(block.start,block.end);
+  const updated=original.replace(/`+[^`\n]+`+|<Link\s+[^<>\n]+\/\s*>|<\/?badge(?:\s+[^<>\n]*)?>|\s*[（(][^()（）\n]{1,70}[)）]/giu,match=>{
+   if(match.startsWith("`"))return match;
+   if(/^<\/?badge/iu.test(match))return "";
+   return match.replace(GENERATED_LINK,(_all,url:string,quoted:string,_unresolved:string,title:string,otherTitle:string)=>{
+    const label=(title??otherTitle).replace(/[[\]]/gu,"\\$&");
+    const href=url??quoted??"";
+    return /^https?:\/\/[^\s<>"']+$/iu.test(href)
+     ?`[${label}](<${href}>)`:`${label}${zh?"（来源链接待核验）":" (source link unverified)"}`;
+   }).replace(SOURCE_SHAPE,"");
+  });
+  if(updated!==original)body=body.slice(0,block.start)+updated+body.slice(block.end);
+ }
+ return body;
+}
 /** Older saved exports may contain a "> **演变记录**" block; it still renders collapsed. */
 export const WIKI_HISTORY_LABEL="演变记录";
 const LONG_PARAGRAPH=250,MIN_PART=80;
@@ -97,14 +122,17 @@ function clarifyGeneratedProse(body:string,zh:boolean):string {
  * summary): the one the other mostly covers goes. Elsewhere only near-verbatim
  * repeats of an earlier paragraph go. Lists, quotes, code and tables are kept. */
 function dropRepeatedParagraphs(body:string):string {
- const nodes=parser.parse(body).children;
+ const blocks=wikiDocumentBlocks(body);
  // A source block's caption is no paragraph to compare: every block of a chapter has the same one.
- const slice=(index:number)=>body.slice(nodes[index].position!.start.offset!,nodes[index].position!.end.offset!);
- const caption=(index:number)=>isSourceCaption(slice(index),nodes[index+1]&&{type:nodes[index+1].type,text:slice(index+1)});
- const items=nodes.map((node,index)=>node.type==="paragraph"&&!caption(index)?{index,start:node.position!.start.offset!,end:node.position!.end.offset!,grams:grams(body.slice(node.position!.start.offset!,node.position!.end.offset!))}:undefined);
+ const items=blocks.map((block,index)=>{
+  const next=blocks[index+1];
+  if(block.kind!=="paragraph"||isSourceCaption(block.text,next&&{type:next.kind,text:next.text})
+   || /^(?:原文来源|Original source|Source references?)\s+\[/iu.test(block.text))return;
+  return {index,start:block.start,end:block.end,grams:grams(block.text)};
+ });
  const dropped=new Set<number>();
  // The opening is the first two paragraphs before any heading; a status quote may precede them.
- const heading=nodes.findIndex(node=>node.type==="heading");
+ const heading=blocks.findIndex(block=>block.kind==="heading");
  const [first,second]=items.slice(0,heading<0?items.length:heading).filter(item=>item!==undefined);
  if(first&&second&&first.grams.size>=12&&second.grams.size>=12){
   const a=covered(first.grams,second.grams),b=covered(second.grams,first.grams);
@@ -147,11 +175,12 @@ function promotePseudoHeadings(body:string):string {
  * chapter's evolution card shows them), restated paragraphs go, bare label lines
  * become sub-headings, long paragraphs split. Saved text and personal chapters
  * are unchanged. */
-export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin">,options:{zh?:boolean;units?:WikiKnowledgeUnit[]}={}):string {
+export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin">,options:{zh?:boolean;units?:WikiKnowledgeUnit[];citeTable?:(unit:WikiKnowledgeUnit)=>string}={}):string {
  // Personal text stays as written; only block captions, which are labels and not its words, read like the rest.
  if(section.userEdited||section.origin)return readableSourceCaptions(body);
  // Narration cleanup runs here too, so exports read like the Reader ("AI发现了", not "AI建议发现了"; no "据讨论，" lead-ins).
  const prose=wikiNarration(aiAdvicePresentation(extractHistoryNotes(withoutUnrelatedScopeNotes(withoutPlaceholderFences(body))).body));
  const formatted=readableUiSketches(readableSourceCaptions(splitLongParagraphs(promotePseudoHeadings(dropRepeatedParagraphs(wikiNumberedProse(dropRepeatedRoutingLead(prose))))),true));
- return wikiBlockPresentation(restoreWikiLiteralPayloads(body,clarifyGeneratedProse(formatted,options.zh??true)),options).body;
+ const reading=wikiBlockPresentation(restoreWikiLiteralPayloads(body,clarifyGeneratedProse(formatted,options.zh??true)),options).body;
+ return consolidateWikiPlanTables(cleanGeneratedAnnotations(reading,options.zh??true),options.zh??true,options);
 }

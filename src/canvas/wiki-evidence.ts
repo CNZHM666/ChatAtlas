@@ -5,17 +5,27 @@ import { wikiQuoteRange, type WikiClaim } from "../shared/wiki-claims";
 import type { EvidencePoint } from "./workspace-evidence-context";
 import { pastedMaterial } from "../shared/source-text-display";
 import type { WikiHistoryEntry } from "../shared/wiki-history";
+import { sourceMessageSignature } from "../shared/source-signature";
 
 const normalized = (text: string) => text.normalize("NFKC").replace(/\s+/gu, " ").trim();
 const snapshotKey = (ref: FocusEvidence) => JSON.stringify([ref.conversationId, ref.sourceVersionId ?? ""]);
 
 /** Duplicate aliases collapse; distinct messages and source snapshots remain navigable. */
 export function wikiEvidenceItems(section: FocusSection, evidence: FocusEvidence[]) {
-  const claims = new Map<string, { text: string; quote: string; evidenceIds: Set<string>; verification?: "supported" | "uncertain"; meaning?: ClaimMeaningCheck; source: WikiClaimSource; userEvidenceId?: string; phrases: Set<string>; holder?: WikiClaim["holder"]; holderMark?: boolean; checked?: boolean }>();
+  let index=evidenceIndexes.get(evidence);
+  if(!index){index=new Map(evidence.map((ref,at)=>[ref.id,{ref,index:at}]));evidenceIndexes.set(evidence,index);}
+  return evidenceItems(section,index);
+}
+
+const evidenceIndexes=new WeakMap<FocusEvidence[],Map<string,{ref:FocusEvidence;index:number}>>();
+function evidenceItems(section: FocusSection, refsById: Map<string,{ref:FocusEvidence;index:number}>) {
+  const claims = new Map<string, { text: string; quote: string; evidenceIds: Set<string>; unitIds:Set<string>; markOnly:boolean; verification?: "supported" | "uncertain"; meaning?: ClaimMeaningCheck; source: WikiClaimSource; userEvidenceId?: string; phrases: Set<string>; holder?: WikiClaim["holder"]; holderMark?: boolean; checked?: boolean }>();
   for (const claim of section.claims ?? []) {
     const key = JSON.stringify([normalized(claim.text), normalized(claim.quote)]);
     const existing = claims.get(key);
-    const item = existing ?? { text: claim.text, quote: claim.quote, evidenceIds: new Set<string>(), verification: claim.verification, meaning: claim.meaning, source: wikiClaimSource(claim), phrases: new Set<string>(), ...(claim.holder ? { holder: claim.holder } : {}) };
+    const item = existing ?? { text: claim.text, quote: claim.quote, evidenceIds: new Set<string>(), unitIds:new Set<string>(),markOnly:true,verification: claim.verification, meaning: claim.meaning, source: wikiClaimSource(claim), phrases: new Set<string>(), ...(claim.holder ? { holder: claim.holder } : {}) };
+    item.markOnly&&=Boolean(claim.markOnly);
+    claim.unitIds?.forEach(id=>item.unitIds.add(id));
     if (claim.holderMark) item.holderMark = true;
     if (claim.checked) item.checked = true;
     // Literal formulations locate the claim in the prose; the claim text is a fallback.
@@ -34,15 +44,15 @@ export function wikiEvidenceItems(section: FocusSection, evidence: FocusEvidence
   return [...claims.values()].map(claim => {
     const groups = new Map<string, { title: string; refs: FocusEvidence[] }>();
     const seen = new Set<string>();
-    for (const ref of evidence) {
-      if (!claim.evidenceIds.has(ref.id)) continue;
+    const refs=[...claim.evidenceIds].flatMap(id=>refsById.get(id)??[]).sort((a,b)=>a.index-b.index);
+    for (const {ref} of refs) {
       const key = ref.conversationId, identity = JSON.stringify([snapshotKey(ref), ref.messageId, ref.sourceSignature ?? ""]);
       if (seen.has(identity)) continue;
       seen.add(identity);
       const group = groups.get(key) ?? { title: ref.title, refs: [] };
       group.refs.push(ref); groups.set(key, group);
     }
-    return { text: claim.text, quote: claim.quote, verification: claim.verification, meaning: claim.meaning, source: claim.source, userEvidenceId: claim.userEvidenceId, phrases: [...claim.phrases], holder: claim.holder, holderMark: claim.holderMark, checked: claim.checked, sources: [...groups.values()] };
+    return { text: claim.text, quote: claim.quote, unitIds:[...claim.unitIds],markOnly:claim.markOnly,verification: claim.verification, meaning: claim.meaning, source: claim.source, userEvidenceId: claim.userEvidenceId, phrases: [...claim.phrases], holder: claim.holder, holderMark: claim.holderMark, checked: claim.checked, sources: [...groups.values()] };
   });
 }
 
@@ -62,15 +72,18 @@ function attentionOf(claim: string, quote: string | undefined, source: EvidenceP
 
 export function wikiEvidencePoints(section: FocusSection, evidence: FocusEvidence[], zh: boolean): Array<EvidencePoint & { phrases: string[] }> {
   if (section.userEdited || section.origin) return [];
-  return wikiEvidenceItems(section, evidence).flatMap((item, index) => {
+  return wikiEvidenceItems(section,evidence).flatMap(item => {
     const references = item.sources.flatMap(source => source.refs);
     // The original holding the claim's quote opens first; the first cited one only when none holds it.
     const reference = references.find(ref => ref.id === item.userEvidenceId) ?? references.find(ref => wikiQuoteRange(ref.excerpt, item.quote)) ?? references[0];
     if (!reference) return [];
     // A confirming reply does not contain the claim's quote; highlight the reply itself.
-    const quote = wikiQuoteRange(reference.excerpt, item.quote) ? item.quote : reference.id === item.userEvidenceId ? reference.excerpt : undefined;
-    const attention = attentionOf(item.text, quote, item.source, item.quote);
-    return [{ key: `${section.id}:${index}`, claim: item.text, quote, source: item.source, label: wikiClaimSourceLabel(item.source, zh), reference, references, placed: false, phrases: item.phrases, ...(item.holder ? { holder: item.holder, ...(item.holderMark ? { holderMark: true } : {}) } : {}), ...(attention ? { attention } : {}), ...(item.checked ? { checked: true } : {}) }];
+    const retainedQuote = wikiQuoteRange(reference.excerpt, item.quote) ? item.quote : reference.id === item.userEvidenceId ? reference.excerpt : undefined;
+    const quote = retainedQuote ?? (item.quote.trim() || undefined);
+    const clippedExcerpt = reference.excerpt.trim().length >= 24 && wikiQuoteRange(item.quote, reference.excerpt);
+    const attention = item.checked||item.markOnly?undefined:attentionOf(item.text, retainedQuote ?? (clippedExcerpt ? item.quote : undefined), item.source, item.quote);
+    const identity=sourceMessageSignature(JSON.stringify([normalized(item.text),normalized(item.quote)]));
+    return [{ key: `${section.id}:${identity.replace(":","-")}`, claim: item.text, quote, source: item.source, label: wikiClaimSourceLabel(item.source, zh), reference, references, placed: false, phrases: item.phrases, unitIds:item.unitIds,...(item.holder ? { holder: item.holder, ...(item.holderMark ? { holderMark: true } : {}) } : {}), ...(attention ? { attention } : {}), ...(item.checked ? { checked: true } : {}) }];
   });
 }
 
@@ -99,7 +112,8 @@ export function wikiApproximatePoints(section: FocusSection, evidence: FocusEvid
 
 /** Sentence-to-original matching shared by Wiki chapters and the project overview. */
 export function approximatePoints(prefix: string, sources: FocusEvidence[], body: string, zh: boolean, limit = 24): Array<EvidencePoint & { phrases: string[] }> {
-  const refs = sources.filter(ref => ref.conversationId && ref.messageId).map(ref => ({ ref, pasted: pastedMaterial(ref.excerpt), grams: trigrams(ref.excerpt), sentences: splitSentences(ref.excerpt).map(text => ({ text, grams: trigrams(text) })) }));
+  const refs = sources.filter(ref => ref.conversationId && ref.messageId).map(ref => ({ ref, pasted: pastedMaterial(ref.excerpt), grams: trigrams(ref.excerpt) }));
+  const sourceSentences=new Map<FocusEvidence,Array<{text:string;grams:Set<string>}>>();
   if (!refs.length) return [];
   const matches = proseSentences(body).flatMap((sentence, order) => {
     const grams = trigrams(sentence);
@@ -109,7 +123,10 @@ export function approximatePoints(prefix: string, sources: FocusEvidence[], body
     // A pasted document repeats older text; prefer the discussion where it was actually said.
     const best = candidates.sort((a, b) => Number(a.item.pasted) - Number(b.item.pasted) || b.overlap - a.overlap)[0];
     if (!best) return [];
-    const quote = best.item.sentences.map(part => ({ text: part.text, overlap: shared(grams, part.grams) })).sort((a, b) => b.overlap - a.overlap)[0]?.text;
+    const ref=best.item.ref;
+    const excerpts=sourceSentences.get(ref)??splitSentences(ref.excerpt).map(text=>({text,grams:trigrams(text)}));
+    sourceSentences.set(ref,excerpts);
+    const quote = excerpts.map(part => ({ text: part.text, overlap: shared(grams, part.grams) })).sort((a, b) => b.overlap - a.overlap)[0]?.text;
     return [{ sentence: sentence.replace(/[。！？!?]$/u, ""), order, score: best.overlap / grams.size, ref: best.item.ref, pasted: best.item.pasted, quote }];
   });
   const seen = new Set<string>();

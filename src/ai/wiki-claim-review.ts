@@ -1,4 +1,5 @@
 import {reviewSavedWikiEditorial} from "./wiki-saved-editorial";
+import { restoreWikiSourceNegation } from "../shared/wiki-source-negation";
 import type { FocusSection, FocusSession } from "../shared/focus-session";
 import type { WikiClaim } from "../shared/wiki-claims";
 import { paragraphIndex } from "../shared/wiki-body-text";
@@ -18,6 +19,7 @@ import { recheckWikiTableNegation } from "./wiki-negation-review";
 import { INCOMPLETE_WIKI_PROSE, restoredConditionalNegation, wikiChapterIntegrity, wikiIncompleteProse, wikiIntegrityCandidate, wikiIntegrityNote } from "./wiki-integrity";
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
 import { wikiHolderOf } from "../shared/wiki-holder";
+import { reviewWikiHistory } from "./wiki-history-review";
 
 const UNSUPPORTED_CLAIM = /^claim "(.+)…" has no supported source after final formatting$/u;
 const LOST_CONDITION = /^"(.+)…" drops a source condition/u;
@@ -200,7 +202,7 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
   if (section.userEdited || section.origin) return section;
   const ledger = session.wikiKnowledge;
   const chapter = ledger?.draft?.chapters.find(item => item.id === section.id);
-  if (!ledger || !chapter) return section;
+  if (!ledger || !chapter) return restoreWikiSourceNegation(section, session);
   const { units: storedUnits, byId: storedById } = context;
   const selected = new Set(section.evidenceIds), conversations = new Set(session.sourceConversationIds);
   const evidence = session.evidence.filter(ref => selected.has(ref.id) && conversations.has(ref.conversationId));
@@ -226,7 +228,12 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
       || item.quote.trim().length >= 12 && unit.evidence.quote.includes(item.quote.trim()))) return;
     return ref;
   };
-  const finish=(reviewed:FocusSection)=>ledger.documentType!=="learning"?reviewSavedWikiEditorial(reviewed,context.reading()!.ledger,scopeSource):reviewed;
+  const finish=(reviewed:FocusSection)=>{
+    if(ledger.documentType==="learning")return restoreWikiSourceNegation(reviewed,session);
+    const reading=context.reading()!;
+    const current=reviewSavedWikiEditorial(reviewed,reading.ledger,scopeSource);
+    return restoreWikiSourceNegation(reviewWikiHistory(current,chapter,reading.units,reading.statuses,unit=>Boolean(scopeSource(unit)),zh),session);
+  };
   if (ledger.documentType !== "learning" && wikiStandingCandidate(section.body)) {
     const reading = context.reading()!;
     const available = new Map<string, NonNullable<ReturnType<typeof sourceOf>>>();
@@ -287,7 +294,6 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
   }
   if (wikiTemporalCandidate.test(section.body) || /^### 早先版本$/mu.test(section.body)) {
     let body = section.body;
-    let repairedEarlierHeading = false;
     const prose = wikiDocumentBlocks(body).filter(block => block.kind === "paragraph" || block.kind === "list");
     const claims = section.claims?.map(claim => {
       const dualRisk=/低风险.{0,30}直接(?:执行|应用).{0,80}(?:多步|复杂|结构性).{0,80}(?:预览|Preview)/iu.test(claim.text);
@@ -304,15 +310,10 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
       if (!rewrite || rewrite.text === claim.text) return claim;
       const text = /[。.!?]$/u.test(rewrite.text) && !/[。.!?]$/u.test(claim.text) && /[。.!?]/u.test(body[body.indexOf(claim.text) + claim.text.length] ?? "")
         ? rewrite.text.slice(0, -1) : rewrite.text;
-      if (rewrite.restoredProposal) {
-        const heading = body.slice(0, body.indexOf(claim.text)).match(/^#{1,6} .+$/gmu)?.at(-1);
-        repairedEarlierHeading ||= /^#{1,6} (?:早先版本|Earlier versions)$/u.test(heading ?? "");
-      }
       body = body.replace(claim.text, () => text);
       if (rewrite.restoredProposal && claim.holder === "earlier") return { ...claim, text, formulations: undefined, holder: "ai" as const, holderMark: false, workStatus: "proposed" as const };
       return { ...claim, text, formulations: undefined };
     });
-    if (repairedEarlierHeading) body = body.replace(/^(#{1,6}) (?:早先版本|Earlier versions)$/mu, `$1 ${zh ? "早期讨论" : "Earlier discussion"}`);
     if (body !== section.body) section = { ...section, body, claims };
   }
   // Old saved sections can have formatting that differs from the original

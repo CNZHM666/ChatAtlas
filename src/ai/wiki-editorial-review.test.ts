@@ -5,10 +5,44 @@ import {wikiDecisionRestatement,wikiLayerDeferral} from "./wiki-confirmation-sco
 import {placeWikiChoices} from "./wiki-choice-placement";
 import {wikiWorkflowScopes} from "./wiki-workflow-scope";
 import {wikiConfirmedScopeText} from "../shared/wiki-overview";
+import {resolveWikiReading} from "./wiki-knowledge-reading";
+import {reviewWikiHistory} from "./wiki-history-review";
 import type {WikiKnowledgeLedger,WikiKnowledgeUnit,WikiDraftChapter} from "../shared/wiki-knowledge";
 const unit=(id:string,statement:string):WikiKnowledgeUnit=>({id,subject:"项目",statement,kind:"plan",details:[],adoption:{status:"proposal"},delivery:"unknown",evidence:{evidenceId:id,conversationId:"c",messageId:id,messageIndex:1,role:"assistant",pasted:false,quote:statement}});
 const chapter=(text:string,unitIds:string[]):WikiDraftChapter=>({id:"c",title:"竞品参考",question:"",group:"",body:text,problems:[],paragraphs:[{subtopic:"方案",text,unitIds,claims:[{text,unitIds}]}]});
 const ledger=(units:WikiKnowledgeUnit[]):WikiKnowledgeLedger=>({version:1,generatedAt:1,status:"complete",materials:1,batches:[{sourceIds:[],status:"ok",units,rejected:{}}]});
+it("keeps complementary or repeated approaches out of history even when the generated chain calls them earlier",()=>{
+ const positioning=unit("position","Atlas 不与大平台直接竞争，专注于用户自己掌控的知识积累。");
+ const oldStorage=unit("storage","采用可扩展的 Content Block 架构替代简单字符串存储，以支持多平台富内容。");
+ const comparison=unit("notion","Atlas 负责从对话中发现知识，Notion 负责保存与管理知识，两者可互补而非竞争。");
+ comparison.evidence.messageIndex=2;
+ const restatement=unit("repeat","使用可扩展的 Content Block 统一消息结构，而非简单字符串存储。");
+ restatement.evidence.messageIndex=3;
+ const all=[positioning,oldStorage,comparison,restatement],data=ledger(all);
+ data.organization={version:1,generatedAt:1,status:"complete",merged:[],report:{},relations:[],chapters:[],
+  subjects:[{id:"a",name:"计划",aliases:[],unitIds:all.map(item=>item.id)}],
+  topics:[{id:"t",name:"定位",current:[comparison.id,restatement.id],earlier:[positioning.id,oldStorage.id],open:false}]};
+ const reading=resolveWikiReading(data);
+ expect(reading.statuses.get(positioning.id)).toBe("proposal");
+ expect(reading.statuses.get(oldStorage.id)).toBe("proposal");
+ expect(reading.organization?.relations.some(link=>link.status==="resolved"&&["replaces","rejects"].includes(link.kind))).toBe(false);
+});
+
+it("repairs a saved history heading without losing verified earlier items or attached source links",()=>{
+ const live=unit("live","提议本地保存原始对话。"),old=unit("old","仅保存对话标题。");
+ const oldLine=`- ${old.statement}`,liveLine="- 此前建议本地保存原始对话。";
+ const body=`### 早先版本\n\n${oldLine}\n${liveLine}\n\n原文来源 [S-live]\n\n### 其他\n\n独立段落。`;
+ const page=chapter(body,[live.id,old.id]);
+ page.paragraphs=[{subtopic:"早先版本",text:oldLine,unitIds:[old.id]},{subtopic:"早先版本",text:liveLine,unitIds:[live.id]}];
+ const section={id:page.id,kind:"finding" as const,title:"计划",body,transition:"",evidenceIds:["live","old"],claims:[
+  {text:old.statement,quote:old.evidence.quote,evidenceIds:[old.id],unitIds:[old.id],holder:"earlier" as const},
+  {text:liveLine.slice(2),quote:live.evidence.quote,evidenceIds:[live.id],unitIds:[live.id],holder:"earlier" as const},
+ ]};
+ const reviewed=reviewWikiHistory(section,page,[live,old],new Map([[live.id,"proposal"],[old.id,"history"]]),()=>true,true);
+ expect(reviewed.body).toContain("### 讨论记录\n\n- 建议本地保存原始对话。\n\n原文来源 [S-live]");
+ expect(reviewed.body).toContain("### 早先版本\n\n"+oldLine);
+ expect(reviewed.claims?.map(claim=>claim.holder)).toEqual(["earlier","ai"]);
+});
 it("keeps the named layer as the subject of a deferral",()=>{
  const question="Level 2 (Exports) 目前仅预留不实现，后续是否启动该层级开发？";
  expect(wikiLayerDeferral(question,"维持现状，暂不开发")).toBe("Level 2 (Exports)：维持预留，暂不开发。");
@@ -177,4 +211,21 @@ it("restores a competitor explicitly retained in an answer and is idempotent",()
  l.userAnswers=[{questionId:"q",unitIds:["u"],question:"竞品还是自有？",answer:"竞品",optionId:"o",at:1}];
  const result=reviewWikiEditorial([chapter("其他开源工具。",[])],l);
  expect(result[0].body).toContain(source.statement);expect(reviewWikiEditorial(result,l)).toEqual(result);
+});
+
+it("keeps a confirmed MCP integration choice separate from the broader product strategy",()=>{
+ const strategy=unit("strategy","Find 负责免费搜索，Organize 负责项目 Wiki，Continue 通过 Context Pack 和 MCP 复用知识。");
+ strategy.kind="decision";
+ const l=ledger([strategy]);
+ const ask="MCP接入的具体实现方式尚未确定，需明确采用哪种方案？";
+ const choice="外部Agent按需查询动态上下文";
+ l.writingQuestions=[{id:"q",organization:1,about:"MCP接入策略",ask,unitIds:[strategy.id],
+  options:[{id:"service",label:"独立 Node.js 只读服务",actions:[{do:"confirm",units:[strategy.id]}]},{id:"dynamic",label:choice,actions:[{do:"confirm",units:[strategy.id]}]}]}];
+ l.userAnswers=[{questionId:"q",question:ask,answer:choice,unitIds:[strategy.id],optionId:"dynamic",at:2}];
+ l.decisions={[strategy.id]:{verdict:"confirmed",at:2}};
+ const scoped=withAnsweredChoices(withAnswerScope(l));
+ expect(scoped.decisions?.[strategy.id]).toBeUndefined();
+ expect(scoped.decisions?.["answer:q:dynamic"]?.verdict).toBe("confirmed");
+ expect(scoped.batches[0].units.find(unit=>unit.id==="answer:q:dynamic")?.statement).toBe(`MCP接入策略：${choice}。`);
+ expect(l.decisions[strategy.id].verdict).toBe("confirmed");
 });

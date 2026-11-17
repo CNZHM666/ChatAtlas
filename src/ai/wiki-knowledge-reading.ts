@@ -14,6 +14,7 @@ import { withUnsaidPlansOut } from "../shared/wiki-unsaid-plan";
 import { wikiSaidLater } from "../shared/wiki-sources";
 import { answeredTogether, explicitExclusions, withUserQuestionsAsked } from "./wiki-user-questions";
 import { knowledgeOwner, knowledgeScopesAgree } from "../shared/knowledge-subject";
+import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 
 /** One reversible interpretation for writing, reading and export. The source ledger and
  * the user's answers remain untouched; never store these deductions as user verdicts. */
@@ -76,7 +77,15 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
     organization = answeredTogether(unrouted, organization, source.userAnswers, report, source.decisions, known);
   }
   if (organization?.groups?.length) organization = { ...organization, groups: chooseGroupHomes(organization.groups, organization.subjects, units, organization.groups, report) };
-  const ledger = { ...answered, ...(organization ? { organization } : {}), ...(source.draft ? { draft: scopedWikiDraft(source) } : {}) };
   const statuses = wikiUnitStatuses(units, organization ?? { relations: [] }, source.decisions);
+  if (organization?.topics?.length) {
+    const topics=wikiDecidedTopics(organization.topics,source.decisions).flatMap(topic=>{
+      const earlier=topic.earlier.filter(id=>statuses.get(id)==="history");
+      const current=topic.current.filter(id=>statuses.get(id)!=="history");
+      return current.length&&current.length+earlier.length>=2?[{...topic,earlier,current,open:topic.open&&current.length>1}]:[];
+    });
+    organization={...organization,topics};
+  }
+  const ledger = { ...answered, ...(organization ? { organization } : {}), ...(source.draft ? { draft: scopedWikiDraft(source) } : {}) };
   return { ledger, organization, units, statuses, report };
 }

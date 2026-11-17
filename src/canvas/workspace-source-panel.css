@@ -69,6 +69,11 @@
 ::highlight(atlas-original-proof) { background: var(--atlas-mark); color: var(--atlas-mark-text); text-decoration: none; }
 ::highlight(atlas-original-context) { background: var(--atlas-mark-soft); color: inherit; }
 ::highlight(atlas-original-related) { background: transparent; color: inherit; text-decoration: underline dashed #94a3b8; }
+.workspace-source-body table[data-atlas-table-active] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.workspace-source-panel .workspace-source-table-scroll { max-width: 100%; overflow-x: auto; margin-block: 14px; }
+.workspace-source-panel .source-message-content .workspace-source-table-scroll > table {
+  display: table; width: auto; max-width: none; margin: 0;
+}
 .workspace-source-highlight.is-context { background:#facc1515; }
 .workspace-source-highlight.is-related { background:#facc1555; border-bottom:2px dashed #dc2626; }
 .workspace-source-highlight.is-support { background:transparent; border-bottom:1.5px dotted #94a3b8; }
@@ -272,6 +277,17 @@
    is, the original, and any question at the bottom where it is read after the passage. */
 .workspace-source-panel.is-card:not(.is-embedded) { margin: 12px 12px 12px 4px; height: calc(100% - 24px); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 10px 30px #0f172a14, 0 2px 6px #0f172a0d; overflow: hidden; }
 .workspace-source-panel.is-card.is-overlay { inset: 12px 12px 12px auto; margin: 0; height: auto; width: min(460px, calc(100% - 24px)); box-shadow: 0 16px 40px #0f172a29; }
+.workspace-source-panel.is-card:has(> .wiki-source-dock:not(:empty)) { --wiki-dock-width: 49px; padding-inline-start: var(--wiki-dock-width); }
+.workspace-source-panel.is-card:not(.is-overlay):has(> .wiki-source-dock:not(:empty)) { position: relative; }
+.workspace-source-panel.is-card:has(> .wiki-source-dock .wiki-status-panel:not([hidden])) { --wiki-dock-width: 104px; }
+.wiki-source-dock { position: absolute; inset-block: 0; inset-inline-start: 0; width: var(--wiki-dock-width); overflow: auto; padding: 10px 5px; border-inline-end: 1px solid var(--border); background: var(--surface-solid); }
+.wiki-source-dock:empty { display: none; }
+.wiki-source-dock > .wiki-tool-rail { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.wiki-source-dock .wiki-status-control { display: flex; width: 100%; flex-direction: column; align-items: center; gap: 6px; }
+.wiki-source-dock .wiki-status-panel { position: static; width: 100%; max-width: none; padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+:is(.focus-workspace,.focus-preview) .wiki-source-dock .wiki-status-key { justify-content: space-between; min-height: 29px; padding: 3px 5px; font-size: 12px; white-space: normal; line-height: 1.25; color: var(--holder,var(--muted)); background: color-mix(in srgb, currentColor 9%, var(--surface-solid)); border-color: color-mix(in srgb, currentColor 40%, var(--border)); }
+.workspace-source-content > .workspace-context-more { display: flex; margin: 8px auto 16px; }
+.workspace-source-content > .workspace-context-more:last-child { margin: 16px auto 8px; }
 :root[data-theme="dark"] .workspace-source-panel.is-card:not(.is-embedded) { box-shadow: 0 10px 30px #00000059; }
 .workspace-source-panel > header.workspace-source-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 10px 6px 14px; border-bottom: 0; }
 .workspace-source-switch { display: inline-flex; padding: 2px; border-radius: 9px; background: var(--surface-muted); }
@@ -300,10 +316,11 @@
 .workspace-source-ask.is-asking { background: color-mix(in srgb, #f59e0b 7%, var(--surface-solid)); }
 .workspace-source-ask .workspace-source-holder button.is-primary { border-color: var(--accent); background: var(--accent); color: var(--surface-solid); font-weight: 600; }
 .workspace-source-ask .workspace-source-holder button.is-primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
-.workspace-source-panel > footer.workspace-source-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.workspace-source-panel > footer.workspace-source-legend { display: flex; flex: none; flex-wrap: wrap; gap: 4px 14px; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 .workspace-source-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .workspace-source-legend i { display: inline-block; width: 16px; height: 10px; border-radius: 2px; }
 .workspace-source-legend i.is-proof { background: var(--atlas-mark); }
+.workspace-source-legend i.is-table { border: 2px solid var(--accent); }
 .workspace-source-legend i.is-similar { background: var(--atlas-mark); border-bottom: 2px dashed #dc2626; border-radius: 2px 2px 0 0; }
 .workspace-source-legend i.is-support { background: transparent; border-bottom: 2px dotted #94a3b8; border-radius: 0; }
 .workspace-source-legend i.is-cue { background: transparent; border-bottom: 2px solid #dc2626; border-radius: 0; }

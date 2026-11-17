@@ -21,14 +21,16 @@ export function projectReferenceGroups(body:string,includeSingle:boolean){
  return ranges.flatMap(([start,end])=>{
   const raw=body.slice(start,end);
   if(!raw.trimEnd().endsWith("</details>"))return [];
-  if(!COLLECTION.test(raw)){
+  const roadmap=/<summary>(?:原始规划表|Original planning tables)<\/summary>/u.test(raw);
+  const assessment=/<summary>(?:讨论中的方案评估|Design assessments from the discussion)<\/summary>/u.test(raw);
+  if(!roadmap&&!assessment&&!COLLECTION.test(raw)){
    if(!includeSingle) return [];
    const contents=blocks.filter(block=>block.start>start&&block.end<end);
    if(contents.filter(block=>block.kind==="code").length!==1||contents.some(block=>block.kind!=="code"&&!(block.kind==="paragraph"
     &&/^(?:原文来源|Original source|Source(?: references?)?)\s+\[S-/u.test(block.text))))return [];
   }
   const heading=headings.filter(block=>block.end<start).at(-1);
-  return [{start,end,raw,topic:heading?.text.replace(/^#{1,6}\s+/u,"")}];
+  return [{start,end,raw,roadmap,topic:roadmap?undefined:heading?.text.replace(/^#{1,6}\s+/u,"")}];
  });
 }
 

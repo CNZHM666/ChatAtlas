@@ -34,7 +34,11 @@ it("updates a ledger document through its ledger, keeping a chapter the user edi
   const grown = { ...conversation, messageCount: 4, updatedAt: 2 };
   await db.put("conversations", grown);
   generateStructured.mockClear();
-  const updated = await generateFocusUpdate(edited, [grown], "zh-CN", new AbortController().signal);
+  const progress = vi.fn(), partial = vi.fn();
+  const updated = await generateFocusUpdate(edited, [grown], "zh-CN", new AbortController().signal, undefined, undefined, progress, { onPartial: partial });
+  expect(progress.mock.calls.map(call => call[3]?.ledger?.stage)).toEqual(expect.arrayContaining(["extract", "plan", "write"]));
+  expect(partial.mock.calls[0][0].sections.some((section: typeof first.sections[number]) => section.wikiOutline)).toBe(true);
+  expect(partial.mock.calls.at(-1)![0].sections.some((section: typeof first.sections[number]) => !section.wikiOutline)).toBe(true);
   // Too few subjects to plan the directory again: export joins the edited chapter. The chapter keeps the user's
   // text and asks for a check; the ledger's new version of it, with export, is offered beside it, not added again.
   expect(updated.sections.map(section => section.title)).toEqual(["检索"]);

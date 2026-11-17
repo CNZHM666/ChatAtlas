@@ -1835,7 +1835,7 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     const plain = (value: string) => value.replace(/\*\*/gu, "").trim();
     // A point a later one replaced: history, set aside by a later reply, or an earlier version of its chain. A suggestion
     // still standing told as 「此前曾提议优先开发……」 is the AI's suggestion, told so by notInForce.
-    const replacedVersion = (id: string) => statuses.get(id) === "history" && !rejectedByYou(id) || outgrown.has(id) || chains.some(topic => topic.earlier.includes(id) && !topic.current.includes(id));
+    const replacedVersion = (id: string) => statuses.get(id) === "history" && !rejectedByYou(id) || outgrown.has(id);
     const decides = (id: string) => { const unit = units.get(id); return Boolean(unit) && (statuses.get(id) === "confirmed" || statuses.get(id) === "stated" && unit!.evidence.role === "user" && !unit!.evidence.pasted && DECIDING_KINDS.includes(unit!.kind)); };
     const paragraphs = chapter.paragraphs.flatMap(paragraph => {
       if (earlierHeading.test(paragraph.subtopic)) return [paragraph];

@@ -16,11 +16,11 @@ const EARLIER = /^(?:早先版本|Earlier versions)$/u;
  * The writer files each point at its home (its subject, or its explanation group's) in the layout as it reads it, so a draft written for this
  * layout has none; one kept while the layout changed reads its points in the wrong place until those chapters are
  * written again. Returns the titles of the chapters to write again, in the organization's order. */
-export function wikiDraftOutOfPlace(stored: WikiKnowledgeLedger | undefined): string[] {
+export function wikiDraftOutOfPlace(stored: WikiKnowledgeLedger | undefined, reading?: ReturnType<typeof resolveWikiReading>): string[] {
   const draft = stored?.draft;
   if (!stored?.organization || !draft?.chapters.length) return [];
   // The layout as the writer reads it: points a broad subject carried into the wrong chapter are filed by their kind.
-  const { ledger, statuses } = resolveWikiReading(stored), organization = ledger.organization!, view = curateWikiUnits(ledger, statuses);
+  const { ledger, statuses } = reading ?? resolveWikiReading(stored), organization = ledger.organization!, view = curateWikiUnits(ledger, statuses);
   const chapterOfSubject = new Map(organization.chapters.flatMap(chapter => chapter.subtopics.flatMap(topic => topic.subjectIds.map(id => [id, chapter.id] as const))));
   const subjectOf = new Map(organization.subjects.flatMap(subject => subject.unitIds.map(id => [id, subject.id] as const)));
   const chapterOf = (id: string) => chapterOfSubject.get(view.home.get(id) ?? subjectOf.get(id) ?? "");
@@ -42,4 +42,10 @@ export function wikiDraftOutOfPlace(stored: WikiKnowledgeLedger | undefined): st
 /** The document is behind its ledger: verdicts given since it was written, or chapters written for another layout. */
 export function ledgerRewriteNeeded(ledger: WikiKnowledgeLedger | undefined): boolean {
   return ledgerDecisionsPending(ledger) || wikiDraftOutOfPlace(ledger).length > 0;
+}
+
+/** An explicit update can retry incomplete source reading even when the
+ * conversation itself has not changed. Successful batches remain reusable. */
+export function ledgerCoverageRetryNeeded(ledger: WikiKnowledgeLedger | undefined): boolean {
+  return Boolean(ledger?.batches.some(batch=>!batch.skipped&&(batch.status==="failed"||batch.uncovered?.length)));
 }

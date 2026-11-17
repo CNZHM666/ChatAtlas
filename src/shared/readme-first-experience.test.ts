@@ -4,11 +4,15 @@ import en from "../../README.en.md?raw";
 import principles from "../../PRODUCT_PRINCIPLES.md?raw";
 import {version} from "../../package.json";
 
-it("introduces search without an API key before installation",()=>{
+it("leads with source-checkable Markdown and states the key-free search option",()=>{
  expect(zh.split("## 安装到")[0]).toContain("基础搜索不需要 AI Key");
  expect(en.split("## Install on")[0]).toContain("Basic search needs no AI key");
- expect(zh.split("## 能做什么")[0]).toContain("docs/images/sidecar-chatgpt-light.png");
- expect(en.split("## What it does")[0]).toContain("docs/images/sidecar-chatgpt-light.png");
+ expect(zh.split("## 安装到")[0]).toMatch(/可核对、可导出的 Markdown/u);
+ expect(en.split("## Install on")[0]).toMatch(/Markdown project Wiki you can verify and share/u);
+ for(const text of [zh,en]){
+  expect(text).toContain("docs/images/wiki-chapter-light.png");
+  expect(text).toContain("https://linux.do");
+ }
 });
 it("links directly to the current preview ZIP and explains loading it in both browsers",()=>{
  const download=`https://github.com/CNZHM666/ChatAtlas/releases/download/v${version}/ChatAtlas-extension-v${version}.zip`;

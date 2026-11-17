@@ -126,7 +126,14 @@ describe("material list responsiveness during import", () => {
     const props={conversations,importJob:null,importSource:"web" as const,selectedIds:new Set(["row-7"]),onSelectedIds:vi.fn(),onPrioritize:vi.fn(),onScan:vi.fn(),onHydrate:vi.fn(),onZip:vi.fn(),onPause:vi.fn(),onConnect:vi.fn()};
     const {container}=render(<PreferencesProvider><WorkbenchSyncPanel {...props}/></PreferencesProvider>);
     fireEvent.click(screen.getByRole("button",{name:/加载更多/}));expect(container.querySelectorAll('.workbench-sync-item')).toHaveLength(20);
-    const input=screen.getByRole("textbox",{name:"搜索对话标题"});input.focus();fireEvent.change(input,{target:{value:"Orama"}});
+    const viewport = container.querySelector<HTMLElement>(".workbench-sync-list-viewport")!;
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 320, 290));
+    const input=screen.getByRole("textbox",{name:"搜索对话标题"});
+    act(() => input.focus());
+    expect(input).toHaveFocus();
+    expect(viewport.style.height).toBe("");
+    fireEvent.change(input,{target:{value:"Orama"}});
+    expect(viewport.style.height).toBe("290px");
     await waitFor(()=>expect(container.querySelectorAll('.workbench-sync-item')).toHaveLength(1));expect(input).toHaveFocus();
     fireEvent.click(screen.getByRole("button",{name:"全选搜索结果 1 条"}));expect(props.onSelectedIds).toHaveBeenCalledWith(new Set(["row-7","row-0"]));expect(props.onHydrate).not.toHaveBeenCalled();expect(props.onScan).not.toHaveBeenCalled();
     fireEvent.change(input,{target:{value:"没有这种标题"}});await screen.findByText("没有找到相关对话");expect(screen.getByRole("button",{name:"全选搜索结果 0 条"})).toBeDisabled();expect(screen.getByRole("textbox",{name:"搜索对话标题"})).toBe(input);

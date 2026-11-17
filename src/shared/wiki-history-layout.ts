@@ -2,6 +2,8 @@ import {wikiDocumentBlocks} from "./wiki-document-blocks";
 import {WIKI_SUPPLEMENT} from "./wiki-source-supplements";
 import {codeRanges} from "./markdown-code-ranges";
 export const wikiHistoricalHeading=(value:string)=>/^(?:早先版本|早期版本|此前版本|历史方案|Earlier versions?|Previous versions?|Historical (?:versions?|plans?))(?:\s*[（(][^）)]*[）)])?$/iu.test(value.replace(/^#{1,6}\s+/u,"").replace(/\n[=-]+$/u,"").trim());
+export const wikiHistoricalTransition=(text:string)=>/^(?:此前|早先|早期|旧版|earlier\b|previous(?:ly)?\b)/iu.test(text.replace(/^\s*(?:[-*+]\s+)?\*{0,2}/u,""))
+  && /已(?:经)?被[^。！？\n]{0,65}(?:替代|取代|废弃)|\b(?:was|were) (?:replaced|superseded) by\b/iu.test(text);
 /** Historical records read as consistent paragraphs. Their raw examples remain in the ledger and Reader. */
 export function wikiHistoryLayout(body:string){
  const blocks=wikiDocumentBlocks(body),edits:Array<{start:number;end:number;text:string}>=[];let depth=0;

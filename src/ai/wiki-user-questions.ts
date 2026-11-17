@@ -1,4 +1,4 @@
-import { knowledgeTerms } from "../shared/knowledge-subject";
+import { knowledgeScopesAgree, knowledgeTerms } from "../shared/knowledge-subject";
 import { wikiUserChooses } from "../shared/wiki-user-choice";
 import { wikiSaidLater } from "../shared/wiki-sources";
 import type { WikiKnowledgeLedger, WikiKnowledgeOrganization, WikiKnowledgeUnit } from "../shared/wiki-knowledge";
@@ -56,6 +56,7 @@ export function withUserQuestionsAsked(ledger: WikiKnowledgeLedger, report: Reco
  * not rule X out. */
 const RULES_OUT = /(?:而非|而不是|不再面向|不面向|不针对|不再针对)\s*([^，。；、,;：:（(“”"]{2,10})/gu;
 const MERELY = /^(?:单纯|仅仅|仅|只|纯|普通|一味|盲目|无限|统一|一般)/u;
+const GENERIC_EXCLUSION = /^(?:竞争|用户|功能|内容|方案|建议|问题|方案选择)$/u;
 
 /** A later point ruling out what an earlier one proposed ("……帮助青少年男性找回自信" before "……18-25岁成年男性，而非青少年")
  * replaces it, when they share a term besides the ruled-out words: the two stood side by side, unmarked. A relation the
@@ -64,19 +65,30 @@ export function explicitExclusions(organization: WikiKnowledgeOrganization, unit
   const related = new Set(organization.relations.flatMap(relation => [`${relation.older}\n${relation.newer}`, `${relation.newer}\n${relation.older}`]));
   const shown = new Set(organization.subjects.flatMap(subject => subject.unitIds));
   const live = [...units.values()].filter(unit => shown.has(unit.id) && !unit.about);
+  const chosen=(unit:WikiKnowledgeUnit)=>!unit.evidence.pasted&&(unit.adoption.status==="user_adopted"&&Boolean(unit.adoption.approval?.quote)
+    || unit.evidence.role==="user"&&wikiUserChooses(unit.evidence.quote));
   const added: WikiKnowledgeOrganization["relations"] = [];
   for (const newer of live) {
-    const ruled = [...newer.statement.matchAll(RULES_OUT)].map(match => match[1].replace(/的$/u, "").trim()).filter(phrase => phrase.length >= 2 && !MERELY.test(phrase));
+    if (newer.evidence.pasted) continue;
+    const ruled = [...newer.statement.matchAll(RULES_OUT)].map(match => match[1].replace(/的$/u, "").trim()).filter(phrase =>
+      phrase.length >= 2 && !MERELY.test(phrase) && !GENERIC_EXCLUSION.test(phrase) && newer.evidence.quote.includes(phrase));
     if (!ruled.length) continue;
     const own = knowledgeTerms(newer.statement);
     for (const older of live) {
-      if (older === newer || related.has(`${older.id}\n${newer.id}`) || older.evidence.messageId === newer.evidence.messageId || !wikiSaidLater(newer, older)) continue;
-      const phrase = ruled.find(item => older.statement.includes(item) && !new RegExp(`(?:而非|而不是|不|非|没有)\\s*${item.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`, "u").test(older.statement));
+      if (older === newer || related.has(`${older.id}\n${newer.id}`) || older.evidence.messageId === newer.evidence.messageId
+        || !wikiSaidLater(newer, older) || !knowledgeScopesAgree(newer.statement, older.statement)) continue;
+      if(chosen(older)&&!chosen(newer))continue;
+      const phrase = ruled.find(item => {
+        const at = older.statement.indexOf(item);
+        if (at < 0) return false;
+        const clause = older.statement.slice(0, at).split(/[，。；、,;]/u).at(-1) ?? "";
+        return !/(?:而非|而不是|不再|不是|没有|替代|取代|避免|拒绝|不)\s*(?:面向|针对|使用|采用|直接|与|简单|的)?\s*$/u.test(clause);
+      });
       if (!phrase) continue;
       const excluded = knowledgeTerms(phrase);
       let shared = 0;
       for (const term of knowledgeTerms(older.statement)) if (own.has(term) && !excluded.has(term)) shared++;
-      if (!shared) continue;
+      if (shared < 2) continue;
       added.push({ older: older.id, newer: newer.id, kind: "replaces", status: "resolved" });
       related.add(`${older.id}\n${newer.id}`); related.add(`${newer.id}\n${older.id}`);
     }

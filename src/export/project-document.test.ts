@@ -1,6 +1,6 @@
 import {markdownHeadingSlug} from "./portable-markdown";
 import {expect,it} from "vitest";
-import {figureClauses,numberedLearningChapter,projectDocument,withoutLeadRepeats,type ProjectExportSelection} from "./project-document";
+import {figureClauses,numberedLearningChapter,projectDocument,projectLedgerFile,withoutLeadRepeats,type ProjectExportSelection} from "./project-document";
 import {contextKnowledge} from "../test/context-fixture";
 import {ledgerDocument} from "../ai/wiki-ledger-document";
 import {withDecision} from "../ai/wiki-key-decisions";
@@ -8,6 +8,55 @@ import type {WikiKnowledgeLedger,WikiKnowledgeUnit} from "../shared/wiki-knowled
 import {wikiOverviewSignature} from "../shared/wiki-overview";
 
 const selection:ProjectExportSelection={overview:false,wikiIds:["database"],matters:false,history:false,sources:false};
+
+it("exports the user-set plan as the only current plan and leaves discussions in the chapter",()=>{
+ const session=contextKnowledge().session,page=session.sections[0];
+ page.body="### 实施路线图\n\n另一个方案建议首版引入 Embedding。";
+ const options={...selection,overview:true,wikiIds:[]};
+ expect(projectDocument(session,options,"md").text).toContain("当前版本范围待确认。");
+ session.projectMaintenance={currentPlan:"v0.1 首先完成全文搜索。"};
+ const markdown=projectDocument(session,options,"md").text;
+ expect(markdown).toContain("### 当前规划\n\nv0.1 首先完成全文搜索。");
+ expect(markdown).not.toContain("Embedding");
+ expect(projectDocument(session,{...options,wikiIds:[page.id]},"md").text).toContain("另一个方案建议首版引入 Embedding。");
+});
+
+it("identifies a matching ledger and reports source-read failures separately from messages without a point",()=>{
+ const session=contextKnowledge().session;
+ const gap="e:c:1:1", retry="e:c:2:1", failed="e:c:3:1";
+ session.wikiKnowledge={version:1,status:"partial",generatedAt:1,materials:3,batches:[
+  {sourceIds:[gap,retry],units:[],status:"ok",uncovered:[gap,retry],rejected:{},
+   coverage:{[retry]:{version:1,sourceSignature:"s",status:"failed",attempts:1}}},
+  {sourceIds:[failed],units:[],status:"failed",rejected:{}},
+ ]};
+ const md=projectDocument(session,selection,"md").text;
+ const snapshot=JSON.parse(projectLedgerFile(session).text);
+ expect(md).toContain(snapshot.snapshotId);
+ expect(md).toMatch(/未抽出知识点\*\* · #2/u);
+ expect(md).toMatch(/补读失败\*\* · #3/u);
+ expect(md).toMatch(/读取批次失败\*\* · #4/u);
+});
+
+it("keeps a sourced release decision in the overview without a separate scope table",()=>{
+ const session=contextKnowledge().session,source=session.evidence[0];
+ const statement="第一版纳入本地全文搜索。",alternative="第一版纳入向量搜索。";
+ source.excerpt=statement;
+ const unit:WikiKnowledgeUnit={id:"search",subject:"全文搜索",statement,kind:"decision",details:[],delivery:"unknown",adoption:{status:"user_decision"},
+  evidence:{evidenceId:source.id,conversationId:source.conversationId,messageId:source.messageId,messageIndex:0,role:"user",pasted:false,quote:statement}};
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",documentType:"project",materials:2,decisions:{[unit.id]:{verdict:"confirmed",at:2,wholeUnit:true}},batches:[{sourceIds:[source.id],status:"ok",rejected:{},units:[unit,
+  {...unit,id:"semantic",subject:"向量搜索",statement:alternative,adoption:{status:"proposal"},evidence:{...unit.evidence,role:"assistant",quote:alternative}}]}],
+  draft:{version:1,generatedAt:2,status:"complete",chapters:[],report:{}}};
+ const opts={...selection,overview:true,wikiIds:[]};
+ const markdown=projectDocument(session,opts,"md").text;
+ expect(markdown).not.toMatch(/^### .*版本范围$/mu);
+ expect(markdown).toMatch(/### 当前规划\n\n完整版本范围待确认。以下安排有确认依据。\n\n- 第一版纳入本地全文搜索。 \[S-/u);
+ expect(markdown).toMatch(/- 第一版纳入本地全文搜索。 \[S-/u);
+ expect(markdown).not.toContain(alternative);
+ const locator=markdown.match(/^\[(S-\d+-[a-z0-9]+)\]: #source-\1$/mu)?.[1];
+ expect(locator).toBeDefined();
+ expect(markdown).toContain(`<a id="source-${locator}"></a>`);
+ expect(projectDocument(session,opts,"html").text).toContain(`href="#source-${locator}"`);
+});
 
 it("selects the matching layer and keeps a locator when no relevant original was saved",()=>{
  const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
@@ -436,7 +485,9 @@ it.each(["md", "html", "txt", "json"] as const)("keeps decided and open marks in
  ];
  const file=projectDocument(session,{...selection,holderMarks:false},format).text;
  // Status has one expression, the mark: decided and open are marked, the assistant's default is not.
- expect(file).toContain("〔已定〕");expect(file).toContain("〔未定〕");expect(file).not.toContain("〔建议／分析〕");
+ expect(file).toContain(format==="html"?'<span class="wiki-mark wiki-mark-decided">已定</span>':"〔已定〕");
+ expect(file).toContain(format==="html"?'<span class="wiki-mark wiki-mark-open">未定</span>':"〔未定〕");
+ expect(file).not.toContain("〔建议／分析〕");
 });
 
 
@@ -1182,7 +1233,7 @@ it("drops a table's redundant caption and presents a simple source flow as ordin
  const file=projectDocument(session,selection,"md").text;
  expect(file).not.toContain("对照表");expect(file).toContain("记录 → 提醒");expect(file).not.toContain("```text");
  const html=projectDocument(session,selection,"html").text;
- expect(html).toContain(`<p class="block-caption over-table"><b>对照表</b></p>`);expect(html).toContain("记录 → 提醒");
+ expect(html).toContain("<p>以下对照「现在」和「扩展后」。</p>");expect(html).not.toContain("<b>对照表</b>");expect(html).toContain("记录 → 提醒");
 });
 
 it("keeps only the figures of a reported figures row",()=>{

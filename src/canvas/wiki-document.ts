@@ -4,6 +4,8 @@ import remarkParse from "remark-parse";
 import {generatedProse} from "../shared/generated-structure-prose";
 import {wikiReadingLayout} from "../shared/wiki-reading-layout";
 import {readingEmphasisMarkdown} from "../shared/reading-emphasis";
+import {isWikiTableIntroduction} from "../shared/wiki-plan-tables";
+import {WIKI_EVIDENCE_LINK} from "../shared/wiki-evidence-link";
 
 const parser = unified().use(remarkParse);
 const nodeText = (node: RootContent): string => "value" in node ? node.value : "children" in node ? node.children.map(child => nodeText(child as RootContent)).join("") : "";
@@ -36,6 +38,7 @@ function chapterOverview(body:string,nodes:RootContent[]):WikiChapterOverview|un
   if(!usable(node)||opening.length>=2)break;
   if(nodes[index+1]&&["list","table","code","blockquote","html"].includes(nodes[index+1].type))break;
   const text=body.slice(node.position!.start.offset!,node.position!.end.offset!);
+  if (isWikiTableIntroduction(text) || text.includes(WIKI_EVIDENCE_LINK)) break;
   if(opening.reduce((sum,item)=>sum+item.text.length,0)+text.length>480)break;
   opening.push({text});end=node.position!.end.offset!;
  }

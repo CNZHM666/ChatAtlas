@@ -9,6 +9,8 @@ it("opens the latest accepted result at its saved chapter, leaving unaccepted pr
   const db = await getDatabase();
   const session: FocusSession = { id: "accepted", canvasId: project.id, goal: "Review", title: "Result", mode: "work", sections: [{ id: "one", title: "First", kind: "finding", body: "Body", transition: "", evidenceIds: [] }], sourceConversationIds: ["chosen"], evidence: [], activeSectionId: "one", completedSectionIds: [], notes: "My edits", createdAt: 1, updatedAt: 1 };
   await db.put("focusSessions", session); await db.put("focusSessions", { ...session, id: "preview", status: "preview", updatedAt: 2 });
+  await db.put("focusSessions", {...session,id:"deleted",deletedAt:3,updatedAt:3});
+  await db.put("focusSessions", {...session,id:"other-project",canvasId:"other",updatedAt:4});
   expect(await projectReader(project)).toEqual(session);
   expect(await db.get("focusSessions", "preview")).toMatchObject({ status: "preview" });
 });

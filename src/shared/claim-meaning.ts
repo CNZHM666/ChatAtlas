@@ -1,6 +1,7 @@
 /** Local checks that a claim keeps what its quoted words mean: a "not" the quote has and the claim lost, or a
  * tentative quote ("可以考虑", "maybe") turned into a firm claim. These are local reading hints, not model verdicts. */
-const NEGATION = /不要|不用|不做|先不|暂不|暂时不|不考虑|不需要|不再|不支持|不采用|不大量|禁止|避免|不得|无需|放弃|\b(?:not|don't|do not|never|no longer)\b/iu;
+const NEGATION = /不要|不用|不做|先不|暂不|暂时不|不考虑|不需要|不再|不支持|不采用|不大量|不应|不得|不能|不含|不纳入|不保留|不直接|不建立|不复制|未纳入|未采用|未支持|未提供|尚未|没有|无法|无须|无需|禁止|避免|排除|放弃|\b(?:not|don't|do not|never|no longer|without|excluded)\b/iu;
+const LITERAL_NEGATION = /(?:暂时不|尚未|暂不|先不|不应|不得|不|未)(?=支持|包含|纳入|采用|使用|启用|显示|开放|允许|接入|实现|完成|提供|执行|保留|保存|调用|覆盖|需要|复制|建立)|\s+not(?=\s)/giu;
 const TENTATIVE = /可以考虑|考虑|也许|或许|可能|建议|是否|要不要|能不能|可选|备选|\b(?:maybe|might|could|consider|perhaps|optional)\b/iu;
 const FIRM = /必须|一定要|已决定|已确定|确定采用|决定采用|已经完成|已完成|已上线|\b(?:must|decided|shipped)\b/iu;
 
@@ -87,7 +88,7 @@ function deferredItem(claim: string, quote: string): EvidenceAttention | undefin
 export function localMeaningProblem(claim: string, fullQuote: string | undefined): EvidenceAttention | undefined {
   if (!fullQuote || !statesSomething(claim)) return undefined;
   // A list of what a version covers is checked item by item: the "不需要后端" next to it says nothing about its items.
-  if (listItems(claim).length) return deferredItem(claim, fullQuote);
+  if (listItems(claim).length) return NEGATION.test(claim) ? undefined : deferredItem(claim, fullQuote);
   const quote = claimSentences(claim, fullQuote);
   if (!NEGATION.test(claim)) {
     const negated = clauses(quote).find(clause => NEGATION.test(clause) && aboutClaim(clause, claim));
@@ -98,6 +99,24 @@ export function localMeaningProblem(claim: string, fullQuote: string | undefined
     if (tentative) return { kind: "tentative", cue: tentative };
   }
   return undefined;
+}
+
+const literalForm = (value: string) => value.normalize("NFKC").toLowerCase().trim().replace(/[。！？!?.]$/u, "").replace(/\s/gu, "");
+/** An exact sentence pair that differs only by one explicit negative cue. */
+export function literalNegationCorrection(claim: string, quote: string): string | undefined {
+  if (!statesSomething(claim) || NEGATION.test(claim)) return;
+  const wanted = literalForm(claim), corrections = new Set<string>();
+  for (const sentence of quote.split(/(?<=[。！？!?\n])|\.(?=\s|$)/u)) {
+    const text = sentence.trim().replace(/^(?:\*\*|__)(.+?)(?:\*\*|__)$/u, "$1");
+    if (literalForm(text) === wanted) return;
+    for (const match of text.matchAll(LITERAL_NEGATION)) {
+      if (literalForm(text.slice(0, match.index) + text.slice(match.index! + match[0].length)) === wanted) {
+        const ending = claim.match(/[。！？!?．.]$/u)?.[0] ?? "";
+        corrections.add(text.replace(/[。！？!?．.]$/u, "") + ending);
+      }
+    }
+  }
+  return corrections.size === 1 ? corrections.values().next().value : undefined;
 }
 
 /** Legacy model verdict retained for backup compatibility; no longer used to schedule checks. */

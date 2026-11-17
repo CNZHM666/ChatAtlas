@@ -29,6 +29,7 @@ import type {PluggableList} from "unified";
 import { BookOpen, CircleCheck, Copy, Flag } from "lucide-react";
 import type { ReaderCitation } from "../reader-citations";
 import { readerScrollContainer } from "../reader-scroll";
+import { wikiTableSignature } from "../../shared/wiki-table-source";
 
 export const ReaderMarkdown = memo(function ReaderMarkdown({ content, zh, literalWidgets = false, sourceStart = 0, hideImages = false, literalCode = false, quoteHighlights }: { content: string; zh: boolean; literalWidgets?: boolean; sourceStart?: number; hideImages?: boolean; literalCode?: boolean; quoteHighlights?:QuoteHighlightRange[] }) {
   const text = useMemo(() => renderableConversationText(content, literalWidgets), [content, literalWidgets]);
@@ -45,6 +46,11 @@ export const ReaderMarkdown = memo(function ReaderMarkdown({ content, zh, litera
   const components: Components = { ol: readerStageList, pre: ({ children, node }) => <div {...sourceAttrs(node)}><ReaderCodeBlock zh={zh} literal={literalCode}>{children}</ReaderCodeBlock></div> };
   components.img = hideImages ? ({ alt }) => <span>{alt}</span> : ({ src, alt }) => <ReaderImage src={src} alt={alt} zh={zh} />;
   for (const tag of ["p", "li", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "table"] as const) Object.assign(components, { [tag]: ({ node, ...props }: HTMLAttributes<HTMLElement> & ExtraProps) => createElement(tag, { ...props, ...sourceAttrs(node) }) });
+  if(literalCode)components.table=({node,...props})=>{
+    const start=node?.position?.start.offset,end=node?.position?.end.offset;
+    const signature=start!==undefined&&end!==undefined?wikiTableSignature(text.slice(start,end)):undefined;
+    return <div className="workspace-source-table-scroll"><table {...props} {...sourceAttrs(node)} data-wiki-original-table={signature}/></div>;
+  };
   // A message is indivisible for context, but parsing an unbounded Markdown AST
   // (especially tables/math) must not freeze navigation just to show its text.
   if (!format) return <div className="reader-long-text" aria-busy="true">{text}</div>;

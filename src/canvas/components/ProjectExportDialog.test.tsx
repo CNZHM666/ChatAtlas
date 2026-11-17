@@ -56,6 +56,9 @@ it("exports the knowledge ledger as its own JSON file when ticked",async()=>{
  const names:string[]=[];vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(function(this:HTMLAnchorElement){names.push(this.download);});
  const session={...contextKnowledge().session,title:"ChatAtlas",runId:"run-1",wikiKnowledge:{version:1,generatedAt:0,status:"complete",materials:0,batches:[]}} as Parameters<typeof ProjectExportDialog>[0]["session"];
  render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
+ const diagnostics=screen.getByText("诊断文件");
+ expect(diagnostics.closest("details")?.open).toBe(false);
+ fireEvent.click(diagnostics);
  const ledger=screen.getByRole("checkbox",{name:/知识点账本/});expect(ledger).not.toBeChecked();
  // The ledger alone is enough to export.
  fireEvent.click(screen.getByRole("checkbox",{name:"项目 Wiki"}));fireEvent.click(ledger);
@@ -68,7 +71,7 @@ it("exports the knowledge ledger as its own JSON file when ticked",async()=>{
  expect(screen.queryByRole("checkbox",{name:/知识点账本/})).toBeNull();
 });
 
-it.each(["wiki","references","both","html-with-references"] as const)("exports the selected files for %s",async mode=>{
+it.each(["md","html","txt","json"] as const)("includes selected examples in the same %s file",async format=>{
  const session=contextKnowledge().session;
  const example="const settings = { enabled: true };";
  session.sections[0].body="## 设置\n\n保留正文说明。\n\n~~~ts\n"+example+"\n~~~";
@@ -77,25 +80,22 @@ it.each(["wiki","references","both","html-with-references"] as const)("exports t
  const names:string[]=[];
  vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(function(this:HTMLAnchorElement){names.push(this.download);});
  render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
- const wiki=screen.getByRole("checkbox",{name:"项目 Wiki"}),references=screen.getByRole("checkbox",{name:"参考示例"});
- expect(wiki).toBeChecked();expect(references).not.toBeChecked();
- if(mode==="references")fireEvent.click(wiki);
- if(mode!=="wiki")fireEvent.click(references);
- if(mode==="html-with-references")fireEvent.change(screen.getByRole("combobox",{name:"文件格式"}),{target:{value:"html"}});
+ expect(screen.getByRole("checkbox",{name:"项目 Wiki"})).toBeChecked();
+ expect(screen.queryByRole("checkbox",{name:/参考示例/})).toBeNull();
+ expect(screen.getByText("将导出 1 个文件")).toBeInTheDocument();
+ fireEvent.click(screen.getByRole("button",{name:"选择 Wiki 章节"}));
+ const appendix=screen.getByRole("checkbox",{name:/在同一文件附参考示例/});
+ expect(appendix).not.toBeChecked();
+ fireEvent.click(appendix);
+ fireEvent.change(screen.getByRole("combobox",{name:"文件格式"}),{target:{value:format}});
  fireEvent.click(screen.getByRole("button",{name:"导出"}));
- await screen.findByText(mode==="wiki"?"文件已导出":mode==="references"?"参考示例已导出":"文件和参考示例已导出");
- expect(names).toEqual([...(mode!=="references"?[mode==="html-with-references"?"ChatAtlas.html":"ChatAtlas.md"]:[]),...(mode!=="wiki"?["ChatAtlas - 参考示例.md"]:[])]);
+ await screen.findByText("文件已导出");
+ expect(names).toEqual([`ChatAtlas.${format}`]);
  const texts=await Promise.all(create.mock.calls.map(([blob])=>new Promise<string>((resolve,reject)=>{
   const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsText(blob);
  })));
- if(mode!=="references"){
-  expect(texts[0]).toContain("项目总览");expect(texts[0]).toContain("保留正文说明");expect(texts[0]).not.toContain(example);
- }
- if(mode!=="wiki"){
-  expect(texts.at(-1)).toContain(example);expect(texts.at(-1)).not.toContain("保留正文说明");
-  if(mode==="references")expect(texts.at(-1)).not.toContain("返回项目 Wiki");
-  if(mode==="both")expect(texts.at(-1)).toContain("[返回项目 Wiki](ChatAtlas.md)");
- }
+ expect(texts[0]).toContain("项目总览");expect(texts[0]).toContain("保留正文说明");expect(texts[0]).toContain(example);
+ if(format==="md")expect(texts[0]).toContain("参考示例附录");
 });
 it("exports this project's generation record as a CSV when ticked",async()=>{
  const create=vi.fn().mockReturnValue("blob:fixture");vi.stubGlobal("URL",class extends URL{static createObjectURL=create;static revokeObjectURL=vi.fn();});
@@ -106,6 +106,7 @@ it("exports this project's generation record as a CSV when ticked",async()=>{
  vi.stubGlobal("Worker",class{set onmessage(callback: typeof receive){receive=callback;} postMessage=post;terminate=terminate;});
  const session={...contextKnowledge().session,title:"AI电路生成平台",runId:"run-1"} as Parameters<typeof ProjectExportDialog>[0]["session"];
  render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
+ fireEvent.click(screen.getByText("诊断文件"));
  fireEvent.click(screen.getByRole("checkbox",{name:/生成记录/}));
  fireEvent.click(screen.getByRole("button",{name:"导出"}));
  expect(screen.getByText("正在准备生成记录…")).toBeInTheDocument();

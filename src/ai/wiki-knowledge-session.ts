@@ -13,7 +13,7 @@ import { datedWikiSources, withWikiSources, type WikiSourceInput } from "../shar
 import { wikiLedgerConversations, withWikiSections } from "../shared/wiki-sections";
 import { getMessagesForConversation } from "../storage/messages";
 
-type AI = { generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> };
+type AI = { modelId?: string; generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> };
 
 /** The ledger with each unit given the heading it stood under in its stored message, read before writing: a ledger
  * extracted before units kept it gets it too. Messages that cannot be read leave the ledger as it was. */

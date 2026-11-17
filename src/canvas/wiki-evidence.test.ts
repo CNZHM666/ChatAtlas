@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { wikiEvidencePoints } from "./wiki-evidence";
 import { needsConfirmation } from "./workspace-evidence-context";
 import { projectSession } from "../test/project-fixture";
+import { restoreWikiSourceNegation } from "../shared/wiki-source-negation";
 
 it("opens the original that holds the claim's quote, whatever order the originals are listed in", () => {
   const session = projectSession();
@@ -41,4 +42,18 @@ it("does not revive review tasks from the removed AI meaning check's stored verd
   const session = projectSession(), ref = { ...session.evidence[0], excerpt: "默认中性灰。" };
   const section = { ...session.sections[0], evidenceIds: [ref.id], claims: [{ text: "默认中性灰。", quote: "默认中性灰。", evidenceIds: [ref.id], meaning: { text: "默认中性灰。", verdict: "unsupported" as const, checkedAt: 1 } }] };
   expect(wikiEvidencePoints(section, [ref], true)[0].attention).toBeUndefined();
+});
+
+it("repairs a literal negation from one retained source and leaves genuinely unresolved scope for review",()=>{
+  const session=projectSession(),text="首版支持向量检索。",quote="首版不支持向量检索。";
+  const ref={...session.evidence[0],excerpt:quote,sourceSignature:"original"};
+  const section={...session.sections[0],body:text,claims:[{text,quote,evidenceIds:[ref.id],holder:"open" as const}]};
+  session.evidence=[ref];
+  const fixed=restoreWikiSourceNegation(section,session);
+  expect(fixed.body).toBe(quote);
+  expect(wikiEvidencePoints(fixed,[ref],true).some(needsConfirmation)).toBe(false);
+  expect(restoreWikiSourceNegation({...section,userEdited:true},session).body).toBe(text);
+  expect(restoreWikiSourceNegation(section,{...session,sourceSignatures:{[ref.conversationId]:{[ref.messageId]:"changed"}}}).body).toBe(text);
+  const ambiguous={...section,body:"首版涵盖计时控制、后台运行、网站屏蔽。",claims:[{...section.claims[0],text:"首版涵盖计时控制、后台运行、网站屏蔽。",quote:"| 网站屏蔽 | V2 |"}]};
+  expect(wikiEvidencePoints(ambiguous,[{...ref,excerpt:ambiguous.claims[0].quote}],true).some(needsConfirmation)).toBe(true);
 });

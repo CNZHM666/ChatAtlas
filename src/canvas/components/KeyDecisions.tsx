@@ -7,7 +7,7 @@ type Verdict = WikiUserDecision["verdict"] | undefined;
 
 /** The key points the discussion left as suggestions, for the user to confirm as decisions or set aside: before a
  * document is written, and later in the knowledge ledger. A click shows at once; saving follows behind it. */
-export function KeyDecisions({ ledger, zh, onDecide, onLedger, intro, footer, open: initiallyOpen = true, onActivity }: {
+export function KeyDecisions({ ledger, zh, onDecide, onLedger, intro, footer, open: initiallyOpen = true, onActivity, prepared }: {
   ledger: WikiKnowledgeLedger | undefined; zh: boolean;
   onDecide: (unitIds: string[], verdict: Verdict, statement: string) => Promise<void> | void;
   /** Applies a version answer to the ledger; without it no version question is asked. */
@@ -15,9 +15,10 @@ export function KeyDecisions({ ledger, zh, onDecide, onLedger, intro, footer, op
   intro?: ReactNode; footer?: ReactNode; open?: boolean;
   /** Called on any answer, so a waiting step knows the user is here. */
   onActivity?: () => void;
+  prepared?: ReturnType<typeof wikiDecisionQuestions>;
 }) {
   // Which version holds now comes first; a point asked there is not asked again below. At most eight questions.
-  const asking = Boolean(onLedger), { versions: allQuestions, candidates: allCandidates, shown } = useMemo(() => wikiDecisionQuestions(ledger, zh, asking), [ledger, zh, asking]);
+  const asking = Boolean(onLedger), { versions: allQuestions, candidates: allCandidates, shown } = useMemo(() => prepared ?? wikiDecisionQuestions(ledger, zh, asking), [ledger, zh, asking, prepared]);
   // The questions that change the document most stand open; the rest wait folded below them, asked all the same.
   const [unfolded, setUnfolded] = useState(false);
   const questions = unfolded ? allQuestions : allQuestions.slice(0, shown), candidates = unfolded ? allCandidates : allCandidates.slice(0, Math.max(0, shown - allQuestions.length));

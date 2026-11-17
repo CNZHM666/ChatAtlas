@@ -15,8 +15,8 @@ import { generateFocusUpdate } from "./focus-update";
 
 const source={id:"document-source",title:"Source",platform:"chatgpt" as const,url:"",messageCount:1,updatedAt:1};
 const original:ConversationMessage={id:"document-message",conversationId:source.id,messageIndex:0,role:"user",content:"Keep the original technical conditions.",contentHash:"",preview:"",createdAt:1,updatedAt:1};
-const previous:FocusSession={id:"document-old",mode:"work",goal:"Organize the discussion",title:"My document",scope:{kind:"all"},sourceConversationIds:[source.id],sections:[{id:"personal",title:"Personal chapter",body:"My exact personal text.",kind:"finding",origin:"user",userEdited:true,transition:"",evidenceIds:[]}],evidence:[],notes:"Keep notes",projectMaintenance:{overview:"My description"},activeSectionId:"personal",completedSectionIds:[],createdAt:1,updatedAt:1};
-const patch:FocusSession={...previous,id:"document-patch",evidence:[{id:"ref",conversationId:source.id,messageId:original.id,title:source.title,excerpt:original.content}],sections:[{id:"generated",title:"Technical conditions",body:original.content,kind:"finding",transition:"",evidenceIds:["ref"]}]};
+const previous:FocusSession={id:"document-old",mode:"work",goal:"Organize the discussion",title:"My document",scope:{kind:"all"},sourceConversationIds:[source.id],sections:[{id:"personal",title:"Personal chapter",body:"My exact personal text.",kind:"finding",origin:"user",userEdited:true,transition:"",evidenceIds:[]}],evidence:[],notes:"Keep notes",projectMaintenance:{overview:"My description",currentPlan:"Ship full-text search in the next release."},activeSectionId:"personal",completedSectionIds:[],createdAt:1,updatedAt:1};
+const patch:FocusSession={...previous,id:"document-patch",projectMaintenance:undefined,evidence:[{id:"ref",conversationId:source.id,messageId:original.id,title:source.title,excerpt:original.content}],sections:[{id:"generated",title:"Technical conditions",body:original.content,kind:"finding",transition:"",evidenceIds:["ref"]}]};
 beforeEach(async()=>{vi.clearAllMocks();const db=await getDatabase();await db.clear("messages");await db.put("messages",original);calls.generate.mockResolvedValue(patch);calls.organize.mockImplementation(async session=>session);});
 
 it("updates document prose without the retired project-state, evolution or Q&A tail",async()=>{
@@ -24,7 +24,7 @@ it("updates document prose without the retired project-state, evolution or Q&A t
  expect(calls.generate).toHaveBeenCalledOnce();expect(calls.generate.mock.calls[0][9]).toMatchObject({complete:true,skipProjectState:true});
  expect(calls.organize).toHaveBeenCalledOnce();expect(calls.state).not.toHaveBeenCalled();expect(calls.history).not.toHaveBeenCalled();expect(calls.query).not.toHaveBeenCalled();
  expect(result.sections.find(section=>section.id==="personal")?.body).toBe("My exact personal text.");expect(result.sections.some(section=>section.body===original.content)).toBe(true);
- expect(result.notes).toBe(previous.notes);expect(result.projectMaintenance?.overview).toBe("My description");expect(result.sourceVersionIds?.[source.id]).toBeTruthy();expect(previous).toEqual(before);
+ expect(result.notes).toBe(previous.notes);expect(result.projectMaintenance).toMatchObject(previous.projectMaintenance!);expect(result.sourceVersionIds?.[source.id]).toBeTruthy();expect(previous).toEqual(before);
 });
 
 it("rejects a stale update while retaining the original document instead of publishing it",async()=>{

@@ -2,6 +2,7 @@ import { wikiUserChooses } from "../shared/wiki-user-choice";
 import { UNDECIDED } from "../shared/open-words";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
+import { requestBudget } from "./request-policy";
 import { AIProviderHttpError, AIProviderResponseError, AIProviderValidationError } from "./provider-errors";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
 import { resolveProjectProofs } from "./project-knowledge";
@@ -406,7 +407,7 @@ function reusable(previous: WikiUnitBatch | undefined, sameInput: boolean, batch
   return previous.sourceIds.length === batch.length && previous.sourceIds.every((id, index) => id === batch[index].id) && previous.units.every(unit => text.get(unit.evidence.evidenceId)?.includes(normalized(unit.evidence.quote)));
 }
 
-export async function extractWikiKnowledge(input: { materials: CoverageMaterial[]; locale: string; signal: AbortSignal; ai: { generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> }; previous?: WikiKnowledgeLedger; project?: string; progress?: WikiProgressFn;
+export async function extractWikiKnowledge(input: { materials: CoverageMaterial[]; locale: string; signal: AbortSignal; ai: { modelId?: string; generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> }; previous?: WikiKnowledgeLedger; project?: string; progress?: WikiProgressFn;
   /** The units read so far, at a third and two thirds of the batches: enough for a first look at the topics. */
   onUnits?: (units: WikiKnowledgeUnit[]) => void;
   /** Material the user is being asked about: read last, so an answer given meanwhile can still leave it out. */
@@ -552,29 +553,17 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       const material = byId.get(id);
       if (!material) return [];
       const outcome = coverageOf(material, result);
-      return outcome?.status === "no_knowledge" ? [] : [{ index, material }];
+      return outcome?.status === "no_knowledge" ? [] : [{ material, attempts: outcome?.attempts ?? 0 }];
     });
   });
-  const packs: CoverageMaterial[][] = [];
-  for (const { material } of waiting) {
-    const pack = packs[packs.length - 1], size = pack?.reduce((sum, item) => sum + item.text.length, 0) ?? 0;
-    if (pack && pack[0].conversationId === material.conversationId && size + material.text.length <= UNIT_BATCH_CHARACTERS) pack.push(material); else packs.push([material]);
-  }
-  let coverRequests = 0, coverUnits = 0;
-  // The second reads (the user's uncovered messages, then product comparisons) run together: one after another they
-  // took 172 s of a 300 s extraction, nine requests each waiting on the last though none needs another's answer. Each
-  // answer is added to its batch as it now stands, so two answers for one batch both land.
-  const cover = async (pack: CoverageMaterial[]) => {
-    signal.throwIfAborted();
-    try {
-      coverRequests++;
+  const coverRequest = (pack: CoverageMaterial[]) => {
       const request = wikiUnitRequest(pack, materials, locale, signal, pasted, input.project, pack.map(material => material.id));
       const payload = JSON.parse(request.prompt);
       const proof = new Map(pack.map((material, index) => ["p" + (index + 1), material]));
-      const answer = await send({
+      return {
         ...request,
         prompt: JSON.stringify({ ...payload, coverReview: "Extract every project intent from the covered user passages, even if an assistant already said it. Also return coverage:[{passage:'p1',status:'no_knowledge'|'pending',reason:'question'|'assistant_request'|'no_project_content',explanation:'brief reason'}] for passages producing no unit. Choose no_knowledge only when no durable project fact, choice, intent or constraint is stated. Uncertain cases are pending." }),
-        validate: value => {
+        validate: (value: unknown) => {
           const parsed = request.validate(value);
           const rows = (value as { coverage?: unknown })?.coverage;
           const coverage: Record<string, string> = {};
@@ -586,7 +575,35 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
           }
           return { ...parsed, coverage };
         },
-      });
+      };
+  };
+  const packs: Array<{ materials: CoverageMaterial[]; request: ReturnType<typeof coverRequest> }> = [];
+  const fits = (request: ReturnType<typeof coverRequest>) => {
+    const budget = requestBudget(request, ai.modelId);
+    return budget.inputTokens <= budget.maxInputTokens;
+  };
+  // Budget the actual prompt, including proof labels and disposition metadata.
+  // In later runs, give passages never attempted a turn ahead of repeat failures.
+  for (const { material } of waiting.sort((a, b) => a.attempts - b.attempts)) {
+    const last = packs.at(-1);
+    if (last && last.materials.length < MAX_UNITS && last.materials[0].conversationId === material.conversationId) {
+      const combined = [...last.materials, material], request = coverRequest(combined);
+      if (fits(request)) { last.materials = combined; last.request = request; continue; }
+    }
+    const request = coverRequest([material]);
+    if (fits(request)) packs.push({ materials: [material], request });
+    else {
+      const index = batchOf.get(material.id)!;
+      results[index] = recordCoverage(material, results[index], "failed", "This source passage exceeds the recovery input budget", true);
+    }
+  }
+  let coverRequests = 0, coverUnits = 0;
+  const cover = async ({ materials: pack, request }: typeof packs[number]): Promise<void> => {
+    signal.throwIfAborted();
+    try {
+      if(coverRequests>=COVER_REQUESTS*2)throw new Error("Recovery retry budget exhausted");
+      coverRequests++;
+      const answer = await send(request);
       const duplicates = new Set<string>();
       for (const unit of answer.units) {
         const index = batchOf.get(unit.evidence.evidenceId);
@@ -609,6 +626,12 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       }
     } catch (error) {
       signal.throwIfAborted();
+      const code=(error as {code?:string})?.code;
+      if(pack.length>1&&coverRequests+2<=COVER_REQUESTS*2&&(code==="LOCAL_INPUT_BUDGET"||code==="LOCAL_INPUT_CHARACTERS"||code==="PROVIDER_OUTPUT_TRUNCATED"||error instanceof AIProviderHttpError&&error.status===413)){
+        const middle=Math.ceil(pack.length/2);
+        await Promise.all([pack.slice(0,middle),pack.slice(middle)].map(materials=>cover({materials,request:coverRequest(materials)})));
+        return;
+      }
       for (const material of pack) {
         const index = batchOf.get(material.id)!;
         results[index] = recordCoverage(material, results[index], "failed", error instanceof Error ? error.message.slice(0, 180) : "Recovery request failed", true);

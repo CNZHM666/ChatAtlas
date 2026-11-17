@@ -8,12 +8,34 @@ import { projectSession } from "../../test/project-fixture";
 import type { ConversationMessage } from "../../shared/types";
 import type { FocusEvidence } from "../../shared/focus-session";
 import {markEvidenceRead} from "../../storage/evidence-reading";
+import {wikiTableSignature} from "../../shared/wiki-table-source";
 vi.mock("../../storage/source-versions", () => ({readSessionSource:vi.fn()}));
 vi.mock("../../storage/evidence-reading",async importOriginal=>({...await importOriginal<typeof import("../../storage/evidence-reading")>(),evidenceWasRead:vi.fn().mockResolvedValue(false),markEvidenceRead:vi.fn().mockResolvedValue(undefined),markEvidenceReadBatch:vi.fn().mockResolvedValue(undefined)}));
 afterEach(()=>{cleanup();vi.clearAllMocks();vi.restoreAllMocks();vi.unstubAllGlobals();});
 /** Everything marked as the claim's source: the original's own words and the sentences close in wording. */
 const markedRanges=(marks:Map<string,Set<Range>>)=>[...(marks.get("atlas-original-proof")??[]),...(marks.get("atlas-original-similar")??[])];
 const original:ConversationMessage = {id:"message",conversationId:"source",role:"user",content:"首版支持预览。后续再考虑实物控制。",messageIndex:2,createdAt:1_700_000_000_000,updatedAt:1_800_000_000_000,contentHash:"",preview:""};
+
+it("anchors on the exact original table and leaves nearby prose and similar tables unmarked",async()=>{
+ const session=projectSession(),excerpt="以下对比候选消息的排序。";
+ const table="| 候选消息 | 排名 |\n| --- | ---: |\n| 矩阵问题 | 3 |";
+ const similar=table.replace("| 3 |","| 8 |");
+ const content=[excerpt,similar,"同一组候选消息还有另一轮结果。",table].join("\n\n");
+ const reference={...session.evidence[0],excerpt,sourceSignature:undefined};
+ session.evidence=[reference];
+ vi.mocked(readSessionSource).mockResolvedValue([{...original,content}]);
+ const view=render(<WorkspaceSourcePanel session={session} reference={reference} tableTarget={wikiTableSignature(table)} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
+ await waitFor(()=>expect(view.container.querySelector("table[data-atlas-table-active]")).toHaveTextContent("矩阵问题3"));
+ expect(view.container.querySelector("table[data-atlas-table-active]")?.parentElement).toHaveClass("workspace-source-table-scroll");
+ expect(screen.getByLabelText("定位图例")).toHaveTextContent("原始表格");
+ expect(within(screen.getByLabelText("定位图例")).queryByText("措辞相近")).toBeNull();
+ expect(screen.getByRole("button",{name:"来源"})).toBeVisible();
+ expect(view.container.querySelector("table:first-of-type")).not.toHaveAttribute("data-atlas-table-active");
+ expect(view.container.querySelector(".workspace-source-highlight")).toBeNull();
+ view.rerender(<WorkspaceSourcePanel session={session} reference={reference} tableTarget={wikiTableSignature(table.replace("3","9"))} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
+ expect(await screen.findByText("该消息中未能唯一定位原始表格，已打开来源消息。")).toBeVisible();
+ expect(view.container.querySelector("table[data-atlas-table-active]")).toBeNull();
+});
 
 it.each([
  {content:'原来是：\n\n> **AI帮你设计硬件。**\n\n现在可以变成：\n\n> **从“我想做什么”，一直陪你到“我真的把它做出来”。**',quote:'一直陪你到“我真的把它做出来”',claim:'一直陪你到“我真的把它做出来”',selector:'blockquote strong',wanted:'一直陪你到“我真的把它做出来”',approximate:false},
@@ -25,11 +47,14 @@ it.each([
  vi.mocked(readSessionSource).mockResolvedValue([{...original,role:'assistant',content}]);
  const marks=new Map<string,Set<Range>>();vi.stubGlobal('CSS',{...globalThis.CSS,highlights:marks});vi.stubGlobal('Highlight',class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
  const {container}=render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote} claim={claim} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
- await waitFor(()=>expect(markedRanges(marks).length).toBeGreaterThan(0));
+ await waitFor(()=>{
+  expect(markedRanges(marks).length).toBeGreaterThan(0);
+  expect(Boolean(marks.get("atlas-original-similar")?.size)).toBe(approximate);
+ });
+ expect(screen.getByLabelText("定位图例")).toHaveTextContent("原话措辞相近同一轮的相关句");
  const ranges=markedRanges(marks);
  expect(ranges.map(range=>range.toString()).join('|')).toContain(wanted);
  expect(ranges.some(range=>range.startContainer.parentElement?.closest(selector))).toBe(true);
- expect(Boolean(screen.queryByText('措辞相近'))).toBe(approximate);
  expect(container.querySelector('pre svg, iframe')).toBeNull();
 });
 
@@ -217,14 +242,18 @@ it("asks about a dropped negation with the original's words, and keeps the statu
 
 it("offers the status behind a quiet link on a point that needs no answer",async()=>{
  const session=projectSession();vi.mocked(readSessionSource).mockResolvedValue([original]);
- const reference={...session.evidence[0],excerpt:"首版支持预览。"},onHolder=vi.fn();
- const points=[{key:"a",claim:"首版支持预览",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"ai" as const}];
- render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文" points={points} pointIndex={0} onPoint={vi.fn()} onHolder={onHolder}/>);
+ const reference={...session.evidence[0],excerpt:"首版支持预览。"},onHolder=vi.fn(),onPoint=vi.fn();
+ const point={key:"a",claim:"首版支持预览",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"ai" as const};
+ const points=[point,{...point,key:"b"}];
+ render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文" points={points} pointIndex={0} onPoint={onPoint} onHolder={onHolder}/>);
  await waitFor(()=>expect(document.querySelector(".workspace-source-message.is-source-target")).toBeTruthy());
  expect(screen.queryByText("这句是你的决定吗？")).toBeNull();expect(screen.getByText("状态：").textContent).toContain("AI 建议");
  // The link offers the statuses themselves; nothing was flagged, so there is no question about the meaning.
  fireEvent.click(screen.getByRole("button",{name:"改状态"}));expect(screen.getByText("这句的状态")).toBeTruthy();expect(screen.queryByText("这句和原话意思一致吗？")).toBeNull();
- fireEvent.click(screen.getByRole("button",{name:"未定"}));expect(onHolder).toHaveBeenCalledWith(points[0],"open");
+ fireEvent.click(screen.getByRole("button",{name:"此前"}));
+ expect(onHolder).toHaveBeenCalledWith(point,"earlier");
+ expect(onPoint).not.toHaveBeenCalled();
+ expect(screen.queryByText("这句的状态")).toBeNull();
 });
 
 it("shows an answered point as recorded, without the flag banner or kind chip coming back",async()=>{
@@ -353,4 +382,40 @@ it("narrows a quote saved across paragraphs to the sentences that state its clai
  // A short quote, or one no sentence of which is clearly closer, stays whole.
  expect(narrowQuote("首版支持预览","首版支持预览。")).toBe("首版支持预览。");
  expect(narrowQuote("用户可以离线使用","今天天气不错。明天再说。")).toBe("今天天气不错。明天再说。");
+});
+
+it("highlights the literal workflow as well as the other supported clauses in a compound claim",async()=>{
+ const session=projectSession();session.projectState=undefined;
+ const flow="摘要展示 → 查看详情 → 查看原始依据 → 按需编辑";
+ const quote=["这些模块可以展示同一条知识的不同视图，但不应无意义地复制相同正文。","建议统一采用：",`**${flow}**`,"例如：项目总览展示一条重要决策的简短摘要。","请优先复用已有组件、关联 ID 和数据来源，不要建立一套平行的记录系统。"].join("\n\n");
+ const claim="各模块可展示同一条知识的不同视图但不应无意义复制相同正文，统一采用摘要展示→查看详情→查看原始依据→按需编辑的流程，不建立平行记录系统。";
+ const reference={...session.evidence[0],excerpt:quote};session.evidence=[reference];
+ vi.mocked(readSessionSource).mockResolvedValue([{...original,role:"assistant",content:quote}]);
+ const marks=new Map<string,Set<Range>>();
+ vi.stubGlobal("CSS",{...globalThis.CSS,highlights:marks});
+ vi.stubGlobal("Highlight",class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
+ render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote} claim={claim} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
+ await waitFor(()=>{
+  const proof=[...marks.get("atlas-original-proof")??[]].map(range=>range.toString()).join("|");
+  expect(proof).toContain(flow);
+  expect(proof).toContain("不同视图");
+  expect(proof).not.toContain("重要决策的简短摘要");
+ });
+});
+
+it("opens long context near the cited turn and expands it in either direction on demand",async()=>{
+ const session=projectSession(),reference={...session.evidence[0],messageId:"m25",excerpt:"消息 25"};
+ session.evidence=[reference];
+ const messages=Array.from({length:60},(_,index)=>({...original,id:`m${index}`,messageIndex:index,role:index%2?"assistant" as const:"user" as const,content:`消息 ${index}`}));
+ vi.mocked(readSessionSource).mockResolvedValue(messages);
+ const {container}=render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
+ await screen.findByText("消息 25");
+ fireEvent.click(screen.getByRole("button",{name:"前后文"}));
+ expect(container.querySelectorAll("[data-message-id]")).toHaveLength(11);
+ expect(screen.queryByText("消息 19")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"显示更早的消息"}));
+ expect(screen.getByText("消息 19")).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"显示更晚的消息"}));
+ expect(screen.getByText("消息 31")).toBeVisible();
+ expect(screen.queryByText("消息 59")).toBeNull();
 });

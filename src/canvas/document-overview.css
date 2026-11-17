@@ -22,6 +22,22 @@
 .document-overview-chapters strong{font-size:15px;font-weight:600;overflow-wrap:anywhere}
 .document-overview-chapters li small{font-size:13px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
 .document-overview-sources{display:flex;align-items:center;gap:8px;margin-top:22px;font-size:13px}
+.document-timeline{margin:0 0 28px;padding:16px 0;border-block:1px solid var(--border)}
+.document-timeline h2{font-size:15px;margin:0 0 12px}
+.document-timeline ol{list-style:none;margin:0;padding:0}
+.document-timeline li{position:relative;margin-inline-start:5px;padding:0 0 14px 16px;border-inline-start:1px solid var(--border);--timeline-ink:var(--accent)}
+.document-timeline li:last-child{padding-bottom:0;border-color:transparent}
+.document-timeline li::before{content:"";position:absolute;inset-block-start:6px;inset-inline-start:-5px;width:9px;height:9px;border-radius:50%;background:var(--timeline-ink);box-shadow:0 0 0 3px var(--surface-solid)}
+.document-timeline li.is-reported{--timeline-ink:var(--muted)}
+.document-timeline li.is-earlier{--timeline-ink:var(--muted)}
+.document-timeline li.is-release{--timeline-ink:var(--wiki-holder-material,#1d4ed8)}
+.document-timeline-meta{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;color:var(--muted);font-size:12px}
+.document-timeline-status{color:var(--timeline-ink);font-weight:600}
+.document-timeline li p{margin:2px 0 0;line-height:1.65;overflow-wrap:anywhere}
+.document-timeline li .document-timeline-reason{color:var(--muted);font-size:13px}
+:is(.focus-workspace,.focus-preview,.document-overview) .document-timeline li button{display:inline;padding:0;min-height:0;margin-inline-start:4px;border:0;background:transparent;color:var(--accent);font-size:12px;text-decoration:underline;text-underline-offset:3px;white-space:nowrap}
+.document-saved-plan{margin:0 0 20px;font-size:14px}
+.document-saved-plan summary{width:fit-content;color:var(--muted);cursor:pointer}
 @media(max-width:600px){.document-overview-chapters li>button{gap:10px;padding:15px 4px}.document-overview-heading h1{font-size:25px}}
 /* ONE quiet line: facts · content status · organizing scope (opens below). */
 /* Every item carries a leading separator; the -20px offset and left clip hide it

@@ -2,6 +2,11 @@ import type { FocusSession } from "./focus-session";
 
 // These fields move the reader, but cannot alter source interpretation or article prose.
 const NAVIGATION = new Set(["activeSectionId", "visitedSectionIds", "wikiCollapsedGroups", "updatedAt"]);
+/** Workspace updates replace content fields by reference, while navigation can shallow-copy the session. */
+export function sameProjectReadingInputs(before: FocusSession, after: FocusSession) {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)] as Array<keyof FocusSession>);
+  return [...keys].every(key => NAVIGATION.has(key) || Object.is(before[key], after[key]));
+}
 const record = (value: object) => Object.entries(value).flatMap(([key, item]) => [key, item]);
 function contentTokens(session: FocusSession): unknown[] {
   return [

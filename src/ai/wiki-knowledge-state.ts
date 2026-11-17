@@ -10,6 +10,7 @@ import { assistantRequest, DECIDING_KINDS, personalDirection, STATE_KINDS, type 
 import { wikiDiscussionOrder, wikiSaidLater } from "../shared/wiki-sources";
 import { UNDECIDED, wikiMeasure } from "../shared/wiki-section-status";
 import { wikiSaidInQuote } from "../shared/wiki-said-in-quote";
+import { exclusiveWikiVersions } from "./wiki-version-conflict";
 
 const ANALYSIS_KINDS: WikiKnowledgeUnit["kind"][] = ["fact", "report", "history", "question"];
 const LEFT_UNDECIDED = /\bcan'?t decide\b|\bcannot decide\b|\bhaven'?t decided\b|拿不定|定不下来/iu;
@@ -60,14 +61,20 @@ export function wikiUnitStatuses(units: WikiKnowledgeUnit[], organization: Pick<
     if ((relation.kind === "replaces" || relation.kind === "rejects") && relation.status === "unresolved" && decided.has(relation.older) && decided.has(relation.newer)) { contested.add(relation.older); contested.add(relation.newer); continue; }
     open.delete(relation.older); open.delete(relation.newer);
   }
-  // The version chains, across subjects: an earlier version holds no longer, and versions left open are open. A
-  // version the user confirmed settles its chain: the chain's other versions are earlier.
+  // A generated chain orders discussions. Only a later confirmed and
+  // incompatible choice can retire a member without a resolved relation.
   const chainEarlier = new Set<string>(), chainOpen = new Set<string>();
   for (const topic of wikiDecidedTopics(organization.topics, decisions)) {
     const members = [...topic.current, ...topic.earlier], settled = members.filter(id => decisions[id]?.verdict === "confirmed" || byId.get(id) && decides(byId.get(id)!));
-    for (const id of topic.earlier) if (!settled.includes(id) && (settled.length || topic.current.some(other => byId.get(other)))) chainEarlier.add(id);
+    for (const id of topic.earlier) {
+      const older = byId.get(id);
+      if (!older || settled.includes(id)) continue;
+      if (settled.some(other => {
+        const newer = byId.get(other);
+        return newer && wikiSaidLater(newer, older) && exclusiveWikiVersions(older, newer);
+      })) chainEarlier.add(id);
+    }
     if (topic.open && !settled.length) topic.current.forEach(id => chainOpen.add(id));
-    if (topic.open && settled.some(id => decisions[id]?.verdict === "confirmed")) topic.current.filter(id => !settled.includes(id)).forEach(id => chainEarlier.add(id));
   }
   return new Map(units.map(unit => [unit.id, ((): WikiUnitStatus => {
     // The user's own verdict in the ledger outranks what the conversation shows.
@@ -149,7 +156,11 @@ export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string
   const stageWords = (terms: Set<string>) => [...terms].filter(term => !/^(?:milestone|phase|stage|m?\d+)$/u.test(term));
   const sameStage = (unit: WikiKnowledgeUnit, item: WikiBaselineItem, own: Set<string>, other: Set<string>) => {
     const stage = stageOf(unit.statement), theirs = stageOf(item.text);
-    if (stage !== undefined && theirs === stage) return true;
+    if (stage !== undefined && theirs === stage) {
+      const source=live.find(candidate=>item.unitIds.includes(candidate.id));
+      return source?.evidence.conversationId===unit.evidence.conversationId&&source.subject===unit.subject
+        || stageWords(own).filter(term => other.has(term)).length >= 2;
+    }
     const target = stage ?? movedTo(unit.statement), held = theirs ?? movedTo(item.text);
     return target !== undefined && target === held && stageWords(own).filter(term => other.has(term)).length >= 2;
   };
@@ -174,7 +185,7 @@ export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string
   // now) is no criterion of the current work. One line per stage: two lists of one stage told it twice.
   const stages = new Set<string>();
   // A line of an earlier stage, whose items later discussion took up, is not what is left out now.
-  const notNow = pick("notNow", unit => { if (takenUp.has(unit.id) || overridden(unit) || !BASELINE_LEAVES.test(unit.statement) || !BASELINE_CURRENT.test(unit.statement)) return false; const stage = stageWord(unit.statement) ?? unit.statement.match(BASELINE_CURRENT)![0]; if (stages.has(stage)) return false; stages.add(stage); return true; });
+  const notNow = pick("notNow", unit => { if (takenUp.has(unit.id) || overridden(unit) || !BASELINE_LEAVES.test(unit.statement) || !BASELINE_CURRENT.test(unit.statement)) return false; const stage = JSON.stringify([unit.subject, stageWord(unit.statement) ?? unit.statement.match(BASELINE_CURRENT)![0]]); if (stages.has(stage)) return false; stages.add(stage); return true; });
   const currentScopes = live.filter(unit => notNow.some(item => item.unitIds.includes(unit.id)));
   const leavesOut = (scope: WikiKnowledgeUnit) => (scope.statement.match(LEFT_OUT_ITEMS)?.[1] ?? "").split(/[、/，,]|以及|及|和|与/u).map(part => part.trim().replace(/^(?:开发|实现|支持)/u, "")).filter(part => part.length >= 2);
   // A stage word naming a part in a list ("当前进展、下一步行动、关键决策" are an overview's modules) says no stage.

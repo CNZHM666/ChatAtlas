@@ -35,6 +35,19 @@
   border: 0; border-radius: 0; background: transparent; overscroll-behavior-x: contain;
 }
 .reader-guide-prose .reader-table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.reader-guide-prose .wiki-table-heading {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 16px 0 4px;
+}
+.reader-guide-prose .wiki-table-heading-title { min-width: 0; }
+.reader-guide-prose .wiki-table-heading-title > p { margin: 0; }
+.reader-guide-prose .wiki-table-heading > :is(a,details) { flex: none; margin-inline-start: auto; font-size: 13px; }
+.reader-guide-prose .wiki-table-heading-sources { position: relative; color: var(--accent); }
+.reader-guide-prose .wiki-table-heading-sources summary { cursor: pointer; }
+.reader-guide-prose .wiki-table-heading-sources > div {
+  position: absolute; inset-inline-end: 0; z-index: 2; display: grid; gap: 4px; min-width: max-content;
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid);
+}
+.reader-guide-prose .wiki-table-heading + .reader-table-scroll { margin-top: 4px; }
 :is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reader-table-scroll > table,
 .reader-guide-prose .reader-table-scroll > table {
   display: table; width: 100%; max-width: none; margin: 0; border: 0;

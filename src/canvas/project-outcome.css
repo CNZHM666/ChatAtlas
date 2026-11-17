@@ -1119,11 +1119,30 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
    Each holder has its own colour and its own word, so the colour is never the only cue. */
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder::before { content: none; }
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder { --holder: var(--muted); color: var(--holder); border-color: color-mix(in srgb, var(--holder) 45%, var(--border)); background: color-mix(in srgb, var(--holder) 10%, var(--surface-solid)); font-weight: 600; letter-spacing: 0; }
-:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-decided { --holder: var(--accent); }
-:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-user { --holder: color-mix(in srgb, #7c3aed 80%, var(--text)); }
-:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-material { --holder: color-mix(in srgb, #2563eb 80%, var(--text)); }
-:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-open { --holder: color-mix(in srgb, #b45309 85%, var(--text)); }
-:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-earlier { --holder: var(--muted); text-decoration: line-through; }
+:is(.wiki-document,.document-overview,.wiki-source-dock) :is(button.wiki-claim-marker,button.wiki-status-key).is-holder-decided { --holder: var(--wiki-holder-decided, #166534); }
+:is(.wiki-document,.document-overview,.wiki-source-dock) :is(button.wiki-claim-marker,button.wiki-status-key).is-holder-user { --holder: var(--wiki-holder-user, #6d28d9); }
+:is(.wiki-document,.document-overview,.wiki-source-dock) :is(button.wiki-claim-marker,button.wiki-status-key).is-holder-user.is-report { --holder: var(--wiki-holder-report, #9d174d); }
+:is(.wiki-document,.document-overview,.wiki-source-dock) :is(button.wiki-claim-marker,button.wiki-status-key).is-holder-material { --holder: var(--wiki-holder-material, #1d4ed8); }
+:is(.wiki-document,.document-overview,.wiki-source-dock) :is(button.wiki-claim-marker,button.wiki-status-key).is-holder-open { --holder: var(--wiki-holder-open, #92400e); }
+:is(.wiki-document,.document-overview,.wiki-source-dock) :is(button.wiki-claim-marker,button.wiki-status-key).is-holder-earlier { --holder: var(--muted); }
+:root[data-theme="dark"] :is(.wiki-document,.document-overview) {
+  --wiki-holder-decided: #86efac;
+  --wiki-holder-user: #c4b5fd;
+  --wiki-holder-report: #f9a8d4;
+  --wiki-holder-material: #93c5fd;
+  --wiki-holder-open: #fcd34d;
+}
+.wiki-status-control { position: relative; flex: none; }
+.wiki-status-panel { position: absolute; top: 0; left: calc(100% + 14px); display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: max-content; max-width: min(210px, var(--wiki-status-width, calc(100vw - 24px))); padding: 9px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-solid); box-shadow: 0 6px 18px #0f172a20; }
+.wiki-status-panel[hidden] { display: none; }
+.wiki-status-panel[data-placement="left"] { left: auto; right: calc(100% + 14px); }
+.wiki-status-panel[data-placement="below"] { top: calc(100% + 14px); left: var(--wiki-status-offset, 0px); }
+.wiki-status-panel .wiki-status-key { min-height: 30px; padding: 4px 8px; border-radius: 7px; color: var(--holder, var(--muted)); border: 1px solid color-mix(in srgb, currentColor 40%, var(--border)); background: color-mix(in srgb, currentColor 9%, var(--surface-solid)); font-size: var(--text-xs); white-space: nowrap; }
+.wiki-status-panel .wiki-status-key:hover { background: color-mix(in srgb, currentColor 16%, var(--surface-solid)); }
+.wiki-status-panel .wiki-status-key[aria-pressed="true"] { box-shadow: inset 0 0 0 1px currentColor; }
+.wiki-status-panel .wiki-status-key span { margin-inline-start: 3px; font-variant-numeric: tabular-nums; }
+.wiki-status-panel .wiki-status-key:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.workspace-source-panel.is-card:has(> .wiki-source-dock:not(:empty)) > .workspace-source-card-head { flex-wrap: wrap; }
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-decided.is-holder-mark span::before { content: "✓ "; }
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet { min-width: 8px; width: 8px; height: 8px; padding: 0; margin: 0 2px; border-radius: 50%; vertical-align: 0.3em; }
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder:hover { background: color-mix(in srgb, var(--holder) 20%, var(--surface-solid)); border-color: var(--holder); color: var(--holder); }
@@ -1388,11 +1407,11 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
    confirm), show sources, edit, and the chapter's history. Icons carry their names as labels and tooltips. */
 .wiki-document > .wiki-tool-rail { position: sticky; top: 12px; z-index: 4; float: right; display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px 16px; padding: 6px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-solid); box-shadow: 0 6px 18px #0f172a12; }
 :root[data-theme="dark"] .wiki-document > .wiki-tool-rail { box-shadow: 0 6px 18px #00000047; }
-:is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted); }
-:is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button:hover { background: var(--surface-muted); color: var(--text); }
-:is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
-:is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button.has-attention { color: #b45309; }
-:root[data-theme="dark"] :is(.focus-workspace,.focus-preview) .wiki-document > .wiki-tool-rail button.has-attention { color: #fbbf24; }
+:is(.focus-workspace,.focus-preview) :is(.wiki-document,.wiki-source-dock) > .wiki-tool-rail :is(button.wiki-tool,button.evidence-review-button) { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; min-height: 36px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted); }
+:is(.focus-workspace,.focus-preview) :is(.wiki-document,.wiki-source-dock) > .wiki-tool-rail :is(button.wiki-tool,button.evidence-review-button):hover { background: var(--surface-muted); color: var(--text); }
+:is(.focus-workspace,.focus-preview) :is(.wiki-document,.wiki-source-dock) > .wiki-tool-rail button.wiki-tool[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+:is(.focus-workspace,.focus-preview) :is(.wiki-document,.wiki-source-dock) > .wiki-tool-rail button.has-attention { color: #b45309; }
+:root[data-theme="dark"] :is(.focus-workspace,.focus-preview) :is(.wiki-document,.wiki-source-dock) > .wiki-tool-rail button.has-attention { color: #fbbf24; }
 .wiki-tool-badge { position: absolute; top: 1px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #d97706; color: #fff; font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 @media (max-width: 860px) {
   .wiki-document > .wiki-tool-rail { position: static; float: none; flex-direction: row; width: max-content; margin: 0 0 12px auto; box-shadow: none; }
@@ -1402,7 +1421,7 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet { min-width: 18px; width: 18px; height: 18px; margin: 0 2px 0 3px; padding: 0; border-width: 1px; border-radius: 50%; vertical-align: .08em; opacity: .9; transition: transform .12s ease, opacity .12s ease; }
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet::before { content: "\201D"; display: block; font: 700 15px/1 Georgia, "Times New Roman", serif; transform: translateY(3px); }
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet:hover { opacity: 1; transform: scale(1.12); }
-:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder.is-holder-ai { --holder: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
+:is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder.is-holder-ai { --holder: var(--muted); }
 @media (pointer: coarse) { :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-quiet { min-width: 24px; width: 24px; height: 24px; } }
 /* The ledger reads at the width of the overview and the chapters, left-aligned like them. The scrollbar keeps its room,
    so switching filters (chapters open or close, the page grows or shrinks) does not move the page sideways. */

@@ -1,7 +1,8 @@
-import { ledgerRewriteNeeded } from "./wiki-draft-fit";
+import { ledgerCoverageRetryNeeded, ledgerRewriteNeeded } from "./wiki-draft-fit";
 import {savedWikiProjectBoundary} from "../shared/wiki-project-boundary";
 import type { Conversation, ConversationMessage } from "../shared/types";
 import type { FocusScope, FocusSession } from "../shared/focus-session";
+import { focusWikiProgress } from "../shared/focus-progress";
 import { sourceMessageSignature } from "../shared/source-signature";
 import { isInternalSearchQueryMessage } from "../shared/conversation-text";
 import { getDatabase } from "../storage/db";
@@ -12,9 +13,10 @@ import { asLearningDocument, generateFocusSession, ledgerDocumentSession, requir
 import { learningUnitsOwn } from "./wiki-learning";
 import { keptLearnerCode } from "./wiki-learning-code";
 import { ledgerPipelineEnabled } from "./wiki-ledger-document";
-import { datedSources, reextractSessionKnowledge, withStoredSections } from "./wiki-knowledge-session";
+import { datedSources, reextractSessionKnowledge } from "./wiki-knowledge-session";
 import { organizeLedger } from "./wiki-knowledge-organize";
-import { writeLedgerDraft } from "./wiki-knowledge-write";
+import { writeFocusWikiDraft, type FocusWikiDraftCallbacks } from "./focus-wiki-draft";
+import { startAIRun } from "./pipeline-timing";
 import { wikiLedgerUnits, type WikiProgress } from "../shared/wiki-knowledge";
 import { readingTitle } from "../shared/reading-title";
 import { mapSemanticEvidence } from "../shared/semantic-structure";
@@ -36,6 +38,7 @@ import {previousWikiDirectory} from "./wiki-topic-plan";
 import {WIKI_SEMANTIC_VERSION} from "../shared/wiki-explanations";
 
 export interface FocusUpdatePlan { fallback: boolean; changed: boolean; affectedSectionIds: string[]; scope: FocusScope; removedKeys: string[]; addedConversationIds?: string[] }
+type FocusUpdateCallbacks = FocusWikiDraftCallbacks & { scope?: FocusScope };
 const key = (conversationId: string, messageId: string) => JSON.stringify([conversationId, messageId]);
 
 /** Revisit the changed chapter and subsequent discussion, including dependent corrections. */
@@ -179,22 +182,36 @@ const REORGANIZE_SHARE = .5;
 /** A document written from the ledger, updated through it: unchanged batches are reused, the ledger organized
  * again and only changed chapters written anew. Every generated chapter then takes the ledger's version, while
  * personally edited chapters stay and are flagged for a check; the result is a preview the user accepts. */
-async function ledgerUpdate(previous: FocusSession, sources: Conversation[], messages: ConversationMessage[], allMessages: ConversationMessage[], plan: FocusUpdatePlan, locale: string, signal: AbortSignal, onState?: Parameters<typeof generateFocusSession>[6], runId?: string, onProgress?: Parameters<typeof generateFocusSession>[8], decisionsOnly = false): Promise<FocusSession> {
-  const id = runId ?? `focus-${crypto.randomUUID()}`, earlier = previous.wikiKnowledge!, boundary = savedWikiProjectBoundary(previous);
-  const ai = createAtlasAI(effectiveAISettings(await getAISettings()), signal, id, onState);
-  const progress = (next: WikiProgress) => onProgress?.(next.done, Math.max(next.total, 1), next.stage === "extract" ? "reading" : "synthesis");
+async function ledgerUpdate(previous: FocusSession, sources: Conversation[], messages: ConversationMessage[], allMessages: ConversationMessage[], plan: FocusUpdatePlan, locale: string, signal: AbortSignal, onState?: Parameters<typeof generateFocusSession>[6], runId?: string, onProgress?: Parameters<typeof generateFocusSession>[8], decisionsOnly = false, callbacks?: FocusUpdateCallbacks): Promise<FocusSession> {
+  const id = runId ?? `focus-${crypto.randomUUID()}`, earlier = previous.wikiKnowledge, boundary = savedWikiProjectBoundary(previous);
+  const scope = callbacks?.scope ?? previous.scope;
+  const startedAt = performance.now(), sourceConversationIds = sources.map(source => source.id);
+  const settings = effectiveAISettings(await getAISettings());
+  await startAIRun(id, "wiki", sourceConversationIds);
+  const ai = createAtlasAI(settings, signal, id, onState);
+  const progress = (next: WikiProgress) => {
+    const detail = focusWikiProgress(next, sourceConversationIds, startedAt);
+    onProgress?.(detail.completed, detail.total, detail.stage === "reading" ? "reading" : "synthesis", detail);
+  };
   // Only the user's verdicts changed: the extracted units and the directory stand, and only chapters whose statuses moved
   // are written again (unchanged chapters keep their text through the draft's signatures).
-  const extracted = withWikiSources(decisionsOnly ? earlier : await reextractSessionKnowledge({ ...previous, runId: id, sourceConversationIds: sources.map(source => source.id) }, ai, signal, earlier, progress), await datedSources(sources));
+  const extracted = decisionsOnly && earlier ? withWikiSources(earlier, await datedSources(sources))
+    : await reextractSessionKnowledge({ ...previous, runId: id, scope, locale: locale === "zh-CN" ? "zh-CN" : "en", sourceConversationIds }, ai, signal, earlier, progress);
   const known = new Set(wikiLedgerUnits(earlier).map(unit => unit.id)), units = wikiLedgerUnits(extracted), fresh = units.filter(unit => !known.has(unit.id)).length;
-  const common = { ai, ...embeddingsFor(effectiveAISettings(await getAISettings()), id), locale, signal, runId: id, conversations: sources.length, names: [boundary.name, previous.goal.length <= 32 ? previous.goal : undefined, ...sources.map(source => source.title)], progress };
+  const common = { ai, ...embeddingsFor(settings, id), locale, signal, runId: id, conversations: sources.length, names: [boundary.name, previous.goal.length <= 32 ? previous.goal : undefined, ...sources.map(source => source.title)], progress };
   // An update keeps the document's type; a learning document's roles are read again for the points it now has.
-  const typed: typeof extracted = keptLearnerCode(learningUnitsOwn(earlier.documentType ? { ...extracted, documentType: earlier.documentType, ...(earlier.documentTypeBy ? { documentTypeBy: earlier.documentTypeBy } : {}) } : extracted), earlier);
-  const reorganized = decisionsOnly && earlier.organization ? earlier : await organizeLedger(typed, fresh > units.length * REORGANIZE_SHARE ? { ...common, directory: earlier.organization } : { ...common, previous: earlier.organization });
+  const documentType = earlier?.documentType ?? scope?.documentType ?? "project";
+  const typed = learningUnitsOwn({ ...extracted, documentType, documentTypeBy: earlier?.documentTypeBy ?? (scope?.documentType ? "user" : "auto") });
+  const carried = keptLearnerCode(typed, earlier);
+  const reorganized = decisionsOnly && earlier?.organization ? earlier : await organizeLedger(carried, fresh > units.length * REORGANIZE_SHARE ? { ...common, directory: earlier?.organization } : { ...common, previous: earlier?.organization });
   requireLedgerDirectory(reorganized, locale);
   const organized = decisionsOnly ? reorganized : await asLearningDocument(reorganized, { ai, locale, signal });
-  const ledger = await writeLedgerDraft(await withStoredSections(organized), { ai, locale, signal, runId: id, project: boundary.name, previous: earlier.draft, progress });
-  const patch = await ledgerDocumentSession(ledger, { id: crypto.randomUUID(), runId: id, goal: previous.goal, mode: previous.mode, strategy: previous.strategy, scope: previous.scope, title: previous.title, locale: previous.locale, sourceConversationIds: sources.map(source => source.id), wikiProjectBoundary: boundary,
+  const { ledger } = await writeFocusWikiDraft(organized, {
+    ...callbacks, ...(decisionsOnly ? { onKeyDecisions: undefined } : {}), ai, locale, signal, runId: id,
+    project: boundary.name, previous: earlier?.draft, progress, originals: messages, sources, title: () => previous.title,
+    preview: { goal: previous.goal, mode: previous.mode, scope, locale: previous.locale, sourceConversationIds, wikiProjectBoundary: boundary },
+  });
+  const patch = await ledgerDocumentSession(ledger, { id: crypto.randomUUID(), runId: id, goal: previous.goal, mode: previous.mode, strategy: previous.strategy, scope, title: previous.title, locale: previous.locale, sourceConversationIds, wikiProjectBoundary: boundary,
     coverage: { method: "full_batched", sourceCount: sources.length, processedSegments: units.length, totalSegments: units.length, batchCount: ledger.batches.length } }, sources, messages, ai, signal, id);
   signal.throwIfAborted();
   // A chapter the user edited keeps their text; the ledger's new version of it is offered beside it as a suggestion,
@@ -204,6 +221,8 @@ async function ledgerUpdate(previous: FocusSession, sources: Conversation[], mes
   const offered: FocusSession = { ...patch, sections: patch.sections.filter(section => !personal.has(section.id)), wikiSuggestions: { ...patch.wikiSuggestions, ...Object.fromEntries(suggested.map(section => [section.id, { ...section, title: personal.get(section.id)!.title }])) } };
   const merged = mergeFocusUpdate(previous, offered, { ...plan, fallback: true, affectedSectionIds: previous.sections.map(section => section.id) }, messages, locale);
   merged.title = previous.title;
+  merged.scope = scope;
+  merged.sourceConversationIds = sourceConversationIds;
   merged.wikiKnowledge = ledger;
   merged.sourceVersionIds = await retainSourceVersions(allMessages);
   await assertSourcesUnchanged(sources, allMessages, locale);
@@ -211,24 +230,32 @@ async function ledgerUpdate(previous: FocusSession, sources: Conversation[], mes
   return merged;
 }
 
-export async function generateFocusUpdate(previous: FocusSession, sources: Conversation[], locale: string, signal: AbortSignal, onState?: Parameters<typeof generateFocusSession>[6], runId?: string, onProgress?: Parameters<typeof generateFocusSession>[8]): Promise<FocusSession> {
-  sources = [...new Set([...previous.sourceConversationIds, ...sources.map(source => source.id)])].map(id => { const source = sources.find(item => item.id === id); if (!source) throw new Error("项目来源缺失，请重新确认材料 / Confirm missing project sources."); return source; });
+export async function generateFocusUpdate(previous: FocusSession, sources: Conversation[], locale: string, signal: AbortSignal, onState?: Parameters<typeof generateFocusSession>[6], runId?: string, onProgress?: Parameters<typeof generateFocusSession>[8], callbacks?: FocusUpdateCallbacks): Promise<FocusSession> {
+  const scope = callbacks?.scope ?? previous.scope;
+  const priorSourceIds = callbacks?.scope ? [] : previous.sourceConversationIds;
+  sources = [...new Set([...priorSourceIds, ...sources.map(source => source.id)])].map(id => { const source = sources.find(item => item.id === id); if (!source) throw new Error("项目来源缺失，请重新确认材料 / Confirm missing project sources."); return source; });
   if (sources.some(source => !isCurrentHydrationComplete(source))) throw new Error(locale === "zh-CN" ? "部分项目来源正在同步，请在正文同步后重试。" : "Some project sources are still syncing. Retry after their messages are available.");
   const [loadedMessages, baselines] = await Promise.all([
     Promise.all(sources.map(source => getMessagesForConversation(source.id))),
     Promise.all(previous.sourceConversationIds.map(async id => [id, await loadSourceBaseline(previous, id)] as const)),
   ]);
   const allMessages = loadedMessages.flat();
-  const messages = allMessages.filter(message => previous.scope?.kind !== "goal" || !previous.sourceConversationIds.includes(message.conversationId) || previous.scope.blocks?.some(block => block.conversationId === message.conversationId && block.messageIds.includes(message.id)));
+  const messages = allMessages.filter(message => scope?.kind !== "goal" || scope.blocks?.some(block => block.conversationId === message.conversationId && block.messageIds.includes(message.id)));
   if (sources.some(source => !messages.some(item => item.conversationId === source.id && item.content.trim() && !isInternalSearchQueryMessage(item)))) throw new Error(locale === "zh-CN" ? "部分项目来源已没有正文，请重新确认材料。原稿和笔记仍保留。" : "Some project sources have no text. Confirm materials again; your original and notes are preserved.");
   const plan = planWikiEditionUpdate(previous,messages,planFocusUpdate(previous, messages,Object.fromEntries(baselines)));
-  if (previous.mode === "work" && previous.wikiKnowledge?.draft && ledgerPipelineEnabled()) {
+  const currentWiki = previous.mode === "work" && ledgerPipelineEnabled();
+  if (currentWiki && previous.wikiKnowledge) {
+    const retryCoverage = ledgerCoverageRetryNeeded(previous.wikiKnowledge);
+    const needsDraft = !previous.wikiKnowledge.draft;
     // Nothing new in the sources, but verdicts the user gave since the draft, or chapters written for another layout (the
     // routing changed since): only the chapters they touch are rewritten.
-    if (!plan.changed && !ledgerRewriteNeeded(previous.wikiKnowledge)) return { ...previous, id: crypto.randomUUID(), runId, createdAt: Date.now(), updatedAt: Date.now() };
-    return ledgerUpdate(previous, sources, messages, allMessages, plan, locale, signal, onState, runId, onProgress, !plan.changed);
+    const sourceWork = plan.changed || retryCoverage || needsDraft || Boolean(callbacks?.scope);
+    if (sourceWork || ledgerRewriteNeeded(previous.wikiKnowledge)) {
+      return ledgerUpdate(previous, sources, messages, allMessages, plan, locale, signal, onState, runId, onProgress, !sourceWork, callbacks);
+    }
+    return { ...previous, id: crypto.randomUUID(), runId, createdAt: Date.now(), updatedAt: Date.now() };
   }
-  if (!plan.changed) {
+  if (!plan.changed && !callbacks?.scope) {
     const next={...previous,id:crypto.randomUUID(),runId,createdAt:Date.now(),updatedAt:Date.now()};
     // Explicit update also backfills an old fragmented directory. Ordinary reads
     // never schedule paid work, and unchanged successful plans are reused.
@@ -239,28 +266,34 @@ export async function generateFocusUpdate(previous: FocusSession, sources: Conve
     // locally and only on this explicit update; reading and export never do it.
     return wikiSemanticsCurrent(organized)?organized:consolidateWikiExplanations(organized,ai,signal,messages);
   }
-  if (!plan.scope.blocks?.length) throw new Error(locale === "zh-CN" ? "来源正文已移除，请调整材料。原稿和笔记仍保留。" : "Source text was removed. Adjust materials; your original and notes are preserved.");
-  const included = sources.filter(source => plan.scope.blocks?.some(block => block.conversationId === source.id));
+  const rebuild = currentWiki || Boolean(callbacks?.scope);
+  if (!rebuild && !plan.scope.blocks?.length) throw new Error(locale === "zh-CN" ? "来源正文已移除，请调整材料。原稿和笔记仍保留。" : "Source text was removed. Adjust materials; your original and notes are preserved.");
+  const included = rebuild ? sources : sources.filter(source => plan.scope.blocks?.some(block => block.conversationId === source.id));
   // An update keeps the existing directory where the material still fits it.
   const anchor = previous.mode === "work" ? previousWikiDirectory(previous) : [];
   const projectOptions = previous.mode === "work" ? { skipProjectState: true, wikiPreviousDirectory:anchor, wikiProjectBoundary:savedWikiProjectBoundary(previous), wikiScopeIncludeKeys:previous.wikiScopeReview?.includeKeys, wikiScopeExcludeKeys:previous.wikiScopeReview?.excludeKeys, wikiScopeIgnoredKeys:previous.wikiScopeReview?.ignoredKeys } : {};
-  let patch = await generateFocusSession(previous.goal, previous.mode, included, locale, signal, undefined, onState, runId, onProgress, plan.fallback && previous.scope?.kind !== "goal" ? { complete: true, ...projectOptions } : { scope: plan.scope, ...projectOptions });
-  if (!plan.fallback && previous.mode === "work") {
+  const generationScope = rebuild ? scope : plan.scope;
+  const fullSource = (rebuild || plan.fallback) && scope?.kind !== "goal";
+  let patch = await generateFocusSession(previous.goal, previous.mode, included, locale, signal, undefined, onState, runId, onProgress, { ...projectOptions, ...(previous.mode === "work" ? callbacks : {}), ...(fullSource ? { complete: true } : { scope: generationScope }) });
+  if (!rebuild && !plan.fallback && previous.mode === "work") {
     const topics = await reconcileWikiTopics(previous, patch, messages, sources, signal);
     patch = topics.patch;
     plan.affectedSectionIds = [...new Set([...plan.affectedSectionIds, ...topics.affectedIds])];
   }
   signal.throwIfAborted();
-  let merged = mergeFocusUpdate(previous, patch, plan, messages, locale);
+  let merged = mergeFocusUpdate(previous, patch, rebuild ? { ...plan, fallback: true, affectedSectionIds: previous.sections.map(section => section.id) } : plan, messages, locale);
   merged.title=previous.title;
   merged.sourceVersionIds = await retainSourceVersions(allMessages);
-  if(previous.mode==="work"){
+  if(previous.mode==="work" && !patch.wikiKnowledge?.draft){
     const ai=createAtlasAI(effectiveAISettings(await getAISettings()),signal,patch.runId,onState);
     merged=requireOrganizedWiki(await autoOrganizeWiki(merged,ai,signal,false,"suggest",anchor));
     // New prose can repeat or contradict explanations in unchanged chapters.
     merged=await consolidateWikiExplanations(merged,ai,signal,messages);
   }
-  if (previous.scope?.kind === "goal") merged.scope = { kind: "goal", blocks: sources.map(source => { const chosen = messages.filter(message => message.conversationId === source.id); return { conversationId: source.id, title: source.title, messageIds: chosen.map(message => message.id), messageSignatures: Object.fromEntries(chosen.map(message => [message.id, sourceMessageSignature(message.content)])) }; }) };
+  if (rebuild) {
+    merged.scope = scope;
+    merged.sourceConversationIds = sources.map(source => source.id);
+  } else if (previous.scope?.kind === "goal") merged.scope = { ...previous.scope, blocks: sources.map(source => { const chosen = messages.filter(message => message.conversationId === source.id); return { conversationId: source.id, title: source.title, messageIds: chosen.map(message => message.id), messageSignatures: Object.fromEntries(chosen.map(message => [message.id, sourceMessageSignature(message.content)])) }; }) };
   await assertSourcesUnchanged(sources, allMessages, locale);
   await loadKnowledgeIndex(merged, messages);
   return merged;

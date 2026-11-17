@@ -40,3 +40,11 @@ export interface FocusAnalysisProgress {
   /** Estimate for the current round only. Final composition has an unknown duration. */
   remainingMs?: number;
 }
+
+export function focusWikiProgress(ledger: WikiProgress, sourceIds: string[], startedAt: number, segments = 0): FocusAnalysisProgress {
+  const reading = ledger.stage === "extract", total = Math.max(ledger.total, 1);
+  return { ledger, completed: ledger.done, total, stage: reading ? "reading" : "synthesis", final: ledger.stage === "write", round: 1,
+    completedSourceIds: reading ? [] : sourceIds, totalSources: sourceIds.length,
+    processedSegments: reading ? Math.min(segments, Math.round(segments * ledger.done / total)) : segments,
+    totalSegments: segments, elapsedMs: Math.round(performance.now() - startedAt) };
+}

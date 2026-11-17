@@ -39,10 +39,10 @@ it("groups a project's sources under the AI each conversation was held with",()=
  expect([...container.querySelectorAll(".chapter-source-platform")].map(item=>item.textContent)).toEqual(["ChatGPT2 个对话","DeepSeek1 个对话"]);
  expect([...container.querySelectorAll(".chapter-source-open small")].map(item=>item.textContent)).toEqual(["《规划》 · 1 条引用","《细化》 · 1 条引用","《评审》 · 1 条引用"]);
 });
-it("opens a chapter source in the reader, not the side panel a sentence opens",async()=>{
+it("opens a Wiki source at the matching quote in the existing sidebar",async()=>{
  const session=projectSession(),ref=session.evidence[0],open=vi.fn();
  vi.mocked(readSessionSource).mockResolvedValue([{id:ref.messageId,conversationId:ref.conversationId,role:"user",messageIndex:0,content:"为什么采用本地消息索引？",preview:"",contentHash:"",createdAt:1,updatedAt:1}]);
  render(<WorkspaceEvidenceContext.Provider value={{open}}><ChapterSources compact session={session} refs={[ref]} conversations={[]} zh onLocate={()=>{}}/></WorkspaceEvidenceContext.Provider>);
  fireEvent.click(await screen.findByText("为什么采用本地消息索引？"));
- expect(open).toHaveBeenCalledWith(ref,{references:[ref],reader:true});
+ expect(open).toHaveBeenCalledWith(ref,{references:[ref],quote:ref.excerpt,mode:"view"});
 });

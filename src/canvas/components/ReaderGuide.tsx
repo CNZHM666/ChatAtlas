@@ -5,7 +5,7 @@ import "../reader-guide-prose.css";
 import {readerGuideHighlights,type ReaderHighlights} from "../reader-guide-highlights";
 import {aiAdvicePresentation} from "../../shared/ai-advice-presentation";
 import { Children, isValidElement, memo, useState, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, {type Components} from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { GFM_OPTIONS } from "../../shared/markdown-gfm";
 import remarkMath from "remark-math";
@@ -27,6 +27,8 @@ import { WIKI_RECALL_LABELS } from "../../shared/wiki-learning-recall";
 import { WIKI_CLAIM_MARKER, wikiClaimMarkers, type WikiClaimMarkerPoint } from "../../shared/wiki-claim-markers";
 import { WikiClaimMarker } from "./WikiClaimMarker";
 import type { PluggableList } from "unified";
+import {readerWikiTableSources} from "../reader-wiki-table-sources";
+import {WIKI_EVIDENCE_LINK} from "../../shared/wiki-evidence-link";
 
 /** A generated "> **演变记录**" block renders collapsed. */
 const wikiHistoryBlock = (node: unknown) => {
@@ -49,11 +51,28 @@ function WikiRecall({ zh, children }: { zh: boolean; children: ReactNode }) {
   return <details className="wiki-recall"><summary><span className="wiki-recall-label">{words[0]}</span><span className="wiki-recall-question">{typeof words[1] === "string" ? words[1].replace(/^[：:]\s*/u, "") : words[1]}{words.slice(2)}</span><small>{zh ? "点击看答案" : "Show answer"}</small></summary><div className="wiki-recall-answer">{answer}</div></details>;
 }
 
+function WikiTableHeading({children,zh}:{children:ReactNode;zh:boolean}) {
+  const [title,refs]=Children.toArray(children).filter(child=>typeof child!=="string"||child.trim());
+  const links=isValidElement<{children?:ReactNode}>(refs)?Children.toArray(refs.props.children):[];
+  return <div className="wiki-table-heading">
+    <div className="wiki-table-heading-title">{title}</div>
+    {links.length<=1?links[0]:<details className="wiki-table-heading-sources">
+      <summary>{zh?"来源":"Sources"}</summary>
+      <div>{links}</div>
+    </details>}
+  </div>;
+}
+
 const Markdown = memo(function Markdown({ content, zh, generated, highlights, claimMarkers }: { content: string; zh: boolean; generated: boolean; highlights?:ReaderHighlights; claimMarkers?: WikiClaimMarkerPoint[] }) {
   const markers: PluggableList = claimMarkers?.length ? [[wikiClaimMarkers, { points: claimMarkers }]] : [];
   const math = content.includes("$");
   const plugins = useReaderPlugins(math, false);
-  return <div className="conversation-answer-markdown reader-guide-prose"><ReactMarkdown components={{ ...readerStructureComponents, ...readerSupplementComponents,...readerColorComponents,...readerIdentifierComponents, ol: readerStageList, blockquote: ({ node, children }) => wikiRecallBlock(node) ? <WikiRecall zh={zh}>{children}</WikiRecall> : generated && wikiHistoryBlock(node) ?<details className="reader-supplement wiki-history"><summary>{zh ? "演变记录" : "History"}</summary>{Children.toArray(children).filter(child => typeof child !== "string" || child.trim()).slice(1)}</details> : <blockquote>{children}</blockquote>, a: ({ href, children }) => href?.startsWith(WIKI_CLAIM_MARKER) ? <WikiClaimMarker pointKey={decodeURIComponent(href.slice(WIKI_CLAIM_MARKER.length))} /> : href?.startsWith(WIKI_CHAPTER_LINK) ? <a href={href} onClick={event => { event.preventDefault(); window.dispatchEvent(new CustomEvent(WIKI_OPEN_CHAPTER_EVENT, { detail: decodeURIComponent(href.slice(WIKI_CHAPTER_LINK.length)) })); }}>{children}</a> : <a href={href}>{children}</a>, table: ({ node, children }) => generated && String(node?.properties?.id ?? "").endsWith("atlas-knowledge-audit") ? <details className="reader-supplement"><summary>{zh ? "补充说明" : "Additional details"}</summary><table>{children}</table></details> : <div className="reader-table-scroll" role="region" aria-label={zh ? "表格，可横向滚动" : "Table, scroll horizontally"} tabIndex={0}><table>{children}</table></div>, pre: ({ children }) => { const code = isValidElement<{ className?: string; children?: unknown }>(children) ? children : undefined; const steps = code?.props.className === "language-atlas-flow" ? flowSteps(String(code.props.children)) : undefined; return steps ? <ReadingFlow steps={steps} /> : <ReaderCodeBlock zh={zh}>{children}</ReaderCodeBlock>; } }} remarkPlugins={math ? [[remarkGfm, GFM_OPTIONS], remarkMath, readerIndentedProse, readerEmphasis, [readerGuideHighlights,{...highlights,enabled:Boolean(highlights)}], readerStagePresentation, readerStructurePresentation, readerIdentifierPresentation, readerWikiSupplements, [readerColorPresentation,{enabled:generated}], [readerKnowledgePresentation, { zh, generated }], ...markers] : [[remarkGfm, GFM_OPTIONS], readerIndentedProse, readerEmphasis, [readerGuideHighlights,{...highlights,enabled:Boolean(highlights)}], readerStagePresentation, readerStructurePresentation, readerIdentifierPresentation, readerWikiSupplements, [readerColorPresentation,{enabled:generated}], [readerKnowledgePresentation, { zh, generated }], ...markers]} rehypePlugins={plugins} skipHtml>{content}</ReactMarkdown></div>;
+  const remarkPlugins:PluggableList = [[remarkGfm,GFM_OPTIONS],...math?[remarkMath]:[],readerIndentedProse,readerEmphasis,
+    [readerGuideHighlights,{...highlights,enabled:Boolean(highlights)}],readerStagePresentation,readerStructurePresentation,readerIdentifierPresentation];
+  if(generated&&content.includes(WIKI_EVIDENCE_LINK))remarkPlugins.push([readerWikiTableSources,{zh}]);
+  remarkPlugins.push(readerWikiSupplements,[readerColorPresentation,{enabled:generated}],[readerKnowledgePresentation,{zh,generated}],...markers);
+  const tableSources={"atlas-table-heading":({children}:{children:ReactNode})=><WikiTableHeading zh={zh}>{children}</WikiTableHeading>} as unknown as Components;
+  return <div className="conversation-answer-markdown reader-guide-prose"><ReactMarkdown components={{ ...readerStructureComponents, ...readerSupplementComponents,...readerColorComponents,...readerIdentifierComponents, ...tableSources, ol: readerStageList, blockquote: ({ node, children }) => wikiRecallBlock(node) ? <WikiRecall zh={zh}>{children}</WikiRecall> : generated && wikiHistoryBlock(node) ?<details className="reader-supplement wiki-history"><summary>{zh ? "演变记录" : "History"}</summary>{Children.toArray(children).filter(child => typeof child !== "string" || child.trim()).slice(1)}</details> : <blockquote>{children}</blockquote>, a: ({ href, children }) => href?.startsWith(WIKI_CLAIM_MARKER) ? <WikiClaimMarker pointKey={decodeURIComponent(href.slice(WIKI_CLAIM_MARKER.length))} /> : href?.startsWith(WIKI_CHAPTER_LINK) ? <a href={href} onClick={event => { event.preventDefault(); window.dispatchEvent(new CustomEvent(WIKI_OPEN_CHAPTER_EVENT, { detail: decodeURIComponent(href.slice(WIKI_CHAPTER_LINK.length)) })); }}>{children}</a> : <a href={href}>{children}</a>, table: ({ node, children }) => generated && String(node?.properties?.id ?? "").endsWith("atlas-knowledge-audit") ? <details className="reader-supplement"><summary>{zh ? "补充说明" : "Additional details"}</summary><table>{children}</table></details> : <div className="reader-table-scroll" role="region" aria-label={zh ? "表格，可横向滚动" : "Table, scroll horizontally"} tabIndex={0}><table>{children}</table></div>, pre: ({ children }) => { const code = isValidElement<{ className?: string; children?: unknown }>(children) ? children : undefined; const steps = code?.props.className === "language-atlas-flow" ? flowSteps(String(code.props.children)) : undefined; return steps ? <ReadingFlow steps={steps} /> : <ReaderCodeBlock zh={zh}>{children}</ReaderCodeBlock>; } }} remarkPlugins={remarkPlugins} rehypePlugins={plugins} skipHtml>{content}</ReactMarkdown></div>;
 });
 
 /** Long AI guides are optional; original discussion remains the main reading path. */

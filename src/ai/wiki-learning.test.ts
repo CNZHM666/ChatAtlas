@@ -95,7 +95,7 @@ describe("learning overview", () => {
   });
 
   it("explains a learning record's own marks", () => {
-    expect(wikiHolderLegend(true, true)).toBe("句末标记说明：〔你〕你写的代码、回答或报告；〔已纠正〕学习中出过的错，附改法；〔此前〕此前的方案，已被后来的取代；没有标记的是 AI 的讲解。");
+    expect(wikiHolderLegend(true, true)).toBe("句末标记说明：〔你〕你写的代码、回答或报告；〔已纠正〕学习中出过的错，附改法；〔此前〕保留的早期方案或历史讨论；没有标记的是 AI 的讲解。");
     expect(wikiHolderLegend(true)).toContain("〔已定〕");
   });
 });

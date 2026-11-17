@@ -4,7 +4,7 @@ import type {FocusSession} from "../../shared/focus-session";
 import {wikiSections} from "../../shared/wiki-navigation";
 import {projectMatters} from "../../shared/project-matters";
 import {evolutionRecords} from "../../shared/product-evolution";
-import {projectAnalysisFilename,projectDocument,projectDocumentFilename,projectLedgerFile,type ProjectExportFormat,type ProjectExportSelection,type ProjectSourceMode} from "../../export/project-document";
+import {projectAnalysisFilename,projectDocument,projectLedgerFile,type ProjectExportFormat,type ProjectExportSelection,type ProjectSourceMode} from "../../export/project-document";
 import {projectKeyEvidence} from "../../export/project-key-evidence";
 import {projectReferenceGroups} from "../../export/project-reference-examples";
 import {wikiReadingFormat} from "../../shared/wiki-reading-format";
@@ -36,30 +36,20 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
  const [ledger,setLedger]=useState(false),hasLedger=Boolean(session.wikiKnowledge);
  // The generation record (time, requests, tokens) of this project's runs, so an evaluation needs no trip to settings.
  const [analysis,setAnalysis]=useState(false),[busy,setBusy]=useState(false),hasRun=Boolean(session.runId);
- const parts=Number(wikiSelected)+Number(selection.matters)+Number(selection.history);
- const includeReferences=references&&hasReferences;
- const count=parts+Number(includeReferences)+Number(ledger&&hasLedger)+Number(analysis&&hasRun);
+ const parts=wikiSelected||selection.matters||selection.history;
+ const diagnosticCount=Number(ledger&&hasLedger)+Number(analysis&&hasRun);
+ const count=Number(parts)+diagnosticCount;
  useEffect(()=>{const previous=document.activeElement as HTMLElement|null;root.current?.querySelector<HTMLButtonElement>("button")?.focus();return()=>{if(previous?.isConnected)previous.focus({preventScroll:true});};},[]);
  const download=async()=>{
   setError("");setStatus("");setBusy(true);
   const save=(text:string,filename:string,mime:string)=>{const url=URL.createObjectURL(new Blob([text],{type:mime}));try{const a=document.createElement("a");a.href=url;a.download=filename;a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}};
   try{
-   const referenceWikiFilename=parts?projectDocumentFilename(session,format):undefined;
-   const combined=includeReferences&&allWiki&&format==="md";
-   const fullReferences=combined?undefined:includeReferences?projectDocument(session,{
-    overview:false,wikiIds:pages.map(page=>page.id),sources:false,matters:false,history:false,referenceAppendix:"separate",referenceWikiFilename,
-   },"md",zh).referenceFile:undefined;
-   if(includeReferences&&!combined&&!fullReferences)throw new Error(l("这个项目暂无可单独导出的参考示例。","This project has no reference examples available for separate export."));
-   const file=parts?projectDocument(session,{...selection,referenceAppendix:combined?"separate":"omit",
-    referenceWikiFilename:combined||fullReferences?referenceWikiFilename:undefined},format,zh):undefined;
-   const referenceFile=file?.referenceFile??fullReferences;
-   if(includeReferences&&!referenceFile)throw new Error(l("这个项目暂无可单独导出的参考示例。","This project has no reference examples available for separate export."));
+   const file=parts?projectDocument(session,{...selection,referenceAppendix:references?true:"omit"},format,zh):undefined;
    if(file)save(file.text,file.filename,file.mime);
-   if(referenceFile)save(referenceFile.text,referenceFile.filename,referenceFile.mime);
    if(ledger&&session.wikiKnowledge){const file=projectLedgerFile(session);save(file.text,file.filename,file.mime);}
    let missing=false;
    if(analysis&&hasRun){const fullMd=file&&format==="md"&&zh&&allWiki&&selection.sourceMode==="locators"&&selection.holderMarks!==false&&!selection.matters&&!selection.history;const quality=fullMd?{sessionId:session.id,updatedAt:session.updatedAt,metrics:wikiQualityCsvMetrics(file.text)}:undefined;const csv=await projectAnalysisInBackground({runId:session.runId,sourceConversationIds:session.sourceConversationIds,quality});if(csv)save(csv,projectAnalysisFilename(session),"text/csv;charset=utf-8");else missing=true;}
-   const done=[file?l("文件","Files"):"",referenceFile?l("参考示例","reference examples"):"",ledger&&hasLedger?l("账本","ledger"):"",analysis&&hasRun&&!missing?l("生成记录","generation record"):""].filter(Boolean);
+   const done=[file?l("文件","Files"):"",ledger&&hasLedger?l("账本","ledger"):"",analysis&&hasRun&&!missing?l("生成记录","generation record"):""].filter(Boolean);
    setStatus(missing&&!done.length?l("这个项目没有可导出的生成记录","This project has no generation record to export"):`${done.join(l("和"," and "))}${l("已导出"," exported")}${missing?l("；这个项目没有可导出的生成记录","; this project has no generation record"):""}`);
   }
   catch(failure){setError(failure instanceof Error?failure.message:String(failure));}
@@ -78,17 +68,24 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
       <label><input ref={wikiCheckbox} type="checkbox" checked={allWiki} onChange={()=>setSelection({...selection,overview:!allWiki,wikiIds:allWiki?[]:pages.map(page=>page.id)})}/>{l("项目 Wiki","Project Wiki")}</label>
       {!!pages.length&&<button type="button" aria-label={l("选择 Wiki 章节","Choose Wiki chapters")} aria-expanded={chaptersOpen} aria-controls="project-export-chapter-list" onClick={()=>setChaptersOpen(value=>!value)}><span>{selection.wikiIds.length}/{pages.length}</span><ChevronDown size={15}/></button>}
      </div>
-     {chaptersOpen?<div id="project-export-chapter-list" className="project-export-wiki">{pages.map(page=><label key={page.id}>
-      <input type="checkbox" checked={selection.wikiIds.includes(page.id)} onChange={event=>setSelection({...selection,overview:selection.overview||event.target.checked,wikiIds:event.target.checked?[...selection.wikiIds,page.id]:selection.wikiIds.filter(id=>id!==page.id)})}/><span>{page.wikiDisplayTitle||page.title}</span>
-     </label>)}</div>:null}
+     {chaptersOpen?<div id="project-export-chapter-list" className="project-export-wiki">
+      {pages.length>0?<button type="button" className="project-export-brief" onClick={()=>setSelection({...selection,overview:true,wikiIds:[]})}>{l("仅选总览","Select overview only")}</button>:null}
+      <label><input type="checkbox" checked={selection.overview} onChange={event=>setSelection({...selection,overview:event.target.checked})}/><span>{l("项目总览","Project overview")}</span></label>
+      {pages.map(page=><label key={page.id}>
+      <input type="checkbox" checked={selection.wikiIds.includes(page.id)} onChange={event=>setSelection({...selection,wikiIds:event.target.checked?[...selection.wikiIds,page.id]:selection.wikiIds.filter(id=>id!==page.id)})}/><span>{page.wikiDisplayTitle||page.title}</span>
+     </label>)}
+      {hasReferences?<label><input type="checkbox" checked={references} disabled={!selection.wikiIds.length} onChange={event=>setReferences(event.target.checked)}/><span>{l("在同一文件附参考示例","Include examples in the document")}</span></label>:null}
+     </div>:null}
     </div>
-    {hasReferences?<label className="project-export-choice project-export-ledger"><input type="checkbox" checked={references} onChange={event=>setReferences(event.target.checked)}/>{l("参考示例","Reference examples")}<small aria-hidden="true">Markdown</small></label>:null}
-    {hasLedger?<label className="project-export-choice project-export-ledger"><input type="checkbox" checked={ledger} onChange={event=>setLedger(event.target.checked)}/>{l("知识点账本","Knowledge ledger")}<small>JSON</small></label>:null}
-    {hasRun?<label className="project-export-choice project-export-ledger"><input type="checkbox" checked={analysis} onChange={event=>setAnalysis(event.target.checked)}/>{l("生成记录","Generation record")}<small>CSV</small></label>:null}
     </div>
     {legacyMatters||legacyHistory?<details className="project-export-legacy"><summary>{l("以前保存的记录","Previously saved records")}</summary>
      {legacyMatters?<label><input type="checkbox" checked={selection.matters} onChange={event=>setSelection({...selection,matters:event.target.checked})}/>{l("历史事项","Saved matters")}<small>{legacyMatters}</small></label>:null}
      {legacyHistory?<label><input type="checkbox" checked={selection.history} onChange={event=>setSelection({...selection,history:event.target.checked})}/>{l("历史演进","Saved evolution")}<small>{legacyHistory}</small></label>:null}
+    </details>:null}
+    {hasLedger||hasRun?<details className="project-export-legacy">
+     <summary>{l("诊断文件","Diagnostics")}{diagnosticCount? <span>{l(`已选 ${diagnosticCount} 项`,`${diagnosticCount} selected`)}</span>:null}</summary>
+     {hasLedger?<label><input type="checkbox" checked={ledger} onChange={event=>setLedger(event.target.checked)}/>{l("知识点账本","Knowledge ledger")}<small>JSON</small></label>:null}
+     {hasRun?<label><input type="checkbox" checked={analysis} onChange={event=>setAnalysis(event.target.checked)}/>{l("生成记录","Generation record")}<small>CSV</small></label>:null}
     </details>:null}
    </fieldset>
    <div className="project-export-options">
@@ -109,6 +106,6 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
     </div>
    </div>
   </div>
-  <footer><span className="project-export-status" data-state={error?"error":status?"success":undefined} role={error?"alert":"status"}>{error||status||(busy?l("正在准备生成记录…","Preparing generation record…"):l(`已选 ${count} 项`,`${count} selected`))}</span><button type="button" className="primary" disabled={!count||busy} onClick={()=>void download()}><Download size={16}/>{l("导出","Export")}</button></footer>
+  <footer><span className="project-export-status" data-state={error?"error":status?"success":undefined} role={error?"alert":"status"}>{error||status||(busy?l("正在准备生成记录…","Preparing generation record…"):l(`将导出 ${count} 个文件`,`${count} ${count===1?"file":"files"} to export`))}</span><button type="button" className="primary" disabled={!count||busy} onClick={()=>void download()}><Download size={16}/>{l("导出","Export")}</button></footer>
  </div></div>;
 }

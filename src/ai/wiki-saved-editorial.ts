@@ -6,7 +6,7 @@ import type {WikiClaim} from "../shared/wiki-claims";
 import {reviewWikiEditorial} from "./wiki-editorial-review";
 import {claimSupported} from "./wiki-claim-support";
 import {wikiDecisionRestatement} from "./wiki-confirmation-scope";
-import {wikiLocalAnswer} from "./wiki-question-parse";
+import {answerLeavesDetailsOpen,wikiChoiceQuestionText,wikiLocalAnswer} from "./wiki-question-parse";
 import {wikiUnconfirmedWorkflowFeedback} from "./wiki-workflow-scope";
 import {placeWikiChoices} from "./wiki-choice-placement";
 import {wikiHistoricalHeading} from "../shared/wiki-history-layout";
@@ -17,6 +17,43 @@ import {wikiHistoricalHeading} from "../shared/wiki-history-layout";
 export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowledgeLedger,sourceOf:(unit:WikiKnowledgeUnit)=>FocusEvidence|undefined):FocusSection{
  if(section.userEdited||section.origin||ledger.documentType==="learning")return section;
  const units=new Map(wikiLedgerUnits(ledger).map(unit=>[unit.id,unit]));
+ const narrowed = new Map<string, {choice:WikiKnowledgeUnit;ref:FocusEvidence;ask:string}>();
+ for (const answer of ledger.userAnswers ?? []) {
+  const choice=units.get(`answer:${answer.questionId}:${answer.optionId}`);
+  const ref=choice&&sourceOf(choice);
+  const question=ledger.writingQuestions?.find(item=>item.id===answer.questionId);
+  const option=question?.options.find(item=>item.id===answer.optionId);
+  if(!choice||!ref||!question||!option||!wikiLocalAnswer(ledger,choice.id))continue;
+  const confirmedIds=option.actions.filter(action=>action.do==="confirm").flatMap(action=>action.units);
+  for(const id of option.actions.length?confirmedIds:answer.unitIds){
+   const unit=units.get(id);
+   if(unit&&unit.evidence.conversationId===choice.evidence.conversationId&&unit.evidence.messageId===choice.evidence.messageId
+      &&unit.evidence.quote===choice.evidence.quote&&answerLeavesDetailsOpen(unit,question,answer.answer))narrowed.set(id,{choice,ref,ask:question.ask});
+  }
+ }
+ if(narrowed.size&&section.claims?.length){
+  let body=section.body;
+  const replacements:WikiClaim[]=[];
+  const blocks=wikiDocumentBlocks(body);
+  for(const claim of section.claims){
+   const matches=[...new Set((claim.unitIds??[]).flatMap(id=>narrowed.get(id)??[]))];
+   const selected=matches.length===1?matches[0]:undefined;
+   if(!selected||claim.checked||claim.markOnly){replacements.push(claim);continue;}
+   const original=units.get(claim.unitIds!.find(id=>narrowed.get(id)===selected)!);
+   const {choice,ref,ask}=selected;
+   const block=blocks.find(item=>item.kind==="paragraph"&&item.text.includes(claim.text));
+   const isPrompt=wikiChoiceQuestionText(claim.text,ask)||Boolean(original&&wikiChoiceQuestionText(claim.text,original.statement));
+   if(block&&isPrompt&&body.indexOf(claim.text)===body.lastIndexOf(claim.text)&&body.includes(claim.text)){
+    body=body.replace(claim.text,()=>choice.statement);
+   }else{
+    replacements.push({...claim,unitIds:claim.unitIds?.filter(id=>!narrowed.has(id)),holder:original?.evidence.role==="assistant"?"ai":"user",holderMark:undefined,userDecided:undefined,sourceReading:undefined});
+    if(block&&!body.includes(choice.statement)&&body.includes(block.text))body=body.replace(block.text,()=>`${choice.statement}\n\n${block.text}`);
+   }
+   if(body.includes(choice.statement)&&!replacements.some(item=>item.text===choice.statement))
+    replacements.push({text:choice.statement,quote:choice.evidence.quote,unitIds:[choice.id],evidenceIds:[ref.id],holder:"decided",holderMark:true,userDecided:true,verification:"supported"});
+  }
+  section={...section,body,claims:replacements};
+ }
  const recovered=new Set((ledger.writingQuestions??[]).filter(question=>question.options.length===1&&!question.options[0].actions.length)
   .map(question=>`answer:${question.id}:${question.options[0].id}`));
  const safeClaims=section.claims?.map(claim=>{

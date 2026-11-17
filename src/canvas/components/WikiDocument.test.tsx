@@ -6,8 +6,29 @@ import { projectSession } from "../../test/project-fixture";
 import { WorkspaceEvidenceContext } from "../workspace-evidence-context";
 import { ProjectKnowledgeActions } from "../project-knowledge-actions";
 import { wikiBlocks } from "../../shared/wiki-explanations";
+import type { WikiKnowledgeUnit } from "../../shared/wiki-knowledge";
+import { wikiTableSignature } from "../../shared/wiki-table-source";
+import { wikiEvidencePoints } from "../wiki-evidence";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+it("opens a generated table citation in the sidebar at its exact evidence, including matching message numbers across conversations",()=>{
+ const session=projectSession(),open=vi.fn();
+ const table="| 组件 | 职责 |\n|---|---|\n| Orama | 本地全文检索 |";
+ const section={...session.sections[0],body:`### 组件\n\n${table}`,claims:[]};
+ const ref={...session.evidence[0],excerpt:"Orama 负责本地全文检索。",id:"e:c:0:1"};
+ const other={...ref,id:"e:other:0:1",conversationId:"other",messageId:"same-number-other-conversation"};
+ section.evidenceIds=[ref.id,other.id];
+ const unit:WikiKnowledgeUnit={id:"search",subject:"搜索",statement:ref.excerpt,kind:"fact",details:[],adoption:{status:"unknown"},delivery:"unknown",
+  evidence:{evidenceId:ref.id,conversationId:ref.conversationId,messageId:ref.messageId,messageIndex:0,role:"assistant",pasted:false,quote:ref.excerpt,code:{language:"table",text:table}}};
+ session.sections=[section];session.evidence=[other,ref];session.sourceConversationIds=[ref.conversationId,other.conversationId];
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[{sourceIds:[ref.id],units:[unit],status:"ok",rejected:{}}]};
+ render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
+ const source=screen.getByRole("link",{name:"来源"});
+ expect(source.closest(".wiki-table-heading")).toHaveTextContent(/组件.*职责/u);
+ expect(screen.queryByText("原文来源")).toBeNull();
+ fireEvent.click(source);
+ expect(open).toHaveBeenCalledWith(ref,expect.objectContaining({tableTarget:wikiTableSignature(table),sectionId:section.id,mode:"view"}));
+});
 // Distinct explanations: a chapter's repeated sentences and paragraphs are dropped before reading.
 const TOPICS=[
  "原始消息保存在本地数据库中，每条消息带有稳定的会话编号和消息编号。导入失败时保留已经成功的批次，重启后可以继续。删除消息时先删除原始记录，再同步删除派生的索引条目。数据库版本变化时会先备份旧数据，再执行迁移，迁移失败可以回退到上一版本。附件和图片只保存引用信息，原文中的代码块按语言标识单独保存，未知类型降级为纯文本显示。批量导入时界面显示已完成的对话数量，用户可以随时取消，取消后已保存的对话仍然可以搜索和阅读。",
@@ -16,6 +37,22 @@ const TOPICS=[
  "阅读页默认只显示标题、正文和来源，编辑控件收在单独的入口里。左侧目录使用简短名称，完整标题在悬停时显示。窄屏下目录折叠到顶部按钮中，正文宽度随窗口调整。滚动区域只有正文一层，避免出现多层滚动条，键盘焦点在切换章节后回到正文开头。深色模式下的配色单独定义，代码块和引用块在两种模式下都保持足够的对比度，打印时隐藏导航。来源标记点击后在右侧面板展示原文，面板关闭后阅读位置保持不变，便于继续往下阅读同一章节。",
  "扩展发布前要在每个支持的平台上手工验收导入、查找和插入。权限只申请当前功能需要的范围。商店说明写清哪些数据保存在本地、哪些会发送给用户配置的模型服务。版本号只在用户确认发布后更新，变更说明列出新增功能和已知限制，回滚包在发布前准备好。用户反馈集中记录在一个表格里，按影响范围排序，每周复查一次是否需要修复版本。发布说明同时提供中文和英文两种语言，截图使用示例数据，不包含任何真实的私人对话内容。",
 ];
+it("docks tools and cycles evidence of the selected status in reading order",()=>{
+ const session=projectSession(),open=vi.fn(),host=document.createElement("div");
+ const quotes=["默认保留全文检索。","导出文件保留原始引用。"];
+ const section={...session.sections[0],body:quotes.join("\n\n"),claims:quotes.map((text,index)=>({text,quote:text,holder:"decided" as const,holderMark:true,evidenceIds:[`e${index}`]}))};
+ session.sections=[section];
+ session.evidence=quotes.map((text,index)=>({...session.evidence[0],id:`e${index}`,messageId:`m${index}`,excerpt:text}));
+ const view=render(<><div ref={node=>{if(node&&!node.contains(host))node.append(host);}}/><WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument toolsHost={host} section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider></>);
+ expect(view.container.querySelector(".wiki-document .wiki-tool-rail")).toBeNull();
+ const tools=within(host);
+ const show=tools.queryByRole("button",{name:"显示出处"});
+ if(show)fireEvent.click(show);
+ const card=tools.getByRole("button",{name:"已定 2"});
+ fireEvent.click(card);fireEvent.click(card);fireEvent.click(card);
+ expect(open.mock.calls.map(([ref,opts])=>[ref.messageId,opts.pointIndex,opts.mode])).toEqual([["m0",0,"view"],["m1",1,"view"],["m0",0,"view"]]);
+ localStorage.removeItem("atlas-wiki-holder-marks-shown");
+});
 it("emphasizes supported phrases in late subtopics consistently in Reader and preview",()=>{
  const session=projectSession(),phrases=Array.from({length:5},(_,index)=>`模块${index}保留自己的来源条件`),section={...session.sections[0],body:phrases.map((phrase,index)=>`## 主题${index}\n\n${phrase}。\n\n${TOPICS[index]}`).join("\n\n"),claims:phrases.map(text=>({text,quote:session.evidence[0].excerpt,evidenceIds:[session.evidence[0].id]}))};
  const before=structuredClone(section),view=render(<WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/>);
@@ -65,15 +102,15 @@ it("marks each claim in the prose and opens only that claim's originals, point b
  ]};
  const view=render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
  const markers=[...view.container.querySelectorAll<HTMLElement>(".wiki-claim-marker")];
- // Reading order, not claim order: the first sentence's claim is point 1.
- expect(markers.map(marker=>marker.dataset.claimKey)).toEqual([`${section.id}:1`,`${section.id}:0`]);
+ // The markers keep chapter reading order even when the saved claims are reversed.
+ expect(markers.map(marker=>marker.dataset.claimKey)).toEqual(wikiEvidencePoints(section,session.evidence,true).reverse().map(point=>point.key));
  expect(markers[0].previousSibling?.textContent).toContain("再按需调用模型。");
  fireEvent.click(markers[1]);
  // Its original is found, so it needs no answer: it opens alone, not as one of every sentence to step through.
  expect(open).toHaveBeenLastCalledWith(second,expect.objectContaining({references:[second],quote:"基础搜索不依赖付费模型。",pointIndex:0,points:[expect.objectContaining({claim:"基础搜索不依赖付费模型",placed:true})]}));
  expect(open.mock.lastCall?.[1]).not.toHaveProperty("sectionId");
  // Both quotes are in their originals: nothing is left to review, and the button still browses every point.
- fireEvent.click(screen.getByRole("button",{name:"原文已定位"}));
+ fireEvent.click(screen.getByRole("button",{name:"来源已定位"}));
  expect(open).toHaveBeenLastCalledWith(first,expect.objectContaining({pointIndex:0}));
 });
 it("checks quotes against the originals and reviews only the points that need a look",()=>{
@@ -94,7 +131,7 @@ it("checks quotes against the originals and reviews only the points that need a 
 it("marks the active point while the panel shows it",()=>{
  const session=projectSession(),ref={...session.evidence[0],id:"p1",messageId:"m1",excerpt:"先在本地检索候选消息。"};session.evidence.push(ref);
  const section={...session.sections[0],body:"Atlas 先在本地检索候选消息。",claims:[{text:"先在本地检索候选消息",quote:"先在本地检索候选消息。",evidenceIds:["p1"],formulations:["先在本地检索候选消息"]}]};
- const point={key:`${section.id}:0`,claim:"先在本地检索候选消息",source:"other" as const,reference:ref,references:[ref],placed:true};
+ const [point]=wikiEvidencePoints(section,session.evidence,true);
  const view=render(<WorkspaceEvidenceContext.Provider value={{open:vi.fn(),active:{points:[point],pointIndex:0}}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
  expect(view.container.querySelector(".wiki-claim-marker")).toHaveAttribute("aria-current","true");
 });
@@ -220,7 +257,7 @@ it("highlights in the document the claims that cite the original the panel shows
  ]};
  const view=render(<WorkspaceEvidenceContext.Provider value={{open:vi.fn(),active:{shown:second}}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
  const highlighted=[...view.container.querySelectorAll<HTMLElement>("[data-claim-highlighted]")].map(marker=>marker.dataset.claimKey);
- expect(highlighted).toEqual([`${section.id}:1`]);
+ expect(highlighted).toEqual(wikiEvidencePoints(section,session.evidence,true).filter(point=>point.reference===second).map(point=>point.key));
 });
 it("hides source highlighting until the reader turns it on, and keeps semantic status labels either way",()=>{
  localStorage.removeItem("atlas-wiki-holder-marks-shown");
@@ -228,15 +265,39 @@ it("hides source highlighting until the reader turns it on, and keeps semantic s
  const section={...session.sections[0],body:`${text}
 
 ${TOPICS[1]}`,evidenceIds:[ref.id],claims:[{text,quote:ref.excerpt,evidenceIds:[ref.id],holder:"decided" as const,holderMark:true}]};
- const view=render(<WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/>);
+ const onLocate=vi.fn();
+ const scroller=document.createElement("div");
+ let visibleWidth=600;
+ vi.spyOn(scroller,"getBoundingClientRect").mockImplementation(()=>new DOMRect(0,0,visibleWidth,640));
+ const view=render(<WikiDocument section={section} session={session} zh scrollRef={{current:scroller}} structure={null} onLocate={onLocate} onCurrent={vi.fn()}/>);
  const article=view.container.querySelector("article.wiki-document")!,toggle=screen.getByRole("button",{name:"显示出处"});
  // Off at first: the page reads as text, not as a sheet of tints.
  expect(article).toHaveClass("hides-holder-marks");expect(toggle).toHaveAttribute("aria-pressed","false");
  // The status label stays with the highlight hidden: it is the one place the status is said.
  expect(article.querySelector(".wiki-claim-marker.is-holder-mark")?.textContent).toBe("已定");
+ expect(screen.queryByRole("group",{name:"按状态查阅依据"})).toBeNull();
+ expect(screen.queryByText("按状态查阅依据")).toBeNull();
+ const control=toggle.parentElement!,panel=control.querySelector<HTMLElement>(".wiki-status-panel")!;
+ let anchorLeft=260;
+ vi.spyOn(control,"getBoundingClientRect").mockImplementation(()=>new DOMRect(anchorLeft,30,36,36));
+ vi.spyOn(panel,"getBoundingClientRect").mockReturnValue(new DOMRect(0,0,210,80));
  fireEvent.click(toggle);
  expect(article).not.toHaveClass("hides-holder-marks");expect(screen.getByRole("button",{name:"收起出处"})).toHaveAttribute("aria-pressed","true");
+ expect(panel).toBe(screen.getByRole("group",{name:"按状态查阅依据"}));
+ expect(panel.dataset.placement).toBe("right");
+ visibleWidth=390;
+ fireEvent.resize(window);
+ expect(panel.dataset.placement).toBe("left");
+ visibleWidth=320;anchorLeft=150;
+ fireEvent.resize(window);
+ expect(panel.dataset.placement).toBe("below");
+ expect(panel.style.getPropertyValue("--wiki-status-offset")).toBe("-142px");
+ fireEvent.click(within(panel).getByRole("button",{name:"已定 1"}));
+ expect(onLocate).toHaveBeenCalledWith(expect.objectContaining({id:ref.id}));
  expect(localStorage.getItem("atlas-wiki-holder-marks-shown")).toBe("1");
+ fireEvent.keyDown(within(panel).getByRole("button",{name:"已定 1"}),{key:"Escape"});
+ expect(panel).not.toBeVisible();
+ expect(screen.getByRole("button",{name:"显示出处"})).toHaveFocus();
  localStorage.removeItem("atlas-wiki-holder-marks-shown");
 });
 it("names a pending problem above the chapter, marks its paragraph and steps to the next",async()=>{

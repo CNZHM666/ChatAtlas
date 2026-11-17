@@ -205,7 +205,7 @@ export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeL
       if (UNDECIDED.test(answer.answer)) continue;
       const choice = knowledgeTerms(answer.answer);
       const version = knowledgeVersion(answer.answer);
-      const anchors = answer.unitIds.flatMap(id => units.get(id) ?? []).filter(unit => !unit.about && unit.kind !== "question");
+      const anchors = answer.unitIds.flatMap(id => units.get(id) ?? []).filter(unit => !unit.about && (unit.kind !== "question" || wikiChoiceQuestionText(unit.statement,answer.question)));
       const overlap = (unit: WikiKnowledgeUnit) => [...knowledgeTerms(unit.statement)].filter(term => choice.has(term)).length
         + (version && version === knowledgeVersion(unit.statement) ? 1 : 0);
       const anchor = anchors.sort((a, b) => overlap(b) - overlap(a))[0];
@@ -214,7 +214,9 @@ export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeL
         const label = answer.answer.trim();
         const proposition = /^必须/u.test(label) && !/还是|或者|或(?:者)?应/u.test(answer.question)
           ? answer.question.match(/^是否(.{2,110}必须[^？?]{2,})[？?]$/u)?.[1] : undefined;
-        const said = proposition ?? label;
+        const timing = /阶段|phase\b/iu.test(label) && /时机|何时|什么时候|阶段.*还是|\bwhen\b/iu.test(answer.question);
+        const context = question.about?.trim() || anchor.subject;
+        const said = proposition ?? (timing && context && !label.includes(context) ? `${context}${/\p{Script=Han}/u.test(context)?"：":": "}${label}` : label);
         const statement = /[.!?。！？]$/u.test(said) ? said : `${said}${/\p{Script=Han}/u.test(said) ? "。" : "."}`;
         added.set(anchor.id, { ...anchor, id, statement, kind: "decision", details: [], conditions: undefined, adoption: { status: "user_decision" }, delivery: "unknown", about: undefined, relation: undefined,
           evidence: { ...anchor.evidence, evidenceId: `${anchor.evidence.evidenceId}:${id}`, pasted: false, code: undefined } });
@@ -255,12 +257,13 @@ export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeL
     // The quote stays the anchor's own words, from the message it was said in: one run gave the answer "ask → answer"
     // as its quote, found in no message, and checking the claims against the originals dropped it, its 〔已定〕 and its
     // row among the key decisions. The decision itself is the user's, kept in decisions below.
-    const anchor = confirmed[0], label = option.label.trim();
+    const anchor = confirmed[0], label = (answer.answer || option.label).trim();
     // A short label ("380px") says nothing read alone: one run wrote 「380px.〔已定〕」 as its own paragraph and key
     // decision. It goes after what the question is about: 「Popup 宽度：380px。」.
     // A Chinese label is short by its length alone: 「使用“完成专注 X 轮”」 has spaces around its X, read as three words.
     const words = /\p{Script=Han}/u.test(label) ? false : /\s\S+\s\S+/u.test(label);
-    const about = question.about?.trim(), bare = !words && label.length <= 16 && about && !label.includes(about);
+    const about = question.about?.trim(), bare = about && !label.includes(about)
+      && (!words && label.length <= 16 || answerTargetsAnotherClaim(anchor, question, label));
     const defer = wikiReleaseDeferral(question.ask, label);
     const said = wikiLayerDeferral(question.ask, label) ?? (defer ? /\p{Script=Han}/u.test(question.ask) ? `${defer.stage} 暂缓${/^[A-Za-z]/u.test(defer.feature) ? " " : ""}${defer.feature}` : `${defer.stage} defers ${defer.feature}`
       : bare ? `${about}${/\p{Script=Han}/u.test(about!) ? "：" : ": "}${label}` : label);
@@ -373,7 +376,33 @@ export function withAnsweredOpenPoints(ledger: WikiKnowledgeLedger): WikiKnowled
 
 /** Version names ("V0.1") are not values. Compare clauses separately so a
  * 25/5 choice does not approve the same plan's separate 15-minute break. */
+function answerTargetsAnotherClaim(unit: WikiKnowledgeUnit, question: WikiWritingQuestion, answer: string) {
+  // Concrete alternatives may point to the same paragraph simply because
+  // it mentions the topic. The chosen option still only settles its own scope.
+  const targets = (option: WikiWritingQuestion["options"][number]) => option.actions.some(action => action.do==="confirm"&&action.units.includes(unit.id));
+  if (question.options.filter(targets).length < 2) return false;
+  const chosen = knowledgeTerms(answer);
+  if (chosen.size < 3) return false;
+  const statement = knowledgeTerms(unit.statement);
+  const shared = [...chosen].filter(term => statement.has(term)).length;
+  return shared < 2 || shared / chosen.size < .4;
+}
+
+export function wikiChoiceQuestionText(statement:string, ask:string) {
+  const stem = (text:string)=>answerKey(text.replace(/^(?:需(?:要)?|尚需|待)(?:决定|确认|选择)[：:，,\s]*/u,""));
+  return Boolean(stem(statement)&&stem(statement)===stem(ask))
+    && /[？?]\s*$|还是|或者|是否|\b(?:whether|versus)\b/iu.test(ask);
+}
+
 export function answerLeavesDetailsOpen(unit: WikiKnowledgeUnit, question: WikiWritingQuestion, answer: string) {
+  if (wikiChoiceQuestionText(unit.statement,question.ask)) return true;
+  // A timing answer only covers that timing, even when a compound plan has
+  // no numeric conditions for the general scope check to catch.
+  const timing = /何时|什么时候|时机|哪个阶段|阶段[^。！？\n]{0,30}还是|\b(?:when|what stage)\b/iu.test(question.ask)
+    && /阶段|之后|之前|发布后|\b(?:phase|stage|alpha|beta|after|before)\b/iu.test(answer)
+    && /[，,；;]|[。.]\s*\S/u.test(unit.statement);
+  if (timing) return true;
+  if (answerTargetsAnotherClaim(unit, question, answer)) return true;
   const trigger = wikiChoiceTrigger(`${question.about} ${question.ask}`, answer);
   if (trigger && !unit.statement.replace(/\s+/gu, "").toLowerCase().includes(trigger.replace(/\s+/gu, "").toLowerCase())) return true;
   const details = wikiUnitConfirmationDetails(unit);

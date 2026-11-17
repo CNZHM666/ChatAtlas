@@ -17,6 +17,7 @@ import { projectSession } from "../../test/project-fixture";
 import { contextKnowledge } from "../../test/context-fixture";
 import * as wikiRewriteAI from "../../ai/wiki-section-rewrite";
 import * as wikiRevisionAI from "../../ai/wiki-revision";
+import * as focusUpdates from "../../ai/focus-update";
 
 vi.mock("../../ai/focus-session", () => ({ generateFocusSession: vi.fn() }));
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -26,6 +27,33 @@ const session: FocusSession = { id: "s", goal: "Review poles", mode: "answer", t
 beforeEach(async () => { vi.clearAllMocks(); localStorage.setItem("atlas-locale", "en"); localStorage.removeItem("atlas-wiki-categories:s"); const db = await getDatabase(); await db.clear("canvases"); await db.clear("projectQueryThreads"); await db.clear("focusGenerationTasks"); await db.clear("focusSessions"); await db.clear("conversations"); await db.clear("aiSettings"); await db.put("aiSettings", { id: "ai-settings", mode: "byok", provider: "openai", baseUrl: "https://api.example/v1", apiKey: "fixture", model: "fixture", updatedAt: 1 }); await db.clear("messages"); await db.put("messages", { id: "m1", conversationId: "c", messageIndex: 0, role: "user", content: "Why poles?", preview: "Why poles?", contentHash: "hash", createdAt: 1, updatedAt: 1 }); });
 
 async function confirmDiscussionScope() { const button = await screen.findByRole("button", { name: "Generate preview" }); await waitFor(() => expect(screen.queryByText("Finding discussions…")).not.toBeInTheDocument()); if ((button as HTMLButtonElement).disabled) { fireEvent.click(screen.getByRole("button", { name: "Browse other discussions" })); fireEvent.click(screen.getAllByRole("checkbox")[0]); } fireEvent.click(button); }
+
+it("reviews unlabelled and default AI points individually, decrementing the count before leaving the chapter",async()=>{
+ const db=await getDatabase();
+ const texts=["全文检索保留各候选消息的位置。","混合检索支持使用模糊描述定位原始对话。"];
+ const original=(await db.get("messages","m1"))!;
+ await db.put("messages",{...original,content:texts.join("\n\n")});
+ await db.put("conversations",conversation);
+ const page={...session.sections[0],title:"Search sources",body:texts.join("\n\n"),claims:texts.map((text,index)=>({
+  text,quote:text,evidenceIds:["e1"],...(index?{holder:"ai" as const,holderMark:true}:{})
+ }))};
+ const project:FocusSession={...session,mode:"work",status:"ready",sections:[page],evidence:[{...session.evidence[0],excerpt:"索引设置。"}]};
+ await db.put("focusSessions",project);
+ render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+ fireEvent.click(await screen.findByRole("button",{name:"Check evidence · 2 to confirm"}));
+ expect(await screen.findByText("2 left to review")).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"Source is fine"}));
+ expect(screen.getByText("1 left to review")).toBeVisible();
+ expect(screen.getByRole("button",{name:"Check evidence · 1 to confirm"})).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"Change"}));
+ fireEvent.click(screen.getByRole("button",{name:"Decided"}));
+ expect(screen.getByText("Chapter reviewed")).toBeVisible();
+ expect(screen.queryByRole("button",{name:"Check evidence · 1 to confirm"})).toBeNull();
+ await waitFor(async()=>{
+  const saved=await db.get("focusSessions",project.id);
+  expect(saved?.sections[0].claims?.map(claim=>[claim.checked,claim.holder])).toEqual([[true,undefined],[true,"decided"]]);
+ });
+});
 
 it("checks the local source before previewing an update and leaves the Wiki alone when text is unchanged",async()=>{
  const db=await getDatabase(),canvas={id:"space",name:"Project",createdAt:1,updatedAt:1};
@@ -38,6 +66,55 @@ it("checks the local source before previewing an update and leaves the Wiki alon
  fireEvent.click(screen.getByRole("button",{name:"Update"}));
  expect(await screen.findByText("No source changes found.")).toBeVisible();
  expect(screen.queryByText("Sources changed")).toBeNull();
+ expect(generateFocusSession).not.toHaveBeenCalled();
+});
+
+it("retries incomplete Wiki coverage through Update even when the original message is unchanged",async()=>{
+ const db=await getDatabase(),canvas={id:"space",name:"Project",createdAt:1,updatedAt:1};
+ const project:FocusSession={...session,mode:"work",status:"ready",canvasId:canvas.id,
+  sourceSignatures:{c:{m1:sourceMessageSignature("Why poles?")}},
+  scope:{kind:"goal",blocks:[{conversationId:"c",title:"Stability",messageIds:["m1"],messageSignatures:{m1:sourceMessageSignature("Why poles?")}}]},
+  wikiKnowledge:{version:1,status:"complete",generatedAt:1,materials:1,batches:[{sourceIds:["e:c:0:1"],units:[],rejected:{},status:"ok",uncovered:["e:c:0:1"]}]}};
+ await db.put("conversations",conversation);
+ await db.put("canvases",canvas);
+ await db.put("focusSessions",project);
+ let finish!: (result:FocusSession) => void;
+ const update=vi.spyOn(focusUpdates,"generateFocusUpdate").mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+ render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[canvas]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+ fireEvent.click(screen.getByRole("button",{name:"Update"}));
+ await waitFor(()=>expect(update).toHaveBeenCalledOnce());
+ const [previous, sources, , , , , onProgress, callbacks] = update.mock.calls[0];
+ expect(previous.id).toBe(project.id);
+ expect(sources.map(source=>source.id)).toEqual(["c"]);
+ act(()=>onProgress?.(1,2,"reading",{completed:1,total:2,stage:"reading",final:false,round:1,completedSourceIds:[],totalSources:1,processedSegments:0,totalSegments:0,elapsedMs:1,ledger:{stage:"extract",done:1,total:2}}));
+ expect(screen.getByText("Read conversations and extract knowledge")).toBeVisible();
+ act(()=>callbacks?.onPartial?.({...project,sections:[{...project.sections[0],wikiOutline:true}]}));
+ expect(screen.getByRole("region",{name:"Chapter draft preview"})).toBeVisible();
+ await act(async()=>finish({...project,id:"retry-preview"}));
+ expect(await screen.findByRole("button",{name:"Save and view"})).toBeVisible();
+ await waitFor(async()=>expect((await db.get("focusSessions","retry-preview"))?.scope).toEqual(project.scope));
+ expect(screen.queryByText("No source changes found.")).toBeNull();
+});
+
+it("asks only for the affected scope before sending changed discussions into the update pipeline",async()=>{
+ const db=await getDatabase(),canvas={id:"space",name:"Project",createdAt:1,updatedAt:1};
+ const oldSignature=sourceMessageSignature("Why poles?"), newText="Why do poles matter?";
+ const project:FocusSession={...session,mode:"work",status:"ready",canvasId:canvas.id,sourceSignatures:{c:{m1:oldSignature}},
+  scope:{kind:"goal",blocks:[{conversationId:"c",title:"Stability",messageIds:["m1"],messageSignatures:{m1:oldSignature}}]}};
+ await db.put("conversations",conversation);
+ await db.put("canvases",canvas);
+ await db.put("focusSessions",project);
+ const message=(await db.get("messages","m1"))!;
+ await db.put("messages",{...message,content:newText,preview:newText,updatedAt:2});
+ const update=vi.spyOn(focusUpdates,"generateFocusUpdate").mockResolvedValue({...project,id:"changed-preview"});
+ render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[canvas]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+ fireEvent.click(screen.getByRole("button",{name:"Update"}));
+ expect(await screen.findByRole("heading",{name:"Confirm update scope"})).toBeVisible();
+ expect(screen.queryByRole("heading",{name:"What would you like to do?"})).toBeNull();
+ const confirm=screen.getByRole("button",{name:"Update and preview"});
+ await waitFor(()=>expect(confirm).toBeEnabled());
+ fireEvent.click(confirm);
+ await waitFor(()=>expect(update.mock.calls[0]?.[7]?.scope?.blocks?.[0].messageSignatures).toEqual({m1:sourceMessageSignature(newText)}));
  expect(generateFocusSession).not.toHaveBeenCalled();
 });
 

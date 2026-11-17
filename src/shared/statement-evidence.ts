@@ -57,7 +57,7 @@ export function statementEvidence(content:string,quote:string){
   preference,
   explicitDecision:!blocked&&!suggestion&&/(?:我(?:们)?(?:已|已经)?(?:决定|确认)|(?:最终|正式)(?:采用|决定|确认)|决定(?:采用|改用|改为|保留|不再|取消)|确认(?:采用|使用|保留)|就按|\b(?:i|we) (?:have )?(?:decided|confirm)|\b(?:adopt|switch to)\b)/iu.test(sentence),
   decision:!blocked&&!suggestion&&/(?:确认|决定|采用|改用|改为|使用|不再|暂缓|重新启动|恢复(?:开发|实施)|沿用|不改|维持|先不做|暂不做|延期|推迟|取消|就按|保留|只(?:用|做)|\b(?:adopt|use|decided|confirmed|switch|keep)\b)/iu.test(sentence),
-  report:!blocked&&!suggestion&&(partialReport||!plan&&!/(?:没有|尚未|未曾|没|不)(?:完成|实现|通过|发布|上线)|\b(?:not|never) (?:completed|implemented|released|finished)\b/iu.test(sentence)&&/(?:已(?:经)?(?:正式)?(?:完成|实现|通过|发布|上线|接入|做完)|完成了|实现了|发布了|上线了|正在(?:开发|实现|测试|处理)|\b(?:completed|implemented|finished|released|shipped|in progress)\b)/iu.test(sentence)),
+  report:!blocked&&!suggestion&&(partialReport||!plan&&!/(?:没有|尚未|未曾|没|不)(?:完成|实现|通过|发布|上线|跑通|打通|上架)|\b(?:not|never) (?:completed|implemented|released|finished)\b/iu.test(sentence)&&/(?:已(?:经)?(?:正式)?(?:完成|实现|通过|发布|上线|接入|做完|跑通|打通|上架)|(?:完成|实现|发布|上线|跑通|打通|上架)了|正在(?:开发|实现|测试|处理)|\b(?:completed|implemented|finished|released|shipped|in progress)\b)/iu.test(sentence)),
   plan:!blocked&&!suggestion&&plan,
   suggestion:!inCode&&suggestion,
  };

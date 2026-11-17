@@ -29,7 +29,8 @@ const APART = /此前|早先|早期|最初|起初|原先|原来|原本|之前|�
 /** The assistant credited with a point: what the user said told as a suggestion. */
 const CREDITS_AI = /(?:AI|助手|ChatGPT|模型)\s*(?:的)?(?:建议|提议|推荐)|(?<![你我])曾建议|(?<![你我])(?:建议|提议)(?:将|把|采用|使用|改为)|\b(?:the (?:AI|assistant) (?:suggests|suggested|proposes|proposed))\b/iu;
 /** The user credited with a point: a decision or proposal told as the user's. */
-const CREDITS_USER = /(?<![让由给请供待需许将把为与和及或、（(])你(?:已|已经)?(?:提出|决定|确认|选择|要求|确定)(?!是否|与|和|、|[（(])|(?<![区分供让由给交请待需许将把为与和及或、（(误认])用户(?:已|已经)?(?:决定|确认|确定)(?!是否|与|和|、|[（(]|合并)|\b(?:you (?:decided|confirmed|chose)|the user (?:decided|confirmed|chose))\b/iu;
+const CREDITS_USER = /(?<![让由给请供待需许将把为与和及或、（(])你(?:已|已经)?(?:提出|决定|确认|选择|要求|确定)(?!的|是否|与|和|、|[（(])|(?<![区分供让由给交请待需许将把为与和及或、（(误认])用户(?:已|已经)?(?:决定|确认|确定)(?!的|是否|与|和|、|[（(]|合并)|\b(?:you (?:decided|confirmed|chose)|the user (?:decided|confirmed|chose))\b/iu;
+export const wikiCreditsUserDecision=(text:string)=>CREDITS_USER.test(text.replace(/(?:不等于|不代表|不能视为|未经)\s*(?:项目发起人|用户|你)(?:已|已经)?(?:确认|决定|确定)/gu,""));
 
 const pairs = (text: string) => knowledgeTerms(text);
 const ownWords = (unit: WikiKnowledgeUnit) => unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about;
@@ -104,7 +105,7 @@ export function chapterInvariants(chapter: WikiDraftChapter, context: InvariantC
       if (units.every(ownWords) && CREDITS_AI.test(claim.text) && !/你|用户/u.test(claim.text)) issues.push({ kind: "user_as_ai", chapterId: chapter.id, unitIds: ids, text: claim.text.slice(0, 80) });
       // A point the user never turned down told as turned down beside one they did: 「……的提议也被否定」.
       if (context.declined && TURNED_DOWN.test(claim.text) && units.some(unit => !context.declined!(unit.id) && unit.evidence.role !== "user")) issues.push({ kind: "declined_overstated", chapterId: chapter.id, unitIds: ids.filter(id => !context.declined!(id)), text: claim.text.slice(0, 80) });
-      if (units.every(unit => unit.evidence.role === "assistant") && ids.every(id => ["proposal", "analysis"].includes(context.statusOf(id) ?? "")) && CREDITS_USER.test(claim.text)) issues.push({ kind: "ai_as_user", chapterId: chapter.id, unitIds: ids, text: claim.text.slice(0, 80) });
+      if (units.every(unit => unit.evidence.role === "assistant") && ids.every(id => ["proposal", "analysis"].includes(context.statusOf(id) ?? "")) && wikiCreditsUserDecision(claim.text)) issues.push({ kind: "ai_as_user", chapterId: chapter.id, unitIds: ids, text: claim.text.slice(0, 80) });
     }
   }
   return issues;

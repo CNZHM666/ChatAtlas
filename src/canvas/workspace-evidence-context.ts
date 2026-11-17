@@ -5,6 +5,8 @@ import type { WikiClaimSource } from "../shared/wiki-chapter-status";
 
 /** One checkable point: a claim in the prose and only the originals that support it. */
 export interface EvidencePoint { key: string; claim: string; quote?: string; source: WikiClaimSource; label?: string; reference: FocusEvidence; references: FocusEvidence[]; placed: boolean;
+  /** Stable source bindings survive read-time changes to the wording. */
+  unitIds?: string[];
   /** Matched locally by wording overlap, not a saved claim-to-source link. */
   approximate?: boolean;
   /** Who holds the claim's sentence, and whether its marker is the labelled end of a run of one holder. */
@@ -16,14 +18,18 @@ export interface EvidencePoint { key: string; claim: string; quote?: string; sou
 /** A point only the user can settle, not yet answered: a local check flagged it (written as decided with no
  * confirmation, a quote not found, a negation dropped…), or it is still open. Every other point has its original found
  * and needs no answer: checking asks about these, not about every sentence. */
-export const needsConfirmation = (point: { attention?: EvidenceAttention; holder?: string; checked?: boolean }) => !point.checked && (Boolean(point.attention) || point.holder === "open");
+export const needsConfirmation = (point: Pick<EvidencePoint, "attention" | "checked">) => !point.checked && Boolean(point.attention);
 export interface WorkspaceEvidenceOptions { references?: FocusEvidence[]; quote?: string; claim?: string; sectionId?:string;
+  /** Identity of the original Markdown table within the selected message. */
+  tableTarget?:string;
   /** The original the panel shows now, so the document can highlight the claims that cite it. */
   shown?: FocusEvidence;
   /** Point-by-point checking: the panel steps through these instead of the whole chapter's sources. */
   points?: EvidencePoint[]; pointIndex?: number;
   /** "check" steps through the points to confirm; opening one sentence's source is a plain view. */
   mode?: "check" | "view";
+  statusFilter?: string;
+  locationRevision?: number;
   /** Opens the conversation in the reader, in its full context, instead of the side panel: a chapter's source list
    * goes from a conversation to its whole discussion, while a sentence's marker goes to the words behind it. */
   reader?: boolean }

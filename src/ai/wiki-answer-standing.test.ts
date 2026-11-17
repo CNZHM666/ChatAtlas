@@ -19,10 +19,34 @@ import { withoutMadeRanges } from "../shared/wiki-made-range";
 import { decidedAgainstDeclined, differingPlans, lengthAgainstDecided, outgrownCentralBy, outgrownCentralNames } from "../shared/wiki-differing-plans";
 import { claimSourceUnits, claimSupported } from "./wiki-claim-support";
 import { reportedStatusRows } from "../shared/wiki-section-status";
+import {reviewSavedWikiEditorial} from "./wiki-saved-editorial";
 import type { WikiDraftChapter, WikiKnowledgeLedger, WikiKnowledgeOrganization, WikiKnowledgeUnit, WikiWritingQuestion } from "../shared/wiki-knowledge";
 
 const unit = (n: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${n}`, subject: "项目", statement, kind: "plan", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: `e${n}`, conversationId: "c", messageId: `m${n}`, messageIndex: n, role: "assistant", pasted: false, quote: statement }, ...extra });
 const ledgerOf = (units: WikiKnowledgeUnit[], extra: Partial<WikiKnowledgeLedger> = {}): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: 1, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], ...extra });
+
+it.each([
+ ["定位位置","需决定是在原生侧边栏定位，还是使用独立 Reader？","原生侧边栏定位","需决定是在原生侧边栏定位，还是使用独立 Reader？"],
+ ["V2EX 招募时机","V2EX 的早期用户寻找是在 Alpha 测试阶段进行，还是在正式发布后？","Alpha 阶段","先采用 GitHub 早期开源，再在 Alpha 阶段到 V2EX 招募，并同步推广演示视频。"],
+] as const)("projects only the selected answer for %s", (about,ask,label,text)=>{
+ const point=unit(1,text,{kind:"decision"});
+ const question:WikiWritingQuestion={id:"where",about,ask,unitIds:[point.id],organization:1,options:[
+  {id:"chosen",label,actions:[{do:"confirm",units:[point.id]}]},
+  {id:"other",label:"另一个方案",actions:[{do:"open",units:[point.id]}]},
+ ]};
+ const stored=withWritingAnswer(ledgerOf([point],{writingQuestions:[question]}),question,"chosen");
+ const {ledger,statuses,units}=resolveWikiReading(stored);
+ const selected=units.find(item=>item.id==="answer:where:chosen");
+ expect(selected?.statement).toContain(label);
+ expect(statuses.get(point.id)).not.toBe("confirmed");
+ const ref={id:"e1",conversationId:"c",messageId:"m1",title:"讨论",excerpt:point.evidence.quote};
+ const displayed=reviewSavedWikiEditorial({id:"s1",kind:"finding",title:about,body:text,transition:"",evidenceIds:[ref.id],
+  claims:[{text,quote:text,evidenceIds:[ref.id],unitIds:[point.id],holder:"decided",userDecided:true}]},ledger,()=>ref);
+ expect(displayed.body).toContain(selected?.statement);
+ expect(displayed.claims?.filter(claim=>claim.holder==="decided").map(claim=>claim.text)).toEqual([selected?.statement]);
+ if (text===ask) expect(displayed.body).not.toContain("还是");
+ else expect(displayed.body).toContain("推广演示视频");
+});
 
 const dau = [unit(1, "当前日活仅25，面临推广难。", { kind: "fact" }), unit(2, "小程序目前每天稳定在22人。", { kind: "report" }), unit(3, "当前小程序日活（DAU）约40。", { kind: "fact" })];
 const dauQuestion: WikiWritingQuestion = { id: "ask:1:2", about: "当前日活数据", ask: "当前日活是25人、22人还是40人？", unitIds: dau.map(item => item.id), organization: 1,
@@ -458,7 +482,7 @@ it("tells a turned-down point as turned down however it was worded, a replaced p
   const units = [
     unit(1, "采用系统自动分配同期小组，而非用户主动寻找战友或创建队伍。", { kind: "decision" }),
     unit(2, "弱化戒色敏感词，将外层定位调整为自律恢复工具。", { kind: "decision" }),
-    unit(3, "决定先深耕戒色单一垂直领域，再扩展至泛自律工具。", { kind: "decision", evidence: { ...unit(3, "").evidence, role: "user", quote: "先深耕戒色" } }),
+    unit(3, "决定先深耕戒色单一垂直领域，再扩展至泛自律工具。", { kind: "decision", evidence: { ...unit(3, "").evidence, role: "user", quote: "先深耕戒色，不再弱化戒色敏感词来调整外层定位。" } }),
     unit(4, "坚持默认匿名、本地优先的数据处理原则。", { kind: "constraint" }),
   ];
   const adopted = "此前采用系统自动分配同期小组（滚动制），不再提供手动创建入口。";
@@ -472,7 +496,7 @@ it("tells a turned-down point as turned down however it was worded, a replaced p
   const ledger = ledgerOf(units, {
     decisions: { u1: { verdict: "rejected", at: 5 } },
     organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "定位", aliases: [], unitIds: units.map(item => item.id) }], merged: [], report: {}, chapters: [{ id: "ch", title: "定位", question: "?", group: "", subtopics: [{ title: "定位", subjectIds: ["s"] }] }],
-      relations: [], topics: [{ id: "t", name: "定位", current: ["u3"], earlier: ["u2"], open: false }] },
+      relations: [{older:"u2",newer:"u3",kind:"replaces",status:"resolved",evidence:units[2].evidence.quote}], topics: [{ id: "t", name: "定位", current: ["u3"], earlier: ["u2"], open: false }] },
     draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "定位", question: "?", group: "", problems: [], body: `${opening}\n\n### 定位\n\n${paragraphs.map(item => item.text).join("\n\n")}`, paragraphs }] },
   } as Partial<WikiKnowledgeLedger>);
   const body = ledgerDocument(ledger, {}).sections[0].body;
@@ -629,7 +653,8 @@ it("keeps a version in force out of the earlier versions, a declined plan out of
 });
 
 it("moves an item of replaced versions to the earlier versions, mends a broken list and table, and keeps a suggestion or a past figure from reading as now", () => {
-  const softer = unit(1, "弱化敏感词，将外层定位调整为自律恢复工具。"), focus = unit(2, "先深耕戒色垂直领域。"), path = unit(3, "采用戒色到状态恢复到自律的渐进式扩展路径。");
+  const softer = unit(1, "弱化敏感词，将外层定位调整为自律恢复工具。"), focus = unit(2, "先深耕戒色垂直领域。",
+    {evidence:{...unit(2,"").evidence,role:"user",quote:"先深耕戒色垂直领域，不再弱化敏感词来调整外层定位。"}}), path = unit(3, "采用戒色到状态恢复到自律的渐进式扩展路径。");
   const button = unit(4, "首页守护按钮平时显示守护，高危时段显示橙色点。"), first = unit(5, "第一版优先实现干预前选强度与急救后评估。"), task = unit(6, "首页只展示一件核心任务。");
   const rescue = unit(7, "升级为包含10秒冷静弹窗的王牌功能。", { subject: "紧急求助功能" }), old = unit(8, "小程序每天稳定在22人。", { kind: "fact" });
   const lines = {
@@ -649,7 +674,7 @@ it("moves an item of replaced versions to the earlier versions, mends a broken l
   const body = `项目先深耕戒色垂直领域。\n\n### 定位\n\n${paragraphs.map(item => item.text).join("\n\n")}`;
   const all = [softer, focus, path, button, first, task, rescue, old];
   const ledger = ledgerOf(all, {
-    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "定位", aliases: [], unitIds: all.map(item => item.id) }], merged: [], report: {}, relations: [],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "定位", aliases: [], unitIds: all.map(item => item.id) }], merged: [], report: {}, relations: [{older:softer.id,newer:focus.id,kind:"replaces",status:"resolved",evidence:focus.evidence.quote}],
       topics: [{ id: "t1", name: "定位", current: ["u2"], earlier: ["u1"], open: false }],
       chapters: [{ id: "ch", title: "产品", question: "?", group: "", subtopics: [{ title: "定位", subjectIds: ["s"] }] }] },
     draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "产品", question: "?", group: "", problems: [], body, paragraphs }] },
@@ -679,9 +704,11 @@ it("tells a table of versions by what its column names, and reads a list of one-
 
 it("opens a chapter on what holds when its opening told only the replaced version, and keeps the writer's asides and bare changes out", () => {
   const span = { conversationSpan: { start: new Date(2026, 5, 20, 12).getTime(), end: new Date(2026, 5, 20, 13).getTime() } };
-  const once = unit(1, "初期采用免费核心功能加一次性30天守护计划付费模式，暂不做强制会员。"), now = unit(2, "先免费开放7天体验，随后销售30天守护计划。");
+  const once = unit(1, "初期采用免费核心功能加一次性30天守护计划付费模式，暂不做强制会员。"), now = unit(2, "先免费开放7天体验，随后销售30天守护计划。",
+    {evidence:{...unit(2,"").evidence,role:"user",quote:"改为先免费开放7天体验，随后销售30天守护计划，替换原付费方案。"}});
   const roadmap = unit(3, "分三版实施：V1替换首页大月历，V2实现动态状态，V3加入自动分组。"), rescue = unit(4, "升级为包含10秒冷静弹窗的王牌功能。", { subject: "紧急求助功能" });
-  const card = unit(5, "将分散模块合并为单一的今日任务卡片。"), task = unit(6, "将今日任务升级为今天只做这一件事，由AI根据状态推荐具体行动。");
+  const card = unit(5, "将分散模块合并为单一的今日任务卡片。"), task = unit(6, "将今日任务升级为今天只做这一件事，由AI根据状态推荐具体行动。",
+    {evidence:{...unit(6,"").evidence,role:"user",quote:"将原今日任务卡片改为今天只做这一件事，由AI根据状态推荐具体行动。"}});
   const rate = unit(7, "整体留存率为26.92%。", { kind: "fact", evidence: { ...unit(7, "整体留存率为26.92%。").evidence, role: "user", ...span } }), total = unit(8, "累计用户1100人。", { kind: "fact", evidence: { ...unit(8, "累计用户1100人。").evidence, role: "user", ...span } }), fresh = unit(9, "新增用户次日留存19%。", { kind: "fact", evidence: { ...unit(9, "新增用户次日留存19%。").evidence, role: "user", ...span } });
   const lines = { plan: "最终建议先免费开放7天体验，随后销售30天守护计划。", roadmap: "此前曾提出分三版实施：V1替换首页大月历，V2实现动态状态，V3加入自动分组，该方案与当前规划存在差异且未明确取代关系。", rescue: "升级为包含10秒冷静弹窗的王牌功能。", task: "现行方案将今日任务升级为今天只做这一件事，由AI根据状态推荐具体行动。",
     rows: "- **整体留存率**：数值/状态：26.92%\n- **新增用户次日留存**：数值/状态：19%\n- **累计用户**：数值/状态：1100人" };
@@ -696,7 +723,10 @@ it("opens a chapter on what holds when its opening told only the replaced versio
   const body = `${opening}\n\n### 模式\n\n${paragraphs.map(item => item.text).join("\n\n")}`;
   const all = [once, now, roadmap, rescue, card, task, rate, total, fresh];
   const ledger = ledgerOf(all, {
-    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "模式", aliases: [], unitIds: all.map(item => item.id) }], merged: [], report: {}, relations: [],
+    organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "模式", aliases: [], unitIds: all.map(item => item.id) }], merged: [], report: {}, relations: [
+      {older:once.id,newer:now.id,kind:"replaces",status:"resolved",evidence:now.evidence.quote},
+      {older:card.id,newer:task.id,kind:"replaces",status:"resolved",evidence:task.evidence.quote},
+    ],
       topics: [{ id: "t1", name: "付费", current: ["u2"], earlier: ["u1"], open: false }, { id: "t2", name: "任务", current: ["u6"], earlier: ["u5"], open: false }],
       chapters: [{ id: "ch", title: "商业", question: "?", group: "", subtopics: [{ title: "模式", subjectIds: ["s"] }] }] },
     draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "商业", question: "?", group: "", problems: [], body, paragraphs: [{ subtopic: "", text: opening, unitIds: ["u1"], claims: [{ text: opening, unitIds: ["u1"] }] }, ...paragraphs] }] },
@@ -1024,7 +1054,8 @@ it("tells a one-row version table as a dated sentence, drops a sentence telling 
   const on = (month: number, day: number) => ({ start: new Date(2026, month - 1, day, 12).getTime(), end: new Date(2026, month - 1, day, 13).getTime() });
   const august = unit(1, "当前小程序日活（DAU）约40，活跃留存率略高于40%，付费率较低。", { kind: "fact", evidence: { evidenceId: "e1", conversationId: "c1", messageId: "m1", messageIndex: 1, role: "user", pasted: false, quote: "日活卡在40了，活跃留存只有40%多", conversationSpan: on(8, 18) } } as Partial<WikiKnowledgeUnit>);
   const merged = unit(2, "将分散模块合并为单一的“今日任务”卡片。"), upgraded = unit(3, "将今日任务升级为“今天只做这一件事”。");
-  const entry = unit(4, "早期曾将“我现在有冲动”和“刚刚失守”设为一级紧急入口。"), flow = unit(5, "紧急干预采用分步急救流程。"), now = unit(6, "首页仅展示最近7天记录。");
+  const entry = unit(4, "早期曾将“我现在有冲动”和“刚刚失守”设为一级紧急入口。"), flow = unit(5, "紧急干预采用分步急救流程。",
+    {evidence:{...unit(5,"").evidence,role:"user",quote:"撤掉原先两个一级紧急入口，改用分步急救流程。"}}), now = unit(6, "首页仅展示最近7天记录。");
   const table = "| 阶段/时间点 | 日活(DAU) | 核心/稳定用户 | 留存率指标 |\n| --- | --- | --- | --- |\n| 当前报告 | 约40 | - | 活跃留存率略高于40% |";
   const items = "- 此前将分散模块合并为单一的“今日任务”卡片。\n- 随后进一步升级为“今天只做这一件事”。";
   const paragraphs = [
@@ -1037,6 +1068,7 @@ it("tells a one-row version table as a dated sentence, drops a sentence telling 
   const all = [august, merged, upgraded, entry, flow, now];
   const ledger = oneChapter(all, paragraphs);
   ledger.organization!.topics = [{ id: "t", name: "急救", current: ["u5"], earlier: ["u2", "u3", "u4"], open: false }] as never;
+  ledger.organization!.relations = [{older:entry.id,newer:flow.id,kind:"replaces",status:"resolved",evidence:flow.evidence.quote}];
   const [section] = ledgerDocument(ledger, {}).sections;
   const [current, earlier] = section.body.split("### 早先版本");
   expect(current).toContain("日活(DAU)约40；活跃留存率略高于40%（8月18日）。");
@@ -1076,16 +1108,19 @@ it("tells a labelled rejected item as the user's, drops a sentence repeating a c
   const cockpit = unit(1, "首屏100%为AI Agent驾驶舱，原日历、任务等功能下移作为Agent的执行结果。"), plan = unit(2, "第一版不训练深度学习模型，而是采用规则评分方案。", { kind: "decision" });
   const roleA = unit(3, "AI生成每日任务时需读取历史失守时间。"), roleB = unit(4, "AI不负责直接判定风险等级。"), button = unit(5, "中央悬浮“+”号含义不明，建议改为盾牌图标并标注“守护”。");
   const once = unit(6, "初期采用免费核心功能加一次性“30天AI守护计划”付费模式，暂不做强制会员或周订阅。");
+  const replacement=unit(7,"中央悬浮按钮保留加号并打开 AI。",
+    {evidence:{...unit(7,"").evidence,role:"user",quote:"保留中央悬浮加号并打开 AI，取消改成盾牌图标的方案。"}});
   const table = "| 模块 | 负责 |\n| --- | --- |\n| 每日任务生成 | AI生成每日任务时需读取历史失守时间。|\n| 中央悬浮按钮 | 中央悬浮“+”号含义不明，建议改为盾牌图标并标注“守护”。|\n| 风险判定 | AI不负责直接判定风险等级。|";
   const block = "```text\n基础风险 = 当前时间段历史风险 × 30%\n\n诱因风险：\n当前独处 +10\n```";
   const earlierPlan = "- 初期曾提出免费核心功能加一次性“30天AI守护计划”的模式，暂不做强制会员或周订阅（含30天¥19.9、90天¥49.9）。";
-  const ledger = oneChapter([cockpit, plan, roleA, roleB, button, once], [
+  const ledger = oneChapter([cockpit, plan, roleA, roleB, button, once,replacement], [
     { subtopic: "模型", text: "第一版不训练深度学习模型，而是采用规则评分方案。基础风险 = 当前时间段历史风险 × 30%。", unitIds: ["u2"], claims: [{ text: "第一版不训练深度学习模型，而是采用规则评分方案。", unitIds: ["u2"] }, { text: "基础风险 = 当前时间段历史风险 × 30%。", unitIds: ["u2"] }] },
     { subtopic: "模型", text: block, unitIds: [], claims: [] },
     { subtopic: "角色", text: table, unitIds: ["u3", "u4", "u5"], claims: [{ text: "每日任务生成", unitIds: ["u3"] }, { text: "AI生成每日任务时需读取历史失守时间。", unitIds: ["u3"] }, { text: "中央悬浮按钮", unitIds: ["u5"] }, { text: "中央悬浮“+”号含义不明，建议改为盾牌图标并标注“守护”。", unitIds: ["u5"] }, { text: "风险判定", unitIds: ["u4"] }, { text: "AI不负责直接判定风险等级。", unitIds: ["u4"] }] },
     { subtopic: "早先版本", text: `- **AI Agent驾驶舱**：负责：首屏100%为AI Agent驾驶舱，原日历、任务等功能下移作为Agent的执行结果。（已否定）。\n${earlierPlan}`, unitIds: ["u1", "u6"], claims: [{ text: "AI Agent驾驶舱", unitIds: ["u1"] }, { text: "首屏100%为AI Agent驾驶舱，原日历、任务等功能下移作为Agent的执行结果。（已否定）", unitIds: ["u1"] }, { text: earlierPlan.slice(2), unitIds: ["u6"] }] },
   ], { u1: rejected });
   ledger.organization!.topics = [{ id: "t", name: "按钮", current: ["u3"], earlier: ["u5", "u6"], open: false }] as never;
+  ledger.organization!.relations = [{older:button.id,newer:replacement.id,kind:"replaces",status:"resolved",evidence:replacement.evidence.quote}];
   const body = ledgerDocument(ledger, {}).sections[0].body;
   const [current, earlier] = body.split("### 早先版本");
   expect(current).not.toContain("规则评分方案。基础风险");

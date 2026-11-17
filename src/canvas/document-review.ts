@@ -1,18 +1,27 @@
-import type { FocusSession } from "../shared/focus-session";
-import { wikiBlockIssues, wikiBlocks, type WikiBlockIssue } from "../shared/wiki-explanations";
+import type { FocusEvidence, FocusSection, FocusSession } from "../shared/focus-session";
+import { wikiBlocks, type WikiBlockIssue } from "../shared/wiki-explanations";
 import { wikiSections } from "../shared/wiki-navigation";
 import { wikiEvidencePoints } from "./wiki-evidence";
 import { needsConfirmation } from "./workspace-evidence-context";
+import { restoreWikiSourceNegation } from "../shared/wiki-source-negation";
 
-/** What the overview can send the reader to: located paragraph problems in reading order, and the chapters whose
- * evidence still needs a look, with how many points each. Saved records only; nothing here calls a model. */
-export function documentReview(session: FocusSession, zh: boolean): { issues: WikiBlockIssue[]; unchecked: Array<{ sectionId: string; count: number }> } {
-  const issues = wikiBlockIssues(session);
-  const unchecked = wikiSections(session).flatMap(section => {
-    const count = wikiEvidencePoints(section, session.evidence, zh).filter(needsConfirmation).length;
+const pendingCache=new WeakMap<FocusSection,{evidence:FocusEvidence[];signatures:FocusSession["sourceSignatures"];
+  versions:FocusSession["sourceVersionIds"];zh:boolean;points:ReturnType<typeof wikiEvidencePoints>}>();
+
+/** The count and the review queue share this view of the saved claims. */
+export function pendingWikiEvidence(section:FocusSection,session:FocusSession,zh:boolean) {
+  const cached=pendingCache.get(section);
+  if(cached&&cached.evidence===session.evidence&&cached.signatures===session.sourceSignatures&&cached.versions===session.sourceVersionIds&&cached.zh===zh)return cached.points;
+  const points=wikiEvidencePoints(restoreWikiSourceNegation(section,session),session.evidence,zh).filter(needsConfirmation);
+  pendingCache.set(section,{evidence:session.evidence,signatures:session.sourceSignatures,versions:session.sourceVersionIds,zh,points});
+  return points;
+}
+
+export function documentEvidenceReview(session: FocusSession, zh: boolean) {
+  return wikiSections(session).flatMap(section => {
+    const count = pendingWikiEvidence(section,session,zh).length;
     return count ? [{ sectionId: section.id, count }] : [];
   });
-  return { issues, unchecked };
 }
 
 const LABELS: Record<WikiBlockIssue["code"], [string, string]> = {

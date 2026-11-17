@@ -52,6 +52,9 @@ describe("organization usage analysis", () => {
     const csv = organizationAnalysisCsv(rows);
     expect(csv).toContain("architecture_status"); expect(csv).toContain("sections[0].body");
     expect(csv).not.toContain("private source content");
+    focus.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:92,batches:[],
+      draft:{version:1,generatedAt:1,status:"complete",chapters:[],report:{},quality:{sources:"complete",failedBatches:0,uncovered:92,organization:"complete",critical:0,problems:0,passed:true}}};
+    expect(analyzeOrganizationRuns([{...run,status:"completed"}],[],[],[focus])[0]).toMatchObject({run:{status:"completed"},outcomes:{wiki:"partial"}});
   });
   it("exports reasoning exhaustion counts and the actual output cap for diagnosis", () => {
     const rows = analyzeOrganizationRuns([run], [event("reasoning-limit", { status: "failed", receivedCharacters: 0, reasoningCharacters: 4500, reasoningTokens: 1200, outputTokenLimit: 1200, finishReason: "length" })], []);
