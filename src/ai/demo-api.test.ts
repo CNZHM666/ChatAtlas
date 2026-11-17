@@ -80,10 +80,10 @@ describe("ChatAtlas Demo API client", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const pending = new AtlasApiClient().runTask("focus_session", { intent: "Find", mode: "review", passages: [{ id: "e1", text: "text" }] }, undefined, "", "focus-fixture");
-    // Keep the clock moving until the task settles: on a slow runner the poll is scheduled only after a single advance,
-    // and its timer then never fired (CI timed out at 15 s).
+    // The native digest can finish after any fixed series of fake-timer advances.
+    // Keep advancing the clock between real event-loop turns until the mock poll settles.
     let settled = false; void pending.then(() => { settled = true; }, () => { settled = true; });
-    for (let step = 0; step < 20 && !settled; step++) await vi.advanceTimersByTimeAsync(1100);
+    await vi.waitFor(() => expect(settled).toBe(true), { interval: 250, timeout: 10_000 });
     expect((await pending).result).toEqual({ title: "done" });
     expect(paths.filter((path) => path.endsWith("/compose"))).toHaveLength(1);
     expect(paths.at(-1)).toContain(`/tasks/${"a".repeat(64)}`);
