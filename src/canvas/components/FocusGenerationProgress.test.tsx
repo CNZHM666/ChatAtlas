@@ -107,8 +107,10 @@ it("shows the knowledge-unit ledger's three steps with the running part and its 
   expect(screen.getByText("0/102 批 · 1 条对话")).toBeVisible();
   expect(screen.getByText("第 1/3 步")).toBeVisible();
   expect(screen.queryByText(/轮|段/u)).toBeNull();
+  rerender(<FocusGenerationProgress zh mode="work" detail={ledger("cover", 1, 4)} sourceCount={1} retrying={false} onCancel={vi.fn()} />);
+  expect(screen.getByRole("status")).toHaveTextContent("正在补读");
   rerender(<FocusGenerationProgress zh mode="work" detail={ledger("merge", 30, 120)} sourceCount={1} retrying={false} onCancel={vi.fn()} />);
-  expect(screen.getByRole("status")).toHaveTextContent("整理主题与目录");
+  expect(screen.getByRole("status")).toHaveTextContent("正在整理");
   expect(screen.getByText("整理 5/7 · 去重与关系 · 30/120 条")).toBeVisible();
   expect(screen.getByText("25%")).toBeVisible();
   // Planning the directory is one request: no percentage it cannot measure.
@@ -121,4 +123,7 @@ it("shows the knowledge-unit ledger's three steps with the running part and its 
   expect(screen.getByText("第 3/3 步")).toBeVisible();
   rerender(<FocusGenerationProgress compact zh mode="work" detail={ledger("write", 3, 8)} sourceCount={1} retrying={false} onCancel={vi.fn()} />);
   expect(container.querySelector("summary")).toHaveTextContent("3/3 步 · 38%");
+  rerender(<FocusGenerationProgress compact zh mode="work" detail={ledger("proofread", 0, 1)} sourceCount={1} retrying={false} onCancel={vi.fn()} />);
+  expect(container.querySelector("summary")).toHaveTextContent("正在校对");
+  expect(screen.getByRole("status", { hidden: true })).toHaveTextContent("正在校对");
 });

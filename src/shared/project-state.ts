@@ -160,6 +160,8 @@ export interface ProjectMaintenance {
   overview?: string;
   /** The plan the user wants readers to follow, independent of discussion and implementation status. */
   currentPlan?: string;
+  /** Questions temporarily set aside in the overview, independent of their decision status. */
+  deferredOverviewQuestions?: string[];
   modules?: Record<string, ProjectModule & { basisSignature?: string; wikiSectionIds?: string[] }>;
   actions?: Record<string, { text: string; done: boolean }>;
   decisions?: Record<string, ProjectMatterDetails & { text: string; basisText?: string; confirmed: boolean; hidden?: boolean }>;

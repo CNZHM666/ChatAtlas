@@ -40,5 +40,5 @@ it("puts checking into the one evidence button and lists no pending counts in th
   expect(container.querySelector(".document-overview-identity")).toBeNull();
   expect(container.querySelector(".document-overview-meta")).toBeNull();
   expect(screen.queryByRole("button", { name: /^待处理 \d+$/u })).toBeNull();
-  expect(screen.queryByText(/个来源对话/u)).toBeNull();
+  expect(screen.queryByRole("button", { name: "查看来源对话" })).toBeNull();
 });

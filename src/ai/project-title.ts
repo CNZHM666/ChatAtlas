@@ -1,5 +1,10 @@
 import { historyRequest } from "../search/history-request";
 
+/** The first selected conversation supplies the default Wiki title. */
+export function sourceProjectTitle(goal: string, sourceTitles: string[], zh: boolean): string {
+  return sourceTitles.find(title => title.trim())?.trim() || fallbackProjectTitle(goal, [], zh);
+}
+
 /** What is left of a request asking for a project from the chosen conversations, once it names nothing. */
 const SELECTION_WORDS = /把|全部|所有|已选(?:的)?|选中(?:的)?|这些|对话|聊天|讨论|\b(?:a|an|the|all|from|selected|these|chosen|of)\b/giu;
 

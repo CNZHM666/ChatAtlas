@@ -15,7 +15,7 @@ export function failureOrigin(error:unknown,prompt?:string):FailureOrigin|undefi
  return error&&typeof error==="object"&&"code" in error&&typeof error.code==="string"?originForCode(error.code):undefined;
 }
 function originForCode(code:string):FailureOrigin|undefined {
- if(/^(?:WIKI_PREFLIGHT_|TASK_INPUT_LIMIT)/u.test(code))return "local";
+ if(/^(?:WIKI_PREFLIGHT_|TASK_INPUT_LIMIT|LOCAL_INPUT_)/u.test(code))return "local";
  if(/^(?:PROVIDER_TIMEOUT|PROVIDER_STREAM_INCOMPLETE|NETWORK_|ETIMEDOUT|ECONNRESET)/u.test(code))return "network";
  if(/^(?:PROVIDER_HTTP_|PROVIDER_MODEL_NOT_FOUND|PROVIDER_RESPONSE_REJECTED|RATE_LIMITED|PROVIDER_BUSY)/u.test(code))return "provider";
  if(/^PROVIDER_(?:SCHEMA_|OUTPUT_TRUNCATED|EMPTY_RESPONSE|INVALID_RESPONSE)/u.test(code))return "model";

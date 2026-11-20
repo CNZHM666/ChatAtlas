@@ -6,9 +6,10 @@ import { claimSupported } from "./wiki-claim-support";
 const ADOPTION = /确定为|已确定|确定(?=不|采用|使用|选择|引入)|已(?:决定|确认)(?:采用|使用|选择)?|\b(?:has been|was) (?:decided|confirmed|selected)\b/iu;
 const PLAN = /计划|建议|目标|规划|拟|将|扩(?:展|充)|\b(?:plan|proposal|target|expand|aim)\b/iu;
 const PRESENT = /内置|已(?:实现|支持|部署|上线|完成)|\b(?:ships with|has implemented|is deployed|already supports)\b/iu;
+const ACTIVE_INTEGRATION = /^([\p{L}\p{N} _-]{1,28}?(?:引擎|系统|模块|平台|服务|应用)\s*)(?:已经?|现已)?(?:集成|接入)\s*([\w][\w.-]{2,})/iu;
 const QUANTITY = /\d+(?:\.\d+)?(?:\s*[-–—~～至到]\s*\d+(?:\.\d+)?)?\s*(?:个|种|项|条|类|\b(?:items|types|entries|modules|features)\b)/giu;
 const quantityKeys = (text: string) => [...text.matchAll(QUANTITY)].map(match => match[0].replace(/\s+/gu, "").replace(/[–—~～至到]/gu, "-"));
-export const wikiStandingCandidate = (text: string) => ADOPTION.test(text) || PRESENT.test(text) || PLAN.test(text) && quantityKeys(text).length > 1;
+export const wikiStandingCandidate = (text: string) => ADOPTION.test(text) || PRESENT.test(text) || ACTIVE_INTEGRATION.test(text) || PLAN.test(text) && quantityKeys(text).length > 1;
 const clean = (text: string) => text.replace(/\*\*|__/gu, "");
 const stageLabel = (text: string) => clean(text).match(/^(?:第[一二三四五六七八九十\d]+(?:版|阶段)|首版|V\d+(?:\.\d+)*(?:\s*版本|\s*阶段)?|\b(?:phase|milestone|stage|version)\s+[\w.]+)/iu)?.[0];
 const proposal = (text: string, zh: boolean) => {
@@ -57,9 +58,20 @@ export function wikiClaimStanding(text: string, units: WikiKnowledgeUnit[], stat
 /** Older chapter openings have no claim bindings. Use a source only when its
  * proposal independently supports the decision clause, and no overlapping
  * confirmed point would be downgraded. */
-export function wikiOpeningStanding(text: string, units: WikiKnowledgeUnit[], statuses: ReadonlyMap<string, WikiUnitStatus>, zh: boolean) {
-  if (!ADOPTION.test(text)) return text;
+export function wikiOpeningStanding(text: string, units: WikiKnowledgeUnit[], statuses: ReadonlyMap<string, WikiUnitStatus>, zh: boolean, bound = units) {
   return text.split(/(?<=[。！？\n])|(?<=[.!?])(?=\s)/u).map(sentence => {
+    const integration = ACTIVE_INTEGRATION.exec(sentence.trimStart());
+    if (zh && integration) {
+      const [, subsystem, tool] = integration;
+      const token = tool.toLowerCase();
+      const cited = bound.filter(unit => knowledgeTerms(unit.statement).has(token));
+      const supporting = units.filter(unit => knowledgeTerms(unit.statement).has(token));
+      if (cited.length && cited.every(unit => !unit.about && !unit.evidence.pasted && unit.evidence.role === "assistant"
+        && ["proposal", "analysis"].includes(statuses.get(unit.id) ?? ""))
+        && !supporting.some(unit => unit.kind === "report" || PRESENT.test(unit.statement))) {
+        return sentence.replace(integration[0], () => subsystem + "拟接入 " + tool);
+      }
+    }
     const match = ADOPTION.exec(sentence);
     if (!match) return sentence;
     const terms = knowledgeTerms(sentence.slice(match.index + match[0].length));

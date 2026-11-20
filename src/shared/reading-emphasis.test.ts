@@ -12,6 +12,14 @@ const varied="原始讨论按照发生顺序保存，阅读时可以逐步找回
 const highlights=(body:string)=>[...body.matchAll(/\*\*([^*]+)\*\*/gu)].map(match=>match[1]);
 const emphasize=(text:string,phrases:string[]=[])=>readingEmphasisMarkdown(`## 主题\n\n${text}\n\n${filler}`,{sectioned:true,phrases});
 
+it("removes decorative emphasis from generated introductions while preserving their words",()=>{
+ const lead="针对预览窗口的界面优化", value="整体设计遵循轻量易用的原则";
+ const result=emphasize(`**${lead}**，让操作入口更容易找到。**${value}**，在窄屏也能浏览。`,[lead,value]);
+ expect(result).toContain(`${lead}，`);
+ expect(result).toContain(`${value}，`);
+ expect(highlights(result)).toEqual([]);
+});
+
 it("shares short literal emphasis across Reader and export and protects personal bodies",()=>{
  const session=contextKnowledge().session,page=session.sections[0],phrase="自动发送原始消息";
  // Seven sentences: under the 250 characters at which reading splits a paragraph.

@@ -11,7 +11,7 @@ File import accepts official exports from ChatGPT, Claude, Gemini (Google Takeou
 
 Use Node.js 22 and npm. Run `npm ci`, then `npm run check`. Load `dist/` as an unpacked Chrome extension; live development uses `npm run dev` and `dist-dev/`. The public build needs no backend or environment variables. Configure your own API only for explicit real-model tests.
 
-The main directories are `src/content` / `src/background` (ChatGPT and extension integration), `src/sync` / `src/storage` (imports and persistence), `src/ai` (generation, cache, budgets and validation), `src/context` (local context packs and optional refinement), `src/canvas` / `src/sidecar` (interfaces), `src/search` (retrieval), and `evaluation/memory-search/cases.ts` (authored regression fixtures).
+The main directories are `src/content` / `src/background` (website and extension integration), `src/sync` / `src/storage` (imports and persistence), `src/ai` (generation, cache, budgets and validation), `src/export` (project files and source locators), `src/context` (compatibility helpers), `src/canvas` / `src/sidecar` (interfaces), `src/search` (retrieval), and `evaluation/memory-search/cases.ts` (authored regression fixtures).
 
 `src/shared/atlas/` contains synchronized frontend contracts; authoritative sources are maintained in a separate backend repository. Coordinate contract changes there first and sync them here. Do not reconstruct or deploy a backend from historical local files. Legacy hosted adapters are retained for compatibility tests; the public build disables hosted-service configuration.
 

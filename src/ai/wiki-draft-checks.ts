@@ -4,7 +4,7 @@ import { FIRST_VERSION_EN, FIRST_VERSION_ZH, ITERATION_EN, ITERATION_ZH } from "
 import { LEAVES_OUT, LEFT_OUT_LABEL } from "../shared/negation";
 import { knowledgeStage, knowledgeTerms } from "../shared/knowledge-subject";
 import { replaceParagraph } from "../shared/wiki-body-text";
-import type { WikiDraftChapter } from "../shared/wiki-knowledge";
+import { wikiStatementWithConditions, type WikiDraftChapter, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 
 /** A scope table's cell leaving an item out of the first version. */
 const LEFT_OUT = LEFT_OUT_LABEL;
@@ -24,6 +24,7 @@ const NEGATED_USE = /(?:不|未|无|没|禁止|别|勿|严禁|暂不)(?:再)?(?:
 /** A flow written as steps ("…→ BOM/代码生成 → Wokwi 仿真"): an item in it is a step the flow does. */
 const CHAIN = /->|→|=>/u, CHAIN_STEP = /(?:->|→|=>)\s*$/u;
 const USE = /利用|集成|接入|使用|采用|引入|导出至|导出到/u, LATER = /后期|后续|之后|以后|未来|稳定后|再接入|V[2-9]/u;
+const STUDIES_REFERENCE = /(?:参考|研究|借鉴|调研|了解|展示了|介绍了|作为参考|对标|用于衡量|监测.{0,20}(?:通过率|Pass Rate))|\b(?:study|research|learn from|benchmark against)\b/iu;
 /** A list or sentence leaving items out: the verb, then the items up to 等 or the clause's end. */
 const LEFT_OUT_LIST = /(暂缓开发|暂缓|不实现|不做|不开发|不进行)[：:]?\s*([^。；;\n]{2,90}?)(?=等|[。；;\n]|$)/gu;
 /** Keep explicitly numbered releases distinct. Their equivalence requires
@@ -38,6 +39,64 @@ export function stageOf(clause: string): { level: "iteration" | "version"; label
 }
 /** The stage word a statement names ("本阶段", "Milestone 3.2", "V1"), as it is written. */
 export const stageWord = (text: string) => (text.match(ITERATION) ?? text.match(VERSION))?.[0];
+const LABELED_ITEM = /^\s*\d+\.\s+\*{0,2}(?:第[一二三四五六七八九十\d]+阶段|(?:Phase|Stage)\s+\d+)\*{0,2}\s*[:：]/imu;
+const SOURCE_STAGE = /\b(?:Phase|Milestone)\s+(?:[A-Z]|\d+(?:\.\d+)*)(?:\s*(?:–|—|[-~～]|至|to)\s*(?:[A-Z]|\d+(?:\.\d+)*))?\b|\b[MP]\d+\b|第[一二三四五六七八九十\d]+阶段|\bV\d+(?:\.\d+)*\b/giu;
+
+/** A legacy list sometimes invented ordinal stages across independent
+ * proposals. Restore one row per source and recorded scope in that case. */
+export function separateUnconfirmedWikiPlans(chapter: WikiDraftChapter, units: ReadonlyMap<string, WikiKnowledgeUnit>, confirmed: ReadonlySet<string>): WikiDraftChapter {
+  const escape = (value: string) => value.replace(/\r?\n/gu, " ").replace(/\|/gu, "\\|");
+  const normalized = (value: string) => value.toLocaleLowerCase().replace(/[\s\p{P}]+/gu, "");
+  let body = chapter.body;
+  const paragraphs = chapter.paragraphs.map(paragraph => {
+    if (!/路线|里程碑|阶段|版本|roadmap|milestone|phase/iu.test(paragraph.subtopic)
+      || paragraph.text.split("\n").filter(line => LABELED_ITEM.test(line)).length < 2
+      || !body.includes(paragraph.text) || body.indexOf(paragraph.text) !== body.lastIndexOf(paragraph.text)) return paragraph;
+    const cited = paragraph.unitIds.flatMap(id => units.get(id) ?? []);
+    if (cited.length !== paragraph.unitIds.length || cited.some(unit => confirmed.has(unit.id) || unit.about
+      || unit.adoption.status === "user_adopted" || unit.adoption.status === "user_decision" || unit.adoption.status === "rejected"
+      || unit.delivery === "user_reported")) return paragraph;
+    const stages = (unit: WikiKnowledgeUnit) => [...new Set([unit.statement, unit.evidence.section ?? ""].flatMap(text => text.match(SOURCE_STAGE) ?? []))];
+    const bySource = new Map<string, Set<string>>();
+    for (const unit of cited) {
+      const key = unit.evidence.conversationId + "\0" + unit.evidence.messageId;
+      const families = bySource.get(key) ?? new Set<string>();
+      for (const label of stages(unit)) {
+        const family = /^(?:Phase|Milestone)\b|^[MP](?=\d)/iu.exec(label)?.[0].toLocaleLowerCase();
+        if (family) families.add(family);
+      }
+      if (families.size) bySource.set(key, families);
+    }
+    const sourceFamilies = [...bySource.values()];
+    if (!sourceFamilies.some(first => sourceFamilies.some(second => first !== second && [...first].every(family => !second.has(family))))) return paragraph;
+    const zh = /\p{Script=Han}/u.test(paragraph.text);
+    const rows = new Map<string, { labels: string[]; cited: WikiKnowledgeUnit[]; question: boolean }>();
+    for (const unit of cited) {
+      const labels = stages(unit), question = unit.kind === "question";
+      const key = JSON.stringify([unit.evidence.conversationId, unit.evidence.messageId, labels.map(normalized).sort(), question]);
+      const row = rows.get(key) ?? { labels, cited: [], question };
+      if (!row.cited.some(other => normalized(other.statement) === normalized(unit.statement))) row.cited.push(unit);
+      rows.set(key, row);
+    }
+    if (rows.size < 2) return paragraph;
+    const claims: NonNullable<WikiDraftChapter["paragraphs"][number]["claims"]> = [];
+    const heading = zh ? "| 原阶段或版本 | 讨论中的安排 | 状态 |" : "| Original stage or release | Proposed work | Status |";
+    const lines = [...rows.values()].map(row => {
+      const text = row.cited.map(unit => {
+        const current = escape(wikiStatementWithConditions(unit, zh));
+        claims.push({ text: current, unitIds: [unit.id] });
+        return current;
+      }).join(" ");
+      const owner = row.cited.every(unit => unit.evidence.role === "user" && !unit.evidence.pasted);
+      const status = row.question ? zh ? "待回答" : "Open question" : owner ? zh ? "发起人提出" : "Author proposal" : zh ? "讨论中" : "Proposed";
+      return "| " + escape(row.labels.join("、") || (zh ? "未注明" : "Unspecified")) + " | " + text + " | " + status + " |";
+    });
+    const text = [heading, "| --- | --- | --- |", ...lines].join("\n");
+    body = replaceParagraph(body, paragraph.text, () => text);
+    return { ...paragraph, text, claims };
+  });
+  return chapter.body === body ? chapter : { ...chapter, body, paragraphs };
+}
 /** The sentence or line holding a position. */
 const clauseAt = (text: string, at: number) => {
   const start = Math.max(...["\n", "。", "；"].map(mark => text.lastIndexOf(mark, at - 1))) + 1, rest = text.slice(at).search(/[。；\n]/u);
@@ -72,7 +131,7 @@ export function scopeDisagreements(chapters: WikiDraftChapter[], decided: Set<st
   const clauses = chapters.flatMap(chapter => own(chapter).flatMap(paragraph => paragraph.text.split(/(?<=[。；;])|\n/u)
     .filter(clause => !clause.trim().startsWith("|") && affirmsPriority(clause) && !LEAVES.test(clause)).map(clause => ({ chapter, clause }))));
   const uses = chapters.flatMap(chapter => own(chapter).flatMap(paragraph => paragraph.text.split(/(?<=[。；;])|\n/u)
-    .filter(clause => !clause.trim().startsWith("|") && (USE.test(clause) || CHAIN.test(clause)) && !LEAVES.test(clause) && !LATER.test(clause)).map(clause => ({ chapter, clause }))));
+    .filter(clause => !clause.trim().startsWith("|") && (USE.test(clause) || CHAIN.test(clause)) && !LEAVES.test(clause) && !LATER.test(clause) && (!STUDIES_REFERENCE.test(clause) || affirmsPriority(clause))).map(clause => ({ chapter, clause }))));
   let added = 0;
   const noted = new Set<string>();
   for (const chapter of chapters) for (const paragraph of chapter.paragraphs) {
@@ -267,6 +326,8 @@ export function mergeOverlappingRows(text: string): { text: string; merged: numb
 const REFUSING = /不|禁止|严禁|勿|避免|无需|\b(?:never|avoid|not|no)\b/iu, TECH_NAME = /[A-Za-z][A-Za-z0-9]{3,}/gu;
 /** Words telling a change in the earlier version's own paragraph: it already says which version holds. */
 const TELLS_CHANGE = /此前|早期|最初|起初|后改|改为|改成|取代|替代|不再/u;
+const OBSERVED_LIMIT = /(?:当前|目前|当时|原型|\bmock\b|\bcurrently\b)[^。！？\n]{0,110}?(?:不检查|不支持|不包含|未实现|尚未|\b(?:does not|doesn't|not yet)\b)/iu;
+const PROPOSED_ADDITION = /(?:计划|建议|需|拟|后续|里程碑|milestone|\b(?:should|plan to|proposed|will)\b)[^。！？\n]{0,80}?(?:补充|增加|加入|实现|检查|支持|\b(?:add|implement|check|support)\b)/iu;
 const named = (text: string, refusing: boolean) => new Set(text.split(/[，,；;。！!？?\n]/u).filter(clause => REFUSING.test(clause) === refusing).flatMap(clause => clause.match(TECH_NAME) ?? []).filter(name => !GENERIC_NAME.test(name)));
 /** The mechanism one statement allows and the other refuses, if any. */
 export function opposedMechanism(first: string, second: string): string | undefined {
@@ -287,6 +348,9 @@ export function versionDisagreements(chapters: WikiDraftChapter[], relations: Ar
     if (added >= MAX_NOTES) break;
     if (relation.status !== "unresolved" || relation.kind !== "replaces" && relation.kind !== "rejects") continue;
     const older = statementOf(relation.older), newer = statementOf(relation.newer);
+    if (older && newer && OBSERVED_LIMIT.test(older) && PROPOSED_ADDITION.test(newer)) continue;
+    const oldStage = older && stageOf(older), newStage = newer && stageOf(newer);
+    if (oldStage && newStage && oldStage.label !== newStage.label && oldStage.label !== "first" && newStage.label !== "first") continue;
     const mechanism = older && newer ? opposedMechanism(older, newer) : undefined;
     if (!older || !newer || !mechanism) continue;
     const earlier = at(relation.older), later = at(relation.newer);

@@ -3,6 +3,7 @@ import type { AISettings, AITaskType } from "../shared/types";
 import { requestBudget, requestMessages, validateProviderOutput } from "./request-policy";
 import { AIProviderResponseError, AIProviderValidationError } from "./provider-errors";
 import { providerResponse, readSse, type ProviderRequestDiagnostics } from "./provider-transport";
+import { providerModelLimits, rememberProviderModelLimits, reportedModelLimits, type ModelTokenLimits } from "./provider-model-limits";
 import { readClaudeResponse, readGeminiResponse, type ClaudePayload, type GeminiPayload } from "./provider-native-streams";
 import { generationProfile } from "../shared/atlas/policy.js";
 import { parseStructuredJson } from "../shared/atlas/tasks.js";
@@ -52,8 +53,8 @@ export interface ProviderRequestUsage { inputTokens: number; outputTokens: numbe
   /** Input tokens the provider read from its own prompt cache; included in inputTokens. */
   cachedInputTokens?: number }
 
-export interface AvailableAIModel { id: string; name: string }
-export interface ProviderCapabilities { textGeneration: boolean; structuredOutput: "native" | "json" | "prompt-only"; embeddings: boolean; maxContextTokens?: number; streaming?: boolean; conversationStructure?: boolean; requestUsage?: boolean; maxConcurrency?: number }
+export interface AvailableAIModel extends ModelTokenLimits { id: string; name: string }
+export interface ProviderCapabilities extends ModelTokenLimits { textGeneration: boolean; structuredOutput: "native" | "json" | "prompt-only"; embeddings: boolean; streaming?: boolean; conversationStructure?: boolean; requestUsage?: boolean; maxConcurrency?: number }
 /** Long fixed instructions (the extraction and writing rules, sent unchanged with every request of a run) are marked
  * for DashScope's explicit context cache: a hit reads them at a fraction of the input price and starts faster. Short
  * ones stay plain, below the cache's minimum they would only cost the cache write. */
@@ -200,7 +201,8 @@ function normalizeModels(payload: unknown, protocol: ProviderProtocol): Availabl
     if (Array.isArray(item.supportedGenerationMethods) && !(item.supportedGenerationMethods as unknown[]).includes("generateContent")) return [];
     seen.add(id);
     const name = typeof item.display_name === "string" ? item.display_name : typeof item.displayName === "string" ? item.displayName : typeof item.name === "string" && protocol !== "gemini" ? item.name : id;
-    return [{ id, name }];
+    const found = reportedModelLimits(item);
+    return [{ id, name, ...Object.fromEntries(Object.entries(found).filter(([, limit]) => limit !== undefined)) }];
   });
 }
 
@@ -209,6 +211,11 @@ export async function listAvailableModels(settings: AISettings, signal?: AbortSi
   const url = providerModelsUrl(settings);
   const paginated = isDashScopeEndpoint(settings.baseUrl);
   const models = new Map<string, AvailableAIModel>();
+  const finish = () => {
+    const items = [...models.values()];
+    rememberProviderModelLimits(settings, items);
+    return items;
+  };
   const visited = new Set<string>();
   let cursor: string | undefined;
   let received = 0;
@@ -223,13 +230,13 @@ export async function listAvailableModels(settings: AISettings, signal?: AbortSi
     available.forEach((item) => models.set(item.id, item));
     if (paginated) {
       received += payload?.output?.models?.length ?? 0;
-      if (!Number.isFinite(payload?.output?.total) || received >= payload.output!.total!) return [...models.values()];
+      if (!Number.isFinite(payload?.output?.total) || received >= payload.output!.total!) return finish();
       if (!payload.output?.models?.length) throw new Error("模型列表分页未完整返回，请检查 API 地址或手动填写模型 ID。");
     } else {
       cursor = preset.protocol === "gemini" && typeof payload?.nextPageToken === "string" ? payload.nextPageToken : preset.protocol === "anthropic" && payload?.has_more && typeof payload.last_id === "string" ? payload.last_id : undefined;
       if (!cursor) {
         if (preset.protocol === "anthropic" && payload?.has_more) throw new Error("模型列表缺少分页游标，请检查 API 地址或手动填写模型 ID。");
-        return [...models.values()];
+        return finish();
       }
     }
     if (page === 50) throw new Error("模型列表超过分页上限，请手动填写模型 ID。");
@@ -244,7 +251,7 @@ export class OpenAICompatibleProvider implements AtlasAIProvider {
   private readonly usage: ProviderUsageSnapshot = { requests: 0, inputTokens: 0, outputTokens: 0, reportedRequests: 0 };
   constructor(private readonly settings: AISettings) {
     this.settings = { ...settings, model: canonicalModelId(settings) }; this.id = settings.provider; this.modelId = this.settings.model;
-    Object.assign(this.capabilities, { streaming: settings.streaming !== false, maxConcurrency: providerConcurrencyCeiling(settings.baseUrl) });
+    Object.assign(this.capabilities, providerModelLimits(settings, this.modelId), { streaming: settings.streaming !== false, maxConcurrency: providerConcurrencyCeiling(settings.baseUrl) });
     if (generationProfile(settings.baseUrl, this.modelId).jsonMode) this.capabilities.structuredOutput = "json";
   }
   getUsageSnapshot(): ProviderUsageSnapshot { return { ...this.usage }; }
@@ -347,7 +354,7 @@ class AnthropicProvider implements AtlasAIProvider {
   readonly modelId: string;
   readonly capabilities: ProviderCapabilities = { textGeneration: true, structuredOutput: "prompt-only", embeddings: false, conversationStructure: true, requestUsage: true };
   private readonly usage: ProviderUsageSnapshot = { requests: 0, inputTokens: 0, outputTokens: 0, reportedRequests: 0 };
-  constructor(private readonly settings: AISettings) { this.id = settings.provider; this.modelId = settings.model; Object.assign(this.capabilities, { streaming: settings.streaming !== false, maxConcurrency: providerConcurrencyCeiling(settings.baseUrl) }); }
+  constructor(private readonly settings: AISettings) { this.id = settings.provider; this.modelId = settings.model; Object.assign(this.capabilities, providerModelLimits(settings, this.modelId), { streaming: settings.streaming !== false, maxConcurrency: providerConcurrencyCeiling(settings.baseUrl) }); }
   getUsageSnapshot(): ProviderUsageSnapshot { return { ...this.usage }; }
 
   private async complete(system: string, prompt: string, signal?: AbortSignal, outputTokens = 32, onUsage?: StructuredAIRequest<unknown>["onUsage"], onDiagnostics?: StructuredAIRequest<unknown>["onDiagnostics"], priority = 1, onResponseText?: (text: string) => void): Promise<string> {
@@ -404,7 +411,7 @@ class GeminiProvider implements AtlasAIProvider {
   readonly modelId: string;
   readonly capabilities: ProviderCapabilities = { textGeneration: true, structuredOutput: "json", embeddings: false, conversationStructure: true, requestUsage: true };
   private readonly usage: ProviderUsageSnapshot = { requests: 0, inputTokens: 0, outputTokens: 0, reportedRequests: 0 };
-  constructor(private readonly settings: AISettings) { this.settings = { ...settings, model: canonicalModelId(settings) }; this.id = settings.provider; this.modelId = this.settings.model; Object.assign(this.capabilities, { streaming: settings.streaming !== false, maxConcurrency: providerConcurrencyCeiling(settings.baseUrl) }); }
+  constructor(private readonly settings: AISettings) { this.settings = { ...settings, model: canonicalModelId(settings) }; this.id = settings.provider; this.modelId = this.settings.model; Object.assign(this.capabilities, providerModelLimits(settings, this.modelId), { streaming: settings.streaming !== false, maxConcurrency: providerConcurrencyCeiling(settings.baseUrl) }); }
   getUsageSnapshot(): ProviderUsageSnapshot { return { ...this.usage }; }
 
   private async complete(system: string, prompt: string, json = false, signal?: AbortSignal, outputTokens = 32, onUsage?: StructuredAIRequest<unknown>["onUsage"], onDiagnostics?: StructuredAIRequest<unknown>["onDiagnostics"], priority = 1, onResponseText?: (text: string) => void): Promise<string> {

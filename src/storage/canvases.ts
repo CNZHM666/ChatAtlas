@@ -42,11 +42,15 @@ export async function createCanvas(name: string): Promise<AtlasCanvas> {
   return canvas;
 }
 
+export function renamedCanvas(canvas: AtlasCanvas, name: string, updatedAt: number): AtlasCanvas {
+  return { ...canvas, name, title: name, type: canvas.type ?? "topic", origin: canvas.origin ?? "user", userEdited: true, updatedAt };
+}
+
 export async function renameCanvas(id: string, name: string): Promise<void> {
   const db = await getDatabase();
   const canvas = await db.get("canvases", id);
   if (!canvas) return;
-  await db.put("canvases", { ...canvas, name, title: name, type: canvas.type ?? "topic", origin: canvas.origin ?? "user", userEdited: true, updatedAt: Date.now() });
+  await db.put("canvases", renamedCanvas(canvas, name, Date.now()));
 }
 
 /** A manual reading order belongs to this canvas and takes precedence over future AI proposals. */

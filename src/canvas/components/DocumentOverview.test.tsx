@@ -1,4 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
+import type { FocusSession } from "../../shared/focus-session";
+import { ProjectKnowledgeActions } from "../project-knowledge-actions";
 import { afterEach, expect, it, vi } from "vitest";
 import { DocumentOverview } from "./DocumentOverview";
 import { contextKnowledge } from "../../test/context-fixture";
@@ -26,25 +29,38 @@ it("keeps an untagged opening sentence quiet instead of presenting it as an auto
  expect(view.container.querySelector(".project-overview-intro strong")).toBeNull();expect(view.container.querySelector(".project-overview-intro")).toHaveTextContent(session.sections[0].body);
 });
 
-it("places the description edit button beside evidence review and keeps the existing editor and save action", async () => {
+it("puts evidence and editing in the Wiki tool rail, docks it with the source panel, and saves the description", async () => {
  const session=contextKnowledge().session,onMaintain=vi.fn().mockResolvedValue(undefined);
  session.brief=undefined;session.projectState=undefined;session.sections[0].title="产品定位";session.sections[0].body="ChatAtlas 是帮助用户找回历史讨论的本地知识助手。";
- const {container}=render(<DocumentOverview session={session} zh onRead={vi.fn()} onLocate={vi.fn()} onMaintain={onMaintain}/>);
- const edit=screen.getByRole("button",{name:"编辑说明"}),actions=container.querySelector(".document-overview-actions")!;
- expect(actions).toContainElement(edit);expect(within(actions as HTMLElement).getByRole("button",{name:"核对依据"})).toBeVisible();
- expect(container.querySelector(".project-overview-intro")).not.toContainElement(edit);
+ const props={session,zh:true,onRead:vi.fn(),onLocate:vi.fn(),onMaintain};
+ const view=render(<DocumentOverview {...props}/>);
+ const dock=document.createElement("div");view.container.append(dock);
+ const tools=screen.getByRole("navigation",{name:"文档工具"});
+ expect(tools).toHaveClass("wiki-tool-rail");
+ expect(within(tools).getAllByRole("button").map(button=>button.getAttribute("aria-label"))).toEqual(["核对依据","编辑说明"]);
+ view.rerender(<DocumentOverview {...props} toolsHost={dock}/>);
+ const edit=within(dock).getByRole("button",{name:"编辑说明"});
+ expect(view.container.querySelector(".project-overview-intro")).not.toContainElement(edit);
  fireEvent.click(edit);fireEvent.change(screen.getByRole("textbox",{name:"项目说明"}),{target:{value:"我的项目说明"}});fireEvent.click(screen.getByRole("button",{name:"保存"}));
  expect(onMaintain).toHaveBeenCalledWith({...session.projectMaintenance,overview:"我的项目说明"});
 });
 
-it("lists every chapter in one numbered list without part labels, even when the Wiki has parts", () => {
+it("shows a compact reading index with chapter questions available on the chapter links", () => {
   const session = contextKnowledge().session, [first, second] = session.sections;
   session.sections = [first, ...Array.from({ length: 3 }, (_, i) => ({ ...first, id: `tech-${i}`, title: `存储细节${i}` })), second, ...Array.from({ length: 3 }, (_, i) => ({ ...second, id: `ui-${i}`, title: `界面细节${i}` }))];
   session.sections.forEach((section, index) => { section.wikiGroup = index < 4 ? "技术" : "界面"; section.wikiGroupEdited = true; });
-  const { container } = render(<DocumentOverview session={session} zh onRead={vi.fn()} onLocate={vi.fn()} />);
-  expect(screen.queryByText(/部分/u)).toBeNull();
-  expect(screen.queryByRole("region", { name: "技术" })).toBeNull();expect(container.querySelectorAll(".document-overview-chapters ol")).toHaveLength(1);
-  expect(screen.getByText("01")).toBeVisible();expect(screen.getByText("08")).toBeVisible();
+  first.wikiQuestion = "原始消息保存在哪里？";
+  const onRead = vi.fn();
+  render(<DocumentOverview session={session} zh onRead={onRead} onLocate={vi.fn()} />);
+  const index = within(screen.getByRole("region", { name: "一页速览" }));
+  expect(index.getAllByRole("listitem")).toHaveLength(8);
+  expect(index.queryByText("01")).toBeNull();
+  expect(screen.queryByRole("button", { name: "查看来源对话" })).toBeNull();
+  expect(index.queryByText("原始消息保存在哪里？")).toBeNull();
+  const link = index.getByTitle("原始消息保存在哪里？");
+  expect(link).toHaveAccessibleName(first.wikiDisplayTitle || first.title);
+  fireEvent.click(link);
+  expect(onRead).toHaveBeenCalledWith(first.id);
 });
 
 it("keeps one flat chapter list without a part count when all chapters share a part", () => {
@@ -56,20 +72,20 @@ it("keeps one flat chapter list without a part count when all chapters share a p
   expect(screen.getByText("数据库存储")).toBeVisible();
 });
 
-it("lays out its heading as a chapter does, actions above the title, and scope in its own full-width row below",()=>{
+it("lays out its heading and separate tools as a chapter does, with scope below the title",()=>{
  const session=contextKnowledge().session;session.brief=undefined;session.projectState=undefined;session.sections[0].title="产品定位";session.sections[0].body="ChatAtlas 是帮助用户找回历史讨论的本地知识助手。";
  const {container}=render(<DocumentOverview session={session} zh onRead={vi.fn()} onLocate={vi.fn()} scope={<details className="wiki-scope-notice"><summary>整理范围：11 段作为背景参考</summary></details>}/>);
  const row=container.querySelector(".document-overview-heading > .wiki-document-location")!;
  expect(row).toHaveTextContent("文档总览");expect(container.querySelector(".document-overview-heading > h1")).toHaveTextContent(session.title);
- // The same text button as in a chapter, not an icon.
- const evidence=within(row as HTMLElement).getByRole("button",{name:"核对依据"});expect(evidence.textContent).toBe("核对依据");
+ const evidence=within(screen.getByRole("navigation",{name:"文档工具"})).getByRole("button",{name:"核对依据"});
+ expect(evidence).toHaveAttribute("title","核对依据");expect(evidence.textContent).toBe("");
  const heading=container.querySelector(".document-overview-heading")!;
  const scope=container.querySelector(".wiki-scope-notice")!;
  expect(scope.parentElement).toHaveClass("document-overview");
  expect(heading.compareDocumentPosition(scope)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  expect(container.querySelector(".document-overview-heading small")).toBeNull();
 });
-it("shows sourced milestones and preserves an existing personal plan below the timeline",async()=>{
+it("keeps plan content without mounting sources and history in the overview",async()=>{
  const {session,messages}=contextKnowledge(),onLocate=vi.fn();
  const units:WikiKnowledgeUnit[]=[];
  const originals = [
@@ -96,25 +112,23 @@ it("shows sourced milestones and preserves an existing personal plan below the t
  units.push({...units[0],id:repeat.id,evidence:{...units[0].evidence,evidenceId:repeat.id,messageId:repeat.messageId,messageIndex:messages.length,quote:repeat.excerpt}});
  session.wikiKnowledge={version:1,generatedAt:1,status:"complete",documentType:"project",materials:units.length,
   decisions:{"step-0":{verdict:"confirmed",at:Date.UTC(2026,10,16),wholeUnit:true}},
+  draft:{version:1,generatedAt:1,status:"complete",chapters:[],report:{},baseline:[{part:"now",text:originals[0].text,unitIds:["step-0"]}]},
   batches:[{sourceIds:units.map(unit=>unit.id),status:"ok",rejected:{},units}]};
  session.projectMaintenance={currentPlan:"v0.1 先交付全文搜索。"};
  vi.mocked(readSessionSource).mockResolvedValue(messages);
  render(<DocumentOverview session={session} zh onRead={vi.fn()} onLocate={onLocate}/>);
- const region=await screen.findByRole("region",{name:"产品演进"}),timeline=within(region);
- expect(timeline.getAllByRole("listitem")).toHaveLength(3);
- expect(timeline.getByText("已确认决定")).toBeVisible();
- expect(timeline.getByText("用户报告完成")).toBeVisible();
- expect(timeline.getByText("用户报告发布")).toBeVisible();
- expect(timeline.getByText("因为用户需要在本地快速找回对话")).toBeVisible();
- expect(timeline.queryByText(originals[3].text)).toBeNull();
- await waitFor(()=>expect(region.querySelectorAll("time")).toHaveLength(2));
- expect(timeline.getByText("日期未记录")).toBeVisible();
- expect(region.querySelector("time")).toHaveAttribute("datetime","2026-10-12T00:00:00.000Z");
- fireEvent.click(timeline.getByRole("button",{name:"来源 2"}));
- expect(onLocate).toHaveBeenCalledWith(primary,{references:[primary,repeat],mode:"view"});
- fireEvent.click(within(timeline.getByText(originals[2].text).closest("li")!).getByRole("button",{name:"来源"}));
- expect(onLocate).toHaveBeenCalledWith(session.evidence.find(ref=>ref.id==="step-2"));
- expect(screen.getByText("已保存的规划").closest("details")).not.toHaveAttribute("open");
+ expect(screen.queryByRole("heading",{name:"下一步"})).toBeNull();
+ expect(screen.queryByText(originals[0].text)).toBeNull();
+ expect(screen.queryByRole("region",{name:"已定的关键决定"})).toBeNull();
+ const plan=within(screen.getByRole("region",{name:"后续计划与验收"}));
+ expect(plan.queryByText("v0.1 先交付全文搜索。")).toBeNull();
+ fireEvent.click(plan.getByText("后续计划与验收"));
+ expect(await plan.findByText("v0.1 先交付全文搜索。")).toBeVisible();
+ expect(screen.getAllByText(originals[0].text)).toHaveLength(1);
+ expect(screen.queryByRole("region",{name:"产品演进"})).toBeNull();
+ expect(screen.queryByText("产品演进")).toBeNull();
+ expect(screen.queryByText("来源与记录")).toBeNull();
+ expect(readSessionSource).not.toHaveBeenCalled();
  expect(screen.queryByRole("region",{name:"当前规划"})).toBeNull();
 });
 it("checks overview statements point by point",()=>{
@@ -126,4 +140,144 @@ it("checks overview statements point by point",()=>{
  const button=screen.queryByRole("button",{name:/^核对依据 · \d+ 处$/u});
  expect(button).not.toBeNull();expect(container.querySelector(".wiki-claim-marker")).not.toBeNull();
  fireEvent.click(button!);expect(open).toHaveBeenCalledWith(source,expect.objectContaining({pointIndex:0,quote:"我们先在本地用 IndexedDB 保存原始消息，再用 Orama 建立检索索引。"}));
+});
+
+it("keeps a long confirmed plan folded and links directly to its Wiki chapter", async () => {
+ const session = contextKnowledge().session, onRead = vi.fn();
+ const section = session.sections[0];
+ const text = "接下来用 DHT22 完成端到端验收。先识别零件，经用户确认后放入零件盘点，生成项目草稿后再更新画布。验证器需要分别检查连接关系和供电条件，验证失败时保留原项目，让用户查看失败原因后再重试。";
+ const source = { id: "next-step", conversationId: "c", messageId: "next-original", title: "下一步讨论", excerpt: text };
+ const unit: WikiKnowledgeUnit = { id: source.id, kind: "plan", statement: text, subject: "验收流程", details: [], adoption: { status: "user_decision" }, delivery: "planned",
+   evidence: { conversationId: source.conversationId, messageId: source.messageId, evidenceId: source.id, messageIndex: 9, role: "user", pasted: false, quote: text } };
+ session.evidence.push(source);
+ section.claims = [{ text, quote: text, evidenceIds: [source.id], unitIds: [unit.id] }];
+ session.wikiKnowledge = { version: 1, generatedAt: 1, status: "complete", documentType: "project", materials: 1,
+   decisions: { [unit.id]: { verdict: "confirmed", at: 1, wholeUnit: true } },
+   batches: [{ sourceIds: [source.id], status: "ok", rejected: {}, units: [unit] }],
+   draft: { version: 1, generatedAt: 1, status: "complete", chapters: [], report: {}, baseline: [{ part: "now", text, unitIds: [unit.id] }] } };
+ render(<DocumentOverview session={session} zh onRead={onRead} onLocate={vi.fn()}/>);
+ expect(screen.queryByText(text)).toBeNull();
+ fireEvent.click(screen.getByText("后续计划与验收"));
+ const plan = await screen.findByText(text);
+ expect(plan).toBeVisible();
+ fireEvent.click(within(plan.closest("li")!).getByRole("button", { name: "查看章节" }));
+ expect(onRead).toHaveBeenCalledWith(section.id, undefined);
+});
+
+it("opens the user-authored source first and only highlights the clicked overview row", async () => {
+ const session = contextKnowledge().session;
+ const flow = "下一阶段优先实现自然语言修改 Hardware IR、Canvas 实时变化和 Validator 自动检查。";
+ const units: WikiKnowledgeUnit[] = ["AI 理解后修改 Hardware IR，Canvas 随之变化。", "用自然语言修改 Hardware IR。Canvas 随修改实时变化，并自动运行 Validator 检查。", "AI 提议暂缓视觉调整。"].map((statement, index) => ({
+   id: `flow-${index}`, kind: "plan", subject: "执行链路", statement, details: [], adoption: { status: "proposal" }, delivery: "planned",
+   evidence: { conversationId: "c", messageId: `original-${index}`, evidenceId: `cite-${index}`, messageIndex: index + 10, role: index ? "user" : "assistant", pasted: false, quote: index === 2 ? "![图片](<atlas-image:example>)\n現在怎麽樣" : statement },
+ }));
+ const sources = units.map(unit => ({ id: unit.evidence.evidenceId, conversationId: "c", messageId: unit.evidence.messageId, title: "执行安排", excerpt: unit.evidence.quote }));
+ session.evidence.push(...sources);
+ session.wikiKnowledge = { version: 1, generatedAt: 1, status: "complete", documentType: "project", materials: units.length,
+   batches: [{ sourceIds: sources.map(source => source.id), status: "ok", rejected: {}, units }],
+   draft: { version: 1, generatedAt: 1, status: "complete", chapters: [], report: {}, baseline: [
+     { part: "now", holder: "user", text: flow, unitIds: units.slice(0, 2).map(unit => unit.id) },
+     { part: "done", text: "讨论 AI 建议的验收方式。", unitIds: [units[0].id] },
+     { part: "notNow", holder: "user", text: units[2].statement, unitIds: [units[2].id] },
+   ] } };
+ const onLocate = vi.fn();
+ const props = { session, zh: true, onLocate, onRead: vi.fn() };
+ const view = render(<WorkspaceEvidenceContext.Provider value={{ open: onLocate }}><DocumentOverview {...props}/></WorkspaceEvidenceContext.Provider>);
+ fireEvent.click(screen.getByText("后续计划与验收"));
+ const row = (await screen.findByText(flow)).closest("li")!;
+ expect(within(row).getByText("用户提出")).toBeVisible();
+ expect(within(screen.getByText(units[2].statement).closest("li")!).queryByText("用户提出")).toBeNull();
+ fireEvent.click(within(row).getByRole("button", { name: "依据" }));
+ expect(onLocate).toHaveBeenCalledWith(sources[1], expect.objectContaining({ claim: flow, quote: sources[1].excerpt, references: [sources[1], sources[0]] }));
+ view.rerender(<WorkspaceEvidenceContext.Provider value={{ open: onLocate, active: { ...onLocate.mock.calls[0][1], shown: sources[0] } }}><DocumentOverview {...props}/></WorkspaceEvidenceContext.Provider>);
+ expect(row.querySelector("mark")).toHaveTextContent(flow);
+ expect(view.container.querySelectorAll(".overview-active-claim")).toHaveLength(1);
+ expect(within(row).getByRole("button", { name: "依据" })).toHaveAttribute("aria-pressed", "true");
+ view.rerender(<WorkspaceEvidenceContext.Provider value={{ open: onLocate }}><DocumentOverview {...props}/></WorkspaceEvidenceContext.Provider>);
+ expect(row.querySelector("mark")).toBeNull();
+});
+
+it("saves a sourced overview choice, defers another, and updates the displayed queue", async () => {
+ const session = contextKnowledge().session;
+ const choices = ["第一版仅支持全文搜索。", "第一版同时支持向量搜索。", "发布前需要运行测试。"];
+ const units: WikiKnowledgeUnit[] = choices.map((statement, index) => ({
+   id: "u" + index, kind: "plan", statement, subject: index === 2 ? "发布验收" : "搜索范围", details: [],
+   adoption: { status: "proposal" }, delivery: "planned",
+   evidence: { conversationId: "c", messageId: "overview-original-" + index, evidenceId: "overview-basis-" + index,
+      messageIndex: 10 + index, role: "assistant", pasted: false, quote: statement },
+ }));
+ session.evidence.push(...units.map(unit => ({ id: unit.evidence.evidenceId, conversationId: "c", messageId: unit.evidence.messageId,
+   excerpt: unit.evidence.quote, title: "讨论" })));
+ session.wikiKnowledge = { version: 1, generatedAt: 1, status: "complete", documentType: "project", materials: 3,
+   batches: [{ sourceIds: units.map(unit => unit.evidence.evidenceId), status: "ok", rejected: {}, units }],
+   organization: { version: 1, generatedAt: 1, status: "complete", subjects: [{ id: "outline", name: "规划", aliases: [], unitIds: units.map(unit => unit.id) }],
+     merged: [], relations: [], report: {}, chapters: [{ id: session.sections[0].id, question: "", title: session.sections[0].title, group: "", subtopics: [{title: "规划", subjectIds: ["outline"]}] }] },
+   writingQuestions: [
+     { id: "search", about: "搜索范围", ask: "第一版采用全文搜索还是也支持向量搜索？", unitIds: ["u0", "u1"], organization: 1, options: [
+       { id: "text", label: choices[0], actions: [{ do: "confirm", units: ["u0"] }, { do: "reject", units: ["u1"] }] },
+       { id: "hybrid", label: choices[1], actions: [{ do: "reject", units: ["u0"] }] },
+     ] },
+     { id: "tests", about: "发布验收", ask: "是否确定发布前需要运行测试？", unitIds: ["u2"], organization: 1, options: [
+       { id: "test", label: choices[2], actions: [{ do: "confirm", units: ["u2"] }] }, { id: "defer", label: "暂不决定", actions: [{ do: "open", units: ["u2"] }] },
+     ] },
+   ],
+ };
+ let stored = session;
+ const onLocate = vi.fn();
+ function Harness() {
+   const [value, setValue] = useState(session);
+   return <ProjectKnowledgeActions.Provider value={{ read: vi.fn(), matter: vi.fn(), save: async (change: (current: FocusSession) => FocusSession) => {
+     stored = change(stored); setValue(stored);
+   } }}><DocumentOverview session={value} zh onRead={vi.fn()} onLocate={onLocate}/></ProjectKnowledgeActions.Provider>;
+ }
+ render(<Harness/>);
+ const open = () => within(screen.getByRole("region", { name: "待决问题" }));
+ expect(open().queryByText("是否确定发布前需要运行测试？")).toBeNull();
+ fireEvent.click(open().getByText("查看全部待决问题"));
+ expect(await open().findByText("是否确定发布前需要运行测试？")).toBeVisible();
+ fireEvent.click(open().getByText("查看全部待决问题"));
+ const question = open().getByText("第一版采用全文搜索还是也支持向量搜索？").closest("summary")!;
+ const search = within(question.closest("li")!);
+ expect(question.querySelector(":scope > .wiki-supplement-chevron")).toBeInTheDocument();
+ expect(search.queryByRole("group", {name:"备选方案"})).toBeNull();
+ fireEvent.click(question);
+ const options = await search.findByRole("group", {name:"备选方案"});
+ expect(within(options).getAllByRole("radio")).toHaveLength(2);
+ expect(within(options).queryByRole("button")).toBeNull();
+ fireEvent.click(search.getByRole("button", {name:"依据"}));
+ expect(onLocate).toHaveBeenCalledWith(session.evidence.at(-3), expect.objectContaining({ mode: "view", overviewEntryId: "search", references: session.evidence.slice(-3, -1) }));
+ fireEvent.click(question);
+ await waitFor(() => expect(search.queryByRole("group", {name:"备选方案"})).toBeNull());
+ fireEvent.click(question);
+ const confirm = await search.findByRole("button", {name:"确认选择"});
+ expect(confirm).toBeDisabled();
+ fireEvent.click(search.getByRole("radio", {name:choices[0]}));
+ expect(stored.wikiKnowledge?.userAnswers).toBeUndefined();
+ fireEvent.click(confirm);
+ await waitFor(() => expect(open().queryByText("第一版采用全文搜索还是也支持向量搜索？")).toBeNull());
+ expect(stored.wikiKnowledge?.decisions?.u0?.verdict).toBe("confirmed");
+ const plan = within(screen.getByRole("region", { name: "后续计划与验收" }));
+ expect(plan.queryByText(choices[0])).toBeNull();
+ fireEvent.click(plan.getByText("后续计划与验收"));
+ expect(await plan.findByText(choices[0])).toBeVisible();
+ expect(plan.getByRole("heading", {name:"已确认"})).toBeVisible();
+ fireEvent.click(await plan.findByRole("button", {name:"修改选择"}));
+ expect(plan.getByRole("radio", {name:choices[0]})).toBeChecked();
+ const confirmEdit = plan.getByRole("button", {name:"确认选择"});
+ expect(confirmEdit).toBeDisabled();
+ fireEvent.click(plan.getByRole("radio", {name:choices[1]}));
+ fireEvent.click(confirmEdit);
+ await waitFor(() => expect(stored.wikiKnowledge?.userAnswers?.[0].previousChoices?.[0].answer).toBe(choices[0]));
+ expect(stored.wikiKnowledge?.userAnswers?.[0].answer).toBe(choices[1]);
+ expect(stored.wikiKnowledge?.decisions?.u0?.verdict).toBe("rejected");
+ fireEvent.click(open().getByText("是否确定发布前需要运行测试？"));
+ const defer = await open().findByRole("button", {name:"暂缓"});
+ expect(open().queryByRole("radio", {name:"暂不决定"})).toBeNull();
+ fireEvent.click(defer);
+ await waitFor(() => expect(stored.projectMaintenance?.deferredOverviewQuestions).toEqual(["tests"]));
+ expect(stored.wikiKnowledge?.decisions?.u2).toBeUndefined();
+ fireEvent.click(open().getByText("已暂缓"));
+ fireEvent.click(await open().findByText("是否确定发布前需要运行测试？"));
+ fireEvent.click(await open().findByRole("button", {name:"继续处理"}));
+ await waitFor(() => expect(stored.projectMaintenance?.deferredOverviewQuestions).toEqual([]));
 });

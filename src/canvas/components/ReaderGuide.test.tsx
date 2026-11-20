@@ -4,6 +4,21 @@ import { ReaderGuide } from "./ReaderGuide";
 import { structureCode } from "../../test/structure-metadata-fixture";
 import {leakedClaims} from "../../test/claims-prose-fixture";
 afterEach(cleanup);
+it("renders long workflow labels once, in reading order, for responsive wrapping", () => {
+ const steps = ["选择待发布的项目", "核对发布说明", "Review notifications", "等待构建并检查完整的文件清单", "提交发布"];
+ const {container} = render(<ReaderGuide content={`流程：${steps.join(" → ")}`} zh complete hideEvidenceMarkers />);
+ const card = container.querySelector(".wiki-flow-card");
+ expect(Array.from(card?.querySelectorAll("ol > li") ?? [], step => step.textContent)).toEqual(steps);
+ expect(screen.getAllByText(steps.at(-1)!)).toHaveLength(1);
+});
+it("does not give an observation list or a context-dependent chain a made-up flow title", () => {
+ const lists = "Landing page views → Trial clicks → Retention → Return visits [Proposal]";
+ const chain = "你的应用 → 加载文件 → 校验数据 → 打开结果〔建议〕";
+ const {container} = render(<ReaderGuide content={lists+"\n\n"+chain} zh complete hideEvidenceMarkers />);
+ expect(container.querySelector(".wiki-flow-card")).toBeNull();
+ expect(container).toHaveTextContent("Trial clicks");
+ expect(container).toHaveTextContent("校验数据");
+});
 const emphasisFiller="原始讨论按照发生顺序保存，阅读时逐步恢复以前形成的理解。".repeat(9);
 it("uses AI建议 only for generated prose and leaves suggestion status unemphasized",()=>{
  const original="助手建议采用本地保存原文。",view=render(<ReaderGuide content={original} zh complete hideEvidenceMarkers highlights={{sectioned:true,phrases:["采用本地保存原文"]}}/>);
@@ -414,4 +429,16 @@ it("wraps slash-separated technical terms at separators without splitting ordina
  expect(token.textContent).toBe('Zod/Validator/Store');expect(token.querySelectorAll('wbr')).toHaveLength(2);
  expect([...token.childNodes].map(node=>node.textContent)).toEqual(['Zod/','','Validator/','','Store']);
  expect(view.container.querySelector('br')).toBeNull();
+});
+it("places a titled generated sequence in a card without promoting inline changes", () => {
+  const text = "**Incident response workflow**: Intake → Assign owner → Contain → Verify [Proposal]\n\nThreshold update: CPU → 80%.";
+  const { container, rerender } = render(<ReaderGuide content={text} zh={false} complete hideEvidenceMarkers />);
+  const card = container.querySelector("figure.wiki-flow");
+  expect(card?.querySelector("figcaption")?.textContent).toContain("Incident response workflow");
+  expect([...card?.querySelectorAll("li") ?? []].map(item => item.textContent)).toEqual(["Intake", "Assign owner", "Contain", "Verify"]);
+  expect(card?.querySelector("figcaption")?.textContent).not.toContain("Proposal");
+  expect(container.querySelectorAll(".wiki-flow")).toHaveLength(1);
+  expect(screen.getByText("Threshold update: CPU → 80%.")).toBeVisible();
+  rerender(<ReaderGuide content={text} zh={false} complete />);
+  expect(container.querySelector(".wiki-flow")).toBeNull();
 });

@@ -836,7 +836,7 @@ function AtlasApp() {
     if (session.canvasId && deletedProjectIds.current.has(session.canvasId)) return;
     setFocusSessions((current) => [session, ...current.filter((item) => item.id !== session.id)].sort((a, b) => b.updatedAt - a.updatedAt));
     const previous = focusSessions.find((item) => item.id === session.id);
-    if (session.canvasId && (previous?.canvasId !== session.canvasId || previous.sourceConversationIds.join("|") !== session.sourceConversationIds.join("|"))) refreshCanvases();
+    if (session.canvasId && (previous?.canvasId !== session.canvasId || previous.title !== session.title || previous.sourceConversationIds.join("|") !== session.sourceConversationIds.join("|"))) refreshCanvases();
   };
   const conversationReviews = useMemo(() => focusSessions.filter((session) => session.sourceConversationIds.includes(selectedConversationId ?? "")), [focusSessions, selectedConversationId]);
   const activeFocus = focusSessions.find((session) => session.id === focusSessionId);

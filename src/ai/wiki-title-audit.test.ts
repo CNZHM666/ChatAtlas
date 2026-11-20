@@ -25,7 +25,7 @@ it("short project generation reviews scope and passes through the shared title e
  }});
  const organized=requireOrganizedWiki(await autoOrganizeWiki({...session,...result.result,evidence:result.evidence}, {generateStructured:<T>(request:StructuredAIRequest<T>)=>generateStructured(request as StructuredAIRequest<unknown>) as Promise<T>},new AbortController().signal,false,"new"));
  expect(result.topicPlanApplied).toBe(true);expect(result.wikiScopeReview?.status).toBe("complete");
- expect(generateStructured.mock.calls.map(([request])=>JSON.parse(request.prompt).presentation)).toEqual(["wiki_topic_plan","wiki_title_edit","wiki_title_edit"]);
+ expect(generateStructured.mock.calls.map(([request])=>JSON.parse(request.prompt).presentation)).toEqual(["wiki_topic_plan","wiki_title_edit"]);
  expect(organized.title).toBe("知识整理工具");expect(organized.sections[0].title).toBe("项目定位");expect(organized.wikiOrganization?.status).toBe("protected");
 });
 

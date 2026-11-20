@@ -1,20 +1,21 @@
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
-import { wikiUnitDetails, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { wikiUnitDetails, type WikiKnowledgeLedger, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { wikiClosedListChoice, wikiStatesClosedList } from "../shared/wiki-closed-list";
 import { sourceBlockSupportsRows } from "../shared/wiki-source-code";
 
 const VERSION = /\b[vV]\d+(?:\.\d+)*\b/gu;
 // These labels make a claim about an identifier as a whole. Their digits
 // cannot support a measurement or a differently named stage.
-const IDENTIFIER = /\b(?:(?:[a-z][a-z0-9-]*?v|phase\s+|milestone\s+|stage\s+)\d+(?:\.\d+)*|[MP]\d+(?:\.\d+)*)\b/giu;
-const identifierKey = (text: string) => text.toLowerCase().replace(/\s+/gu, "");
+const IDENTIFIER = /\b(?:(?:[a-z][a-z0-9-]*?v|phase\s+|milestone\s+|stage\s+)\d+(?:\.\d+)*|[MP]\d+(?:\.\d+)*|0x[\da-f]+|[a-z][a-z_]*\d+[a-z_][a-z\d_]*)\b/giu;
+const identifierKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/\s+/gu, "");
 const ownerKey = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 export function wikiNumberRowSources(row: string, candidates: Iterable<WikiKnowledgeUnit>, cited: WikiKnowledgeUnit[]) {
   const name = ownerKey(row.trim().replace(/^\|/u, "").split("|")[0]);
   if (name.length < 3) return cited;
-  const labels = new Set([...row.matchAll(IDENTIFIER)].map(match => identifierKey(match[0])));
+  const labels = new Set([...row.normalize("NFKC").matchAll(IDENTIFIER)].map(match => identifierKey(match[0])));
   if (!labels.size) return cited;
   const owner = (unit: WikiKnowledgeUnit) => ownerKey(unit.about?.name ?? "");
-  const matching = [...candidates].filter(unit => owner(unit) === name && [...unit.statement.matchAll(IDENTIFIER)].some(match => labels.has(identifierKey(match[0]))));
+  const matching = [...candidates].filter(unit => owner(unit) === name && [...unit.statement.normalize("NFKC").matchAll(IDENTIFIER)].some(match => labels.has(identifierKey(match[0]))));
   return [...new Set([...cited.filter(unit => !owner(unit) || owner(unit) === name), ...matching])];
 }
 const ORDINAL = /第\s*\d+|[（(]\d{1,2}[)）]|(?<![\d.])\d{1,2}(?=[、)）]|\.\s)/gu;
@@ -30,16 +31,30 @@ const numbers = (text: string) => thousands(text).replace(ORDINAL, " ").match(/\
 export const wikiNumberRanges = (text: string) => [...text.matchAll(RANGE)].map(match => `${match[1].replace(/,/gu, "")}-${match[2].replace(/,/gu, "")}`);
 const valuesIn = (text: string, versions: ReadonlySet<string>) => {
   const identifiers = new Set<string>();
-  const cleaned = text.replace(IDENTIFIER, label => { identifiers.add(identifierKey(label)); return " "; })
+  const cleaned = text.normalize("NFKC").replace(IDENTIFIER, label => { identifiers.add(identifierKey(label)); return " "; })
     .replace(VERSION, version => versions.has(version.toLowerCase()) ? " " : version);
   return { numbers: new Set(numbers(cleaned)), ranges: new Set(wikiNumberRanges(cleaned)), identifiers };
 };
 
-export function unsupportedWikiNumbers(text: string, known: string, versions: ReadonlySet<string>, labelSources = known) {
+export function wikiBoundClosedListChoices(text: string, units: readonly WikiKnowledgeUnit[], ledger?: Pick<WikiKnowledgeLedger, "userAnswers" | "decisions">) {
+  return (ledger?.userAnswers ?? []).flatMap(answer => {
+    if (answer.unitIds.length !== 1 || !units.some(unit => unit.id === answer.unitIds[0] && !unit.about)) return [];
+    const verdict = ledger?.decisions?.[answer.unitIds[0]];
+    if (verdict?.verdict !== "confirmed" || verdict.at !== answer.at) return [];
+    const choice = wikiClosedListChoice(answer);
+    return choice && wikiStatesClosedList(text, choice) ? [choice] : [];
+  });
+}
+
+export function wikiBoundListNumbers(text: string, units: readonly WikiKnowledgeUnit[], ledger?: Pick<WikiKnowledgeLedger, "userAnswers" | "decisions">) {
+  return new Set(wikiBoundClosedListChoices(text, units, ledger).map(choice => choice.count));
+}
+
+export function unsupportedWikiNumbers(text: string, known: string, versions: ReadonlySet<string>, labelSources = known, confirmedLists: ReadonlySet<string> = new Set()) {
   const stated = valuesIn(text, versions), sourced = valuesIn(withDigits(known), versions);
   const sourcedLabels = labelSources === known ? sourced.identifiers : valuesIn(labelSources, versions).identifiers;
   return {
-    numbers: [...stated.numbers].filter(value => !sourced.numbers.has(value)),
+    numbers: [...stated.numbers].filter(value => !sourced.numbers.has(value) && !confirmedLists.has(value)),
     ranges: [...stated.ranges].filter(value => !sourced.ranges.has(value)),
     identifiers: [...stated.identifiers].filter(value => !sourcedLabels.has(value)),
   };
@@ -54,7 +69,7 @@ const DRAFT_EXCERPT = /来源待核对的草稿原句「[^」]*」|Draft excerpt
 const key = (text: string) => withoutMarks(text).replace(LIST_LEAD, "").normalize("NFKC").replace(/\s+/gu, "");
 const parts = (text: string) => text.replace(DRAFT_EXCERPT, "").replace(/^\s*(?:\d+[.)]\s+|\d+、\s*)/gmu, "").replace(/\n+/gu, " ").split(SENTENCE).map(line => line.trim()).filter(Boolean);
 export function wikiNumberSpans(body: string): string[] {
-  if (!/\d/u.test(body)) return [];
+  if (!/\p{N}/u.test(body)) return [];
   return wikiDocumentBlocks(body).flatMap(block => {
     if (block.kind === "table") return block.text.split("\n").slice(2);
     if (block.kind === "paragraph") return parts(block.text);
@@ -87,7 +102,7 @@ export function deduplicateWikiNumberProblems(problems: string[], spans: string[
 interface Binding { text: string; unitIds?: readonly string[] }
 
 /** Recheck the named span and value against its own bound sources. */
-export function recheckWikiNumberProblem(problem: string, spans: string[], claims: readonly Binding[], paragraphs: readonly Binding[], units: ReadonlyMap<string, WikiKnowledgeUnit>, versions: ReadonlySet<string>) {
+export function recheckWikiNumberProblem(problem: string, spans: string[], claims: readonly Binding[], paragraphs: readonly Binding[], units: ReadonlyMap<string, WikiKnowledgeUnit>, versions: ReadonlySet<string>, ledger?: Pick<WikiKnowledgeLedger, "userAnswers" | "decisions">) {
   const match = problem.match(PROBLEM);
   if (!match) return problem;
   const [, head, figures, range, identifiers] = match, anchor = key(head.split("\n")[0]);
@@ -115,7 +130,8 @@ export function recheckWikiNumberProblem(problem: string, spans: string[], claim
       const cited = (kind === "identifiers" || !values[kind].has(value) && legacyLabels.length) && /^\s*\|/u.test(span)
         ? wikiNumberRowSources(span, units.values(), bound) : bound;
       const known = valuesIn(withDigits(cited.map(unit => [unit.statement, ...wikiUnitDetails(unit), unit.evidence.section ?? "", unit.evidence.quote].join(" ")).join(" ")), versions);
-      const hasValue = !values[kind].has(value) || known[kind].has(value);
+      const hasValue = !values[kind].has(value) || known[kind].has(value)
+        || kind === "numbers" && wikiBoundListNumbers(anchored?.text ?? span, cited, ledger).has(value);
       if (hasValue && legacyLabels.every(label => known.identifiers.has(label))
         || cited.some(unit => unit.evidence.code && sourceBlockSupportsRows(span, unit.evidence.code))) continue;
       remaining.add(value);

@@ -1,5 +1,5 @@
 import {expect,it} from "vitest";
-import {evidenceTextRange} from "./evidence-highlight";
+import {evidenceSourceRanges,evidenceTextRange} from "./evidence-highlight";
 
 it("locates GFM table rows and entities without including Markdown table punctuation",()=>{
  const root=document.createElement("div");root.innerHTML='<table><tbody><tr><td>GPIO</td><td>21 &amp; 22</td></tr></tbody></table>';
@@ -26,4 +26,15 @@ it("keeps original DOM offsets across normalized fullwidth characters and emoji"
  const root=document.createElement("div");root.innerHTML='<p>前文🙂 ＡＩ <b>修改</b>方案。</p><button>忽略按钮</button>';
  expect(evidenceTextRange(root,"AI 修改方案。")?.toString()).toBe("ＡＩ 修改方案。");
  expect(evidenceTextRange(root,"忽略按钮")).toBeUndefined();
+});
+
+it("locates a literal in its exact source block even when the rendered block contains extra text",()=>{
+ const root=document.createElement("div"),source="前文也写着检查失败。\n\n**检查失败**后可以重试。";
+ const start=source.indexOf("**"),quote={start:start+2,end:start+6,kind:"quote" as const};
+ root.innerHTML=`<p>前文也写着检查失败。</p><p data-reader-source-start="${start}" data-reader-source-end="${source.length}">提示 <strong>检查失败</strong>后可以重试。</p>`;
+ const [highlight]=evidenceSourceRanges(root,source,[quote]);
+ expect(highlight?.range.toString()).toBe("检查失败");
+ expect(highlight?.range.startContainer.parentElement?.tagName).toBe("STRONG");
+ root.querySelector("strong")!.after("检查失败");
+ expect(evidenceSourceRanges(root,source,[quote])).toEqual([]);
 });

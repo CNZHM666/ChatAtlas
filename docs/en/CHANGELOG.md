@@ -7,6 +7,13 @@
 [简体中文](../../CHANGELOG.md) · **English**
 
 
+## 0.1.6 — Alpha
+
+- Improved extraction reuse, targeted recovery, task budgets, and truncation handling, with failures and pending review shown in progress and diagnostics.
+- Improved Wiki grouping, prose flow, and process diagrams. Confirmed checks retain their release scope and source evidence.
+- Improved workbench history search, original-message highlighting, evidence navigation, and reading in Wiki, overview, and preview.
+- Cleaned platform reference tokens in exports while preserving verifiable external URLs and ChatAtlas source locators.
+
 ## 0.1.5 — Alpha
 
 - Export the overview and selected Wiki chapters as one Markdown document, with optional reference examples.

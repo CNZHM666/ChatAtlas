@@ -115,6 +115,10 @@ it("lists the other products and projects the material names, and leaves out the
   expect(review.filter(item => live(left).has(item.id))).toEqual([]);
   expect(own.every(item => live(left).has(item.id))).toBe(true);
   expect(wikiNamedProjects(left)[0]).toMatchObject({ name: "ChatAtlas", excluded: true });
+  const mistakenName = { ...left, organization: { ...left.organization!, projectName: "ChatAtlas" } };
+  expect(wikiNamedProjects(mistakenName).find(item => item.key === "chatatlas")?.excluded).toBe(true);
+  expect(review.some(item => live(mistakenName).has(item.id))).toBe(false);
+  expect(own.every(item => live(mistakenName).has(item.id))).toBe(true);
   // Taken back, everything returns.
   const back = withExcludedProject(left, "ChatAtlas", false);
   expect(back.scopeAnswers).toBeUndefined();

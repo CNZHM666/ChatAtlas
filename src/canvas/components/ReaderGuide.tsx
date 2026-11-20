@@ -11,7 +11,7 @@ import { GFM_OPTIONS } from "../../shared/markdown-gfm";
 import remarkMath from "remark-math";
 import { useReaderPlugins } from "../hooks/useReaderPlugins";
 import { evidencePresentation } from "../evidence-presentation";
-import { ReadingFlow } from "./ReadingFlow";
+import { ReadingFlow, WikiFlowCard } from "./ReadingFlow";
 import { flowSteps } from "../reading-flow";
 import { readerEmphasis } from "../reader-emphasis";
 import {readerIndentedProse} from "../reader-indented-prose";
@@ -28,7 +28,9 @@ import { WIKI_CLAIM_MARKER, wikiClaimMarkers, type WikiClaimMarkerPoint } from "
 import { WikiClaimMarker } from "./WikiClaimMarker";
 import type { PluggableList } from "unified";
 import {readerWikiTableSources} from "../reader-wiki-table-sources";
+import { WIKI_FLOW_CLAIM_MARKER } from "../../shared/wiki-flow-block";
 import {WIKI_EVIDENCE_LINK} from "../../shared/wiki-evidence-link";
+import type { FocusEvidence } from "../../shared/focus-session";
 
 /** A generated "> **演变记录**" block renders collapsed. */
 const wikiHistoryBlock = (node: unknown) => {
@@ -63,20 +65,20 @@ function WikiTableHeading({children,zh}:{children:ReactNode;zh:boolean}) {
   </div>;
 }
 
-const Markdown = memo(function Markdown({ content, zh, generated, highlights, claimMarkers }: { content: string; zh: boolean; generated: boolean; highlights?:ReaderHighlights; claimMarkers?: WikiClaimMarkerPoint[] }) {
+const Markdown = memo(function Markdown({ content, zh, generated, highlights, claimMarkers, flowSources }: { content: string; zh: boolean; generated: boolean; highlights?:ReaderHighlights; claimMarkers?: WikiClaimMarkerPoint[]; flowSources?: readonly FocusEvidence[] }) {
   const markers: PluggableList = claimMarkers?.length ? [[wikiClaimMarkers, { points: claimMarkers }]] : [];
   const math = content.includes("$");
   const plugins = useReaderPlugins(math, false);
   const remarkPlugins:PluggableList = [[remarkGfm,GFM_OPTIONS],...math?[remarkMath]:[],readerIndentedProse,readerEmphasis,
-    [readerGuideHighlights,{...highlights,enabled:Boolean(highlights)}],readerStagePresentation,readerStructurePresentation,readerIdentifierPresentation];
+    [readerGuideHighlights,{...highlights,enabled:Boolean(highlights)}],readerStagePresentation];
   if(generated&&content.includes(WIKI_EVIDENCE_LINK))remarkPlugins.push([readerWikiTableSources,{zh}]);
-  remarkPlugins.push(readerWikiSupplements,[readerColorPresentation,{enabled:generated}],[readerKnowledgePresentation,{zh,generated}],...markers);
-  const tableSources={"atlas-table-heading":({children}:{children:ReactNode})=><WikiTableHeading zh={zh}>{children}</WikiTableHeading>} as unknown as Components;
-  return <div className="conversation-answer-markdown reader-guide-prose"><ReactMarkdown components={{ ...readerStructureComponents, ...readerSupplementComponents,...readerColorComponents,...readerIdentifierComponents, ...tableSources, ol: readerStageList, blockquote: ({ node, children }) => wikiRecallBlock(node) ? <WikiRecall zh={zh}>{children}</WikiRecall> : generated && wikiHistoryBlock(node) ?<details className="reader-supplement wiki-history"><summary>{zh ? "演变记录" : "History"}</summary>{Children.toArray(children).filter(child => typeof child !== "string" || child.trim()).slice(1)}</details> : <blockquote>{children}</blockquote>, a: ({ href, children }) => href?.startsWith(WIKI_CLAIM_MARKER) ? <WikiClaimMarker pointKey={decodeURIComponent(href.slice(WIKI_CLAIM_MARKER.length))} /> : href?.startsWith(WIKI_CHAPTER_LINK) ? <a href={href} onClick={event => { event.preventDefault(); window.dispatchEvent(new CustomEvent(WIKI_OPEN_CHAPTER_EVENT, { detail: decodeURIComponent(href.slice(WIKI_CHAPTER_LINK.length)) })); }}>{children}</a> : <a href={href}>{children}</a>, table: ({ node, children }) => generated && String(node?.properties?.id ?? "").endsWith("atlas-knowledge-audit") ? <details className="reader-supplement"><summary>{zh ? "补充说明" : "Additional details"}</summary><table>{children}</table></details> : <div className="reader-table-scroll" role="region" aria-label={zh ? "表格，可横向滚动" : "Table, scroll horizontally"} tabIndex={0}><table>{children}</table></div>, pre: ({ children }) => { const code = isValidElement<{ className?: string; children?: unknown }>(children) ? children : undefined; const steps = code?.props.className === "language-atlas-flow" ? flowSteps(String(code.props.children)) : undefined; return steps ? <ReadingFlow steps={steps} /> : <ReaderCodeBlock zh={zh}>{children}</ReaderCodeBlock>; } }} remarkPlugins={remarkPlugins} rehypePlugins={plugins} skipHtml>{content}</ReactMarkdown></div>;
+  remarkPlugins.push(...markers,[readerStructurePresentation,{cards:generated,zh,flowSources,claimMarkers}],readerIdentifierPresentation,readerWikiSupplements,[readerColorPresentation,{enabled:generated}],[readerKnowledgePresentation,{zh,generated}]);
+  const tableSources={"atlas-table-heading":({children}:{children:ReactNode})=><WikiTableHeading zh={zh}>{children}</WikiTableHeading>,"atlas-wiki-flow":WikiFlowCard} as unknown as Components;
+  return <div className="conversation-answer-markdown reader-guide-prose"><ReactMarkdown components={{ ...readerStructureComponents, ...readerSupplementComponents,...readerColorComponents,...readerIdentifierComponents, ...tableSources, ol: readerStageList, blockquote: ({ node, children }) => wikiRecallBlock(node) ? <WikiRecall zh={zh}>{children}</WikiRecall> : generated && wikiHistoryBlock(node) ?<details className="reader-supplement wiki-history"><summary>{zh ? "演变记录" : "History"}</summary>{Children.toArray(children).filter(child => typeof child !== "string" || child.trim()).slice(1)}</details> : <blockquote>{children}</blockquote>, a: ({ href, children }) => href?.startsWith(WIKI_FLOW_CLAIM_MARKER) ? <WikiClaimMarker pointKey={decodeURIComponent(href.slice(WIKI_FLOW_CLAIM_MARKER.length))} flowSource /> : href?.startsWith(WIKI_CLAIM_MARKER) ? <WikiClaimMarker pointKey={decodeURIComponent(href.slice(WIKI_CLAIM_MARKER.length))} /> : href?.startsWith(WIKI_CHAPTER_LINK) ? <a href={href} onClick={event => { event.preventDefault(); window.dispatchEvent(new CustomEvent(WIKI_OPEN_CHAPTER_EVENT, { detail: decodeURIComponent(href.slice(WIKI_CHAPTER_LINK.length)) })); }}>{children}</a> : <a href={href}>{children}</a>, table: ({ node, children }) => generated && String(node?.properties?.id ?? "").endsWith("atlas-knowledge-audit") ? <details className="reader-supplement"><summary>{zh ? "补充说明" : "Additional details"}</summary><table>{children}</table></details> : <div className="reader-table-scroll" role="region" aria-label={zh ? "表格，可横向滚动" : "Table, scroll horizontally"} tabIndex={0}><table>{children}</table></div>, pre: ({ children }) => { const code = isValidElement<{ className?: string; children?: unknown }>(children) ? children : undefined; const steps = code?.props.className === "language-atlas-flow" ? flowSteps(String(code.props.children)) : undefined; return steps ? <ReadingFlow steps={steps} /> : <ReaderCodeBlock zh={zh}>{children}</ReaderCodeBlock>; } }} remarkPlugins={remarkPlugins} rehypePlugins={plugins} skipHtml>{content}</ReactMarkdown></div>;
 });
 
 /** Long AI guides are optional; original discussion remains the main reading path. */
-export const ReaderGuide = memo(function ReaderGuide({ content: original, zh, complete = false, hideEvidenceMarkers = false, hideCitationAnnotations = false, sourceTexts, highlights, claimMarkers }: { content: string; zh: boolean; complete?: boolean; hideEvidenceMarkers?: boolean; hideCitationAnnotations?:boolean; sourceTexts?: string[]; highlights?:ReaderHighlights;
+export const ReaderGuide = memo(function ReaderGuide({ content: original, zh, complete = false, hideEvidenceMarkers = false, hideCitationAnnotations = false, sourceTexts, highlights, claimMarkers, flowSources }: { content: string; zh: boolean; complete?: boolean; hideEvidenceMarkers?: boolean; hideCitationAnnotations?:boolean; sourceTexts?: string[]; highlights?:ReaderHighlights; flowSources?: readonly FocusEvidence[];
   /** Point-by-point evidence: a marker after each claim sentence found in the prose. */
   claimMarkers?: WikiClaimMarkerPoint[] }) {
   const [expanded, setExpanded] = useState(false);
@@ -84,7 +86,7 @@ export const ReaderGuide = memo(function ReaderGuide({ content: original, zh, co
   const narration=hideEvidenceMarkers?aiAdvicePresentation(prose.body,sourceTexts):prose.body;
   const content = renderableConversationText(hideEvidenceMarkers || hideCitationAnnotations ? evidencePresentation(narration) : narration);
   if (!content.trim() && prose.removedBlocks) return <p className="muted">{zh ? "本页仅包含结构分析数据，暂无阅读正文。" : "This page contains only structure metadata; no reading text is available."}</p>;
-  if (complete || content.length <= 900) return <Markdown content={content} zh={zh} generated={hideEvidenceMarkers} highlights={highlights} claimMarkers={claimMarkers} />;
+  if (complete || content.length <= 900) return <Markdown content={content} zh={zh} generated={hideEvidenceMarkers} highlights={highlights} claimMarkers={claimMarkers} flowSources={flowSources} />;
   const introduction = content.split(/\n\s*\n/u)[0].replace(/^[#>*\s]+/u, "").slice(0, 240);
-  return <section className="reader-guide"><div>{expanded ? <Markdown content={content} zh={zh} generated={hideEvidenceMarkers} highlights={highlights} claimMarkers={claimMarkers} /> : <p>{introduction}{introduction.length < content.split(/\n\s*\n/u)[0].length ? "…" : ""}</p>}</div><button type="button" className="reader-text-action" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? zh ? "收起导读" : "Collapse guide" : zh ? "展开完整导读" : "Read full guide"}</button></section>;
+  return <section className="reader-guide"><div>{expanded ? <Markdown content={content} zh={zh} generated={hideEvidenceMarkers} highlights={highlights} claimMarkers={claimMarkers} flowSources={flowSources} /> : <p>{introduction}{introduction.length < content.split(/\n\s*\n/u)[0].length ? "…" : ""}</p>}</div><button type="button" className="reader-text-action" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? zh ? "收起导读" : "Collapse guide" : zh ? "展开完整导读" : "Read full guide"}</button></section>;
 });

@@ -4,6 +4,7 @@ import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
 import { missingWikiConditions, pastedUserText, quotedDetails, wikiUnitConditions, wikiUncoveredMessageCount, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
+import { AIProviderHttpError, AIProviderResponseError } from "./provider-errors";
 import { requestBudget } from "./request-policy";
 
 const material = (index: number, role: "user" | "assistant", body: string, conversationId = "c1"): CoverageMaterial => ({ id: `e:${conversationId}:${index}:1`, role, conversationId, sourceConversationIds: [conversationId], title: "讨论", messageId: `m${index}`, messageIndex: index, text: `${role}: ${body}`, rawEvidenceIds: [`e:${conversationId}:${index}:1`] });
@@ -11,6 +12,55 @@ const signal = new AbortController().signal;
 const proposal = "我建议第一版用 Orama 做全文索引，每 30 秒增量更新一次。";
 const reply = (batch: CoverageMaterial[], all: CoverageMaterial[], value: unknown) => wikiUnitRequest(batch, all, "zh-CN", signal, material => pastedUserText(material.text)).validate(value);
 const unit = (extra: Record<string, unknown>) => ({ subject: "全文索引", statement: "全文索引使用 Orama，每 30 秒增量更新。", kind: "decision", details: ["30 秒"], quoteKey: "p1:1", adoption: "proposal", delivery: "unknown", ...extra });
+
+it("bounds transport retries and resumes a failed source without rereading a successful batch", async () => {
+  const materials = [material(0, "assistant", proposal), material(1, "assistant", "保留历史对话的原始来源。", "second")];
+  const calls: Array<{ failed: boolean; operationId?: string; parent?: string; reason?: string }> = [];
+  let online = false;
+  const generateStructured = async <T,>(request: StructuredAIRequest<T>) => {
+    const failed = request.prompt.includes("保留历史对话的原始来源");
+    calls.push({ failed, operationId: request.trace?.operationId, parent: request.trace?.parentOperationId, reason: request.trace?.recoveryReason });
+    if (failed && !online) throw new TypeError("fetch failed");
+    return request.validate({ units: [] });
+  };
+  const input = { materials, locale: "zh-CN", signal, ai: { generateStructured } };
+  const first = await extractWikiKnowledge(input);
+  expect(first.ledger.status).toBe("partial");
+  expect(first.ledger.batches[1]).toMatchObject({ status: "failed", failure: { kind: "network" } });
+  expect(first.ledger.batches[1].coverage).toBeUndefined();
+  const failed = calls.filter(call => call.failed);
+  expect(failed).toHaveLength(2);
+  expect(failed[1]).toMatchObject({ parent: failed[0].operationId, reason: "transport" });
+  online = true;
+  calls.length = 0;
+  const resumed = await extractWikiKnowledge({ ...input, previous: first.ledger });
+  expect(resumed.ledger.status).toBe("complete");
+  expect(calls.map(call => call.failed)).toEqual([true]);
+});
+
+it("retains successful leaves of a truncated batch and resumes only its failed source", async () => {
+  const materials = [0, 1, 2, 3].map(index => material(index, "assistant", "方案细节编号 " + index));
+  const calls: number[][] = [];
+  let available = false;
+  const generateStructured = async <T,>(request: StructuredAIRequest<T>) => {
+    const passages = (JSON.parse(request.prompt).passages as Array<{ text: string; context?: true }>).filter(item => !item.context);
+    const ids = passages.map(item => Number(/方案细节编号 (\d)/u.exec(item.text)?.[1]));
+    calls.push(ids);
+    if (ids.length > 1) throw new AIProviderResponseError("PROVIDER_OUTPUT_TRUNCATED");
+    if (ids[0] === 2 && !available) throw new AIProviderHttpError(403, "unavailable");
+    return request.validate({ units: [] });
+  };
+  const input = { materials, locale: "zh-CN", signal, ai: { generateStructured } };
+  const first = await extractWikiKnowledge(input);
+  expect(first.ledger.batches[0]).toMatchObject({ status: "failed" });
+  expect(first.ledger.batches[0].failedSources).toEqual({ [materials[2].id]: { kind: "provider", code: "PROVIDER_HTTP_403" } });
+  expect(first.ledger.batches[0].recoveredHalves?.map(part => part.path)).toEqual(["00", "01", "11"]);
+  calls.length = 0;
+  available = true;
+  const resumed = await extractWikiKnowledge({ ...input, previous: first.ledger });
+  expect(resumed.ledger.status).toBe("complete");
+  expect(calls).toEqual([[2]]);
+});
 
 it("preserves a literal condition with the claim it qualifies, and rejects a condition absent from its quote", () => {
   const condition = "如果本地性能验证通过", statement = "第一版使用 Orama 建立全文索引。";
@@ -272,20 +322,18 @@ it("reads the user's own words that produced no unit once more, and records what
   const prompts: Array<{ cover?: string[] }> = [];
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => { prompts.push(JSON.parse(request.prompt)); return request.validate({ units: [unit({ details: [] })] }); } };
   const result = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
-  // A second request for the uncovered intent only; a message that only asks is not counted as uncovered. Its answer
-  // states what the batch already has, so the message stays noted.
-  expect(prompts).toHaveLength(2);
-  expect(prompts[1].cover).toHaveLength(1);
+  // The omitted disposition gets one targeted retry. The ordinary question is outside recovery.
+  expect(prompts).toHaveLength(3);
+  expect(prompts.slice(1).map(prompt => prompt.cover?.length)).toEqual([1, 1]);
   expect(result.ledger.batches[0].uncovered).toEqual([all[1].id]);
   expect(result.ledger.batches[0].coverChecked).toBeUndefined();
   expect(result.ledger.batches[0].coverage?.[all[1].id]?.status).toBe("pending");
-  expect(result.report).toMatchObject({ requests: 1, coverRetries: 1, uncoveredMessages: 1 });
-  // A pending gap is reviewed again while the successful extraction is reused.
+  expect(result.report).toMatchObject({ requests: 1, coverRetries: 2, uncoveredMessages: 1 });
+  // The unchanged evidence was already tried with both strategies.
   prompts.length = 0;
   const reused = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai, previous: result.ledger });
-  expect(prompts).toHaveLength(1);
-  expect(prompts[0].cover).toHaveLength(1);
-  expect(reused.report).toMatchObject({ firstPassUncoveredMessages: 1, uncoveredMessages: 1 });
+  expect(prompts).toHaveLength(0);
+  expect(reused.report).toMatchObject({ firstPassUncoveredMessages: 1, coverRetries: 0, uncoveredMessages: 1 });
 });
 
 it("keeps what the user's uncovered message gives when read again, with the batch it belongs to", async () => {
@@ -296,6 +344,27 @@ it("keeps what the user's uncovered message gives when read again, with the batc
   expect(result.ledger.batches[0].units.map(item => item.statement)).toContain("首屏展示类似 ChatGPT 的欢迎页。");
   expect(result.ledger.batches[0].uncovered).toBeUndefined();
   expect(result.report).toMatchObject({ coverRetries: 1, coverUnits: 1, firstPassUncoveredMessages: 1, uncoveredMessages: 0 });
+});
+
+it("keeps a short option reply as separate adoption evidence and skips rereading it", async () => {
+  const first = "使用全文索引。", second = "使用向量索引。";
+  const offered = "有两个选项：\n\n方案一：" + first + "\n\n方案二：" + second;
+  const all = [material(0, "assistant", offered), material(1, "user", "选第二个。")];
+  const blocks = projectProofBlocks(offered);
+  const keyOf = (text: string) => "p1:" + (blocks.findIndex(block => block.text.includes(text)) + 1);
+  const calls: string[] = [];
+  const generateStructured = async <T,>(request: StructuredAIRequest<T>) => {
+    calls.push(request.prompt);
+    return request.validate({ units: [
+      unit({ subject: "全文索引", statement: first, quoteKey: keyOf(first), details: [] }),
+      unit({ subject: "向量索引", statement: second, quoteKey: keyOf(second), details: [] }),
+    ] });
+  };
+  const { ledger } = await extractWikiKnowledge({ materials: all, ai: { generateStructured }, locale: "zh-CN", signal });
+  expect(calls.filter(prompt => prompt.includes('"cover"'))).toHaveLength(0);
+  expect(ledger.batches[0].units.find(item => item.statement === second)?.adoption).toMatchObject({ status: "user_adopted", approval: { messageId: all[1].messageId, quote: "选第二个。" } });
+  expect(ledger.batches[0].units.find(item => item.statement === first)?.adoption.status).toBe("proposal");
+  expect(ledger.batches[0].coverage?.[all[1].id]?.status).toBe("covered");
 });
 
 it("retries failed recovery on a reused extraction and retains the user's independent evidence", async () => {
@@ -319,6 +388,37 @@ it("retries failed recovery on a reused extraction and retains the user's indepe
   expect(next.ledger.batches[0].coverage?.[all[1].id]).toMatchObject({ status: "covered", attempts: 2 });
 });
 
+it("revisits a user choice before attribution cleanup can leave it uncovered", async () => {
+  const choice = "我决定第一版只做离线查找，原始消息保存在用户设备。";
+  const source = material(0,"user",choice);
+  const seen:string[][]=[];
+  const result = await extractWikiKnowledge({materials:[source],locale:"zh-CN",signal,ai:{
+    generateStructured:async <T,>(request:StructuredAIRequest<T>)=>{
+      const data=JSON.parse(request.prompt);
+      if(data.cover)seen.push(data.attributionReview);
+      return request.validate({units:[unit({statement:data.cover?choice:"导出支持每周同步到云端服务并开展团队协作。",details:[],adoption:"user_decision"})]});
+    },
+  }});
+  expect(seen).toEqual([["p1"]]);
+  expect(result.ledger.batches[0].units.map(item=>item.statement)).toEqual([choice]);
+  expect(result.ledger.batches[0].coverage?.[source.id]?.status).toBe("covered");
+});
+
+it("recovers an exact quote from only the isolated user passage when the model loses its range label", async () => {
+  const choice = "我决定第一版只做离线查找，原始消息保存在用户设备。";
+  const source = material(0, "user", choice);
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const payload = JSON.parse(request.prompt);
+    const forged = unit({ statement: "全文索引使用云端服务。", details: [], quoteKey: "p9:1", quote: "全文索引使用云端服务。", evidenceIds: ["p1"] });
+    return request.validate({ units: payload.recoveryFocus
+      ? [forged, unit({statement: choice, details: [], adoption: "user_decision", passage: "p1", literal: choice, quoteKey: "p9:4"})]
+      : [forged] });
+  } };
+  const {ledger} = await extractWikiKnowledge({ materials: [source], locale: "zh-CN", signal, ai });
+  expect(ledger.batches[0].units).toMatchObject([{ statement: choice, evidence: {role: "user", messageId: source.messageId, quote: choice} }]);
+  expect(ledger.batches[0].coverage?.[source.id]).toMatchObject({status: "covered", attempts: 2});
+});
+
 it("records why a passage has no project knowledge, but preserves an unexplained intent as pending", async () => {
   const all = [material(0, "user", "这个产品方向到底还有多少潜在的市场空间"), material(1, "user", "我想让用户自己配置并保管模型调用密钥")];
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => request.validate({
@@ -331,6 +431,22 @@ it("records why a passage has no project knowledge, but preserves an unexplained
   expect(result.ledger.batches[0].coverage?.[all[0].id]).toMatchObject({ status: "no_knowledge", reason: expect.stringContaining("market") });
   expect(result.ledger.batches[0].coverage?.[all[1].id]?.status).toBe("pending");
   expect(result.ledger.batches[0].uncovered).toEqual([all[1].id]);
+});
+
+it("records screenshot feedback separately and does not reread it as missing project intent", async () => {
+  const feedback = material(0, "user", "![截图](attachment.png)\n\n现在怎么样？");
+  const choice = material(1, "user", "![截图](attachment.png)\n\n我决定手机端仅提供结果预览。");
+  const cover: string[][] = [];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const payload = JSON.parse(request.prompt);
+    if (payload.cover) cover.push(payload.cover);
+    return request.validate({ units: [] });
+  } };
+  const { ledger } = await extractWikiKnowledge({ materials: [feedback, choice], locale: "zh-CN", signal, ai });
+  expect(cover[0]).toHaveLength(1);
+  expect(ledger.batches[0].coverage?.[feedback.id]?.status).toBe("no_knowledge");
+  expect(ledger.batches[0].coverage?.[choice.id]?.status).toBe("pending");
+  expect(ledger.batches[0].uncovered).toEqual([choice.id]);
 });
 
 it("packs all 92 unresolved passages by the full request budget and reuses the read batches", async () => {
@@ -393,6 +509,23 @@ it("recovers a short user constraint that the main extraction omitted", async ()
   const result = await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai });
   expect(result.report).toMatchObject({ coverRetries: 1, uncoveredMessages: 0 });
   expect(result.ledger.batches[0].units[0]).toMatchObject({ statement, evidence: { role: "user" } });
+});
+
+it("gives a truncated single-passage recovery one bounded larger response",async()=>{
+  const statement="不要云同步",materials=[material(0,"user",statement)];
+  const attempts:Array<{budget:number;reason?:string}>=[];
+  const ai={generateStructured:async<T,>(request:StructuredAIRequest<T>):Promise<T>=>{
+    const data=JSON.parse(request.prompt);
+    if(!data.cover)return request.validate({units:[]});
+    attempts.push({budget:request.maxOutputTokens!,reason:request.trace?.recoveryReason});
+    if(attempts.length===1)throw new AIProviderResponseError("PROVIDER_OUTPUT_TRUNCATED");
+    return request.validate({units:[unit({statement,kind:"constraint",details:[],adoption:"user_decision"})]});
+  }};
+  const result=await extractWikiKnowledge({materials,locale:"zh-CN",signal,ai});
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1].budget).toBeGreaterThan(attempts[0].budget);
+  expect(attempts[1].reason).toBe("output_truncation");
+  expect(result.report).toMatchObject({coverRetries:2,coverUnits:1,uncoveredMessages:0});
 });
 
 it("reads material put to the user last, leaves out what the user skips, and keeps the skips for later updates", async () => {

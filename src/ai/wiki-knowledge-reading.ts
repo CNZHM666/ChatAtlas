@@ -15,6 +15,7 @@ import { wikiSaidLater } from "../shared/wiki-sources";
 import { answeredTogether, explicitExclusions, withUserQuestionsAsked } from "./wiki-user-questions";
 import { knowledgeOwner, knowledgeScopesAgree } from "../shared/knowledge-subject";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
+import { withReferenceOwnership } from "./wiki-reference-ownership";
 
 /** One reversible interpretation for writing, reading and export. The source ledger and
  * the user's answers remain untouched; never store these deductions as user verdicts. */
@@ -32,7 +33,8 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
   // And a move the user's decision quotes, which extraction left out, is a decision of its own (withQuotedMoves).
   const report: Record<string, number> = {};
   const source = withQuotedMoves(withAnsweredOpenPoints(withSettledByAnswer(withSetAsideAlternatives(withSetAsideOffers(withTurnedDownRestatements(withDeclinedProposals(withAnsweredChoices(withAnswerScope(withoutOwnProjectAnswers(withSoundAnswers(withUserQuestionsAsked(withUnsaidPlansOut(stored), report))))))))))), report);
-  const answered = withUserAnswers(withUserRelations(withDiscussedProjects(source)));
+  const attributed = withReferenceOwnership(withDiscussedProjects(source));
+  const answered = withUserAnswers(withUserRelations(attributed));
   const units = wikiLedgerUnits(answered), known = new Map(units.map(unit => [unit.id, unit]));
   const answeredIds = new Set((source.userAnswers ?? []).flatMap(answer => answer.unitIds));
   const checked = answered.organization ? { ...answered.organization, relations: answered.organization.relations.map(relation => {
@@ -86,6 +88,6 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
     });
     organization={...organization,topics};
   }
-  const ledger = { ...answered, ...(organization ? { organization } : {}), ...(source.draft ? { draft: scopedWikiDraft(source) } : {}) };
+  const ledger = { ...answered, ...(organization ? { organization } : {}), ...(source.draft ? { draft: scopedWikiDraft(attributed) } : {}) };
   return { ledger, organization, units, statuses, report };
 }

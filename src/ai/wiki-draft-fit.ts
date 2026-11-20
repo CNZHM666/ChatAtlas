@@ -1,4 +1,4 @@
-import type { WikiKnowledgeLedger } from "../shared/wiki-knowledge";
+import { wikiOrganizationIncomplete, type WikiKnowledgeLedger } from "../shared/wiki-knowledge";
 import { curateWikiUnits } from "./wiki-knowledge-select";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { ledgerDecisionsPending } from "./wiki-key-decisions";
@@ -47,5 +47,10 @@ export function ledgerRewriteNeeded(ledger: WikiKnowledgeLedger | undefined): bo
 /** An explicit update can retry incomplete source reading even when the
  * conversation itself has not changed. Successful batches remain reusable. */
 export function ledgerCoverageRetryNeeded(ledger: WikiKnowledgeLedger | undefined): boolean {
-  return Boolean(ledger?.batches.some(batch=>!batch.skipped&&(batch.status==="failed"||batch.uncovered?.length)));
+  return Boolean(ledger?.batches.some(batch=>!batch.skipped&&(batch.status==="failed"||batch.uncovered?.length||batch.uncoveredSentences)));
+}
+
+export function ledgerGenerationRetryNeeded(ledger: WikiKnowledgeLedger | undefined): boolean {
+  return Boolean(ledger && (ledgerCoverageRetryNeeded(ledger) || ledger.lastFailure ||
+    wikiOrganizationIncomplete(ledger.organization) || !ledger.draft || ledger.draft.status === "partial"));
 }

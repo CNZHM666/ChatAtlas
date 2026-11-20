@@ -47,7 +47,7 @@ it("reports stale local-search source links and prevents opening changed text as
   const db=await getDatabase();await db.put("messages",{...message,content:"后来已修改方案"});
   const find=vi.spyOn(await import("../../search/home-history"),"findHistory").mockResolvedValue({matches:[{conversation:conversations[0],excerpt:message.content,messages:[message]}]} as unknown as Awaited<ReturnType<typeof import("../../search/home-history")["findHistory"]>>);
   const onRead=vi.fn();render(<HomeTaskWorkspace {...props()} goal="Orama" requestedAction="answer" localSearch onRead={onRead}/>);
-  await screen.findByText(message.content);fireEvent.click(screen.getByRole("button",{name:"阅读对话：硬件"}));
+  fireEvent.click(await screen.findByRole("button",{name:"阅读对话：硬件"}));
   expect(await screen.findByRole("alert")).toHaveTextContent("原文已更新或删除");expect(onRead).not.toHaveBeenCalled();expect(planHomeTask).not.toHaveBeenCalled();find.mockRestore();
 });
 it("edits searches in place within the same pool and ignores results from an older query", async () => {
@@ -75,7 +75,7 @@ it("opens the conversation in the workspace, selects real matched messages and r
   const reader=await screen.findByRole("region",{name:"对话阅读"});
   expect(screen.queryByRole("dialog",{name:"原文依据"})).not.toBeInTheDocument();expect(screen.queryByRole("combobox",{name:"切换来源"})).not.toBeInTheDocument();
   const outline=within(reader).getByRole("complementary",{name:"命中目录"});expect(within(outline).getAllByRole("listitem")).toHaveLength(2);
-  fireEvent.click(within(outline).getByRole("button",{name:/AI · 2/}));
+  fireEvent.click(within(outline).getByRole("button",{name:/导出 Orama 索引并本地保存/}));
   await waitFor(()=>expect(reader.querySelector('.reader-reply-part[data-reader-message-id="local-reply"] .knowledge-reader-message')).toHaveClass("is-focused"));
   await waitFor(()=>expect(reader.querySelector(".reader-evidence-target")).toHaveTextContent(reply.content));
   expect(onRead).not.toHaveBeenCalled();expect((await readerMessages("one")).map(message=>message.id)).toContain(question.id);
@@ -238,7 +238,7 @@ it("groups hits by the question they answer, reads conditions as chips, and open
   render(<HomeTaskWorkspace {...props()} goal="在 ChatGPT 里 Orama" requestedAction="answer" localSearch/>);
   // The platform words became a condition; only the topic was searched.
   await waitFor(()=>expect(find).toHaveBeenCalledWith("Orama",[conversations[0]]));
-  expect(await screen.findByText("Orama 索引怎么持久化？")).toBeVisible();
+  expect(await screen.findByRole("button",{name:"阅读对话：硬件"})).toHaveTextContent("Orama 索引怎么持久化？");
   expect(screen.getByRole("button",{name:"移除条件：ChatGPT"})).toBeVisible();
   expect(screen.getByText("1 个对话 · 2 处讨论 · 本地搜索")).toBeVisible();
   // The second discussion has its own row and opens at its own reply.
@@ -247,7 +247,7 @@ it("groups hits by the question they answer, reads conditions as chips, and open
   await waitFor(()=>expect(reader.querySelector(".reader-evidence-target")).toHaveTextContent("Markdown 导出要附带 Orama 引用。"));
   find.mockRestore();
 });
-it("lists organized knowledge first and lets the reader pick found conversations to organize or add to a project", async () => {
+it("separates organized knowledge and discussion, highlights matches, and opens conversations directly", async () => {
   const message={id:"pick-local",conversationId:"one",role:"user" as const,content:"Orama 原始方案",messageIndex:0,createdAt:1,updatedAt:1,contentHash:"",preview:""};
   await(await getDatabase()).put("messages",message);
   const find=vi.spyOn(await import("../../search/home-history"),"findHistory").mockResolvedValue({matches:[{conversation:conversations[0],excerpt:message.content,messages:[message]}]} as unknown as Awaited<ReturnType<typeof import("../../search/home-history")["findHistory"]>>);
@@ -257,13 +257,13 @@ it("lists organized knowledge first and lets the reader pick found conversations
   const knowledge=await screen.findByRole("region",{name:"已整理的知识"});
   fireEvent.click(within(knowledge).getByRole("button",{name:/搜索架构/u}));
   expect(openChapter).toHaveBeenCalledWith(project.id,"search");
-  await screen.findByText(message.content);
+  const discussions = await screen.findByRole("region", { name: "对话里的讨论" });
+  const result = within(discussions).getByRole("button", { name: "阅读对话：硬件" });
+  expect(result).toHaveTextContent(message.content);
+  expect(result.querySelector("mark")).toHaveTextContent("Orama");
   expect(screen.queryByRole("region",{name:"已选对话"})).toBeNull();
-  fireEvent.click(screen.getByRole("checkbox",{name:"选择对话：硬件"}));
-  const bar=screen.getByRole("region",{name:"已选对话"});expect(bar).toHaveTextContent("已选 1 个对话");
-  fireEvent.click(within(bar).getByRole("button",{name:"整理成项目"}));
-  expect(callbacks.onStart).toHaveBeenCalledWith("整理这些讨论：Orama","work",["one"],{kind:"all",sourceConversationIds:["one"]});
-  fireEvent.change(within(bar).getByRole("combobox",{name:"加入已有项目"}),{target:{value:project.id}});
-  expect(callbacks.onContinue).toHaveBeenCalledWith(project,"Orama",["one"]);
+  expect(within(discussions).queryByRole("checkbox")).toBeNull();
+  fireEvent.click(result);
+  expect(await screen.findByRole("region", { name: "对话阅读" })).toBeVisible();
   find.mockRestore();
 });

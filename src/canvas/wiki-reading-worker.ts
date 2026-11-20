@@ -1,27 +1,22 @@
 import type { FocusSession } from "../shared/focus-session";
 import { projectKnowledgeReading, projectKnowledgeReadingContext } from "../shared/project-knowledge-view";
-import { projectTimeline, type ProjectMilestone } from "../shared/project-timeline";
-import { projectWikiPages, type ProjectWikiPages } from "./project-wiki-pages";
+import { projectWikiPage, type ProjectWikiPages, type WikiPageTarget } from "./project-wiki-pages";
 
 export type WikiReadingProjection = {
   context: ReturnType<typeof projectKnowledgeReadingContext>;
   chapter: ReturnType<typeof projectKnowledgeReading> | undefined;
 };
-export type WikiReadingRequest = { session: FocusSession } & ({ target: "chapter" | "timeline" } | { target: "pages"; zh: boolean });
+export type WikiReadingRequest = { session: FocusSession } & ({ target: "chapter" } | { target: WikiPageTarget; zh: boolean });
 
 const worker = globalThis as unknown as {
-  postMessage(result: WikiReadingProjection | ProjectMilestone[] | ProjectWikiPages): void;
+  postMessage(result: WikiReadingProjection | Partial<ProjectWikiPages>): void;
   onmessage: ((event: MessageEvent<WikiReadingRequest>) => void) | null;
 };
 
 worker.onmessage = ({ data: request }) => {
   const { session, target } = request;
-  if (target === "pages") {
-    worker.postMessage(projectWikiPages(session, request.zh));
-    return;
-  }
-  if (target === "timeline") {
-    worker.postMessage(projectTimeline(session));
+  if (target !== "chapter") {
+    worker.postMessage(projectWikiPage(session, request.zh, target));
     return;
   }
   const context = projectKnowledgeReadingContext(session);

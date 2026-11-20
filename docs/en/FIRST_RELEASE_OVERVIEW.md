@@ -2,7 +2,7 @@
 
 [简体中文](../FIRST_RELEASE_OVERVIEW.md) · **English**
 
-Version **0.1.5 Alpha** for Chrome and Edge. This describes available features and limits.
+Version **0.1.6 Alpha** for Chrome and Edge. This describes available features and limits.
 
 ## Supported platform
 
@@ -15,8 +15,7 @@ You can copy or export context for manual use in another AI. Selecting a BYOK mo
 | Status | Capability |
 | --- | --- |
 | Main path | ChatGPT ZIP/JSON and webpage import, local keyword search, continuous originals, confirmed scope, overview/Wiki generation, review/save, personal edits and sources |
-| Main path | Search/Context sidebar, discussion navigation, local preparation, inline saved contexts, copy and draft-preserving insertion |
-| Main path | Local packs from saved overview/Wiki, task and chapter selection, optional refinement with candidate adoption/restoration |
+| Main path | Native sidebar search, discussion navigation, Reader, project association, and draft-preserving insertion |
 | Main path | Backup/restore, successful-analysis reuse, bounded recovery, request and usage records |
 | Main path | Organize one or multiple conversations into an overview/Wiki; review, edit, update on demand and export Markdown/printable HTML |
 | Legacy compatibility | Independent project Q&A, matters and evolution workspaces are retired; data remains and saved matters/evolution can be exported |

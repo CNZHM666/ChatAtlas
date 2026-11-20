@@ -10,7 +10,7 @@ import { paintClaimHighlights, revealRange, similarSentenceRanges } from "./clai
 export function useEvidencePoints(points: Array<EvidencePoint & { phrases: string[] }>, onLocate: (ref: FocusEvidence) => void, zh: boolean, renderKey: unknown, pending?:EvidencePoint[]) {
   const evidencePanel = useContext(WorkspaceEvidenceContext);
   const rootRef = useRef<HTMLElement>(null);
-  const claimMarkers = useMemo<WikiClaimMarkerPoint[]>(() => points.map(({ key, phrases }) => ({ key, phrases })), [points]);
+  const claimMarkers = useMemo<WikiClaimMarkerPoint[]>(() => points.map(({ key, phrases, approximate }) => ({ key, phrases, approximate })), [points]);
   const [placedKeys, setPlacedKeys] = useState<string[]>([]);
   // Extra phrase data rides along; the panel reads only EvidencePoint fields.
   const answers=evidencePanel?.active?.points;
@@ -49,8 +49,10 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
     if (details && !details.open) details.open = true;
   }, [activeKey]);
   // Left the claim, right its origin: the claim being checked, or every claim citing the original shown, is highlighted.
-  const shown = active?.tableTarget ? undefined : active?.shown;
-  const highlighted = useMemo(() => activeKey ? [activeKey] : shown ? ordered.filter(point => point.references.some(ref => ref.id === shown.id || ref.conversationId === shown.conversationId && ref.messageId === shown.messageId)).map(point => point.key) : [], [activeKey, shown, ordered]);
+  const shown = active?.tableTarget || active?.overviewEntryId ? undefined : active?.shown;
+  const selectedClaim = shown ? active?.claim : undefined;
+  const highlighted = useMemo(() => activeKey ? [activeKey] : shown ? ordered.filter(point =>
+    (!selectedClaim || point.claim === selectedClaim) && point.references.some(ref => ref.id === shown.id || ref.conversationId === shown.conversationId && ref.messageId === shown.messageId)).map(point => point.key) : [], [activeKey, shown, ordered, selectedClaim]);
   const highlightKey = highlighted.join("|");
   useEffect(() => {
     const root = rootRef.current;
@@ -61,7 +63,7 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
       const wanted = highlightKey ? points.filter(point => highlightKey.split("|").includes(point.key)) : [];
       // Each claim owns its numeric conditions. Different points citing the
       // same source must not inherit the first point's count or bound.
-      const queries=wanted.length?wanted.map(point=>[point.claim,...point.phrases]):!activeKey&&shown?.excerpt?[[shown.excerpt]]:[];
+      const queries=wanted.length?wanted.map(point=>[point.claim,...point.phrases]):selectedClaim?[[selectedClaim]]:!activeKey&&shown?.excerpt?[[shown.excerpt]]:[];
       ranges = paintClaimHighlights(root, [], () => [], queries.slice(0,6).flatMap(texts=>similarSentenceRanges(root,texts,1)));
     }
     // Each switch brings the highlighted text into view inside the document's own scroll area. Opening the panel
@@ -70,7 +72,8 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
     const timer = first ? window.setTimeout(() => revealRange(first), 120) : undefined;
     return () => { window.clearTimeout(timer); paintClaimHighlights(root, []); };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- points change with the prose, which renderKey tracks.
-  }, [highlightKey, activeKey, active?.locationRevision, renderKey, shown?.id]);
-  const markerContext = useMemo(() => ({ points: ordered, activeKey, open, zh }), [ordered, activeKey, open, zh]);
+  }, [highlightKey, activeKey, active?.locationRevision, renderKey, shown?.id, selectedClaim]);
+  const pointByKey = useMemo(() => new Map(ordered.map(point => [point.key, point])), [ordered]);
+  const markerContext = useMemo(() => ({ points: ordered, pointByKey, activeKey, open, zh }), [ordered, pointByKey, activeKey, open, zh]);
   return { rootRef, claimMarkers: claimMarkers.length ? claimMarkers : undefined, ordered, open, markerContext };
 }

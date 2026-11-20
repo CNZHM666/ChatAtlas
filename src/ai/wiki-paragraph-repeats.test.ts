@@ -1,9 +1,10 @@
 import { expect, it } from "vitest";
-import { droppedContainedRepeats, splitUnrelatedSentences } from "./wiki-paragraph-repeats";
+import { droppedContainedRepeats, mergeWikiRelatedParagraphs, splitUnrelatedSentences } from "./wiki-paragraph-repeats";
 import { claimSupported, wikiLabelledThresholdClaims } from "./wiki-claim-support";
 import { pastCapabilityWords, plannedCapabilityWords } from "./wiki-capability-state";
 import { mergeOverlappingRows } from "./wiki-draft-checks";
 import { withHolderMarks } from "../shared/wiki-holder";
+import { wikiWithoutUnsupportedExample } from "./wiki-prose-grounding";
 import type { WikiDraftChapter, WikiKnowledgeUnit, WikiUnitStatus } from "../shared/wiki-knowledge";
 
 const unit = (id: string, statement: string, index = 1, role: "user" | "assistant" = "assistant"): WikiKnowledgeUnit => ({ id, statement, subject: "界面", kind: "constraint", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: id, messageId: id, conversationId: "c", messageIndex: index, role, pasted: false, quote: statement } });
@@ -32,6 +33,61 @@ it("gives a sentence about something else its own paragraph, and keeps a sentenc
   expect(chapter.paragraphs.map(paragraph => paragraph.unitIds)).toEqual([["a"], ["b"]]);
   const leaning = "统一定义视觉相关错误码，便于前端提示。涉及 VISION_TIMEOUT 与 VISION_BLOCKED 两种。";
   expect(splitUnrelatedSentences([chapterOf(leaning, [{ text: "统一定义视觉相关错误码，便于前端提示。", unitIds: ["a"] }, { text: "涉及 VISION_TIMEOUT 与 VISION_BLOCKED 两种。", unitIds: ["b"] }])])).toBe(0);
+});
+
+it("joins related short paragraphs with separate bindings, keeping an acceptance target distinct", () => {
+  const sentences = [
+    "Validator 校验候选 IR 的引脚定义与连接。",
+    "Validator 校验候选 IR 时使用元件目录中的引脚定义。",
+    "计划为 Validator 校验候选 IR 增加 12 个验收用例。",
+  ];
+  const chapter = chapterOf(sentences[0], [{ text: sentences[0], unitIds: ["a"] }], sentences.join("\n\n"));
+  for (const [index, id] of ["b", "c"].entries()) {
+    const text = sentences[index + 1];
+    chapter.paragraphs.push({ subtopic: "界面", text, unitIds: [id], claims: [{ text, unitIds: [id] }] });
+  }
+  const merged = mergeWikiRelatedParagraphs(chapter, new Map(["a", "b", "c"].map(id => [id, "validation"])),
+    new Map([["a", "confirmed"], ["b", "confirmed"], ["c", "proposal"]]));
+  expect(merged.body).toBe(sentences[0] + sentences[1] + "\n\n" + sentences[2]);
+  expect(merged.paragraphs[0].claims?.map(claim => claim.unitIds)).toEqual([["a"], ["b"]]);
+  const scoped = mergeWikiRelatedParagraphs(chapter, new Map([["a", "validation"], ["b", "validation"]]),
+    new Map([["a", "confirmed"], ["b", "confirmed"]]), new Map(), id => id === "a" ? ["仅限离线模式"] : ["仅限在线模式"]);
+  expect(scoped.body).toBe(chapter.body);
+});
+
+it("attributes related suggestions once and keeps release-specific alternatives separate", () => {
+  const texts = [
+    "AI 建议：V1 保存审批附件及签署记录。",
+    "AI 建议：V1 附件下载需要核对授权。",
+    "AI 建议：V2 为审批附件提供公开下载。",
+  ];
+  const chapter = chapterOf(texts[0], [{ text: texts[0], unitIds: ["a"] }], texts.join("\n\n"));
+  for (const [index, id] of ["b", "c"].entries()) {
+    const text = texts[index + 1];
+    chapter.paragraphs.push({ subtopic: "界面", text, unitIds: [id], claims: [{ text, unitIds: [id] }] });
+  }
+  const merged = mergeWikiRelatedParagraphs(chapter, new Map(), new Map([["a", "proposal"], ["b", "proposal"], ["c", "proposal"]]),
+    new Map([["a", "attachments"], ["b", "attachments"], ["c", "attachments"]]));
+  expect(merged.paragraphs[0].text).toBe(texts[0]+"V1 附件下载需要核对授权。");
+  expect(merged.paragraphs[0].claims?.[1]).toEqual({text:"V1 附件下载需要核对授权。",unitIds:["b"]});
+  expect(merged.paragraphs[1].text).toBe(texts[2]);
+});
+
+it("puts a confirmed rule and a qualified suggestion together without moving the intervening claim into the paragraph", () => {
+  const text = ["**文件校验**不通过时显示失败原因。", "日志保留最近十次同步记录。", "AI 建议：文件校验失败时提供按字段查看的入口。"];
+  const chapter = chapterOf(text[0], [{text:text[0],unitIds:["a"]}], text.join("\n\n"));
+  chapter.paragraphs.push(...text.slice(1).map((part,index)=>({text:part,subtopic:"界面",unitIds:[String(index)],claims:[{text:part,unitIds:[String(index)]}]})));
+  const got=mergeWikiRelatedParagraphs(chapter,new Map([["a","validator"],["0","logs"],["1","validator"]]),
+    new Map([["a","confirmed"],["0","proposal"],["1","proposal"]]));
+  expect(got.body).toBe(text[0]+text[2]+"\n\n"+text[1]);
+  expect(got.paragraphs[0].claims?.map(claim=>claim.unitIds)).toEqual([["a"],["1"]]);
+});
+
+it("preserves a code-to-remedy example only when its pairing exists in the cited text", () => {
+  const cited = [unit("x", "CACHE_TIMEOUT → 重试下载。\nTOKEN_EXPIRED → 重新授权。")];
+  expect(wikiWithoutUnsupportedExample("显示简明错误提示，例如将“CACHE_TIMEOUT”转化为“重新授权”的建议，并保留详细诊断。",cited))
+    .toBe("显示简明错误提示，并保留详细诊断。");
+  expect(wikiWithoutUnsupportedExample("显示简明错误提示，例如将“CACHE_TIMEOUT”转化为“重试下载”的建议。",cited)).toBeUndefined();
 });
 
 it("lets a value come from the cited unit its own clause is about, and a palette from its colours", () => {

@@ -15,9 +15,11 @@ The Manifest V3 Chrome extension has two HTML entry points: `atlas.html` (workbe
 
 `src/sync/` imports ChatGPT exports and webpage history. Source versions preserve historical message bodies; source scope and content signatures bind interpretations to the material actually selected. `src/ai/focus-coverage.ts` performs budgeted reading, directory planning and writing, reusing valid requests and checkpoints. Complete candidate windows can overlap later source reading within one shared provider allowance. Global planning assigns parent scopes and restores local child topics and source ownership; dependent convergence rounds stay ordered.
 
-Final Wiki output is checked for valid sources, explicit chapter ownership and subtopic coverage. Source-bearing schema recovery is local, bounded by depth and request count, and retains successful batches. Interrupted final writing has one local retry; this is not an unlimited retry of the original conversation. Read [AI_WORKFLOWS.md](AI_WORKFLOWS.md) for limits.
+The knowledge ledger connects extraction, organization, writing, and the reading projection. Validated extraction batches can be reused when the material, rules, and model context match. Targeted recovery reads uncovered messages. Writing checks source binding, chapter placement, and scope. Truncated responses enter bounded recovery and incomplete coverage is reported in the exported document. See [AI_WORKFLOWS.md](AI_WORKFLOWS.md).
 
 Generated prose, raw messages and personal edits remain distinct. Validation of IDs or quotes is not proof of semantic truth, adoption or implementation. Saving a project never upgrades a historical assistant proposal to a user decision.
+
+Saved confirmation questions, choices, and sources determine the scope shown in prose and tables. Markdown uses numbered links to the conversation and confirmation records. Verifiable external URLs are preserved. Platform-specific reference tokens are cleaned from the export while the raw sources and literal code are retained.
 
 Language validation exposes safe field paths and allows short technical labels. BYOK repair sends only invalid prose fields and applies a bounded translation patch to the locally retained response, preserving literal code/quotes and revalidating sources and ownership. Directory navigation includes compact fact subjects; writing keeps the complete detail inventory. Writing output ceilings scale with assigned subtopics. Editorial depth/result-table hints never trigger automatic paid regeneration or upgrade factual status.
 

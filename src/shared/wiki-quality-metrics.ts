@@ -108,7 +108,7 @@ export function wikiQualityMetrics(markdown:string,terms:readonly string[]=WIKI_
   sibling_suffix_pairs,
   bold_count:boldLengths.length,bold_avg_chars:boldLengths.length?boldLengths.reduce((sum,size)=>sum+size,0)/boldLengths.length:0,bold_max_chars:Math.max(0,...boldLengths),
   // The document writes the holder as "AI 建议"; prose may drop the space.
-  ai_advice_density:characters?(allProse.match(/AI\s*建议/gu)??[]).length*1000/characters:0,
+  ai_advice_density:characters?(allProse.match(/AI\s*建议|〔建议〕|\[Proposal\]/gu)??[]).length*1000/characters:0,
   meta_overview_count:wiki.filter(chapter=>chapter.paragraphs[0]?.trimStart().startsWith("本章")).length,
   cross_chapter_duplicates,
   overview_verbatim_overlap:chapters.filter(chapter=>overviewTitle(chapter.title)).flatMap(chapter=>chapter.sentences).filter(sentence=>otherSentences.has(sentence)).length,

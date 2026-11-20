@@ -330,5 +330,7 @@
    quote itself (a solid red line is the condition cue); the rest of the exchange is a faint dotted line. */
 ::highlight(atlas-original-similar) { background: var(--atlas-mark); color: var(--atlas-mark-text); text-decoration: underline dashed #dc2626 2px; text-underline-offset: 4px; }
 ::highlight(atlas-original-support) { background: transparent; color: inherit; text-decoration: underline dotted #94a3b8 1.5px; text-underline-offset: 4px; }
+.workspace-source-body[data-related-focus] ::highlight(atlas-original-support) { background: #94a3b838; }
+.workspace-source-body[data-related-focus] .workspace-source-highlight.is-support { background: #94a3b838; }
 ::highlight(atlas-original-cue) { color: inherit; text-decoration: underline solid #dc2626 2px; text-underline-offset: 4px; }
 .workspace-source-highlight.is-quote { background: #facc1566; }

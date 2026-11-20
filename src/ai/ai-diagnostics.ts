@@ -10,7 +10,7 @@ export const aiFeatures = {
   connection:["连接测试","Connection test"], unclassified:["未标注的历史请求","Unlabelled legacy request"],
 } as const;
 export type AIFeature = keyof typeof aiFeatures;
-export interface AITrace { feature?: AIFeature; operation?: string; operationId?:string; parentOperationId?: string; recoveryReason?:"output_truncation"|"schema"|"transport"; recoveryDepth?:number; schedulingMs?:number }
+export interface AITrace { feature?: AIFeature; operation?: string; operationId?:string; parentOperationId?: string; recoveryReason?:"output_truncation"|"input_budget"|"schema"|"transport"; recoveryDepth?:number; schedulingMs?:number }
 export interface AITiming {
   preparationMs?: number; cacheLookupMs?: number; cacheWriteMs?:number; validationMs?: number;
   queueMs?: number; responseMs?: number; backoffMs?: number;

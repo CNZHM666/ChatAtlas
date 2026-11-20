@@ -212,7 +212,7 @@ export interface AIUsageEvent {
   operation?: string;
   operationId?: string;
   parentOperationId?: string;
-  recoveryReason?: "output_truncation"|"schema"|"transport";
+  recoveryReason?: "output_truncation"|"input_budget"|"schema"|"transport";
   recoveryDepth?: number;
   schedulingMs?: number;
   cacheLayer?: "result" | "inflight" | "checkpoint" | "field" | "provider";
@@ -226,6 +226,9 @@ export interface AIUsageEvent {
   directoryValidation?: {missing:number;duplicate:number;unknown:number;parentMismatch:number};
   citationDiagnostics?: { allowedEvidenceCount: number; unknownEvidenceCount: number; citationPaths: string[]; returnedSectionCount?: number; returnedNoteCount?: number };
   estimatedInputTokens?: number;
+  inputTokenLimit?: number;
+  plannedOutputTokens?: number;
+  predictedOutputTokens?: number;
   /** Provider-reported prompt-cache reads, included in inputTokens; absent when not reported. */
   cachedInputTokens?: number;
   tokenEstimateVersion?: string;

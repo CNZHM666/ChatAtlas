@@ -92,6 +92,18 @@ export function pastCapabilityWords(chapters: WikiDraftChapter[], outdated: Map<
 
 /** Words telling a capability as planned, not had. */
 const PLANNED = /计划|规划|将(?:会)?|拟|目标|设计为|预期|未来|后续|旨在|用于|\b(?:plan|will|aim)/iu;
+const SENTENCE_END = /(?<=[。！？])/u;
+
+function repeatsCapabilityReport(sentence: string, report: Report) {
+  const match = LACKS.exec(sentence);
+  if (!match || match[1].toLowerCase() !== report.part.toLowerCase()) return false;
+  const lead = sentence.slice(0, match.index).trim();
+  const tail = sentence.slice(match.index + match[0].length).trim();
+  if (!/^(?:(?:当前|目前|此前|当时|之前)\s*)?$/u.test(lead)
+    || !/^(?:[，,](?:后续|需|需要|计划)[^。！？\d]{0,3}(?:逐步)?补充(?:这些)?(?:基础)?(?:电气)?规则)?[。！？]?$/u.test(tail)) return false;
+  const objects = match[2].split(SPLIT).map(squeeze);
+  return objects.length === report.objects.length && report.objects.every(object => objects.includes(object));
+}
 /** The opening of a chapter whose discussion says a part does not do a check yet ("Validator 不检查电压、GPIO 冲突")
  * telling that check as had ("……规则引擎，实时检查电压、电流及 GPIO 冲突以发现常见错误", "……的同时识别电压、GPIO 及总线冲突"): the overview reads the opening,
  * and one reader took the plan for the current state. The check is told as planned ("计划实时检查……"). Returns how many
@@ -161,14 +173,28 @@ export function retainCapabilityReports(chapters: WikiDraftChapter[], units: Wik
     }
     const stated = chapters.some(chapter => chapter.paragraphs.some(paragraph => paragraph.unitIds.includes(report.unit.id)
       && chapter.body.includes(paragraph.text) && squeeze(paragraph.text).includes(squeeze(limit))));
-    if (stated) continue;
     const { chapter, paragraph } = home;
-    const lead = report.unit.evidence.pasted ? "项目发起人提供的资料记录了当时的实现边界" : "项目发起人当时报告";
-    const text = `${lead}，${limit}。`;
-    const paragraphIndex = chapter.paragraphs.indexOf(paragraph);
-    chapter.body = replaceParagraph(chapter.body, paragraph.text, `${paragraph.text}\n\n${text}`);
-    chapter.paragraphs.splice(paragraphIndex + 1, 0, { text, subtopic: paragraph.subtopic, unitIds: [report.unit.id], claims: [{ text, unitIds: [report.unit.id] }] });
-    changed++;
+    if (!stated) {
+      const lead = report.unit.evidence.pasted ? "项目发起人提供的资料记录了当时的实现边界" : "项目发起人当时报告";
+      const text = `${lead}，${limit}。`;
+      const paragraphIndex = chapter.paragraphs.indexOf(paragraph);
+      chapter.body = replaceParagraph(chapter.body, paragraph.text, `${paragraph.text}\n\n${text}`);
+      chapter.paragraphs.splice(paragraphIndex + 1, 0, { text, subtopic: paragraph.subtopic, unitIds: [report.unit.id], claims: [{ text, unitIds: [report.unit.id] }] });
+      changed++;
+    }
+    // Use the independently sourced report once and leave the proposal's
+    // rules and acceptance criteria in their original paragraphs.
+    for (const { chapter, paragraph } of candidates) {
+      if (paragraph.unitIds.includes(report.unit.id) || /^[|>#*-]|\n/u.test(paragraph.text)) continue;
+      const sentences = paragraph.text.split(SENTENCE_END);
+      const kept = sentences.filter(sentence => !repeatsCapabilityReport(sentence, report)).join("").trim();
+      if (!kept || kept === paragraph.text || sentences.some(sentence => !kept.includes(sentence.trim()) &&
+        paragraph.claims?.some(claim => claim.text.includes(sentence.trim()) && !kept.includes(claim.text) && claim.unitIds.some(id => !plans.has(id))))) continue;
+      chapter.body = replaceParagraph(chapter.body, paragraph.text, kept);
+      paragraph.text = kept;
+      paragraph.claims = paragraph.claims?.filter(claim => kept.includes(claim.text));
+      changed++;
+    }
   }
   return changed;
 }

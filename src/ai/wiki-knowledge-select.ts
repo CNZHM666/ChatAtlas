@@ -1,3 +1,4 @@
+import { illustrativeWikiFlow } from "../shared/wiki-plain-block";
 import { currentBaseline, laterTakenUp } from "./wiki-knowledge-state";
 import { assistantRequest, exactDetail, personalDirection, similarStatements, wikiLedgerUnits, wikiUnitDetails, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
 import { knowledgeTerms } from "../shared/knowledge-subject";
@@ -120,7 +121,11 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
   // is for are its matter, not advice beside a project or another product's points. One run left out the whole first
   // week of Git, tagged as about GitHub, and every 学习路线 point.
   const learning = ledger.documentType === "learning";
-  const shown = (unit: WikiKnowledgeUnit | undefined): unit is WikiKnowledgeUnit => Boolean(unit) && subjectOf.has(unit!.id) && !assistantRequest(unit!.statement) && (learning || unit!.about?.role !== "other_project" && !PERSONAL.test(unit!.statement));
+  const demoWithoutCriterion = (unit: WikiKnowledgeUnit) => ["proposal", "analysis"].includes(statuses.get(unit.id) ?? "")
+    && !unit.evidence.code && unit.kind !== "constraint" && !unit.conditions?.length
+    && !wikiUnitDetails(unit).some(detail => MEASURE.test(detail) || COUNTED_TARGET.test(detail))
+    && illustrativeWikiFlow(unit.statement);
+  const shown = (unit: WikiKnowledgeUnit | undefined): unit is WikiKnowledgeUnit => Boolean(unit) && subjectOf.has(unit!.id) && !assistantRequest(unit!.statement) && (learning || unit!.about?.role !== "other_project" && !PERSONAL.test(unit!.statement) && !demoWithoutCriterion(unit!));
   // Repetition and recency from P2: a point folded from several mentions, or the newer side of a narrowing.
   const repeated = new Map(organization.merged.map(row => [row.id, row.from.length]));
   const bonus = new Map<string, number>();

@@ -1,7 +1,6 @@
 import type { FocusSession } from "../shared/focus-session";
-import type { ProjectMilestone } from "../shared/project-timeline";
 import type { WikiReadingProjection, WikiReadingRequest } from "./wiki-reading-worker";
-import type { ProjectWikiPages } from "./project-wiki-pages";
+import type { ProjectWikiPages, WikiPageTarget } from "./project-wiki-pages";
 
 function readWikiInWorker<T>(request: WikiReadingRequest, signal?: AbortSignal): Promise<T | undefined> | undefined {
   if (typeof Worker === "undefined" || signal?.aborted) return;
@@ -27,10 +26,6 @@ export function refreshWikiReading(session: FocusSession, signal: AbortSignal) {
   return readWikiInWorker<WikiReadingProjection>({ session, target: "chapter" }, signal);
 }
 
-export function readWikiTimeline(session: FocusSession) {
-  return readWikiInWorker<ProjectMilestone[]>({ session, target: "timeline" });
-}
-
-export function readWikiPages(session: FocusSession, zh: boolean, signal: AbortSignal) {
-  return readWikiInWorker<ProjectWikiPages>({ session, target: "pages", zh }, signal);
+export function readWikiPages(session: FocusSession, zh: boolean, signal: AbortSignal, target: WikiPageTarget = "pages") {
+  return readWikiInWorker<Partial<ProjectWikiPages>>({ session, target, zh }, signal);
 }

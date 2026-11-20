@@ -18,9 +18,9 @@
 }
 :is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose :is(h4,h5,h6) { font-size: 16px; margin: 24px 0 10px; }
 :is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose > :is(h1,h2,h3):first-child { margin-top: 0; }
-:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose :is(ul,ol) { padding-left: 1.5em; margin: 10px 0 16px; }
-:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose li { padding-left: .3em; margin: 4px 0; }
-:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose li > p { margin: 4px 0; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose :is(ul,ol):not(:where(.wiki-flow *)) { padding-left: 1.5em; margin: 10px 0 16px; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose li:not(:where(.wiki-flow *)) { padding-left: .3em; margin: 4px 0; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose li:not(:where(.wiki-flow *)) > p { margin: 4px 0; }
 /* Stage cards keep their own spacing: the list indent and item padding above would press the text to the border. */
 :is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reading-stage-flow { padding: 0; margin: 0; }
 :is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reading-stage-flow > li { margin: 0; padding: var(--stage-card-padding); }
@@ -116,28 +116,28 @@
 
 /* Generated reference material is one quiet subsection attachment, not a sequence of empty cards. */
 .reader-guide-prose .wiki-source-supplement { margin: 8px 0 18px; padding: 0; color: var(--muted); font-size: 13px; }
-.reader-guide-prose .wiki-source-supplement > summary {
+.wiki-source-supplement > summary {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   min-height: 36px; box-sizing: border-box; padding: 6px 8px; border-radius: 6px;
   list-style: none; cursor: pointer; font-weight: 500; line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.reader-guide-prose .wiki-source-supplement > summary::-webkit-details-marker { display: none; }
-.reader-guide-prose .wiki-source-supplement > summary:hover { color: var(--text); background: var(--surface-muted); }
-.reader-guide-prose .wiki-source-supplement > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wiki-source-supplement > summary::-webkit-details-marker { display: none; }
+.wiki-source-supplement > summary:hover { color: var(--text); background: var(--surface-muted); }
+.wiki-source-supplement > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .wiki-supplement-chevron {
   flex: 0 0 6px; width: 6px; height: 6px; margin-inline: 4px;
   border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
 }
 .wiki-source-supplement[open] > summary > .wiki-supplement-chevron { transform: rotate(225deg); }
-.reader-guide-prose .wiki-supplement-content { padding: 4px 8px 0; }
+.wiki-source-supplement > .wiki-supplement-content { padding: 4px 8px 0; }
 .reader-guide-prose .wiki-source-supplement h4 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; color: var(--text); }
 .reader-guide-prose .wiki-source-supplement pre { margin: 8px 0 14px; }
 .reader-color-swatch { display: inline-block; width: .8em; height: .8em; border: 1px solid #8885; border-radius: 2px; margin-right: 6px; vertical-align: -.03em; }
 /* Short ordered stages keep reading order while wrapping between whole items. */
 .reader-guide-prose .reading-stage-flow-frame { margin: 12px 0 18px; padding: 0; }
 .conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact {
- --stage-card-padding: 2px 0; display: flex; flex-wrap: wrap; gap: 6px 0; padding: 0; margin: 0; min-width: 0; list-style: none;
+ --stage-card-padding: 2px 0; display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 0; margin: 0; min-width: 0; list-style: none;
 }
 .conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li {
  display: inline-flex; align-items: baseline; gap: 6px; flex: 0 1 auto; max-width: 100%;
@@ -149,10 +149,10 @@
  content: counter(atlas-stage) ".";
 }
 .conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li:not(:last-child)::after {
- position: static; display: inline; content: "→"; width: auto; height: auto; margin: 0 9px 0 3px;
+ position: static; flex: none; content: "→" / ""; width: auto; height: auto; margin: 0 0 0 3px;
  background: none; color: var(--muted); border: 0;
 }
-.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li > p { display: inline; margin: 0; }
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li > p { display: inline; margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled { --stage-card-labelled-padding: 5px 0; display: block; padding: 0; margin: 0; }
 .conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled > li {
  padding: 5px 0; margin: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
@@ -169,3 +169,79 @@
 /* Long technical names wrap at semantic boundaries without injected text or a forced new line. */
 .reader-guide-prose .reader-token { display: inline; white-space: normal; overflow-wrap: break-word; word-break: normal; }
 .conversation-answer-markdown.reader-guide-prose p { text-wrap: wrap; }
+.reader-guide-prose .wiki-flow {
+  margin: 1.25rem 0;
+}
+.reader-guide-prose .wiki-flow figcaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.reader-guide-prose .wiki-flow figcaption > p {
+  min-inline-size: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.reader-guide-prose .wiki-flow figcaption em {
+  display: inline-block;
+  margin-inline-start: 8px;
+  font-size: .8em;
+  font-style: normal;
+  color: var(--muted);
+}
+.reader-guide-prose .wiki-flow-sources {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: .8em;
+}
+.reader-guide-prose .wiki-flow-card {
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted, var(--surface));
+}
+.reader-guide-prose .wiki-flow:has([data-claim-highlighted="true"]) .wiki-flow-card {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.reader-guide-prose .wiki-flow-card > ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 14px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.reader-guide-prose .wiki-flow-card > ol > li {
+  position: relative;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 0;
+  margin: 0;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.reader-guide-prose .wiki-flow-card > ol > li > p {
+  margin: 0;
+  min-inline-size: 0;
+}
+.reader-guide-prose .wiki-flow-card > ol > li + li {
+  display: grid;
+  grid-template-columns: 1em minmax(0, 1fr);
+  column-gap: .4em;
+  align-items: baseline;
+}
+.reader-guide-prose .wiki-flow-card > ol > li + li::before {
+  content: "→" / "";
+  line-height: inherit;
+  color: var(--muted);
+}

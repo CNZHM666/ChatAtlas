@@ -4,6 +4,7 @@
  * the rendered prose; markers also carry an attribute, for styling where that API is missing. */
 import { evidenceTextLocator } from "./evidence-highlight";
 import { evidenceConditionDescription, evidenceConditionDescriptionMatches, evidenceConditionLabel, evidenceConditions, evidenceConditionsMatch } from "./evidence-conditions";
+import { literalNegationCorrection } from "../shared/claim-meaning";
 const NAME = "atlas-claim";
 const SENTENCE_END = /[。！？!?；;]/gu;
 const FOLLOWING = 4, PRECEDING = 2;
@@ -102,10 +103,10 @@ export function similarSentenceRanges(root: HTMLElement | null, original: string
     let score=0;
     for(const source of sources){
       const {cover,shared}=closeness(own,source);
-      if(cover>=minCover&&shared>=minShared)score=Math.max(score,cover+shared/100+(code?2*shared/source.size:0));
+      if(cover>=minCover&&shared>=minShared)score=Math.max(score,.55*cover+.7*shared/source.size+Math.min(.2,shared/100)+(code?2*shared/source.size:0));
       else if(bar==="loose"){const names=closeness(anchors(own),anchors(source));if(names.shared>=2&&names.cover>=.5)score=Math.max(score,names.cover/2+names.shared/100);}
     }
-    return score;
+    return score && !literalNegationCorrection(texts[0],text) && !literalNegationCorrection(text,texts[0]) ? score : 0;
   };
   // Whole sentences of each paragraph, read across bold, links and code inside it; an original's headings too, where a
   // reply often puts its point ("1. Mem0 擅长记忆召回，但 Atlas 需要管理项目的「现行状态」").
@@ -143,32 +144,37 @@ export function similarSentenceRanges(root: HTMLElement | null, original: string
       scored.push({ range, score, block, start, end });
     }
   }
-  if(required.length){
-    const byBlock=new Map(fragments.map(fragment=>[fragment.block,fragment]));
-    for(const first of fragments){
-      if(first.block.tagName==="PRE"||!evidenceConditionLabel(first.text))continue;
-      const group=[first];let text=first.text,next=first.block.nextElementSibling;
-      // Join only adjacent fragments in this message/list item/quote. A new
-      // branch, heading, rule or different numeric condition ends the group.
-      for(let count=0;next&&count<3;count++){
-        const fragment=byBlock.get(next as HTMLElement);if(!fragment||/^(?:H[1-6]|PRE|TD|TH)$/u.test(fragment.block.tagName))break;
-        if(/^(?:如果|若|当|假如|假设|否则|反之|(?:if|else)\b)/iu.test(fragment.text.trim()))break;
-        const conditions=evidenceConditions(fragment.text);
-        if(conditions.length&&!evidenceConditionsMatch(conditions,texts[0]))break;
-        if(text.length+fragment.text.length>600)break;
-        group.push(fragment);text+="\n"+fragment.text;
-        const score=scorePassage(text);
-        if(score){
-          const range=first.block.ownerDocument.createRange(),last=fragment.nodes.at(-1)!;
-          range.setStart(first.nodes[0],0);range.setEnd(last,last.length);
-          scored.push({range,score,block:first.block,start:0,end:text.length,blocks:group.map(item=>item.block)});
-        }
-        next=fragment.block.nextElementSibling;
+  const byBlock=new Map(fragments.map(fragment=>[fragment.block,fragment]));
+  const isProse=(block: Element)=>block.matches("p,li,blockquote");
+  const matchedTerms=(text:string)=>[...meaningTerms(text)].filter(term=>sources[0].has(term));
+  for(const first of fragments){
+    if(!isProse(first.block)||required.length&&!evidenceConditionLabel(first.text))continue;
+    const covered=new Set(required.length?[]:matchedTerms(first.text));
+    if(!required.length&&covered.size<2)continue;
+    const group=[first];let text=first.text,next=first.block.nextElementSibling,bestAlone=scorePassage(text);
+    // Each adjacent block must add evidence for the same claim. Stop at a different branch or structural boundary.
+    for(let count=0;next&&count<3;count++){
+      const fragment=byBlock.get(next as HTMLElement);if(!fragment||!isProse(fragment.block))break;
+      if(/^(?:如果|若|当|假如|假设|否则|反之|(?:if|else)\b)/iu.test(fragment.text.trim()))break;
+      const conditions=evidenceConditions(fragment.text);
+      if(conditions.length&&!evidenceConditionsMatch(conditions,texts[0]))break;
+      const added=required.length?[]:matchedTerms(fragment.text).filter(term=>!covered.has(term));
+      if(!required.length&&added.length<2||text.length+fragment.text.length>600)break;
+      added.forEach(term=>covered.add(term));
+      group.push(fragment);text+="\n"+fragment.text;
+      bestAlone=Math.max(bestAlone,scorePassage(fragment.text));
+      const score=scorePassage(text);
+      if(score>bestAlone+.08){
+        const range=first.block.ownerDocument.createRange(),last=fragment.nodes.at(-1)!;
+        range.setStart(first.nodes[0],0);range.setEnd(last,last.length);
+        scored.push({range,score,block:first.block,start:0,end:text.length,blocks:group.map(item=>item.block)});
       }
+      next=fragment.block.nextElementSibling;
     }
   }
   const selected:typeof scored=[];
   for(const item of scored.sort((a,b)=>b.score-a.score||(a.end-a.start)-(b.end-b.start))){
+    if(selected.length&&item.score<selected[0].score*.62)break;
     if(selected.some(other=>item.blocks||other.blocks?(item.blocks??[item.block]).some(block=>(other.blocks??[other.block]).includes(block)):other.block===item.block&&other.start<item.end&&item.start<other.end))continue;
     selected.push(item);if(selected.length>=limit)break;
   }

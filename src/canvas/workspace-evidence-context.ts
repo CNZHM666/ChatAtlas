@@ -20,6 +20,9 @@ export interface EvidencePoint { key: string; claim: string; quote?: string; sou
  * and needs no answer: checking asks about these, not about every sentence. */
 export const needsConfirmation = (point: Pick<EvidencePoint, "attention" | "checked">) => !point.checked && Boolean(point.attention);
 export interface WorkspaceEvidenceOptions { references?: FocusEvidence[]; quote?: string; claim?: string; sectionId?:string;
+  /** The exact overview entry and the quoted passages belonging to each of its references. */
+  overviewEntryId?: string;
+  sourcePassages?: Array<{ referenceId: string; quote: string }>;
   /** Identity of the original Markdown table within the selected message. */
   tableTarget?:string;
   /** The original the panel shows now, so the document can highlight the claims that cite it. */

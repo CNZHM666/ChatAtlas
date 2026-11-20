@@ -1,14 +1,25 @@
 import { wikiDraftOutOfPlace } from "../ai/wiki-draft-fit";
 import { ledgerDecisionsPending, wikiDecisionQuestions } from "../ai/wiki-key-decisions";
 import { resolveWikiReading } from "../ai/wiki-knowledge-reading";
+import { wikiOverviewNeedsClaimReview } from "../ai/wiki-claim-review";
+import { aiAdvicePresentation } from "../shared/ai-advice-presentation";
 import type { FocusSession } from "../shared/focus-session";
 import { projectOverviewContent, projectOverviewReadingText } from "../shared/project-overview";
-import { projectTimeline } from "../shared/project-timeline";
 import type { WikiUnitStatus } from "../shared/wiki-knowledge";
+import { currentWikiOverview } from "../shared/wiki-overview";
 import { documentEvidenceReview } from "./document-review";
+import { projectOverviewWorkspace } from "./project-overview-workspace";
 import { approximatePoints } from "./wiki-evidence";
 
 type Reading = ReturnType<typeof resolveWikiReading>;
+
+/** Paint saved prose while the worker derives evidence, decisions and the ledger. */
+export function savedProjectOverviewPage(session: FocusSession) {
+  const saved = currentWikiOverview(session);
+  if (!saved || wikiOverviewNeedsClaimReview(saved.text, session)) return;
+  const overview = { text: aiAdvicePresentation(saved.text), evidenceIds: saved.evidenceIds };
+  return { overview, readingText: overview.text, references: [], points: [] };
+}
 
 export function projectOverviewPage(session: FocusSession, zh: boolean, preview = false, reading?: Reading) {
   const overview = projectOverviewContent(session, reading);
@@ -53,11 +64,25 @@ export function projectLedgerPage(session: FocusSession, zh: boolean, reading?: 
 
 export function projectWikiPages(session: FocusSession, zh: boolean) {
   const reading = session.wikiKnowledge && resolveWikiReading(session.wikiKnowledge);
+  const ledger = projectLedgerPage(session, zh, reading);
   return {
     overview: projectOverviewPage(session, zh, false, reading),
     review: documentEvidenceReview(session, zh),
-    ledger: projectLedgerPage(session, zh, reading),
-    milestones: projectTimeline(session, reading),
+    ledger,
+    workspace: projectOverviewWorkspace(session, zh, reading, ledger?.questions.versions),
   };
 }
 export type ProjectWikiPages = ReturnType<typeof projectWikiPages>;
+export type WikiPageTarget = "pages" | "overview" | "ledger" | "preview";
+
+export function projectWikiPage(session: FocusSession, zh: boolean, target: WikiPageTarget): Partial<ProjectWikiPages> {
+  if (target === "pages") return projectWikiPages(session, zh);
+  if (target === "ledger") return { ledger: projectLedgerPage(session, zh) };
+  if (target === "preview") return { overview: projectOverviewPage(session, zh, true) };
+  const reading = session.wikiKnowledge && resolveWikiReading(session.wikiKnowledge);
+  return {
+    overview: projectOverviewPage(session, zh, false, reading),
+    review: documentEvidenceReview(session, zh),
+    workspace: projectOverviewWorkspace(session, zh, reading),
+  };
+}

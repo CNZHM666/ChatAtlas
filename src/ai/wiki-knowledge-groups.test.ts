@@ -155,17 +155,18 @@ it("asks a cut-off batch again in halves, counting progress by units so the tota
   expect(steps).toEqual([[0, 8], [4, 8], [8, 8]]);
 });
 
-it("halves a batch only once, and gives up instead of halving a wrong-shaped answer", async () => {
+it("bounds recovery of truncated or malformed descendants and records failed clusters", async () => {
   const pairs = exportPairs(4);
   let seen = 0;
   const truncating = groupModel(() => { seen++; throw cutOff(); });
   const cut = await build(pairs.flat(), pairs.map(pair => pair.map(item => item.id)), truncating.ai);
-  // One request, then two halves; the halves are not cut again.
-  expect(seen).toBe(3);expect(cut.report).toMatchObject({ group_halved: 1, group_failed: 2, group_fail_truncated: 3 });
+  expect(seen).toBe(5);expect(cut.report).toMatchObject({ group_halved: 2, group_failed: 3, group_fail_truncated: 5 });
   const malformed = groupModel(() => ({ nothing: true }));
   const wrong = await build(pairs.flat(), pairs.map(pair => pair.map(item => item.id)), malformed.ai);
-  expect(malformed.calls).toHaveLength(1);expect(wrong.report).toMatchObject({ group_failed: 1, group_fail_invalid: 1 });
-  expect(wrong.report.group_halved).toBeUndefined();
+  expect(malformed.calls).toHaveLength(5);
+  expect(wrong.report.group_fail_invalid).toBe(5);
+  expect(wrong.report.group_halved).toBe(2);
+  expect(wrong.failedClusters?.flat().sort()).toEqual(pairs.flat().map(item => item.id).sort());
 });
 
 it("stops halving after three failures in a row", async () => {
@@ -175,6 +176,26 @@ it("stops halving after three failures in a row", async () => {
   // Both batches go out at once and fail (one and two in a row), so each is halved once; the four halves fail
   // and are given up, never halved again.
   expect(fake.calls).toHaveLength(6);expect(report).toMatchObject({ group_halved: 2, group_failed: 4 });
+});
+
+it("gives one indivisible truncated group more output room and retains its conditions", async () => {
+  const pair = exportPairs(1)[0], limits:number[]=[];
+  const report:Record<string,number>={};
+  const {groups}=await buildExplanationGroups(pair,[pair.map(item=>item.id)],new Map(),{locale:"zh-CN",signal,ai:{
+    modelId:"fixture",
+    generateStructured:async <T,>(request:StructuredAIRequest<T>)=>{
+      limits.push(request.maxOutputTokens!);
+      if(limits.length===1)throw cutOff();
+      const cluster=(JSON.parse(request.prompt).clusters as Cluster[])[0];
+      return request.validate({groups:[{core:cluster.units[0].clauses[0].replace(/^1\. /u,""),
+        members:cluster.units.map(item=>({id:item.id,support:[1],adds:item.clauses.slice(1).map((_,index)=>index+2)}))}]});
+    },
+  }},report);
+  expect(limits).toHaveLength(2);
+  expect(limits[1]).toBeGreaterThan(limits[0]);
+  expect(groups).toHaveLength(1);
+  expect(report).toMatchObject({group_output_expanded:1});
+  expect(report.group_failed).toBeUndefined();
 });
 
 it("keeps unchanged groups on an update, and redoes a group a new or changed unit reaches, under its old id", async () => {

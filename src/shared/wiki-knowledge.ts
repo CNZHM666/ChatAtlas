@@ -1,5 +1,6 @@
 import type { LearningRole, WikiDocumentType } from "./wiki-document-type";
 import { knowledgeTerms } from "./knowledge-subject";
+import { wikiProposalTargetsProject } from "./wiki-scope-identity";
 /** Knowledge-unit ledger (redesign P1). Produced next to the Wiki behind a
  * developer switch; nothing reads it into the document yet. */
 
@@ -29,7 +30,7 @@ export interface WikiKnowledgeUnit {
   about?: { name: string; role: WikiUnitAboutRole };
 }
 /** Where a ledger step is: requests done of the stage's total, for a progress bar. */
-export interface WikiProgress { stage: "extract" | "name" | "attach" | "split" | "same" | "merge" | "group" | "plan" | "write"; done: number; total: number }
+export interface WikiProgress { stage: "extract" | "cover" | "verify" | "name" | "attach" | "split" | "same" | "merge" | "group" | "plan" | "write" | "proofread"; done: number; total: number }
 export type WikiProgressFn = (progress: WikiProgress) => void;
 export type WikiUnitAboutRole = "competitor" | "reference" | "other_project";
 export const ABOUT_ROLES: WikiUnitAboutRole[] = ["competitor", "reference", "other_project"];
@@ -50,9 +51,12 @@ export interface WikiUnitBatch {
   /** The first few rejected rows, for diagnosing extraction; never read into documents. */
   rejectedSamples?: Array<{ reason: string; statement?: string; subject?: string; keys?: string; detail?: string }>;
   error?: string;
+  /** May be absent in projects saved before failure provenance was recorded. */
+  failure?: { kind: "truncated" | "network" | "provider" | "model" | "local" | "unknown"; code?: string };
+  failedSources?: Record<string, NonNullable<WikiUnitBatch["failure"]>>;
   /** Successful halves of an incomplete extraction, reusable under the same input signature. */
-  recoveredHalves?: Array<{ index: number; units: WikiKnowledgeUnit[]; rejected: Record<string, number>; rejectedSamples?: WikiUnitBatch["rejectedSamples"] }>;
-  /** The batch's own user messages that produced no unit even when asked again. */
+  recoveredHalves?: Array<{ index: number; path?: string; units: WikiKnowledgeUnit[]; rejected: Record<string, number>; rejectedSamples?: WikiUnitBatch["rejectedSamples"] }>;
+  /** The batch's own user passages with missing or unverified knowledge, including partial coverage. */
   uncovered?: string[];
   /** The version of the sentence check this batch passed: each of the user's own sentences stating a choice
    * is covered by a unit, or was asked for once more. A reused batch without it is checked on the next update. */
@@ -64,7 +68,7 @@ export interface WikiUnitBatch {
    * more. A reused batch without it is checked on the next run. */
   coverChecked?: number;
   /** Per-material recovery outcomes, bound to the source text and review rules. */
-  coverage?: Record<string, { version: number; sourceSignature: string; status: "covered" | "duplicate" | "no_knowledge" | "failed" | "pending"; reason?: string; attempts: number }>;
+  coverage?: Record<string, { version: number; sourceSignature: string; status: "covered" | "duplicate" | "no_knowledge" | "failed" | "pending"; reason?: string; failure?: WikiUnitBatch["failure"]; attempts: number; recoveryKey?: string }>;
   /** The version of the statement check this batch passed: statements saying more than their source (a stronger rule,
    * a figure, a length) were asked to be told in the source's terms once. */
   fidelityChecked?: number;
@@ -101,6 +105,8 @@ export interface WikiKnowledgeLedger {
   coexisting?: string[];
   /** What the user said another project named in the discussion is, by its name key (aboutNameKey). */
   scopeAnswers?: Record<string, WikiScopeAnswer>;
+  /** Projects the user explicitly excluded in source selection. */
+  explicitProjectExclusions?: string[];
   /** Explanation groups the user said tell one point though written in several chapters: explained once, at home. */
   sameGroups?: string[];
   /** Explanation groups the user said are separate points: not asked again. */
@@ -132,7 +138,7 @@ export type WikiAnswerAction = { do: "confirm" | "reject" | "open"; units: strin
 /** stage: writing when the writer asked it while writing a chapter, after which only that chapter is written again. */
 export interface WikiWritingQuestion { id: string; about: string; ask: string; unitIds: string[]; options: Array<{ id: string; label: string; actions: WikiAnswerAction[] }>; organization: number; stage?: "writing" }
 /** An answer: the option chosen, or what the user wrote instead. */
-export interface WikiUserAnswer { questionId: string; unitIds: string[]; question: string; answer: string; optionId?: string; at: number }
+export interface WikiUserAnswer { questionId: string; unitIds: string[]; question: string; answer: string; optionId?: string; at: number; previousChoices?: Array<{ answer: string; at: number }>; roadmap?: import("./wiki-confirmed-roadmap").WikiConfirmedRoadmap }
 /** project: part of this project, left where it is; related: the user's other project, a chapter of its own;
  * reference: an outside product, beside the competitors; exclude: left out of the Wiki. */
 export type WikiScopeAnswer = "project" | "related" | "reference" | "exclude";
@@ -141,7 +147,15 @@ export const aboutNameKey = (name: string) => name.normalize("NFKC").toLocaleLow
  * two outside suggestions with Pocket Ledger as their owner, and the whole project left its own Wiki. Read-time only:
  * the stored answers stay. */
 export function withoutOwnProjectAnswers(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
-  const own = ledger.organization?.projectName ? aboutNameKey(ledger.organization.projectName) : "";
+  const organization = ledger.organization;
+  const own = organization?.projectName ? aboutNameKey(organization.projectName) : "";
+  const recordedExclusion = own && ledger.scopeAnswers?.[own] === "exclude" && (ledger.explicitProjectExclusions?.includes(own)
+    || Object.values(ledger.userOwners ?? {}).some(name => aboutNameKey(name) === own)
+      && ledger.batches?.some(batch => batch.units.some(unit => wikiProposalTargetsProject(unit.evidence.quote, organization!.projectName!))));
+  if (organization && recordedExclusion) {
+    // The inferred name would also prevent the excluded project's untagged units from being found.
+    return { ...ledger, organization: { ...organization, projectName: undefined } };
+  }
   if (!own || !ledger.scopeAnswers?.[own] && !Object.values(ledger.userOwners ?? {}).some(name => aboutNameKey(name) === own)) return ledger;
   const scopeAnswers = { ...ledger.scopeAnswers }, userOwners = Object.fromEntries(Object.entries(ledger.userOwners ?? {}).filter(([, name]) => aboutNameKey(name) !== own));
   delete scopeAnswers[own];
@@ -296,17 +310,41 @@ export function scopedWikiDraft(source: WikiKnowledgeLedger): WikiUnitDraft | un
   if (!draft || !keys.length) return draft;
   const answered = withUserAnswers(ledger), active = new Set(answered.organization?.subjects.flatMap(subject => subject.unitIds));
   const removed = new Set(ledger.organization?.subjects.flatMap(subject => subject.unitIds).filter(id => !active.has(id)));
-  for (const unit of wikiLedgerUnits(ledger)) if (unit.about && keys.includes(aboutNameKey(unit.about.name))) removed.add(unit.id);
+  const units = new Map(wikiLedgerUnits(ledger).map(unit => [unit.id, unit]));
+  for (const unit of units.values()) if (unit.about && keys.includes(aboutNameKey(unit.about.name))) removed.add(unit.id);
   const namesExcluded = (text: string) => keys.some(key => aboutNameKey(text).includes(key));
   let filtered = 0;
   const chapters = draft.chapters.flatMap(chapter => {
     if (namesExcluded(chapter.title)) { filtered += chapter.paragraphs.length; return []; }
-    const paragraphs = chapter.paragraphs.filter(paragraph => !paragraph.unitIds.some(id => removed.has(id)) && !namesExcluded(paragraph.text) && !namesExcluded(paragraph.subtopic));
-    filtered += chapter.paragraphs.length - paragraphs.length;
+    let changed = false;
+    const paragraphs = chapter.paragraphs.flatMap(paragraph => {
+      const keep = (id: string) => !removed.has(id) && units.has(id);
+      if (!paragraph.unitIds.some(id => removed.has(id)) && !namesExcluded(paragraph.text) && !namesExcluded(paragraph.subtopic)) return [paragraph];
+      filtered++; changed = true;
+      if (namesExcluded(paragraph.subtopic)) return [];
+      const retained = (paragraph.claims ?? []).filter(claim => claim.unitIds.length && claim.unitIds.every(keep) && !namesExcluded(claim.text));
+      if (!retained.length) return [];
+      const zh = /\p{Script=Han}/u.test(paragraph.text), used = new Set<string>();
+      // Preserve self-contained rows with their original labels, then recover
+      // supported clauses from mixed rows without copying the excluded prose.
+      const lines = paragraph.text.split("\n"), ordered = lines.every(line => /^\s*\d+\.\s/u.test(line));
+      const safeRows = ordered ? lines.filter(line => {
+        const claims = (paragraph.claims ?? []).filter(claim => line.includes(claim.text));
+        if (namesExcluded(line) || !claims.length || claims.some(claim => !retained.includes(claim))) return false;
+        claims.forEach(claim => claim.unitIds.forEach(id => used.add(id)));
+        return true;
+      }) : [];
+      const recover = [...new Set(retained.flatMap(claim => claim.unitIds))].filter(id => !used.has(id)).flatMap(id => {
+        const unit = units.get(id)!, text = wikiStatementWithConditions(unit, zh);
+        return namesExcluded(text) ? [] : [{ subtopic: paragraph.subtopic, text, unitIds: [id], claims: [{ text, unitIds: [id] }] }];
+      });
+      return [...safeRows.length ? [{ ...paragraph, text: safeRows.join("\n"), unitIds: [...used],
+        claims: retained.filter(claim => claim.unitIds.every(id => used.has(id)) && safeRows.some(row => row.includes(claim.text))) }] : [], ...recover];
+    });
     const opening = chapter.body.startsWith("### ") ? "" : chapter.body.split(/\n### /u)[0];
     const keepOpening = !namesExcluded(opening) && !chapter.openingUnitIds?.some(id => removed.has(id));
     if (!keepOpening && opening) filtered++;
-    if (paragraphs.length === chapter.paragraphs.length && keepOpening) return [chapter];
+    if (!changed && keepOpening) return [chapter];
     if (!paragraphs.length) return [];
     const topics = [...new Set(paragraphs.map(paragraph => paragraph.subtopic))];
     const body = [...keepOpening && opening ? [opening.trim()] : [], ...topics.map(title => `### ${title}\n\n${paragraphs.filter(paragraph => paragraph.subtopic === title).map(paragraph => paragraph.text).join("\n\n")}`)].join("\n\n");
@@ -445,7 +483,7 @@ export function wikiDraftMarkdown(ledger: WikiKnowledgeLedger, title: string, lo
   const quality = draft.quality, gaps = quality && (!quality.passed || quality.uncovered) ? [
     quality.failedBatches ? (zh ? `${quality.failedBatches} 批原文未能读取，材料不完整，相关结论可能缺少后续确认` : `${quality.failedBatches} source batches could not be read; later confirmations may be missing`) : "",
     quality.organization === "partial" ? (zh ? "整理有步骤失败，部分主题或关系可能不完整" : "some organizing steps failed; subjects or relations may be incomplete") : "",
-    quality.uncovered ? (zh ? `用户本人的 ${quality.uncovered} 条消息未抽出知识点，其中的决定可能未体现` : `${quality.uncovered} of the user's own messages produced no unit; decisions in them may be missing`) : "",
+    quality.uncovered ? (zh ? `${quality.uncovered} 条用户消息仍待补读或核对` : `${quality.uncovered} user messages still need recovery or review`) : "",
     quality.critical ? (zh ? `正文仍有 ${quality.critical} 项关键校验未通过（决定归属、来源角色、数字或变化依据）` : `${quality.critical} key checks still fail (decisions, holders, numbers or changes)`) : "",
   ].filter(Boolean) : [];
   const warning = gaps.length ? `> ${zh ? "质量提示：" : "Quality: "}${gaps.join(zh ? "；" : "; ")}${zh ? "。" : "."}` : "";
@@ -484,6 +522,8 @@ export interface WikiKnowledgeOrganization {
   /** Reuse only with the same complete source inputs and unchanged directory. */
   inputSignature?: string;
   layoutSignature?: string;
+  /** Only source clusters from failed grouping jobs, for the next update. */
+  groupRetryClusters?: string[][];
   layoutContext?: true;
   unitSignatures?: Record<string, string>;
   fitSignatures?: Record<string, string>;
@@ -511,6 +551,11 @@ export interface WikiKnowledgeOrganization {
   placementDoubts?: WikiPlacementDoubt[];
   /** Request counts and local repairs, for diagnostics. */
   report: Record<string, number>;
+}
+
+export function wikiOrganizationIncomplete(organization: WikiKnowledgeOrganization | undefined): boolean {
+  return Boolean(organization && (organization.status === "partial" ||
+    ["group_failed", "group_merge_failed", "fit_failed", "topic_failed"].some(key => organization.report[key] > 0)));
 }
 
 /** One thing the discussion settled more than once (the first screen's layout, how long a review takes): current holds

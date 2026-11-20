@@ -117,7 +117,13 @@ export function answeredTogether(before: WikiKnowledgeOrganization, after: WikiK
     // With them, what the answer set aside of their subject without asking (another way of doing what it decided).
     const homes = new Set(answer.unitIds.flatMap(id => subjectIn(before, id) ?? []));
     const setAside = before.subjects.filter(subject => homes.has(subject.id)).flatMap(subject => subject.unitIds).filter(id => !answer.unitIds.includes(id) && decisions?.[id]?.at === answer.at);
-    const ids = [...answer.unitIds, ...setAside].filter(id => subjectIn(before, id) && subjectIn(after, id));
+    const decisionId = `answer:${answer.questionId}:${answer.optionId}`;
+    const scopedChoice = decisions?.[decisionId]?.verdict === "confirmed" && units?.has(decisionId);
+    // Once the exact answer has its own unit, incidental proposals that
+    // appeared in the question can keep their independently chosen homes.
+    const related = scopedChoice ? [decisionId, ...answer.unitIds.filter(id => decisions?.[id]?.at === answer.at), ...setAside]
+      : [...answer.unitIds, ...setAside];
+    const ids = [...new Set(related)].filter(id => subjectIn(before, id) && subjectIn(after, id));
     for (const id of ids) {
       const from = subjectIn(before, id)!, to = subjectIn(after, id)!;
       if (from === to || moves.has(id)) continue;

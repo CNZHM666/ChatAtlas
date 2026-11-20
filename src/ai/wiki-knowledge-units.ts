@@ -2,16 +2,21 @@ import { wikiUserChooses } from "../shared/wiki-user-choice";
 import { UNDECIDED } from "../shared/open-words";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
-import { requestBudget } from "./request-policy";
-import { AIProviderHttpError, AIProviderResponseError, AIProviderValidationError } from "./provider-errors";
+import { waitForWikiRetry, wikiBatchFailure, wikiCannotFit, wikiRecoveryRequest, wikiRequestIdentity, wikiSplitReason, wikiTransportFailure } from "./wiki-batch-recovery";
+import { wikiRequestFits, wikiStructuredOutput, type WikiBudgetModel } from "./wiki-request-budget";
+import { AIProviderHttpError, AIProviderValidationError } from "./provider-errors";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
 import { resolveProjectProofs } from "./project-knowledge";
-import { confirmsProposal } from "../shared/statement-evidence";
+import { confirmsProposal, isWikiDeicticChoice, isWikiOptionReply, wikiReplyOption } from "../shared/statement-evidence";
 import { sourceMessageSignature } from "../shared/source-signature";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { FIDELITY_RULES, fidelitySignature, repairedStatements, statementDrift, trimmedQuote } from "./wiki-unit-fidelity";
 import { measuredSourceScope, sourceScopedUnit } from "./wiki-source-scope";
-import { ABOUT_ROLES, aboutNameKey, ownSection, WIKI_EXCEPTION, assistantRequest, DECIDING_KINDS, pastedUserText, quotedDetails, similarStatements, STATE_KINDS, wikiUnitConditions, type WikiKnowledgeLedger, type WikiUnitAboutRole, type WikiProgressFn, type WikiKnowledgeUnit, type WikiUnitAdoption, type WikiUnitBatch, type WikiUnitKind } from "../shared/wiki-knowledge";
+import { ABOUT_ROLES, aboutNameKey, ownSection, WIKI_EXCEPTION, assistantRequest, DECIDING_KINDS, pastedUserText, quotedDetails, similarStatements, statementsConflict, STATE_KINDS, wikiUnitConditions, type WikiKnowledgeLedger, type WikiUnitAboutRole, type WikiProgressFn, type WikiKnowledgeUnit, type WikiUnitAdoption, type WikiUnitBatch, type WikiUnitKind } from "../shared/wiki-knowledge";
+import { wikiQuoteAsksOnlyForFeedback } from "../shared/wiki-said-in-quote";
+import { wikiProposalTargetsProject } from "../shared/wiki-scope-identity";
+import { cacheWikiExtractionBatch, readWikiExtractionBatch, wikiExtractionCacheKey } from "./wiki-extraction-cache";
+import { stableReadingBatches } from "./focus-reading-plan";
 
 /** About the size of one reading batch, so a batch fits the 14k-token input policy. */
 /** Batches read at once; the provider's adaptive limit still decides how many run, and halves on a rate limit. */
@@ -31,6 +36,8 @@ const USER_WORDS_SHARED = 2, USER_WORDS_COVER = .12;
  * choice, and a point it never states was marked as the user's decision. Text in two scripts is not compared: a statement
  * written in another language than the message shares no words with it. */
 function userWordsSay(statement: string, message: string): boolean {
+  const exact = normalized(statement).replace(/[。.!！？?]+$/u, "");
+  if (exact.length >= 4 && normalized(message).includes(exact)) return true;
   const han = (text: string) => (text.match(/\p{Script=Han}/gu) ?? []).length > 8;
   if (han(statement) !== han(message)) return true;
   // A share of the statement too: "学习时长的统计数据存在哪里比较好？" shares 学习 and 习时 with "完成专注或休息后仅提醒用户……避免
@@ -50,7 +57,7 @@ const QUALIFIED = /但|不过|可是|除了|只要|只做|先不|不要|别|不�
 // A refusal names what it declines.
 const REFUSAL = /不要|不用|别|算了|不行|不做|不考虑|放弃|先不|否决|不采用|不需要|去掉|删掉|\b(?:no|don't|drop|skip|not now)\b/iu;
 const SHORT_APPROVAL = /^\s*(?:好的?|可以|行|嗯|对|同意|没问题|就这样|按这个|就按|就用|用这个|ok(?:ay)?|yes|sure)/iu;
-const ENUMERATED = /(?:^|\n)\s*(?:方案\s*[一二三123]|[123][.)、]\s)/gu;
+const ENUMERATED = /^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?(?:\*{1,2})?(?:(?:方案|选项|Option|Approach)[ \t]*[一二三四五六七八九1-9A-I]|[1-9A-I][.)、][ \t])/gimu;
 
 /** Bumped when local checks change what a unit may claim; with the prompt, part of every batch signature. */
 const EXTRACT_RULES = 4;
@@ -62,7 +69,7 @@ const ONLY_ASKS = /[?？]\s*$/u, STATES_INTENT = /我(?:打算|准备|想|要|�
 const onlyAsks = (body: string) => body.length < 80 && ONLY_ASKS.test(body) && !STATES_INTENT.test(body);
 /** Version of the sentence check: a batch that passed this one is not checked again. */
 // 2: English choices (move, drop, exclude …) and each clause of a sentence giving several.
-const SENTENCE_RULES = 2;
+const SENTENCE_RULES = 3;
 /** Version of the product check, and its limits: a passage comparing other products ("竞品对比", "参考项目") that names
  * at least two of them and yielded fewer units about them than that was read as one sentence ("AI 生成硬件路线已被
  * Boardly、WireMind 等产品验证"), and every run's competitor chapter was the thin one. Such passages are read once more,
@@ -71,7 +78,7 @@ const SENTENCE_RULES = 2;
  * packed together. Their words carry the decisions: one run left 25 of them without a unit, 「首屏应展示类似 ChatGPT
  * 的欢迎页」 among them, and the user's decisions were missing from the document, not only unmarked. Eight packs: read
  * side by side they add no wait, and four left nine of a record's messages unread, one conversation never cited. */
-const COVER_RULES = 2, COVER_REQUESTS = 8;
+const COVER_RULES = 7, COVER_REQUESTS = 8;
 const PRODUCT_RULES = 1, PRODUCT_REQUESTS = 6, PRODUCT_MIN_NAMES = 2;
 const COMPARES = /竞品|竞争|对手|参考|对比|借鉴|开源项目|同类产品|标杆|替代方案|\b(?:competitors?|alternatives?|compared? (?:to|with)|vs\.?)\b/giu;
 /** Product names a passage gives: capitalized Latin names (one or two words) and names in Chinese quotes. Words every
@@ -98,6 +105,11 @@ const CHOICE_SENTENCE = new RegExp(/我(?:的|们的)?(?:项目|产品)[^。！�
  * budgets milestone entirely" is two, and only the second became a unit. */
 const choiceClauses = (sentence: string) => sentence.split(/[;；]|,\s*and\s+|，(?:并且?|再|然后)/u).map(clause => clause.trim()).filter(Boolean);
 const sentencesOf = (text: string) => text.split(/(?:(?<=[。！？!?；;\n])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))/u).map(sentence => sentence.trim()).filter(sentence => sentence.length >= 8);
+const choiceText = (text: string) => normalized(text).replace(/^[★>#*，,-]+|[。.!！？?；;，,]+$/gu, "");
+function quotesChoice(quote: string, clause: string) {
+  const source = choiceText(quote), target = choiceText(clause);
+  return Boolean(target && (source.includes(target) || source.length >= 8 && target.includes(source)));
+}
 /** The user's own choice sentences in a batch that no unit from their message states: most of the sentence's terms
  * in those units' statements and details. A quote often spans the whole message, so it proves nothing here; a
  * message often states several points and yields one unit. */
@@ -108,9 +120,13 @@ export function uncoveredSentences(batch: CoverageMaterial[], units: WikiKnowled
     // Words without the quotes and stops around them: '"shared' and "entirely." are words of "Shared budgets are dropped
     // entirely …".
     const words = (text: string) => new Set([...knowledgeTerms(text.replace(/["“”'‘’「」]/gu, " "))].map(term => term.replace(/[.,;:!?]+$/u, "")).filter(Boolean));
-    const terms = new Set(own.flatMap(unit => [...words(`${unit.statement} ${unit.details.join(" ")}`)]));
+    const evidence = own.map(unit => ({ unit, terms: words(`${unit.statement} ${unit.details.join(" ")}`) }));
     // Clause by clause: a sentence giving two choices read as stated when a unit told the one sharing most of its words.
-    const said = (text: string) => { const mine = words(text); return !mine.size || [...mine].filter(term => terms.has(term)).length / mine.size >= .5; };
+    const said = (text: string) => {
+      const mine = words(text);
+      return !mine.size || evidence.some(({ unit, terms }) => (!unit.evidence.quote || quotesChoice(unit.evidence.quote, text))
+        && !statementsConflict(unit.statement, text) && [...mine].filter(term => terms.has(term)).length / mine.size >= .5);
+    };
     const left = sentencesOf(bodyOf(material)).filter(sentence => CHOICE_SENTENCE.test(sentence) && !assistantRequest(sentence)).flatMap(sentence => {
       const clauses = choiceClauses(sentence);
       if (clauses.length < 2) return said(sentence) ? [] : [sentence];
@@ -218,12 +234,22 @@ function normalizeKeys(row: Row, prefix: "" | "confirmation", sizes: Map<string,
 const text = (value: unknown, max: number) => typeof value === "string" && value.trim() && value.length <= max ? value.trim() : undefined;
 
 /** Local checks decide what a unit may claim; the model's labels are proposals. */
-export function checkWikiUnits(value: unknown, passages: Passage[], project?: string): { units: WikiKnowledgeUnit[]; rejected: Record<string, number>; rejectedSamples: NonNullable<WikiUnitBatch["rejectedSamples"]> } {
+export function checkWikiUnits(value: unknown, passages: Passage[], project?: string, literalRecovery?: Passage): { units: WikiKnowledgeUnit[]; rejected: Record<string, number>; rejectedSamples: NonNullable<WikiUnitBatch["rejectedSamples"]> } {
   const rows = (value as { units?: unknown })?.units;
   if (!Array.isArray(rows) || rows.length > MAX_UNITS * 1.5) throw new Error("invalid_units");
   const byAlias = new Map(passages.map(passage => [passage.alias, passage]));
   const sizes = new Map(passages.flatMap(passage => projectProofBlocks(passage.text).map((block, index) => [`${passage.alias}:${index + 1}`, block.text.length] as const)));
-  const cleaned = rows.map(row => { if (!row || typeof row !== "object") return row; const copy = { ...row as Row }; normalizeKeys(copy, "", sizes); normalizeKeys(copy, "confirmation", sizes); return copy; });
+  const cleaned = rows.map(row => {
+    if (!row || typeof row !== "object") return row;
+    const copy = { ...row as Row };
+    delete copy.quote;
+    delete copy.evidenceIds;
+    delete copy.confirmationQuote;
+    delete copy.confirmationEvidenceIds;
+    normalizeKeys(copy, "", sizes);
+    normalizeKeys(copy, "confirmation", sizes);
+    return copy;
+  });
   const resolved = resolveProjectProofs(cleaned, passages.map(passage => ({ id: passage.alias, text: passage.text }))) as Row[];
   const rejected: Record<string, number> = {}, rejectedSamples: NonNullable<WikiUnitBatch["rejectedSamples"]> = [];
   let current: Row = {};
@@ -238,7 +264,17 @@ export function checkWikiUnits(value: unknown, passages: Passage[], project?: st
     const subject = text(row.subject, 60), statement = text(row.statement, 300), kind = KINDS.includes(row.kind as WikiUnitKind) ? row.kind as WikiUnitKind : "fact";
     if (!subject || !statement) { reject("fields"); continue; }
     if (assistantRequest(statement)) { reject("assistant_request"); continue; }
-    const source = Array.isArray(row.evidenceIds) ? byAlias.get(String(row.evidenceIds[0])) : undefined, quote = text(row.quote, 350);
+    let source = Array.isArray(row.evidenceIds) ? byAlias.get(String(row.evidenceIds[0])) : undefined;
+    let quote = text(row.quote, 350);
+    if (literalRecovery && current.passage === literalRecovery.alias && (!source || source === literalRecovery)) {
+      const literal = text(current.literal, 350);
+      if (literal && literal.length >= 6 && literalRecovery.text.includes(literal)
+        && literalRecovery.text.indexOf(literal) === literalRecovery.text.lastIndexOf(literal)
+        && userWordsSay(statement, literal) && !statementsConflict(statement, literal)) {
+        source = literalRecovery;
+        quote = literal;
+      }
+    }
     if (!source || source.context || !quote) { reject("quote"); continue; }
     const material = source.material;
     // Adoption: only a user's own words decide; an approval must be a later, unpasted user reply to this proposal.
@@ -252,7 +288,7 @@ export function checkWikiUnits(value: unknown, passages: Passage[], project?: st
       const later = reply && approvalSource.role === "user" && !approvalSource.pasted && reply.conversationId === material.conversationId && (reply.messageIndex ?? -1) > (material.messageIndex ?? -1);
       const adjacent = later && (reply.messageIndex ?? -1) === (material.messageIndex ?? -1) + 1;
       const single = [...source.text.matchAll(ENUMERATED)].length < 2;
-      const accepts = later && approvalQuote && source.role === "assistant" && (confirmsProposal({ content: approvalSource.text, conversationId: reply.conversationId, messageIndex: reply.messageIndex }, approvalQuote, { content: source.text, conversationId: material.conversationId, messageIndex: material.messageIndex, id: material.messageId, role: "assistant" }, quote) || adjacent && single && approvalSource.text.trim().length <= 40 && SHORT_APPROVAL.test(approvalSource.text) && !QUALIFIED.test(approvalSource.text));
+      const accepts = later && approvalQuote && source.role === "assistant" && (confirmsProposal({ content: approvalSource.text, conversationId: reply.conversationId, messageIndex: reply.messageIndex }, approvalQuote, { content: source.text, conversationId: material.conversationId, messageIndex: material.messageIndex, id: material.messageId, role: "assistant" }, quote) || adjacent && single && approvalSource.text.trim().length <= 40 && !isWikiOptionReply(approvalSource.text) && !isWikiDeicticChoice(approvalSource.text) && SHORT_APPROVAL.test(approvalSource.text) && !QUALIFIED.test(approvalSource.text));
       if (requested === "rejected" && later && approvalQuote && REFUSAL.test(approvalQuote)) adoption = { status: "rejected", approval: { evidenceId: reply.id, messageId: reply.messageId, quote: approvalQuote } };
       else if (requested === "user_adopted" && accepts) adoption = { status: "user_adopted", approval: { evidenceId: reply!.id, messageId: reply!.messageId, quote: approvalQuote! } };
       else { adoption = { status: source.role === "assistant" ? "proposal" : "unknown" }; reject("adoption_downgraded"); }
@@ -325,8 +361,8 @@ const QUOTE_MIN_TERMS = 3, QUOTE_FIT = .25, BLOCK_FIT = .4, BLOCK_SHARED = 3, MA
  * first request of a batch, and its signature, stay as they were. */
 /** project names the document only for the local checks (its own name is never another product): it is not sent, so
  * renaming the document reads no conversation again. One rename re-read 38 batches, half a run's tokens. */
-export function wikiUnitRequest(batch: CoverageMaterial[], all: CoverageMaterial[], locale: string, signal: AbortSignal, pasted: (material: CoverageMaterial) => boolean, project?: string, cover?: string[], coverSentences?: Array<{ id: string; sentences: string[] }>, products?: Array<{ id: string; names: string[] }>): StructuredAIRequest<ReturnType<typeof checkWikiUnits>> {
-  const passages = passagesFor(batch, all, pasted);
+export function wikiUnitRequest(batch: CoverageMaterial[], all: CoverageMaterial[], locale: string, signal: AbortSignal, pasted: (material: CoverageMaterial) => boolean, project?: string, cover?: string[], coverSentences?: Array<{ id: string; sentences: string[] }>, products?: Array<{ id: string; names: string[] }>, recoveryPassages?: Passage[]): StructuredAIRequest<ReturnType<typeof checkWikiUnits>> {
+  const passages = recoveryPassages ?? passagesFor(batch, all, pasted);
   return {
     taskType: "other", temperature: 0, maxAttempts: 1, resendUnsent: true, maxOutputTokens: UNIT_OUTPUT_TOKENS, signal, trace: { feature: "wiki", operation: "wiki:knowledge-units" },
     system: SYSTEM + " When a claim is conditional or applies only to a version, mode or audience, keep that qualifier in statement. Also return conditions: an optional array of up to three literal clauses from this unit's own quoted range, including the limiting words (if, unless, only, 如果, 仅限). Cite the range that contains both the qualifier and the claim. Keep each threshold with the exact measured action, audience, comparator and observation window. An example measures its named feature, not all features. Never attach qualifiers from another point or turn a conditional suggestion into an unconditional decision.",
@@ -392,7 +428,7 @@ export function droppedFigures(unit: WikiKnowledgeUnit, message: string): string
   return found;
 }
 
-export interface WikiKnowledgeReport { requests: number; coverageCovered?: number; coverageDuplicate?: number; coverageNoKnowledge?: number; coverageFailed?: number; coveragePending?: number; fidelityFailedRequests?: number; fidelityUncheckedUnits?: number; fidelityPendingUnits?: number; /** Characters of all material, of pasted material, and of material the user chose to leave out (unread). */ totalCharacters?: number; pastedCharacters?: number; skippedMaterials?: number; skippedCharacters?: number; coverRetries: number; rereadNoLedger?: number; rereadBatchChanged?: number; rereadFailed?: number; rereadRulesChanged?: number; rereadInputChanged?: number; rereadLegacySignatureChanged?: number; /** User messages with source blocks still uncovered after extraction and repair. */ uncoveredMessages?: number; firstPassUncoveredMessages?: number; sentenceRetries?: number; sentenceUnits?: number; figuresRecovered?: number; reused: number; failed: number; units: number; rejected: number; materials: number; coveredMaterials: number; /** Batches read again as two halves after failing whole. */ splitRetries?: number; /** Product comparisons read once more, the units they added and the units they tagged. */ productRequests?: number; productUnits?: number; productTagged?: number; /** Units the user's uncovered messages gave when read again. */ coverUnits?: number; /** Quotes cut to the blocks stating their point; statements saying more than their source, those told again in its terms, and the requests asking. */ quotesTrimmed?: number; statementsDrifting?: number; statementsRepaired?: number; fidelityRequests?: number }
+export interface WikiKnowledgeReport { requests: number; coverageCovered?: number; coverageDuplicate?: number; coverageNoKnowledge?: number; coverageFailed?: number; coveragePending?: number; fidelityFailedRequests?: number; fidelityUncheckedUnits?: number; fidelityPendingUnits?: number; /** Characters of all material, of pasted material, and of material the user chose to leave out (unread). */ totalCharacters?: number; pastedCharacters?: number; skippedMaterials?: number; skippedCharacters?: number; coverRetries: number; rereadNoLedger?: number; rereadBatchChanged?: number; rereadFailed?: number; rereadRulesChanged?: number; rereadInputChanged?: number; rereadLegacySignatureChanged?: number; /** User messages with source blocks still uncovered after extraction and repair. */ uncoveredMessages?: number; firstPassUncoveredMessages?: number; sentenceRetries?: number; sentenceUnits?: number; figuresRecovered?: number; reused: number; reusedAcrossTasks?: number; failed: number; units: number; rejected: number; materials: number; coveredMaterials: number; /** Batches read again as two halves after failing whole. */ splitRetries?: number; /** Product comparisons read once more, the units they added and the units they tagged. */ productRequests?: number; productUnits?: number; productTagged?: number; /** Units the user's uncovered messages gave when read again. */ coverUnits?: number; /** Quotes cut to the blocks stating their point; statements saying more than their source, those told again in its terms, and the requests asking. */ quotesTrimmed?: number; statementsDrifting?: number; statementsRepaired?: number; fidelityRequests?: number }
 
 /** One request per batch, bounded concurrency; a failed batch is recorded, never fatal. */
 /** An earlier batch still describes these materials: same signature, or (older ledgers
@@ -407,7 +443,7 @@ function reusable(previous: WikiUnitBatch | undefined, sameInput: boolean, batch
   return previous.sourceIds.length === batch.length && previous.sourceIds.every((id, index) => id === batch[index].id) && previous.units.every(unit => text.get(unit.evidence.evidenceId)?.includes(normalized(unit.evidence.quote)));
 }
 
-export async function extractWikiKnowledge(input: { materials: CoverageMaterial[]; locale: string; signal: AbortSignal; ai: { modelId?: string; generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> }; previous?: WikiKnowledgeLedger; project?: string; progress?: WikiProgressFn;
+export async function extractWikiKnowledge(input: { materials: CoverageMaterial[]; locale: string; signal: AbortSignal; ai: WikiBudgetModel & { generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> }; previous?: WikiKnowledgeLedger; project?: string; progress?: WikiProgressFn; sharedCache?: boolean;
   /** The units read so far, at a third and two thirds of the batches: enough for a first look at the topics. */
   onUnits?: (units: WikiKnowledgeUnit[]) => void;
   /** Material the user is being asked about: read last, so an answer given meanwhile can still leave it out. */
@@ -422,43 +458,83 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
   // A message split into several materials is pasted or not as a whole.
   const whole = new Map<string, string>();
   for (const material of materials) { const key = JSON.stringify([material.conversationId, material.messageId]); whole.set(key, (whole.get(key) ?? "") + bodyOf(material)); }
-  const pasted = (material: CoverageMaterial) => pastedUserText(whole.get(JSON.stringify([material.conversationId, material.messageId])) ?? bodyOf(material));
+  const pastedMessages = new Map<string,boolean>();
+  const pasted = (material: CoverageMaterial) => {
+    const key = JSON.stringify([material.conversationId,material.messageId]), cached = pastedMessages.get(key);
+    if (cached !== undefined) return cached;
+    const value = pastedUserText(whole.get(key) ?? bodyOf(material));
+    pastedMessages.set(key,value);
+    return value;
+  };
   const later = input.deferred ?? (() => false);
-  const batches = [...wikiUnitBatches(materials.filter(material => !later(material))), ...wikiUnitBatches(materials.filter(later))], results: WikiUnitBatch[] = new Array(batches.length);
+  const cacheEnabled = input.sharedCache && !input.skipped && !input.deferred && globalThis.crypto?.subtle && globalThis.indexedDB;
+  const batches = cacheEnabled ? await stableReadingBatches(materials, {
+    namespace: "wiki-units-v" + EXTRACT_RULES, signal, partial: true,
+    fits: batch => wikiUnitBatches(batch).length === 1,
+    partition: async items => wikiUnitBatches(items),
+  }) : [...wikiUnitBatches(materials.filter(material => !later(material))), ...wikiUnitBatches(materials.filter(later))];
+  const results: WikiUnitBatch[] = new Array(batches.length);
   // Without a question asked now, an update leaves out what the user left out before.
   const earlierSkips = new Set(input.previous?.skippedMessages ?? []), skippedNow = () => input.skipped?.() ?? earlierSkips;
   const leftOut = (material: CoverageMaterial) => skippedNow().has(`${material.conversationId}:${material.messageId}`);
   let skippedMaterials = 0, skippedCharacters = 0;
-  let next = 0, reused = 0, finished = 0, splitRetries = 0;
+  let next = 0, reused = 0, reusedAcrossTasks = 0, finished = 0, splitRetries = 0;
+  // The filled-out batch depends on nearby replies and the whole discussion.
+  // The independently validated first pass depends only on its request.
+  const enrichment = cacheEnabled ? await wikiExtractionCacheKey([COVER_RULES, FIDELITY_RULES, input.project,
+    [...earlierSkips].sort(), materials.map(material => [material.id, material.messageId, material.messageIndex, roleOf(material), material.text, material.precedingContext])]) : "";
+  const cacheKeys = new Map<number, { raw: string; enriched: string }>();
   let available = CONCURRENCY;
   const waitingForSlot: Array<() => void> = [];
-  const send = async <T>(request: StructuredAIRequest<T>): Promise<T> => {
+  const requestSlot = async <T>(request: StructuredAIRequest<T>): Promise<T> => {
     if (available) available--;
     else await new Promise<void>(resolve => waitingForSlot.push(resolve));
     try { signal.throwIfAborted(); return await ai.generateStructured!(request); }
     finally { const waiting = waitingForSlot.shift(); if (waiting) waiting(); else available++; }
   };
+  // Late disconnects with unknown usage have a small allowance. A wider outage
+  // leaves the remaining batches available to resume instead of doubling the run.
+  let transportRetries = 0;
+  const send = async <T>(request: StructuredAIRequest<T>): Promise<T> => {
+    const primary = wikiRequestIdentity(request);
+    try { return await requestSlot(primary); }
+    catch (error) {
+      signal.throwIfAborted();
+      if (!wikiTransportFailure(error) || transportRetries >= 8) throw error;
+      const delay = Math.max(500 + 150 * transportRetries++, Math.min(5000, error instanceof AIProviderHttpError ? error.retryAfterMs ?? 0 : 0));
+      await waitForWikiRetry(signal, delay);
+      return requestSlot(wikiRecoveryRequest({ ...primary, resendUnsent: false }, primary, "transport"));
+    }
+  };
   const reread: Partial<Record<"rereadNoLedger" | "rereadBatchChanged" | "rereadFailed" | "rereadRulesChanged" | "rereadInputChanged" | "rereadLegacySignatureChanged", number>> = {};
+  const needsUserProof = (unit: WikiKnowledgeUnit, material: CoverageMaterial) =>
+    unit.evidence.role === "user" && !unit.evidence.pasted && !pasted(material) && !unit.about &&
+    unit.kind !== "question" && !userWordsSay(unit.statement, bodyOf(material));
+  const contextualChoice = (material: CoverageMaterial) => isWikiOptionReply(bodyOf(material)) || isWikiDeicticChoice(bodyOf(material));
+  const choiceIn = (material: CoverageMaterial) => contextualChoice(material) || STATES_INTENT.test(bodyOf(material)) || CHOICE_SENTENCE.test(bodyOf(material))
+    || /^(?:选(?:择)?\s*(?:第?[一二三四五六七八九十\d]+(?:个|项)?|[A-D])|就按.{1,28}|先别做.{0,25}|不要做.{1,25}|go with (?:option )?[a-d\d])(?:[。.!！、，,\s]|$)/iu.test(bodyOf(material).trim());
+  const linkedChoices = new Set<string>();
+  const feedbackOnly = (material: CoverageMaterial) => !choiceIn(material) && wikiQuoteAsksOnlyForFeedback(bodyOf(material).trim());
+  const hasUserCoverage = (material: CoverageMaterial, units: WikiKnowledgeUnit[]) =>
+    linkedChoices.has(material.id) || !contextualChoice(material)
+      && units.some(unit => unit.evidence.evidenceId === material.id && !needsUserProof(unit, material));
   // The user's own words carry the decisions: a substantive user message with no unit is asked for once more.
   const uncoveredIn = (batch: CoverageMaterial[], found: WikiKnowledgeUnit[]) => batch.filter(material => {
-    if (roleOf(material) !== "user" || pasted(material) || found.some(unit => unit.evidence.evidenceId === material.id)) return false;
-    const body = bodyOf(material).trim(), statesChoice = STATES_INTENT.test(body) || CHOICE_SENTENCE.test(body);
-    return (body.length >= COVER_MIN || statesChoice) && !onlyAsks(body) && (!assistantRequest(body) || statesChoice);
+    if (roleOf(material) !== "user" || pasted(material) || hasUserCoverage(material, found) || feedbackOnly(material)) return false;
+    const body = bodyOf(material).trim(), statesChoice = choiceIn(material);
+    return statesChoice || body.length >= COVER_MIN && !onlyAsks(body) && !assistantRequest(body);
   }).map(material => material.id);
   const coverageOf = (material: CoverageMaterial, result: WikiUnitBatch) => {
     const recorded = result.coverage?.[material.id];
-    return recorded?.version === COVER_RULES && recorded.sourceSignature === sourceMessageSignature(material.text) ? recorded : undefined;
+    return recorded && recorded.version <= COVER_RULES && recorded.sourceSignature === sourceMessageSignature(material.text) ? recorded : undefined;
   };
-  const recordCoverage = (material: CoverageMaterial, result: WikiUnitBatch, status: NonNullable<WikiUnitBatch["coverage"]>[string]["status"], reason?: string, attempted = false) => {
+  const recordCoverage = (material: CoverageMaterial, result: WikiUnitBatch, status: NonNullable<WikiUnitBatch["coverage"]>[string]["status"], reason?: string, attempted = false, failure?: WikiUnitBatch["failure"], recoveryKey?: string) => {
     const prior = coverageOf(material, result);
     return { ...result, coverage: { ...result.coverage, [material.id]: {
-      version: COVER_RULES, sourceSignature: sourceMessageSignature(material.text), status, ...(reason ? { reason } : {}),
-      attempts: (prior?.attempts ?? 0) + Number(attempted),
+      version: COVER_RULES, sourceSignature: sourceMessageSignature(material.text), status, ...(reason ? { reason } : {}), ...(failure ? { failure } : {}),
+      attempts: (prior?.attempts ?? 0) + Number(attempted), ...(recoveryKey ? { recoveryKey } : {}),
     } } };
   };
-  // What the user said that no unit states, whole messages or single choice sentences, is noted on its batch.
-  interface Pending { index: number; batch: CoverageMaterial[]; units: WikiKnowledgeUnit[]; missing: string[]; sentences: Array<{ id: string; sentences: string[] }>; base: WikiUnitBatch }
-  const pending: Pending[] = [];
   const marks = new Set([Math.ceil(batches.length / 3), Math.ceil(batches.length * 2 / 3)].filter(mark => mark > 0 && mark < batches.length));
   const tick = () => { input.progress?.({ stage: "extract", done: finished, total: batches.length }); if (input.onUnits && marks.delete(finished)) input.onUnits(results.flatMap(batch => batch?.units ?? [])); };
   tick();
@@ -470,171 +546,365 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       const batch = batches[index].filter(material => !leftOut(material));
       if (batch.length < batches[index].length) { skippedMaterials += batches[index].length - batch.length; skippedCharacters += batches[index].filter(leftOut).reduce((sum, material) => sum + material.text.length, 0); }
       if (!batch.length) { results[index] = { sourceIds, status: "ok", skipped: true, units: [], rejected: {} }; finished++; tick(); continue; }
-      const request = wikiUnitRequest(batch, materials, locale, signal, pasted, input.project);
+      const request = wikiRequestIdentity(wikiUnitRequest(batch, materials, locale, signal, pasted, input.project));
       const signature = sourceMessageSignature(JSON.stringify([EXTRACT_RULES, request.prompt]));
       const previous = earlier.get(sourceIds[0]);
       const sameInput = Boolean(previous?.signature && sameBatchSources(previous, sourceIds) && (previous.signature === signature
         || previous.signature === sourceMessageSignature(JSON.stringify([EXTRACT_RULES, request.system, request.prompt]))));
       // An unchanged batch keeps its units; only new or changed material is read again.
       if (reusable(previous, sameInput, batch, sourceIds)) {
-        const kept: WikiUnitBatch = { ...previous!, signature, extractRules: EXTRACT_RULES, sentenceChecked: SENTENCE_RULES };
-        // A batch read before the sentence check gets it once: only the choice sentences no unit states are asked for.
-        const left = previous!.sentenceChecked !== SENTENCE_RULES ? uncoveredSentences(batch, previous!.units, pasted) : [];
-        if (left.length) pending.push({ index, batch, units: previous!.units, missing: [], sentences: left, base: kept });
+        const kept: WikiUnitBatch = { ...previous!, signature, extractRules: EXTRACT_RULES };
         results[index] = kept; reused++; finished++; tick(); continue;
+      }
+      const keys = cacheEnabled ? await wikiExtractionCacheKey([
+        EXTRACT_RULES, request.system, request.prompt, ai.modelId, input.project,
+        batch.map(material => [material.conversationId, material.messageId, material.id, material.messageIndex]),
+      ]).then(raw => ({ raw, enriched: raw + ":" + enrichment })) : undefined;
+      if (keys) {
+        cacheKeys.set(index, keys);
+        const restored = await readWikiExtractionBatch(keys.enriched) ?? await readWikiExtractionBatch(keys.raw);
+        signal.throwIfAborted();
+        if (restored && restored.signature === signature && sameBatchSources(restored, sourceIds)) {
+          results[index] = restored; reused++; reusedAcrossTasks++; finished++; tick(); continue;
+        }
       }
       const reason = !input.previous ? "rereadNoLedger" : !previous || previous.skipped || !sameBatchSources(previous, sourceIds) ? "rereadBatchChanged" : previous.status !== "ok" ? "rereadFailed"
         : previous.extractRules === undefined ? "rereadLegacySignatureChanged" : previous.extractRules !== EXTRACT_RULES ? "rereadRulesChanged" : "rereadInputChanged";
       reread[reason] = (reread[reason] ?? 0) + 1;
       try {
-        // A batch over the input budget, or one the provider timed out on, is read again as two halves: one run lost six
-        // of 36 batches this way (one at 15358/14000 estimated tokens, five at 90-117 s), a sixth of its material.
-        // A failed half leaves the batch incomplete and the successful half available to resume.
-        const saved = sameInput ? previous?.recoveredHalves : undefined;
-        let first: Awaited<ReturnType<typeof request.validate>> | undefined;
-        if (!saved?.length) try { first = await send(request); }
-        catch (error) {
-          signal.throwIfAborted();
-          const code = (error as { code?: string })?.code;
-          if (batch.length < 2 || !(code === "LOCAL_INPUT_BUDGET" || code === "LOCAL_INPUT_CHARACTERS" || error instanceof AIProviderValidationError
-            || error instanceof AIProviderHttpError && error.status === 413 || error instanceof AIProviderResponseError && ["PROVIDER_TIMEOUT", "PROVIDER_OUTPUT_TRUNCATED", "PROVIDER_STREAM_INCOMPLETE"].includes(error.code))) throw error;
-        }
-        if (!first) {
-          const middle = Math.ceil(batch.length / 2), halves = [batch.slice(0, middle), batch.slice(middle)];
-          const parts = [...saved ?? []], rejected: Record<string, number> = {};
+        // Save validated leaves of a failed split so a resumed task only requests the missing branches.
+        const saved = new Map((sameInput ? previous?.recoveredHalves ?? [] : []).map(item => [item.path ?? String(item.index), item]));
+        const parts: NonNullable<WikiUnitBatch["recoveredHalves"]> = [];
+        const failedSources: NonNullable<WikiUnitBatch["failedSources"]> = {};
+        let failure: string | undefined, provenance: WikiUnitBatch["failure"];
+        const read = async (material: CoverageMaterial[], job: typeof request, path = ""): Promise<void> => {
+          const checkpoint = saved.get(path);
+          if (checkpoint) { parts.push(checkpoint); return; }
+          const descendants = [...saved.keys()].some(key => key.startsWith(path));
+          let splitReason: ReturnType<typeof wikiSplitReason> = previous?.failure?.kind === "truncated" ? "output_truncation" : "input_budget";
+          if (!descendants) {
+            try {
+              if (material.length > 1 && !wikiRequestFits(job, ai, 384)) {
+                throw Object.assign(new Error("Extraction request exceeds its input budget"), { code: "LOCAL_INPUT_BUDGET" });
+              }
+              const answer = await send(job);
+              parts.push({ index: Number(path[0] ?? 0), path, ...answer });
+              return;
+            } catch (error) {
+              signal.throwIfAborted();
+              const canSplit = material.length > 1 && path.length < 3 && (wikiCannotFit(error) || !path && error instanceof AIProviderValidationError);
+              if (!canSplit) {
+                failure ??= error instanceof Error ? error.message.slice(0, 200) : "failed";
+                const sourceFailure = wikiBatchFailure(error);
+                provenance ??= sourceFailure;
+                for (const item of material) failedSources[item.id] = sourceFailure;
+                return;
+              }
+              splitReason = wikiSplitReason(error);
+            }
+          }
+          const middle = Math.ceil(material.length / 2);
           splitRetries++;
-          const outcomes = await Promise.allSettled(halves.flatMap((half, halfIndex) => parts.some(part => part.index === halfIndex) ? [] : [
-            send(wikiUnitRequest(half, materials, locale, signal, pasted, input.project)).then(part => ({ index: halfIndex, ...part })),
-          ]));
-          signal.throwIfAborted();
-          let failure: string | undefined;
-          for (const outcome of outcomes) {
-            if (outcome.status === "fulfilled") parts.push(outcome.value);
-            else failure ??= outcome.reason instanceof Error ? outcome.reason.message.slice(0, 200) : "failed";
-          }
-          parts.sort((a, b) => a.index - b.index);
-          for (const part of parts) for (const [reason, count] of Object.entries(part.rejected)) rejected[reason] = (rejected[reason] ?? 0) + count;
-          first = { units: parts.flatMap(part => part.units), rejected, rejectedSamples: parts.flatMap(part => part.rejectedSamples ?? []) };
-          if (failure) {
-            results[index] = { sourceIds, signature, extractRules: EXTRACT_RULES, status: "failed", units: first.units, rejected, error: failure, ...(parts.length ? { recoveredHalves: parts } : {}) };
-            finished++; tick(); continue;
-          }
+          await Promise.all([material.slice(0, middle), material.slice(middle)].map((half, index) =>
+            read(half, wikiRecoveryRequest(wikiUnitRequest(half, materials, locale, signal, pasted, input.project), job, splitReason), path + index)));
+        };
+        await read(batch, request);
+        parts.sort((a, b) => (a.path ?? String(a.index)).localeCompare(b.path ?? String(b.index)));
+        const rejected: Record<string, number> = {};
+        for (const part of parts) for (const [reason, count] of Object.entries(part.rejected)) rejected[reason] = (rejected[reason] ?? 0) + count;
+        const first = { units: parts.flatMap(part => part.units), rejected, rejectedSamples: parts.flatMap(part => part.rejectedSamples ?? []) };
+        if (failure) {
+          results[index] = { sourceIds, signature, extractRules: EXTRACT_RULES, status: "failed", units: first.units, rejected,
+            error: failure, failure: provenance, failedSources, ...(parts.length ? { recoveredHalves: parts } : {}) };
+          finished++; tick(); continue;
         }
-        const missing = uncoveredIn(batch, first.units), sentences = uncoveredSentences(batch, first.units, pasted).filter(item => !missing.includes(item.id));
-        const base: WikiUnitBatch = { sourceIds, signature, extractRules: EXTRACT_RULES, status: "ok", units: first.units, rejected: first.rejected, ...(first.rejectedSamples.length ? { rejectedSamples: first.rejectedSamples } : {}), sentenceChecked: SENTENCE_RULES };
+        const base: WikiUnitBatch = { sourceIds, signature, extractRules: EXTRACT_RULES, status: "ok", units: first.units, rejected: first.rejected, ...(first.rejectedSamples.length ? { rejectedSamples: first.rejectedSamples } : {}) };
         results[index] = base;
-        if (missing.length || sentences.length) pending.push({ index, batch, units: first.units, missing, sentences, base });
+        if (keys) await cacheWikiExtractionBatch(keys.raw, base);
       }
-      catch (error) { signal.throwIfAborted(); results[index] = { sourceIds, signature, extractRules: EXTRACT_RULES, status: "failed", units: [], rejected: {}, error: error instanceof Error ? error.message.slice(0, 200) : "failed" }; }
+      catch (error) { signal.throwIfAborted(); results[index] = { sourceIds, signature, extractRules: EXTRACT_RULES, status: "failed", units: [], rejected: {}, failure: wikiBatchFailure(error), error: error instanceof Error ? error.message.slice(0, 200) : "failed" }; }
       finished++; tick();
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
-  const initialCoverageGaps = results.flatMap((result, index) => result?.status === "ok" && !result.skipped
-    ? uncoveredIn(batches[index].filter(material => !leftOut(material)), result.units).filter(id => {
-      const material = batches[index].find(material => material.id === id)!;
-      return coverageOf(material, result)?.status !== "no_knowledge";
-    }) : []);
-  // No second request for what the first answer left out: packed after the main pass it added about 5 units in 1,200
-  // for eight requests. What stays uncovered is recorded, so the quality check still names it.
-  for (const item of pending) {
-    const still = item.missing.length ? uncoveredIn(item.batch, item.units) : [], stillSentences = item.sentences.length ? uncoveredSentences(item.batch, item.units, pasted).reduce((sum, entry) => sum + entry.sentences.length, 0) : 0;
-    results[item.index] = { ...item.base, units: item.units, ...(still.length ? { uncovered: still } : {}), ...(stillSentences ? { uncoveredSentences: stillSentences } : {}) };
-  }
-  // The user's own messages still without a unit, read once more: packed by conversation, a few requests a run, each
-  // unit kept with the batch its message belongs to. A unit stating again what the batch has is not added.
   const batchOf = new Map(batches.flatMap((batch, index) => batch.map(material => [material.id, index] as const)));
   const byId = new Map(materials.map(material => [material.id, material]));
-  // Recalculate gaps even if a legacy recovery was marked complete.
+  const sourceOrder = new Map(materials.map((material, index) => [material.id, index]));
+  const position = (material: CoverageMaterial, offset = 0) => JSON.stringify([material.conversationId, (material.messageIndex ?? -1) + offset]);
+  const atPosition = new Map<string, CoverageMaterial[]>();
+  for (const material of materials) {
+    if (material.messageIndex === undefined) continue;
+    const key = position(material), at = atPosition.get(key);
+    if (at) at.push(material);
+    else atPosition.set(key, [material]);
+  }
+  const replyContextOf = (reply: CoverageMaterial) => {
+    const parts = (atPosition.get(position(reply, -1)) ?? []).filter(item => roleOf(item) === "assistant" && !leftOut(item));
+    if (reply.messageIndex === undefined || new Set(parts.map(item => item.messageId)).size !== 1) return;
+    return { parts, text: parts.map(bodyOf).join("") };
+  };
+  const optionOf = (reply: CoverageMaterial, context = replyContextOf(reply)) => {
+    const words = bodyOf(reply).trim();
+    if (!context || whole.get(JSON.stringify([reply.conversationId, reply.messageId]))?.trim() !== words) return;
+    const previous = context.parts[0];
+    const singleProposal = isWikiDeicticChoice(words) && context.parts.length === 1 && context.text.length <= 350 && !/\n/u.test(context.text.trim())
+      && (context.text.match(/[。！？!?]|\.(?=\s|$)/gu)?.length ?? 0) <= 1
+      && confirmsProposal({ content: words, conversationId: reply.conversationId, messageIndex: reply.messageIndex }, words,
+        { content: context.text, conversationId: previous.conversationId, messageIndex: previous.messageIndex, id: previous.messageId, role: "assistant" });
+    const option = singleProposal ? { start: 0, end: context.text.length } : wikiReplyOption(words, context.text);
+    if (!option) return;
+    let offset = 0;
+    const passages = context.parts.flatMap(material => {
+      const raw = bodyOf(material), start = offset;
+      offset += raw.length;
+      const text = raw.slice(Math.max(0, option.start - start), Math.max(0, option.end - start));
+      return text.trim() ? [{ material, text }] : [];
+    });
+    return { reply, words, context, passages };
+  };
+  const confirmsOption = (option: NonNullable<ReturnType<typeof optionOf>>, unit: WikiKnowledgeUnit, quote: string) => {
+    const material = byId.get(unit.evidence.evidenceId);
+    return !unit.about && unit.evidence.role === "assistant" && unit.adoption.status !== "rejected" && material
+      && !leftOut(material) && !leftOut(option.reply)
+      && option.passages.some(part => part.material.id === material.id && part.text.includes(quote))
+      && confirmsProposal({ content: option.words, conversationId: option.reply.conversationId, messageIndex: option.reply.messageIndex }, option.words,
+        { content: option.context.text, conversationId: material.conversationId, messageIndex: material.messageIndex, id: material.messageId, role: "assistant" }, quote);
+  };
+  const withOptionApproval = (unit: WikiKnowledgeUnit, option: NonNullable<ReturnType<typeof optionOf>>, quote: string): WikiKnowledgeUnit => ({
+    ...unit, evidence: { ...unit.evidence, quote },
+    adoption: { status: "user_adopted", approval: { evidenceId: option.reply.id, messageId: option.reply.messageId, quote: option.words } },
+  });
+  const options = materials.filter(reply => roleOf(reply) === "user" && !pasted(reply) && !leftOut(reply) && contextualChoice(reply))
+    .flatMap(reply => optionOf(reply) ?? []);
+  const optionByReply = new Map(options.map(option => [option.reply.id, option]));
+  const optionBySource = new Map(options.flatMap(option => option.passages.map(part => [part.material.id, option] as const)));
+  // Resolve a short selection from already read units before scheduling a paid request.
+  for (const batch of results) batch.units = batch.units.map(unit => {
+    const option = optionBySource.get(unit.evidence.evidenceId);
+    const approval = unit.adoption.status === "user_adopted" ? unit.adoption.approval : undefined;
+    const rejectedCachedSelection = approval && isWikiOptionReply(approval.quote) && byId.has(approval.evidenceId);
+    const unresolved = () => rejectedCachedSelection ? { ...unit, adoption: { status: "proposal" as const } } : unit;
+    if (!option) return unresolved();
+    const lines = unit.evidence.quote.split("\n").map(line => line.replace(/^[\s*#]*(?:(?:方案|选项|Option|Approach)\s*[一二三四五六七八九1-9A-I]|[1-9A-I][.)、])\s*[：:]?\s*/iu, "").trim());
+    const quote = [unit.evidence.quote, ...lines.filter(line => line && normalized(line).includes(normalized(unit.statement))
+      && [...wikiUnitConditions(unit), ...unit.details].every(detail => normalized(line).includes(normalized(detail))))].find(value => confirmsOption(option, unit, value)
+        && userWordsSay(unit.statement, value) && !statementsConflict(unit.statement, value));
+    if (!quote) return unresolved();
+    linkedChoices.add(option.reply.id);
+    return withOptionApproval(unit, option, quote);
+  });
+
+  const missingChoices = (own: CoverageMaterial[], units: WikiKnowledgeUnit[]) => {
+    const grounded = units.filter(unit => {
+      const source = byId.get(unit.evidence.evidenceId);
+      return source && !needsUserProof(unit, source);
+    });
+    return new Map(uncoveredSentences(own, grounded, pasted).map(item => [item.id, item.sentences]));
+  };
+  const attributionReason = "Source or role validation did not retain a unit from this user passage";
+  const partialReason = "Some explicit choices in this passage still lack source-backed coverage";
+  // Evaluate coverage per original passage, even when its batch was reused.
   const waiting = results.flatMap((result, index) => {
     if (!result || result.status !== "ok" || result.skipped) return [];
-    const missing = uncoveredIn(batches[index].filter(material => !leftOut(material)), result.units);
-    return missing.flatMap(id => {
-      const material = byId.get(id);
-      if (!material) return [];
+    const own = batches[index].filter(material => !leftOut(material));
+    const missing = new Set(uncoveredIn(own, result.units));
+    const gaps = missingChoices(own.filter(material => !missing.has(material.id)), result.units);
+    return own.flatMap(material => {
+      const sentences = gaps.get(material.id) ?? [];
+      if (!missing.has(material.id) && !sentences.length) return [];
       const outcome = coverageOf(material, result);
-      return outcome?.status === "no_knowledge" ? [] : [{ material, attempts: outcome?.attempts ?? 0 }];
+      if (outcome?.status === "no_knowledge" && !sentences.length && !choiceIn(material)) return [];
+      const attribution = result.units.some(unit => unit.evidence.evidenceId === material.id && needsUserProof(unit, material)) || outcome?.reason === attributionReason;
+      const context = replyContextOf(material);
+      const option = optionByReply.get(material.id);
+      const key = sourceMessageSignature(JSON.stringify([COVER_RULES, ai.modelId, ai.capabilities, material.text, sentences, context?.text, context?.parts.map(part => part.id)]));
+      return [{ material, index, key, sentences, attribution, context, option, outcome, priority: option || sentences.length ? 3 : choiceIn(material) ? 2 : attribution ? 1 : 0 }];
     });
   });
-  const coverRequest = (pack: CoverageMaterial[]) => {
-      const request = wikiUnitRequest(pack, materials, locale, signal, pasted, input.project, pack.map(material => material.id));
-      const payload = JSON.parse(request.prompt);
-      const proof = new Map(pack.map((material, index) => ["p" + (index + 1), material]));
-      return {
-        ...request,
-        prompt: JSON.stringify({ ...payload, coverReview: "Extract every project intent from the covered user passages, even if an assistant already said it. Also return coverage:[{passage:'p1',status:'no_knowledge'|'pending',reason:'question'|'assistant_request'|'no_project_content',explanation:'brief reason'}] for passages producing no unit. Choose no_knowledge only when no durable project fact, choice, intent or constraint is stated. Uncertain cases are pending." }),
+  const initialCoverageGaps = waiting.map(item => item.material.id);
+  type CoverItem = typeof waiting[number];
+  const needsRecovery = waiting.filter(item => {
+    if (item.outcome?.recoveryKey === item.key && (item.outcome.status === "pending" || item.outcome.failure?.code === "LOCAL_INPUT_BUDGET")) return false;
+    if (!item.option && contextualChoice(item.material)) {
+      results[item.index] = recordCoverage(item.material, results[item.index], "pending", "unclear_reference: could not verify a unique option", false, undefined, item.key);
+      return false;
+    }
+    return true;
+  });
+
+  const focusContext = (context: NonNullable<CoverItem["context"]>, body: string) => {
+    if (context.text.length <= 1200) return [context.text];
+    const terms = knowledgeTerms(body);
+    const blocks = projectProofBlocks(context.text);
+    const best = blocks.map((block, index) => ({ index, score: [...knowledgeTerms(block.text)].filter(term => terms.has(term)).length }))
+      .sort((a, b) => b.score - a.score || a.index - b.index).filter(item => item.score > 0).slice(0, 3);
+    const indices = best.length ? best.flatMap(({ index }) => [index - 1, index, index + 1]) : [0, 1, blocks.length - 2, blocks.length - 1];
+    return [...new Set(indices)].sort((a, b) => a - b).flatMap(index => blocks[index]?.text ?? []);
+  };
+
+  type CoverAnswer = ReturnType<typeof checkWikiUnits> & { coverage: Record<string, string>; pendingReasons: Record<string, string> };
+  const coverRequest = (items: CoverItem[], focused = false, extraOutput = 0): {expectedOutput: number; request: StructuredAIRequest<CoverAnswer>} => {
+    const pack = [...items].sort((a, b) => sourceOrder.get(a.material.id)! - sourceOrder.get(b.material.id)!);
+    const proof = new Map(pack.map((item, index) => ["p" + (index + 1), item]));
+    const sentenceTargets = pack.flatMap(item => {
+      const sentences = item.sentences.length ? item.sentences : focused && !item.option
+        ? sentencesOf(bodyOf(item.material)).filter(sentence => CHOICE_SENTENCE.test(sentence) && !assistantRequest(sentence)).flatMap(choiceClauses) : [];
+      return sentences.length ? [{ id: item.material.id, sentences }] : [];
+    });
+    const targetText = (item: CoverItem) => {
+      const original = bodyOf(item.material), target = sentenceTargets.find(row => row.id === item.material.id);
+      if (!target || original.length <= 900) return original;
+      const ranges = target.sentences.map(sentence => ({ start: original.indexOf(sentence), length: sentence.length }));
+      if (ranges.some(range => range.start < 0)) return original;
+      const start = Math.min(...ranges.map(range => range.start)), end = Math.max(...ranges.map(range => range.start + range.length));
+      const blocks = projectProofBlocks(original);
+      const first = blocks.findIndex(block => block.end > start), last = blocks.findIndex(block => block.end >= end);
+      return first < 0 || last < 0 ? original : original.slice(blocks[Math.max(0, first - 1)].start, blocks[Math.min(blocks.length - 1, last + 1)].end);
+    };
+    const passages: Passage[] = [...proof].map(([alias, item]) => ({
+      alias, material: item.material, text: targetText(item), role: "user", pasted: false, context: false,
+    }));
+    const selectedOptions = [...proof].flatMap(([confirmation, item]) => item.option?.passages.flatMap(part => {
+      if (leftOut(part.material)) return [];
+      const alias = "p" + (passages.length + 1);
+      passages.push({ alias, material: part.material, text: part.text, role: "assistant", pasted: false, context: false });
+      return [{ passage: alias, confirmation }];
+    }) ?? []);
+    const request = wikiUnitRequest(pack.map(item => item.material), materials, locale, signal, pasted, input.project,
+      pack.filter(item => !item.sentences.length).map(item => item.material.id), sentenceTargets, undefined, passages);
+    const payload = JSON.parse(request.prompt);
+    const replyContext = [...proof].flatMap(([passage, item]) => item.context && item.context.parts.every(part => !leftOut(part)) && !item.option && !item.sentences.length
+      ? [{ passage, text: focusContext(item.context, bodyOf(item.material)).join("\n[…]\n") }] : []);
+    const expectedRows = pack.reduce((sum, item) => sum + Math.max(2, item.sentences.length * 2,
+      !item.sentences.length&&!item.option ? Math.min(12,Math.ceil(targetText(item).length/240)) : 0,
+      Math.ceil((item.option?.passages.reduce((count, part) => count + part.text.length, 0) ?? 0) / 160)), 0);
+    const nominal = wikiStructuredOutput(expectedRows, 260, UNIT_OUTPUT_TOKENS, focused?1600:1200);
+    const maxOutputTokens = Math.min(ai.capabilities?.maxOutputTokens ?? Infinity, UNIT_OUTPUT_TOKENS, nominal+extraOutput);
+    return {
+      expectedOutput: extraOutput ? maxOutputTokens
+        : Math.min(maxOutputTokens, wikiStructuredOutput(expectedRows, 175, UNIT_OUTPUT_TOKENS, focused?1050:850)),
+      request: {
+        ...request, maxOutputTokens, trace: { ...request.trace, operation: "wiki:knowledge-cover" },
+        prompt: JSON.stringify({ ...payload,
+          coverReview: "For cover passages, extract each durable statement the user actually makes. For coverSentences, recover only the missing clauses, keeping each version, negation and exception; do not repeat the already covered claims. Use exact source labels. replyContext only helps identify what was discussed; never quote it as if the user said it. selectedOptions pairs an assistant's exact selected alternative with the user's reply. Extract only concrete durable claims from that option with the assistant quoteKey and the user's confirmationQuoteKey. Never expand a short reply into a standalone decision. For each whole passage without a valid unit report coverage:[{passage:'p1',status:'no_knowledge'|'pending',reason:'question'|'assistant_request'|'no_project_content'|'unclear_reference'|'insufficient_evidence',explanation:'brief reason'}]. Use no_knowledge only for a passage without durable project knowledge.",
+          replyContext, selectedOptions, ...(focused ? { recoveryFocus: "For each unit from the target user's own passage, give its passage label and a literal field with the exact complete original clause proving the statement, including any conditions. Keep quoteKey if known. Do not copy context or cite a different role. If the user only requests feedback or the reference cannot be resolved, give the matching coverage reason." } : {}),
+          attributionReview: [...proof].flatMap(([key, item]) => item.attribution ? [key] : []) }),
         validate: (value: unknown) => {
-          const parsed = request.validate(value);
+          const target = focused && pack.length === 1 && !pack[0].option ? passages[0] : undefined;
+          const parsed = target?.role === "user" && !target.pasted ? checkWikiUnits(value, passages, input.project, target) : request.validate(value);
           const rows = (value as { coverage?: unknown })?.coverage;
-          const coverage: Record<string, string> = {};
+          const coverage: Record<string, string> = {}, pendingReasons: Record<string, string> = {};
           if (Array.isArray(rows)) for (const row of rows) {
-            const entry = row as Record<string, unknown>, material = proof.get(String(entry?.passage));
-            if (!material || entry.status !== "no_knowledge" || !["question", "assistant_request", "no_project_content"].includes(String(entry.reason))
-              || typeof entry.explanation !== "string" || !entry.explanation.trim() || STATES_INTENT.test(bodyOf(material)) || CHOICE_SENTENCE.test(bodyOf(material))) continue;
-            coverage[material.id] = String(entry.reason) + ": " + entry.explanation.slice(0, 180);
+            const entry = row as Record<string, unknown>, item = proof.get(String(entry?.passage));
+            if (!item || typeof entry.explanation !== "string" || !entry.explanation.trim()) continue;
+            if (entry.status === "pending" && ["unclear_reference", "insufficient_evidence"].includes(String(entry.reason))) {
+              pendingReasons[item.material.id] = String(entry.reason) + ": " + entry.explanation.slice(0, 180);
+            }
+            if (entry.status === "no_knowledge" && ["question", "assistant_request", "no_project_content"].includes(String(entry.reason))
+              && !item.sentences.length && !choiceIn(item.material)) {
+              coverage[item.material.id] = String(entry.reason) + ": " + entry.explanation.slice(0, 180);
+            }
           }
-          return { ...parsed, coverage };
+          return { ...parsed, coverage, pendingReasons };
         },
-      };
+      },
+    };
   };
-  const packs: Array<{ materials: CoverageMaterial[]; request: ReturnType<typeof coverRequest> }> = [];
-  const fits = (request: ReturnType<typeof coverRequest>) => {
-    const budget = requestBudget(request, ai.modelId);
-    return budget.inputTokens <= budget.maxInputTokens;
-  };
-  // Budget the actual prompt, including proof labels and disposition metadata.
-  // In later runs, give passages never attempted a turn ahead of repeat failures.
-  for (const { material } of waiting.sort((a, b) => a.attempts - b.attempts)) {
+
+  type CoverPack = ReturnType<typeof coverRequest> & { items: CoverItem[] };
+  const packs: CoverPack[] = [];
+  const fits = (pack: ReturnType<typeof coverRequest>) => wikiRequestFits(pack.request, ai, pack.expectedOutput);
+  for (const item of needsRecovery.sort((a, b) => b.priority - a.priority || (a.outcome?.attempts ?? 0) - (b.outcome?.attempts ?? 0))) {
     const last = packs.at(-1);
-    if (last && last.materials.length < MAX_UNITS && last.materials[0].conversationId === material.conversationId) {
-      const combined = [...last.materials, material], request = coverRequest(combined);
-      if (fits(request)) { last.materials = combined; last.request = request; continue; }
+    if (last && last.items.length < (item.priority > 0 ? 6 : 12) && last.items[0].material.conversationId === item.material.conversationId) {
+      const items = [...last.items, item], combined = coverRequest(items);
+      if (fits(combined)) { packs[packs.length - 1] = { items, ...combined }; continue; }
     }
-    const request = coverRequest([material]);
-    if (fits(request)) packs.push({ materials: [material], request });
-    else {
-      const index = batchOf.get(material.id)!;
-      results[index] = recordCoverage(material, results[index], "failed", "This source passage exceeds the recovery input budget", true);
-    }
+    const request = coverRequest([item]);
+    if (fits(request)) packs.push({ items: [item], ...request });
+    else results[item.index] = recordCoverage(item.material, results[item.index], "failed", "This source passage exceeds the recovery budget", false, { kind: "local", code: "LOCAL_INPUT_BUDGET" }, item.key);
   }
-  let coverRequests = 0, coverUnits = 0;
-  const cover = async ({ materials: pack, request }: typeof packs[number]): Promise<void> => {
+  let coverRequests = 0, coverUnits = 0, sentenceRetries = 0, sentenceUnits = 0;
+  const cover = async (job: CoverPack, focused = false, raised = false): Promise<void> => {
     signal.throwIfAborted();
+    const items = job.items.filter(item => !leftOut(item.material));
+    if (!items.length || coverRequests >= COVER_REQUESTS * 2) return;
+    const sourcesChanged = items.length !== job.items.length || items.some(item => item.context?.parts.some(leftOut));
+    const request = wikiRequestIdentity(sourcesChanged ? coverRequest(items, focused).request : job.request);
     try {
-      if(coverRequests>=COVER_REQUESTS*2)throw new Error("Recovery retry budget exhausted");
       coverRequests++;
+      if (items.some(item => item.sentences.length)) sentenceRetries++;
       const answer = await send(request);
       const duplicates = new Set<string>();
-      for (const unit of answer.units) {
-        const index = batchOf.get(unit.evidence.evidenceId);
-        if (index === undefined || !results[index]) continue;
-        // Equivalent wording cannot erase independent user evidence or stance.
-        if (results[index].units.some(other => other.evidence.evidenceId === unit.evidence.evidenceId
-          && other.evidence.role === unit.evidence.role && other.evidence.pasted === unit.evidence.pasted
-          && other.kind === unit.kind && other.adoption.status === unit.adoption.status && similarStatements(other.statement, unit.statement))) {
-          duplicates.add(unit.evidence.evidenceId);
+      const userItems = new Map(items.map(item => [item.material.id, item]));
+      const selectedItems = new Map(items.flatMap(item => item.option?.passages.map(part => [part.material.id, item] as const) ?? []));
+      for (const raw of answer.units) {
+        const id = raw.evidence.evidenceId, index = batchOf.get(id), material = byId.get(id);
+        if (index === undefined || !results[index] || !material || leftOut(material)) continue;
+        const item = userItems.get(id) ?? selectedItems.get(id);
+        if (!item || leftOut(item.material) || needsUserProof(raw, material)) continue;
+        let unit = raw;
+        if (item.option) {
+          if (!confirmsOption(item.option, unit, unit.evidence.quote) || !DECIDING_KINDS.includes(unit.kind)
+            || !userWordsSay(unit.statement, unit.evidence.quote) || statementsConflict(unit.statement, unit.evidence.quote)) continue;
+          unit = withOptionApproval(unit, item.option, unit.evidence.quote);
+          linkedChoices.add(item.material.id);
+        } else if (item.sentences.length && !item.sentences.some(sentence => quotesChoice(unit.evidence.quote, sentence)
+          && userWordsSay(unit.statement, sentence) && !statementsConflict(unit.statement, sentence))) continue;
+        // Only identical bindings and standing are interchangeable.
+        if (results[index].units.some(other => other.evidence.evidenceId === id && other.evidence.role === unit.evidence.role
+          && other.evidence.pasted === unit.evidence.pasted && other.kind === unit.kind && other.adoption.status === unit.adoption.status
+          && normalized(other.evidence.quote) === normalized(unit.evidence.quote) && similarStatements(other.statement, unit.statement))) {
+          duplicates.add(item.material.id);
           continue;
         }
-        results[index] = { ...results[index], units: [...results[index].units, unit] }; coverUnits++;
+        results[index] = { ...results[index], units: [...results[index].units, unit] };
+        coverUnits++;
+        if (item.sentences.length) sentenceUnits++;
       }
-      for (const material of pack) {
-        const index = batchOf.get(material.id)!;
-        const covered = results[index].units.some(unit => unit.evidence.evidenceId === material.id);
-        const reason = answer.coverage[material.id];
-        results[index] = recordCoverage(material, results[index], covered ? duplicates.has(material.id) ? "duplicate" : "covered" : reason ? "no_knowledge" : "pending",
-          covered ? undefined : reason ?? "No supported unit or conclusive disposition returned", true);
+      const retry: CoverItem[] = [];
+      for (const item of items) {
+        const { material, index } = item;
+        const existing = results[index];
+        const covered = hasUserCoverage(material, existing.units);
+        const left = covered ? missingChoices([material], existing.units).get(material.id) ?? [] : [];
+        const disposition = !covered && answer.coverage[material.id];
+        const explanation = answer.pendingReasons[material.id];
+        const status = covered && !left.length ? duplicates.has(material.id) ? "duplicate" : "covered" : disposition ? "no_knowledge" : "pending";
+        const reason = status === "pending" ? explanation ?? (left.length ? partialReason : item.attribution ? attributionReason : "No supported unit or conclusive disposition returned")
+          : disposition || undefined;
+        const canFocus = status === "pending" && !explanation && !focused;
+        results[index] = recordCoverage(material, existing, status, reason, true, undefined, canFocus ? undefined : item.key);
+        if (canFocus) retry.push({ ...item, sentences: left.length ? left : item.sentences });
+      }
+      for (const item of retry) {
+        const job = coverRequest([item], true);
+        if (fits(job) && coverRequests < COVER_REQUESTS * 2) {
+          await cover({ items: [item], ...job, request: wikiRecoveryRequest(job.request, request, "schema") }, true);
+        } else if (!fits(job)) {
+          const current = results[item.index];
+          results[item.index] = recordCoverage(item.material, current, "failed", "This source passage exceeds the focused recovery budget", false, { kind: "local", code: "LOCAL_INPUT_BUDGET" }, item.key);
+        }
       }
     } catch (error) {
       signal.throwIfAborted();
-      const code=(error as {code?:string})?.code;
-      if(pack.length>1&&coverRequests+2<=COVER_REQUESTS*2&&(code==="LOCAL_INPUT_BUDGET"||code==="LOCAL_INPUT_CHARACTERS"||code==="PROVIDER_OUTPUT_TRUNCATED"||error instanceof AIProviderHttpError&&error.status===413)){
-        const middle=Math.ceil(pack.length/2);
-        await Promise.all([pack.slice(0,middle),pack.slice(middle)].map(materials=>cover({materials,request:coverRequest(materials)})));
+      if (items.length > 1 && coverRequests + 2 <= COVER_REQUESTS * 2 && wikiCannotFit(error)) {
+        const middle = Math.ceil(items.length / 2);
+        await Promise.all([items.slice(0, middle), items.slice(middle)].map(items => {
+          const next = coverRequest(items, focused);
+          return cover({ items, ...next, request: wikiRecoveryRequest(next.request, request, wikiSplitReason(error)) }, focused);
+        }));
         return;
       }
-      for (const material of pack) {
-        const index = batchOf.get(material.id)!;
-        results[index] = recordCoverage(material, results[index], "failed", error instanceof Error ? error.message.slice(0, 180) : "Recovery request failed", true);
+      if(items.length===1&&!raised&&coverRequests<COVER_REQUESTS*2&&wikiBatchFailure(error).kind==="truncated"){
+        const next=coverRequest(items,true,Math.max(800,request.maxOutputTokens??0));
+        if((next.request.maxOutputTokens??0)>(request.maxOutputTokens??0)&&fits(next)){
+          await cover({items,...next,request:wikiRecoveryRequest(next.request,request,"output_truncation")},true,true);
+          return;
+        }
+      }
+      for (const { material, index, key } of items) {
+        results[index] = recordCoverage(material, results[index], "failed", error instanceof Error ? error.message.slice(0, 180) : "Recovery request failed", true, wikiBatchFailure(error), key);
       }
     }
   };
@@ -667,21 +937,13 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       results[index] = { ...result, units, productsChecked: PRODUCT_RULES };
     } catch { signal.throwIfAborted(); }
   };
-  await Promise.all([...packs.slice(0, COVER_REQUESTS).map(cover), ...candidates.map(compare)]);
-  // Each batch read again, or with nothing to read, is checked: what is still without a unit stays noted.
-  for (const [index, result] of results.entries()) {
-    if (!result || result.status !== "ok" || result.skipped) continue;
-    const missing = uncoveredIn(batches[index].filter(material => !leftOut(material)), result.units);
-    const unresolved = missing.filter(id => {
-      const material = byId.get(id);
-      const outcome = material && coverageOf(material, result);
-      return !outcome || !["no_knowledge", "duplicate", "covered"].includes(outcome.status);
-    });
-    const next = { ...result };
-    if (unresolved.length) delete next.coverChecked;
-    else next.coverChecked = COVER_RULES;
-    results[index] = next;
-  }
+  const supplements = [...packs.slice(0, COVER_REQUESTS).map(pack => () => cover(pack)), ...candidates.map(item => () => compare(item))];
+  let supplemented = 0;
+  if (supplements.length) input.progress?.({ stage: "cover", done: 0, total: supplements.length });
+  await Promise.all(supplements.map(async run => {
+    await run();
+    input.progress?.({ stage: "cover", done: ++supplemented, total: supplements.length });
+  }));
   // A figure the source message gives beside a word the unit names, which its statement and details dropped
   // ("不要把获得 100 颗 Stars 作为目标" read as "放弃以 Stars 数量为目标"), is kept as a detail. Local and free,
   // so reused batches get it too.
@@ -699,7 +961,9 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       const source = byMaterial.get(original.evidence.evidenceId);
       if (!source) return original;
       const body = bodyOf(source);
-      const scoped = measuredSourceScope(original.statement, original.evidence.quote)?.excerpt && normalized(body).includes(normalized(original.evidence.quote));
+      const ordinal = original.adoption.status === "user_adopted" && original.adoption.approval && optionByReply.get(original.adoption.approval.evidenceId);
+      const scoped = Boolean(ordinal && confirmsOption(ordinal, original, original.evidence.quote))
+        || measuredSourceScope(original.statement, original.evidence.quote)?.excerpt && normalized(body).includes(normalized(original.evidence.quote));
       const quote = scoped ? original.evidence.quote : fittingQuote(original.statement, original.evidence.quote, projectProofBlocks(body).map(block => block.text));
       let unit = original;
       if (quote !== original.evidence.quote) { unit = { ...unit, evidence: { ...unit.evidence, quote } }; quotesRefit++; changed = true; }
@@ -715,7 +979,7 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
       // on "弹出窗口宽度你会选多少像素？", "完成专注或休息后仅提醒用户……" on the storage question): the user never said it, and it
       // was marked 〔你〕. It is cited to the nearest reply of the conversation that states it; a point no message says ("后续
       // 规划不再将云同步纳入开发范围", credited to "帮我把……总结成一段") is left out.
-      if (unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about && unit.kind !== "question" && !userWordsSay(unit.statement, body)) {
+      if (needsUserProof(unit, source)) {
         let reply: CoverageMaterial | undefined, replyQuote = "";
         for (const item of repliesNear(source)) { replyQuote = fittingQuote(unit.statement, "", projectProofBlocks(bodyOf(item)).map(block => block.text)); if (replyQuote) { reply = item; break; } }
         if (!reply) { pointsUnsaid++; changed = true; return undefined; }
@@ -784,7 +1048,9 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
     const body = messageOf(unit), reasons = body ? statementDrift(unit, body) : [];
     return reasons.length ? [{ unit, body, reasons }] : [];
   }));
+  if (flagged.length) input.progress?.({ stage: "verify", done: 0, total: flagged.length });
   const repair = flagged.length ? await repairedStatements(flagged, ai, locale, signal) : { statements: new Map<string, string>(), checked: new Set<string>(), requests: 0, failed: 0 };
+  if (flagged.length) input.progress?.({ stage: "verify", done: flagged.length, total: flagged.length });
   for (const index of unchecked) {
     const batch = results[index];
     const units = batch.units.map(unit => repair.statements.has(unit.id) ? { ...unit, statement: repair.statements.get(unit.id)! } : unit);
@@ -824,35 +1090,54 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
     if (recovered.length) batch.units = [...batch.units, ...recovered];
     conditionalSuggestionsRecovered += recovered.length;
   }
-  // Recheck the final units: supplementing a batch or correcting a quote's
-  // author can change which source blocks still have no knowledge point.
+  // A choice only counts if its evidence and approval both survived review.
+  linkedChoices.clear();
+  for (const unit of results.flatMap(batch => batch.units)) {
+    if (unit.adoption.status !== "user_adopted" || !unit.adoption.approval) continue;
+    const option = optionByReply.get(unit.adoption.approval.evidenceId);
+    if (option && confirmsOption(option, unit, unit.evidence.quote)) linkedChoices.add(option.reply.id);
+  }
+  // Recheck after attribution and fidelity repair, including partial messages.
   for (const [index, saved] of results.entries()) {
     let result = saved;
     if (result.status !== "ok" || result.skipped) continue;
     const own = batches[index].filter(material => !leftOut(material));
+    const gaps = missingChoices(own.filter(material => hasUserCoverage(material, result.units)), result.units);
     for (const material of own.filter(material => roleOf(material) === "user" && !pasted(material))) {
-      const covered = result.units.some(unit => unit.evidence.evidenceId === material.id);
+      const covered = hasUserCoverage(material, result.units);
       const outcome = coverageOf(material, result);
-      if (covered && !["covered", "duplicate"].includes(outcome?.status ?? "")) result = recordCoverage(material, result, "covered");
+      if (gaps.has(material.id)) {
+        if (outcome?.status !== "failed" && outcome?.status !== "pending") result = recordCoverage(material, result, "pending", partialReason);
+      }
+      else if (covered && !["covered", "duplicate"].includes(outcome?.status ?? "")) result = recordCoverage(material, result, "covered");
+      else if (!covered && feedbackOnly(material) && outcome?.status !== "no_knowledge") {
+        result = recordCoverage(material, result, "no_knowledge", "Local review: asks for feedback on the shown result without stating a project choice");
+      }
       else if (!covered && (outcome?.status === "covered" || outcome?.status === "duplicate")) {
-        result = recordCoverage(material, result, "pending", "Source or role validation did not retain a unit from this user passage");
+        result = recordCoverage(material, result, "pending", attributionReason);
       }
       else if (!covered && !outcome && (onlyAsks(bodyOf(material).trim()) || assistantRequest(bodyOf(material)))) {
         result = recordCoverage(material, result, "no_knowledge", "Local review: a question or request to the assistant without a project choice");
       }
     }
-    const uncovered = uncoveredIn(own, result.units).filter(id => {
+    const uncovered = [...new Set([...gaps.keys(), ...uncoveredIn(own, result.units).filter(id => {
       const material = byId.get(id);
-      return !material || coverageOf(material, result)?.status !== "no_knowledge";
-    });
+      return !material || choiceIn(material) || coverageOf(material, result)?.status !== "no_knowledge";
+    })])];
     for (const id of uncovered) {
       const material = byId.get(id)!;
-      if (!coverageOf(material, result)) result = recordCoverage(material, result, "pending", "Not reviewed within this run's recovery budget");
+      const outcome = coverageOf(material, result);
+      if (!outcome || outcome.status === "no_knowledge") result = recordCoverage(material, result, "pending",
+        gaps.has(id) ? partialReason : "Not reviewed within this run's recovery budget");
     }
     if (uncovered.length) result.uncovered = uncovered;
     else delete result.uncovered;
     if (uncovered.length) delete result.coverChecked;
     else result.coverChecked = COVER_RULES;
+    if (gaps.size) result.uncoveredSentences = [...gaps.values()].reduce((total, sentences) => total + sentences.length, 0);
+    else delete result.uncoveredSentences;
+    if (uncovered.length) delete result.sentenceChecked;
+    else result.sentenceChecked = SENTENCE_RULES;
     results[index] = result;
   }
   const countMessages = (ids: string[]) => new Set(ids.flatMap(id => {
@@ -866,15 +1151,17 @@ export async function extractWikiKnowledge(input: { materials: CoverageMaterial[
     if (outcome) coverageOutcomes[outcome.status] = (coverageOutcomes[outcome.status] ?? 0) + 1;
   }
   const units = results.flatMap(batch => batch.units);
+  if (cacheKeys.size) await Promise.all([...cacheKeys].map(([index, keys]) => cacheWikiExtractionBatch(keys.enriched, results[index])));
   const covered = new Set(units.map(unit => unit.evidence.evidenceId));
-  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: Date.now(), status: results.every(batch => batch.status === "ok") ? "complete" : "partial", materials: materials.length, batches: results, ...(input.previous?.decisions ? { decisions: input.previous.decisions, ...(input.previous.decisionsAt ? { decisionsAt: input.previous.decisionsAt } : {}) } : {}), ...(input.previous?.coexisting ? { coexisting: input.previous.coexisting } : {}),
+  const ledger: WikiKnowledgeLedger = { version: 1, generatedAt: Date.now(), status: !uncoveredMessages && results.every(batch => batch.status === "ok") ? "complete" : "partial", materials: materials.length, batches: results, ...(input.previous?.decisions ? { decisions: input.previous.decisions, ...(input.previous.decisionsAt ? { decisionsAt: input.previous.decisionsAt } : {}) } : {}), ...(input.previous?.coexisting ? { coexisting: input.previous.coexisting } : {}),
     // What the user said another project is, and which repeated points are one: a rerun reading the same discussion
     // keeps them, as it keeps decisions. Left out, an excluded project came back after re-extraction.
     ...(input.previous?.scopeAnswers ? { scopeAnswers: input.previous.scopeAnswers } : {}), ...(input.previous?.sameGroups ? { sameGroups: input.previous.sameGroups } : {}), ...(input.previous?.separateGroups ? { separateGroups: input.previous.separateGroups } : {}),
     // So are the user's answers before writing, and the points they said are another project's.
-    ...(input.previous?.userAnswers ? { userAnswers: input.previous.userAnswers } : {}), ...(input.previous?.userOwners ? { userOwners: input.previous.userOwners } : {}),
+    ...(input.previous?.explicitProjectExclusions ? { explicitProjectExclusions: input.previous.explicitProjectExclusions } : {}),
+    ...(input.previous?.userAnswers ? { userAnswers: input.previous.userAnswers } : {}), ...(input.previous?.writingQuestions ? { writingQuestions: input.previous.writingQuestions } : {}), ...(input.previous?.userOwners ? { userOwners: input.previous.userOwners } : {}),
     ...(skippedNow().size ? { skippedMessages: [...skippedNow()] } : {}), ...((input.sourceChoices?.() ?? input.previous?.sourceChoices) ? { sourceChoices: input.sourceChoices?.() ?? input.previous!.sourceChoices } : {}) };
-  return { ledger, report: { requests: Object.values(reread).reduce((sum, count) => sum + count, 0), ...reread, coverageCovered: coverageOutcomes.covered ?? 0, coverageDuplicate: coverageOutcomes.duplicate ?? 0, coverageNoKnowledge: coverageOutcomes.no_knowledge ?? 0, coverageFailed: coverageOutcomes.failed ?? 0, coveragePending: coverageOutcomes.pending ?? 0, fidelityPendingUnits: results.reduce((sum, batch) => sum + Object.values(batch.fidelityResults ?? {}).filter(result => result.remaining).length, 0), fidelityFailedRequests: repair.failed, fidelityUncheckedUnits: flagged.filter(item => !repair.checked.has(item.unit.id)).length, ...(conditionalSuggestionsRecovered ? { conditionalSuggestionsRecovered } : {}), coverRetries: coverRequests, ...(coverUnits ? { coverUnits } : {}), uncoveredMessages, firstPassUncoveredMessages: countMessages(initialCoverageGaps), ...(figuresRecovered ? { figuresRecovered } : {}), ...(codesMoved ? { codesMoved } : {}), ...(quotesRefit ? { quotesRefit } : {}), ...(quotesTrimmed ? { quotesTrimmed } : {}), ...(flagged.length ? { statementsDrifting: flagged.length, statementsRepaired: repair.statements.size, fidelityRequests: repair.requests } : {}), ...(discussed.size ? { discussedOtherProject: discussed.size } : {}), ...(ownNames.size ? { ownNamesUntagged: ownNames.size } : {}), ...(questionsRead ? { questionsReadAsPlans: questionsRead } : {}), ...(pointsUnsaid ? { pointsUnsaid } : {}), ...(splitRetries ? { splitRetries } : {}), ...(productRequests ? { productRequests, productUnits, productTagged } : {}), reused, failed: results.filter(batch => batch.status === "failed").length, units: units.length, rejected: results.reduce((sum, batch) => sum + Object.values(batch.rejected).reduce((total, count) => total + count, 0), 0), materials: materials.length, coveredMaterials: covered.size, ...(skippedMaterials ? { skippedMaterials, skippedCharacters } : {}), totalCharacters: materials.reduce((sum, material) => sum + material.text.length, 0), pastedCharacters: materials.filter(material => roleOf(material) === "user" && pasted(material)).reduce((sum, material) => sum + material.text.length, 0) } };
+  return { ledger, report: { requests: Object.values(reread).reduce((sum, count) => sum + count, 0), ...reread, coverageCovered: coverageOutcomes.covered ?? 0, coverageDuplicate: coverageOutcomes.duplicate ?? 0, coverageNoKnowledge: coverageOutcomes.no_knowledge ?? 0, coverageFailed: coverageOutcomes.failed ?? 0, coveragePending: coverageOutcomes.pending ?? 0, fidelityPendingUnits: results.reduce((sum, batch) => sum + Object.values(batch.fidelityResults ?? {}).filter(result => result.remaining).length, 0), fidelityFailedRequests: repair.failed, fidelityUncheckedUnits: flagged.filter(item => !repair.checked.has(item.unit.id)).length, ...(conditionalSuggestionsRecovered ? { conditionalSuggestionsRecovered } : {}), coverRetries: coverRequests, ...(coverUnits ? { coverUnits } : {}), ...(sentenceRetries ? { sentenceRetries, sentenceUnits } : {}), uncoveredMessages, firstPassUncoveredMessages: countMessages(initialCoverageGaps), ...(figuresRecovered ? { figuresRecovered } : {}), ...(codesMoved ? { codesMoved } : {}), ...(quotesRefit ? { quotesRefit } : {}), ...(quotesTrimmed ? { quotesTrimmed } : {}), ...(flagged.length ? { statementsDrifting: flagged.length, statementsRepaired: repair.statements.size, fidelityRequests: repair.requests } : {}), ...(discussed.size ? { discussedOtherProject: discussed.size } : {}), ...(ownNames.size ? { ownNamesUntagged: ownNames.size } : {}), ...(questionsRead ? { questionsReadAsPlans: questionsRead } : {}), ...(pointsUnsaid ? { pointsUnsaid } : {}), ...(splitRetries ? { splitRetries } : {}), ...(productRequests ? { productRequests, productUnits, productTagged } : {}), reused, reusedAcrossTasks, failed: results.filter(batch => batch.status === "failed").length, units: units.length, rejected: results.reduce((sum, batch) => sum + Object.values(batch.rejected).reduce((total, count) => total + count, 0), 0), materials: materials.length, coveredMaterials: covered.size, ...(skippedMaterials ? { skippedMaterials, skippedCharacters } : {}), totalCharacters: materials.reduce((sum, material) => sum + material.text.length, 0), pastedCharacters: materials.filter(material => roleOf(material) === "user" && pasted(material)).reduce((sum, material) => sum + material.text.length, 0) } };
 }
 
 /** A product the discussion talks about as a product ("ChatAtlas 当前能收集……", "针对 ChatAtlas 生成的综述", "升级
@@ -904,7 +1191,8 @@ export function discussedProjects(units: WikiKnowledgeUnit[], project?: string, 
   const count = (text: string, name: string) => text.split(name).length - 1;
   const escaped = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const discussedAs = (name: string) => new RegExp(`${escaped(name)}\\s*(?:当前|目前|生成的|输出的|的(?:综述|输出|能力|问题|结果|文档))|(?:针对|升级|优化|改进)\\s*${escaped(name)}`, "gu");
-  const candidates = new Set([...free.flatMap(unit => unit.statement.match(PRODUCT_NAME) ?? []), ...[...bodies.values()].flatMap(text => text.match(PRODUCT_NAME) ?? []), ...seeded.keys()]);
+  const namedInSources = free.flatMap(unit => (unit.evidence.quote.match(PRODUCT_NAME) ?? []).filter(name => options.projects?.has(aboutNameKey(name))));
+  const candidates = new Set([...free.flatMap(unit => unit.statement.match(PRODUCT_NAME) ?? []), ...[...bodies.values()].flatMap(text => text.match(PRODUCT_NAME) ?? []), ...seeded.keys(), ...namedInSources]);
   // A point naming it, in its statement or as its subject ("ChatAtlas · 核心定位").
   const names = (unit: WikiKnowledgeUnit, name: string) => unit.statement.includes(name) || unit.subject.includes(name);
   const tagged = new Map<string, string>();
@@ -912,6 +1200,8 @@ export function discussedProjects(units: WikiKnowledgeUnit[], project?: string, 
     if (own.has(name.toLowerCase()) || [...own].some(word => name.toLowerCase().includes(word)) || known.has(name.toLowerCase()) && !options.projects?.has(aboutNameKey(name))) continue;
     const given = seeded.get(name) ?? [];
     if (options.seededOnly && !given.length && !options.projects?.has(aboutNameKey(name))) continue;
+    const explicit = free.filter(unit => unit.evidence.role === "assistant" && !unit.evidence.pasted && wikiProposalTargetsProject(unit.evidence.quote, name));
+    explicit.forEach(unit => tagged.set(unit.id, name));
     const naming = messages.filter(message => textOf(message).includes(name));
     // A project the user named is looked for however often its name comes up: the rest are rare names only.
     const named = options.projects?.has(aboutNameKey(name)) ?? false;

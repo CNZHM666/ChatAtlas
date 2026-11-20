@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { hasReadableMessageGap, isInternalSearchQueryMessage, readableConversationText, readablePlatformMarkup, renderableConversationText } from "./conversation-text";
+import { hasReadableMessageGap, isInternalSearchQueryMessage, portablePlatformReferences, readableConversationText, readablePlatformMarkup, renderableConversationText } from "./conversation-text";
 
 describe("readable conversation text", () => {
+  it("cleans opaque REF tokens outside code and only accepts real external links in portable references", () => {
+    const token = "\uE002REFtestId123\uE003";
+    const code = `\`${token}\`\n\n\`\`\`txt\n${token}\n\`\`\``;
+    expect(portablePlatformReferences(`结论${token}。\n\n${code}`)).toBe(`结论。\n\n${code}`);
+    expect(portablePlatformReferences(`结论${token}。`, () => " [S-test]")).toBe("结论 [S-test]。");
+    expect(portablePlatformReferences("\uE200url\uE202参考\uE202https://example.com/a(b)\uE201")).toBe("[参考](https://example.com/a%28b%29)");
+  });
   it("normalizes exported Link components without DOM access while retaining literal code and blocking unsafe protocols", () => {
     expect(readableConversationText('<Link url="https://example.com?a=1&amp;b=2" title="项目 &quot;说明&quot;"/>')).toBe('[项目 "说明"](https://example.com?a=1&b=2)');
     expect(readableConversationText('&lt;Link url=&quot;https://example.com&quot; title=&quot;资料&quot;/&gt;')).toBe('[资料](https://example.com)');

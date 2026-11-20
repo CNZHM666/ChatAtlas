@@ -83,7 +83,7 @@ function fittingTable(units:WikiKnowledgeUnit[],open:number):TableName|undefined
 }
 
 /** Reading structure is planned from the supplied material, not a topic-name keyword. */
-export function wikiWritingLayout(units:WikiKnowledgeUnit[],options:{zh?:boolean;open?:number}={}){
+export function wikiWritingLayout(units:WikiKnowledgeUnit[],options:{zh?:boolean;open?:number;plans?:ReadonlyMap<string,string>}={}){
  // Parallel points (rules, checks, parts, settings) read as a labelled list: written as prose, one sentence per
  // rule, a subtopic of validator checks read as a wall of 检查……。检查……。
  const constraints=units.filter(unit=>unit.kind==="constraint"),parallel=units.filter(unit=>PARALLEL_KINDS.includes(unit.kind));
@@ -91,10 +91,13 @@ export function wikiWritingLayout(units:WikiKnowledgeUnit[],options:{zh?:boolean
  const topics=new Set(units.map(unit=>`${unit.subject??""}\u0000${unit.about?.name??""}\u0000${unit.facet??""}`.trim().toLocaleLowerCase()));
  const listed=units.every(unit=>Boolean(unit.subject?.trim()))&&topics.size===1&&(constraints.length>=3&&constraints.length*2>=units.length||parallel.length>=PARALLEL_MIN&&parallel.length*3>=units.length*2);
  const subjects=new Set(units.flatMap(unit=>unit.about?.name??[]));
- const stages=subjects.size<2&&stagedPlan(units),table=subjects.size>=2||stages?undefined:fittingTable(units,options.open??0);
- return {preferred:stages?"stages":subjects.size>=2||table?"comparison":listed?"list":"explanation",
+ const competingPlans = new Set(units.flatMap(unit => options.plans?.get(unit.id) ?? [])).size > 1;
+ const stages=!competingPlans&&subjects.size<2&&stagedPlan(units),table=competingPlans||subjects.size>=2||stages?undefined:fittingTable(units,options.open??0);
+ return {preferred:stages?"stages":competingPlans||subjects.size>=2||table?"comparison":listed?"list":"explanation",
   allowed:["paragraph","list","comparison","stages"],maxColumns:4,
   ...(table?{table:{columns:COLUMNS[table][options.zh===false?1:0],rows:HOW[table]}}:{}),
+  ...(competingPlans ? { table: { columns: options.zh === false ? ["Original stage", "Scope", "Plan", "Status"] : ["原阶段","适用范围","安排","状态"],
+    rows: "One row uses units from only one plan. Keep the exact original stage label and whether it was confirmed. Leave doubtful scope explicit. Do not number all rows as one delivery sequence." } } : {}),
   rule:"Explain one question per subsection in connected prose. Share a list only when items have the same subject, scope and semantic role; kind alone does not prove parallelism. Separate unrelated mechanisms, operating requirements and checks into their own explanatory blocks. Compare only shared, evidenced dimensions. Keep each item's conditions, status and unitIds. Do not invent cells or repeat the same content in prose. Prefer unlabelled lists; use labels only for field/value mappings. Render short linear stages as an inline arrow flow. Number acceptance cases separately from the overall outcome. Real headings describe topics; avoid bold sentences as pseudo-headings or mechanically bold paragraph openings."
    +(listed&&!stages&&!table?" These units share a topic; use a short list only for genuinely parallel rules, checks or settings. Do not force a label onto each item; explain dependencies and reasons in prose.":"")
    +(stages?" The material is the stages of a plan: write them as one stages block, one item per stage in the plan's order, stage a short label (第一阶段, P0, v0.1) and text what that stage does; put the short answer before it.":"")

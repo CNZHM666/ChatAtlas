@@ -73,7 +73,7 @@ it.each(["omitted", "invalid-kind", "foreign-owner", "owner-split", "owner-resum
     const resumed=await run();expect(fetch.mock.calls.length).toBe(before);
     expect(resumed.result.sections).toEqual(result.result.sections);
   }
-  expect(titles).toBe(1);expect(result.result.title).toBe("消息管理工具");
+  expect(titles).toBe(0);expect(result.result.title).toBe("项目知识");
   expect(result.topicPlanApplied).toBe(true);expect(result.result.sections).toHaveLength(2);
   expect(result.result.sections.every(section=>section.body.startsWith("本章说明")&&section.body.includes("\n\n## 具体机制"))).toBe(true);
   expect(result.result.sections.every(section=>!("chapterOverview" in section))).toBe(true);

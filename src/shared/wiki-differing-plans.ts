@@ -1,5 +1,6 @@
 import type { WikiKnowledgeUnit, WikiTopicChain } from "./wiki-knowledge";
 import { knowledgeScopesAgree, knowledgeTerms } from "./knowledge-subject";
+import { UNDECIDED } from "./open-words";
 
 /** A rename of one named item: 将“今日任务0/7”改为“今日重点0/1”. */
 const RENAME = /将?“([^”]{1,16})”(?:模块|按钮|入口|卡片)?(?:升级为|改为|改成|更名为|调整为|替换为|命名为)“([^”]{1,20})”/u;
@@ -173,12 +174,14 @@ export function decidedAgainstDeclined(units: WikiKnowledgeUnit[], statusOf: (id
     // A run one of several points turned down says is a detail of that one (守护小组, where 用户开始计划后自动分配至守护小组 was
     // turned down); one most of them say is what was turned down (自动分).
     const declinedRun = (run: string) => {
-      const holders = others.filter(other => other.statement.includes(run)), saying = holders.filter(other => declined(other.id)).length;
+      const holders = others.filter(other => conflictFeature(other.statement).includes(run)), saying = holders.filter(other => declined(other.id)).length;
       return saying > 0 && saying / holders.length >= DECLINED_SHARE && (saying >= DECLINED_SAYING || turnedDown.length === 1);
     };
     for (const clause of unit.statement.split(/[；;，,、：:。]/u).map(item => item.trim()).filter(item => item.length >= 4)) {
-      const runs = Array.from({ length: Math.max(0, clause.length - SHARED_RUN + 1) }, (_, at) => clause.slice(at, at + SHARED_RUN)).filter(run => /^\p{Script=Han}+$/u.test(run) && !RUN_STOP.test(run) && declinedRun(run));
-      const against = turnedDown.filter(other => runs.some(run => other.statement.includes(run)));
+      if (UNDECIDED.test(clause) || /(?:^|[^以])待明确$/u.test(clause)) continue;
+      const subject = conflictFeature(clause);
+      const runs = Array.from({ length: Math.max(0, subject.length - SHARED_RUN + 1) }, (_, at) => subject.slice(at, at + SHARED_RUN)).filter(run => /^\p{Script=Han}+$/u.test(run) && !RUN_STOP.test(run) && declinedRun(run));
+      const against = turnedDown.filter(other => runs.some(run => conflictFeature(other.statement).includes(run)));
       if (!against.length) continue;
       found.push({ decidedId: unit.id, declinedIds: against.map(other => other.id), clause, note: `你确认的决定含「${clause}」，但你否定过「${bare(against[0].statement)}」${against.length > 1 ? `（另有 ${against.length - 1} 条类似）` : ""}，是否保留需要你确认。` });
       break;
@@ -187,6 +190,9 @@ export function decidedAgainstDeclined(units: WikiKnowledgeUnit[], statusOf: (id
   return found;
 }
 const SHARED_RUN = 3, DECLINED_SHARE = .5, DECLINED_SAYING = 2;
+// Release framing and modality are shared by unrelated features. Break runs on
+// both sides so "第一阶段仅支持" cannot link mobile editing to hardware scope.
+const conflictFeature = (text: string) => text.replace(/第\s*[一二三四五六七八九十\d]+\s*(?:个)?(?:阶段|版|期)|首(?:版|期)|(?:仅|只|暂不|不)?(?:支持|涉及)|(?:建议|计划|决定|确认)|允许|禁止/gu, " ");
 /** Words that join others: a run through them (用户的, 并在后) names no thing of its own. */
 const RUN_STOP = /[的了在和与及或为是将把被由对从而并以等中后前也都]/u;
 

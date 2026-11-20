@@ -2,7 +2,7 @@ import { sourceQuoteProjection, sourceQuoteText } from "../shared/source-quote-t
 import type { EvidenceHighlight } from "../shared/original-evidence-highlights";
 
 /** Build the rendered-text map once per message, without rewriting React nodes. */
-export function evidenceTextLocator(root: HTMLElement) {
+export function evidenceTextLocator(root: HTMLElement, keepSpaces = false) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const positions: Array<{node:Text;start:number;end:number}>=[];
   let text="";
@@ -12,7 +12,13 @@ export function evidenceTextLocator(root: HTMLElement) {
     let offset=0;
     for(const char of node.data){
       const normalized=char.normalize("NFKC");
-      for(const part of normalized){if(!/\s/u.test(part)){text+=part;for(let i=0;i<part.length;i++)positions.push({node,start:offset,end:offset+char.length});}}
+      for (const part of normalized) {
+        const space = /\s/u.test(part);
+        if (space && (!keepSpaces || text.endsWith(" "))) continue;
+        const value = space ? " " : part;
+        text += value;
+        for (let i = 0; i < value.length; i++) positions.push({ node, start: offset, end: offset + char.length });
+      }
       offset+=char.length;
     }
   }
@@ -50,6 +56,7 @@ export function evidenceSourceRanges(root:HTMLElement,content:string,highlights:
   const normalize=(text:string)=>text.normalize("NFKC").replace(/\s/gu,"");
   const blocks=[...root.querySelectorAll<HTMLElement>("[data-reader-source-start][data-reader-source-end]")].map(element=>({element,start:Number(element.dataset.readerSourceStart),end:Number(element.dataset.readerSourceEnd)})).filter(block=>Number.isInteger(block.start)&&Number.isInteger(block.end)&&block.start>=0&&block.end<=content.length&&block.start<block.end);
   const fullProjection=sourceQuoteProjection(content);
+  const locators=new Map<HTMLElement,ReturnType<typeof evidenceTextLocator>>();
   const result:Array<{range:Range;highlight:EvidenceHighlight}>=[];
   for(const highlight of highlights){
     if(highlight.start<0||highlight.end>content.length||highlight.end<=highlight.start)continue;
@@ -60,7 +67,9 @@ export function evidenceSourceRanges(root:HTMLElement,content:string,highlights:
       // A gap between annotated blocks is whitespace or unsupported markup.
       if(!block&&blocks.length)continue;
       const element=block?.element??root,base=block?.start??0,limit=block?.end??content.length;
-      const locate=evidenceTextLocator(element),dom=locate.text;
+      let locate=locators.get(element);
+      if(!locate){locate=evidenceTextLocator(element);locators.set(element,locate);}
+      const dom=locate.text;
       const raw=content.slice(base,limit),literal=!block&&dom===normalize(raw);
       if(literal){
         const from=normalize(raw.slice(0,start-base)).length,to=normalize(raw.slice(0,end-base)).length;
@@ -72,11 +81,18 @@ export function evidenceSourceRanges(root:HTMLElement,content:string,highlights:
       if(!projection)continue;
       const blockFrom=projection.ends.findIndex(at=>at>base-offset);if(blockFrom<0)continue;
       let blockTo=blockFrom;while(blockTo<projection.starts.length&&projection.starts[blockTo]<limit-offset)blockTo++;
-      if(projection.text.slice(blockFrom,blockTo)!==dom)continue;
       const from=projection.ends.findIndex(at=>at>start-offset);
       if(from<0)continue;
       let to=from;while(to<projection.starts.length&&projection.starts[to]<end-offset)to++;
-      const range=locate.at(from-blockFrom,to-blockFrom);if(range)result.push({range,highlight});
+      const rendered=projection.text.slice(blockFrom,blockTo);
+      if(rendered===dom){
+        const range=locate.at(from-blockFrom,to-blockFrom);if(range)result.push({range,highlight});
+        continue;
+      }
+      // The renderer may add text to an annotated block. Keep the raw-offset scope and map only a unique literal.
+      const needle=projection.text.slice(from,to),hit=dom.indexOf(needle);
+      if(!block||!needle||hit<0||hit!==dom.lastIndexOf(needle)||rendered.indexOf(needle)!==rendered.lastIndexOf(needle))continue;
+      const range=locate.at(hit,hit+needle.length);if(range)result.push({range,highlight});
     }
   }
   return result;

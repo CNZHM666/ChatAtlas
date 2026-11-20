@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { soundQuestion, withSetAsideOffers, withSoundAnswers } from "./wiki-question-parse";
+import { soundQuestion, wikiLocalAnswer, wikiRepairIntegrationChoice, withSetAsideOffers, withSoundAnswers } from "./wiki-question-parse";
 import { withWritingAnswer } from "./wiki-writing-questions";
 import { withDecision } from "./wiki-key-decisions";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
@@ -25,9 +25,33 @@ import type { WikiDraftChapter, WikiKnowledgeLedger, WikiKnowledgeOrganization, 
 const unit = (n: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${n}`, subject: "项目", statement, kind: "plan", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: `e${n}`, conversationId: "c", messageId: `m${n}`, messageIndex: n, role: "assistant", pasted: false, quote: statement }, ...extra });
 const ledgerOf = (units: WikiKnowledgeUnit[], extra: Partial<WikiKnowledgeLedger> = {}): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: 1, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], ...extra });
 
+it.each(["confirm","open"] as const)("keeps an integration purpose and a later named choice on separate receipts (%s)",action=>{
+ const point=unit(1,"建议集成在线预览，允许审核员查看交付结果。");
+ const first:WikiWritingQuestion={id:"ask:first",about:"预览集成",ask:"本阶段是否集成在线预览或生成离线报告？",unitIds:[point.id],organization:1,options:[
+  {id:"integrate",label:"集成，用于验收交付",actions:[{do:"confirm",units:[point.id]}]},
+  {id:"wait",label:"暂不集成",actions:[{do:"reject",units:[point.id]}]},
+ ]};
+ const anchor="answer:ask:first:integrate";
+ const later:WikiWritingQuestion={id:"ask:later",about:"集成方式",ask:"已经决定用于验收，但具体采用在线预览，还是生成离线报告？",unitIds:[anchor],organization:1,options:[
+  {id:"preview",label:"使用在线预览",actions:[{do:action,units:[anchor]}]},
+  {id:"report",label:"生成离线报告",actions:[{do:action,units:[anchor]}]},
+ ]};
+ const answers=[
+  {questionId:first.id,optionId:"integrate",at:10,question:first.ask,answer:first.options[0].label,unitIds:[point.id]},
+  {questionId:later.id,optionId:"preview",at:20,question:later.ask,answer:later.options[0].label,unitIds:[anchor]},
+ ];
+ const {ledger,units}=resolveWikiReading(ledgerOf([point],{writingQuestions:[first,later],userAnswers:answers,
+  decisions:action==="open"?{[anchor]:{verdict:"open",at:20}}:undefined}));
+ expect(wikiLocalAnswer(ledger,anchor)?.at).toBe(10);
+ expect(wikiLocalAnswer(ledger,"answer:ask:later:preview")?.at).toBe(20);
+ expect(units.find(item=>item.id==="answer:ask:later:preview")?.statement).toBe("集成方式：使用在线预览。");
+ expect(wikiRepairIntegrationChoice("具体采用「在线预览」，但确认用于验收交付。",first.ask,answers[0].answer)).toContain("具体采用「在线预览」或「生成离线报告」待明确");
+});
+
 it.each([
  ["定位位置","需决定是在原生侧边栏定位，还是使用独立 Reader？","原生侧边栏定位","需决定是在原生侧边栏定位，还是使用独立 Reader？"],
  ["V2EX 招募时机","V2EX 的早期用户寻找是在 Alpha 测试阶段进行，还是在正式发布后？","Alpha 阶段","先采用 GitHub 早期开源，再在 Alpha 阶段到 V2EX 招募，并同步推广演示视频。"],
+ ["V0范围确认","V0版本是否严格限制为无画布文本输出，还是允许包含简单的静态预览？","严格无画布","先开发无画布的V0版本，仅通过输入一句话输出推荐方案、接线说明、BOM和代码，以低成本验证AI生成价值。"],
 ] as const)("projects only the selected answer for %s", (about,ask,label,text)=>{
  const point=unit(1,text,{kind:"decision"});
  const question:WikiWritingQuestion={id:"where",about,ask,unitIds:[point.id],organization:1,options:[
@@ -45,7 +69,39 @@ it.each([
  expect(displayed.body).toContain(selected?.statement);
  expect(displayed.claims?.filter(claim=>claim.holder==="decided").map(claim=>claim.text)).toEqual([selected?.statement]);
  if (text===ask) expect(displayed.body).not.toContain("还是");
- else expect(displayed.body).toContain("推广演示视频");
+ else expect(displayed.body).toContain(about==="V0范围确认"?"推荐方案、接线说明、BOM和代码":"推广演示视频");
+});
+
+it("confirms a storage choice without approving the adjacent framework proposal", () => {
+ const point=unit(1,"采用 Svelte、Vite 和 TypeScript；V1 使用 IndexedDB 保存草稿。",{kind:"decision"});
+ const question:WikiWritingQuestion={id:"storage",about:"V1 草稿存储",ask:"V1 草稿是否维持 IndexedDB，还是改用服务端存储？",unitIds:[point.id],organization:1,options:[
+  {id:"local",label:"维持 IndexedDB",actions:[{do:"confirm",units:[point.id]}]},
+  {id:"server",label:"改用服务端存储",actions:[{do:"open",units:[point.id]}]},
+ ]};
+ const reading=resolveWikiReading(withWritingAnswer(ledgerOf([point],{writingQuestions:[question]}),question,"local"));
+ expect(reading.statuses.get(point.id)).toBe("proposal");
+ const choice=reading.units.find(item=>item.id==="answer:storage:local")!;
+ expect(reading.statuses.get(choice.id)).toBe("confirmed");
+ expect(choice.statement).toContain("IndexedDB");
+ expect(choice.statement).not.toContain("Svelte");
+});
+
+it("keeps a deferred optional integration separate from the unchosen immediate core proposal",()=>{
+ const immediate=unit(1,"立即集成 Wokwi 作为核心测试手段。");
+ const later=unit(2,"Wokwi 集成在后期作为可选功能。");
+ const laterAutomation=unit(3,"后续考虑把 Wokwi 集成到自动化测试。");
+ const question:WikiWritingQuestion={id:"timing",about:"仿真集成",ask:"Wokwi 集成是作为核心测试手段立即实施，还是仅在后期作为可选预览？",unitIds:[immediate.id,later.id],organization:1,options:[
+  {id:"now",label:"核心测试手段",actions:[{do:"confirm",units:[immediate.id]}]},
+  {id:"later",label:"后期可选功能",actions:[{do:"confirm",units:[later.id]}]},
+ ]};
+ const organization:WikiKnowledgeOrganization={version:1,generatedAt:1,status:"complete",chapters:[],merged:[],relations:[],report:{},
+  subjects:[{id:"simulation",name:"仿真",aliases:[],unitIds:[immediate.id,later.id,laterAutomation.id]}]};
+ const stored=withWritingAnswer(ledgerOf([immediate,later,laterAutomation],{organization,writingQuestions:[question]}),question,"later");
+ const reading=resolveWikiReading(stored);
+ expect(reading.statuses.get(immediate.id)).toBe("history");
+ expect(reading.statuses.get(laterAutomation.id)).toBe("proposal");
+ expect(reading.units.some(item=>reading.statuses.get(item.id)==="confirmed"&&item.statement.includes("后期作为可选"))).toBe(true);
+ expect(stored.decisions?.[immediate.id]).toBeUndefined();
 });
 
 const dau = [unit(1, "当前日活仅25，面临推广难。", { kind: "fact" }), unit(2, "小程序目前每天稳定在22人。", { kind: "report" }), unit(3, "当前小程序日活（DAU）约40。", { kind: "fact" })];
@@ -815,6 +871,15 @@ it("asks about a confirmed decision holding what the user turned down, and not a
   expect(found.map(item => item.decidedId)).toEqual(["u1"]);
   expect(found[0].note).toContain("「第三版加入自动分组」");
   expect(found[0].note).toContain("另有 1 条类似");
+});
+
+it("does not treat release wording as a conflict between mobile viewing and hardware scope", () => {
+  const mobile = unit(1, "手机端第一阶段仅支持查看生成结果，不支持复杂画布编辑。");
+  const hardware = [
+    unit(2, "第一版建议仅支持 ESP32/Arduino 生态及常见模块的方案生成，不涉及自动原理图。"),
+    unit(3, "第一阶段仅支持低压模块，不做 PCB 布线。"),
+  ];
+  expect(decidedAgainstDeclined([mobile, ...hardware], id => id === mobile.id ? "confirmed" : "proposal", id => id !== mobile.id)).toEqual([]);
 });
 
 it("moves a sentence told as replaced out of the current points, and drops one telling the confirmed plan as replaced", () => {

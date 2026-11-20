@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <a href="README.md">简体中文</a> · <b>English</b> · <b>v0.1.5 Alpha</b>
+  <a href="README.md">简体中文</a> · <b>English</b> · <b>v0.1.6 Alpha</b>
 </p>
 
 <p align="center">
-  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.5/ChatAtlas-extension-v0.1.5.zip"><b>Download the Alpha ZIP</b></a>
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip"><b>Download the Alpha ZIP</b></a>
   · <a href="#install-on-chrome-or-edge">Install</a>
   · <a href="docs/en/CHANGELOG.md">Changelog</a>
   · <a href="https://github.com/CNZHM666/ChatAtlas/issues">Feedback</a>
@@ -22,7 +22,7 @@ Select conversations and generate an overview, themed chapters, and source citat
 
 ## Install on Chrome or Edge
 
-**[Download ChatAtlas (ZIP)](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.5/ChatAtlas-extension-v0.1.5.zip)** · [Release notes](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.5)
+**[Download ChatAtlas (ZIP)](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip)** · [Release notes](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.6)
 
 1. Download the ZIP and extract it to a folder you can keep.
 2. In the address bar, enter `chrome://extensions` for **Chrome** or `edge://extensions` for **Edge**. Turn on **Developer mode**.
@@ -65,7 +65,7 @@ flowchart LR
 ```
 
 - **Knowledge ledger.** A point links the generated text to the original message. Originals, generated prose, and personal edits are saved separately. A confirmation applies to its specific decision.
-- **Batched generation and incremental updates.** Successful reads can be reused. When sources change, preview the affected chapters before applying an update.
+- **Batched generation and incremental updates.** Validated reads can be reused. Recovery targets gaps, and source updates can be previewed before adoption.
 - **Local storage and on-demand AI.** IndexedDB stores conversations, the ledger, and the Wiki. When you start generation, ChatAtlas sends the selected material to your configured provider. Reading, basic search, and export run locally.
 
 [Architecture](docs/en/ARCHITECTURE.md) · [AI workflow](docs/en/AI_WORKFLOWS.md) · [Privacy](docs/en/PRIVACY.md)

@@ -5,7 +5,12 @@ import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
 import {wikiHistoricalHeading} from "../shared/wiki-history-layout";
 import {wikiSupplementRanges} from "../shared/wiki-source-supplements";
 import {wikiWorkflowScopes} from "./wiki-workflow-scope";
+import {wikiLocalAnswer,wikiRepairIntegrationChoice,wikiScopedIntegration} from "./wiki-question-parse";
+import {wikiRepairClosedListCell} from "../shared/wiki-closed-list";
+import {confirmedRoadmaps,wikiRejectedReadingOfConfirmedOrder} from "../shared/wiki-confirmed-roadmap";
+import {wikiDesignContrast,wikiIntegrationProposal,wikiWithoutImplementationAside,wikiWithoutUnsupportedExample} from "./wiki-prose-grounding";
 import {aboutNameKey,wikiLedgerUnits,type WikiDraftChapter,type WikiKnowledgeLedger,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
+import {separateUnconfirmedWikiPlans} from "./wiki-draft-checks";
 
 const DECISION_SUPPLEMENT=/^(?:已确认的决定补记|Confirmed decisions retained)$/u;
 
@@ -164,13 +169,15 @@ function separateExpansion(text:string,answer:string,units:WikiKnowledgeUnit[]):
 export function reviewWikiEditorial(chapters:WikiDraftChapter[],ledger:WikiKnowledgeLedger):WikiDraftChapter[]{
  const units=new Map(wikiLedgerUnits(ledger).map(unit=>[unit.id,unit]));
  const workflow=wikiWorkflowScopes(ledger,units);
+ const roadmaps=confirmedRoadmaps(ledger);
  const scopedAnswers=new Map((ledger.userAnswers??[]).flatMap(answer=>{
   const question=ledger.writingQuestions?.find(item=>item.id===answer.questionId);
   const id=`answer:${answer.questionId}:${answer.optionId}`,unit=units.get(id);
   if(!question||!unit||ledger.decisions?.[id]?.verdict!=="confirmed")return [];
   return [[id,{unit,question,answer,workflow:workflow.narrowed.get(question.id)}] as const];
  }));
- const result=chapters.map(chapter=>({...chapter,paragraphs:chapter.paragraphs.map(paragraph=>({...paragraph,claims:paragraph.claims?.map(claim=>({...claim}))}))}));
+ const confirmed = new Set(Object.entries(ledger.decisions ?? {}).filter(([, decision]) => decision.verdict === "confirmed").map(([id]) => id));
+ const result=chapters.map(chapter=>separateUnconfirmedWikiPlans({...chapter,paragraphs:chapter.paragraphs.map(paragraph=>({...paragraph,claims:paragraph.claims?.map(claim=>({...claim}))}))}, units, confirmed));
  const latestByUnit=new Map<string,NonNullable<WikiKnowledgeLedger["userAnswers"]>[number]>();
  for(const answer of [...ledger.userAnswers??[]].sort((a,b)=>a.at-b.at))for(const id of answer.unitIds)latestByUnit.set(id,answer);
  const deferred=(ledger.userAnswers??[]).flatMap(answer=>{
@@ -181,14 +188,52 @@ export function reviewWikiEditorial(chapters:WikiDraftChapter[],ledger:WikiKnowl
  for(const chapter of result)for(const paragraph of chapter.paragraphs){
   if(/`{3}|~{3}/u.test(paragraph.text))continue;
   const before=paragraph.text;
+  // A driver requirement belongs to a specific validator result. Drop an
+  // unbound sentence that applies it to a mixed list of unrelated error codes.
+  for(const fragment of before.match(/(?:^|(?<=[。！？]))\s*遇到\s+[A-Z][A-Z_\d]+[^。！？\n]{12,250}提示安装驱动[^。！？\n]*[。！？]/gu)??[]){
+   const codes=[...fragment.matchAll(/\b[A-Z][A-Z_\d]{4,}\b/gu)].map(match=>match[0]);
+   if(codes.length<3||paragraph.claims?.some(claim=>claim.text.trim()&&(claim.text.includes(fragment.trim())||fragment.includes(claim.text)))
+     ||paragraph.unitIds.some(id=>{const unit=units.get(id);return unit&&codes.every(code=>unit.evidence.quote.includes(code));}))continue;
+   paragraph.text=paragraph.text.replace(fragment,"").trim();
+  }
   const expanded=new Set<string>();
   for(const claim of paragraph.claims??[]){
    if(!claim.text||!paragraph.text.includes(claim.text))continue;
    const sources=claim.unitIds.flatMap(id=>units.get(id)??[]);
+   const mislabeled=roadmaps.find(({plan})=>claim.unitIds.includes(plan.unitId)&&wikiRejectedReadingOfConfirmedOrder(claim.text,plan));
+   if(mislabeled){
+    // The choice's alternate already has its own evidence and historical
+    // standing. This sentence assigns that verdict to the selected order.
+    paragraph.text=paragraph.text.replace(claim.text,"").trim();
+    claim.text="";
+    continue;
+   }
    let next=workflow.qualify(claim.text,claim.unitIds);
+   const inventoryReport=next.match(/^(?:\*{4})?实际(包含.+共\s*\*{0,2}\d+\s*个\*{0,2}\s*(?:元件|组件)[。.]?)$/u);
+   if(inventoryReport){
+    const compact=(value:string)=>value.normalize("NFKC").replace(/[\s*。.]/gu,"");
+    const source=sources.filter(unit=>!unit.about&&!unit.evidence.pasted&&unit.evidence.role==="user"
+      &&/^.{2,22}(?:库|清单|目录)$/u.test(unit.subject)&&compact(inventoryReport[1])===compact(unit.statement));
+    if(source.length===1){
+     next=`据项目发起人报告，${source[0].subject}${inventoryReport[1].replace(/\*\*/gu,"").replace(/\s*(\d+)\s*个\s*/u," $1 个")}`;
+     claim.unitIds=[source[0].id];
+    }
+   }
+   if(sources.length===claim.unitIds.length){
+    next=wikiWithoutUnsupportedExample(next,sources)??next;
+    next=wikiWithoutImplementationAside(next,sources)??next;
+    if(sources.length===1&&ledger.decisions?.[sources[0].id]?.verdict!=="confirmed")next=wikiDesignContrast(next,sources[0])??next;
+   }
    const scoped=claim.unitIds.length===1?scopedAnswers.get(claim.unitIds[0]):undefined;
    if(scoped){
     const {unit,question,answer}=scoped;
+    const integration=wikiScopedIntegration(answer.question,answer.answer);
+    const narrowed=wikiRepairIntegrationChoice(next,answer.question,answer.answer);
+    if(integration&&(narrowed||next===unit.statement)){
+     const resolved=ledger.userAnswers?.some(later=>later.at>answer.at&&later.unitIds.length===1&&later.unitIds[0]===unit.id
+      &&wikiLocalAnswer(ledger,`answer:${later.questionId}:${later.optionId}`)===later);
+     next=resolved?integration.slice(0,integration.indexOf("。")+1):narrowed??next;
+    }
     const layer=wikiLayerDeferral(question.ask,answer.answer);
     const old=`${question.about}：${answer.answer}`;
     if(layer&&(wikiDecisionRestatement(next,old)||wikiDecisionRestatement(next,answer.answer)))next=layer;
@@ -196,6 +241,13 @@ export function reviewWikiEditorial(chapters:WikiDraftChapter[],ledger:WikiKnowl
      const generic=/^该方案已确认为(?:最终)?实施计划[。.]?$/u.test(next);
      const entryPart=!generic&&/移除|取消/u.test(next)&&/移除|取消/u.test(scoped.workflow.statement)&&!/[\d<>]/u.test(next)&&/常驻|固定/u.test(next);
      if(entryPart){next=scoped.workflow.statement;expanded.add(unit.id);}
+    }
+   }
+   if(sources.length===1&&/^\s*\|/u.test(before)){
+    const source=sources[0], answer=latestByUnit.get(source.id), verdict=ledger.decisions?.[source.id];
+    if(answer?.unitIds.length===1&&verdict?.verdict==="confirmed"&&verdict.at===answer.at&&!source.about){
+     const row=before.split("\n").find(line=>line.split("|").some(cell=>cell.trim()===claim.text));
+     if(row)next=wikiRepairClosedListCell(next,row.split("|")[1]?.trim()??"",answer)??next;
     }
    }
    if(sources.length&&deferred.length&&!/完整流程设想|end-to-end vision|^[|]/iu.test(next))for(const {feature,stage} of deferred){
@@ -214,6 +266,10 @@ export function reviewWikiEditorial(chapters:WikiDraftChapter[],ledger:WikiKnowl
    const option=question?.options.find(option=>option.id===answer?.optionId);
    const current=question&&option?units.get(`answer:${question.id}:${option.id}`):undefined;
    const confirmedIds=option?.actions.flatMap(action=>action.do==="confirm"?action.units:[])??[];
+   if(answer&&current&&ledger.decisions?.[current.id]?.verdict==="confirmed"&&wikiScopedIntegration(answer.question,answer.answer)
+    &&sources.length===1&&confirmedIds.includes(sources[0].id)&&ledger.decisions?.[sources[0].id]?.verdict!=="confirmed"){
+    next=wikiIntegrationProposal(next,sources[0],/\p{Script=Han}/u.test(next))??next;
+   }
    if(answer&&sources.length===1&&confirmedIds.includes(sources[0].id)&&!/早先版本|早期版本|Earlier versions/iu.test(paragraph.subtopic)){
     const proposal=separateExpansion(next,answer.answer,sources);
     if(proposal&&!next.startsWith("|")){

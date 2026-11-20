@@ -6,6 +6,7 @@ import {wikiReadingLayout} from "../shared/wiki-reading-layout";
 import {readingEmphasisMarkdown} from "../shared/reading-emphasis";
 import {isWikiTableIntroduction} from "../shared/wiki-plan-tables";
 import {WIKI_EVIDENCE_LINK} from "../shared/wiki-evidence-link";
+import { wikiFlowParagraph } from "../shared/wiki-flow-block";
 
 const parser = unified().use(remarkParse);
 const nodeText = (node: RootContent): string => "value" in node ? node.value : "children" in node ? node.children.map(child => nodeText(child as RootContent)).join("") : "";
@@ -31,11 +32,12 @@ export function wikiNavigationHeadings(body:string,generated=false):WikiHeading[
 
 /** Only a chapter's own opening is an overview. Missing legacy openings stay
  * absent; paragraphs sampled from child topics do not summarize the chapter. */
-function chapterOverview(body:string,nodes:RootContent[]):WikiChapterOverview|undefined {
+function chapterOverview(body:string,nodes:RootContent[],generated:boolean):WikiChapterOverview|undefined {
  const usable=(node:RootContent)=>node.type==="paragraph"&&Boolean(node.position)&&nodeText(node).trim().length>0&&!(node.children.every(child=>child.type==="strong"||child.type==="emphasis"||child.type==="text"&&!child.value.trim())&&!/[。.!?！？]/u.test(nodeText(node)))&&body.slice(node.position!.start.offset!,node.position!.end.offset!).length<=360&&!/[：:]\s*$/u.test(nodeText(node))&&!/(?:如下|以下|包括|as follows|including)\s*[：:]?$/iu.test(nodeText(node));
  const opening:WikiChapterOverview["blocks"]=[];let end=0;
  for(const [index,node] of nodes.entries()){
   if(!usable(node)||opening.length>=2)break;
+  if(generated&&node.type==="paragraph"&&wikiFlowParagraph(node,true))break;
   if(nodes[index+1]&&["list","table","code","blockquote","html"].includes(nodes[index+1].type))break;
   const text=body.slice(node.position!.start.offset!,node.position!.end.offset!);
   if (isWikiTableIntroduction(text) || text.includes(WIKI_EVIDENCE_LINK)) break;
@@ -63,5 +65,5 @@ export function wikiDocument(body: string,generated=false,originalTexts:string[]
   if(generated)body=wikiReadingLayout(generatedProse(body,originalTexts).body,originalTexts);
   if(generated)body=readingEmphasisMarkdown(body,{sectioned:true,phrases});
   const tree = parser.parse(body);
-  return { body, overview:chapterOverview(body,tree.children), headings: tree.children.flatMap((node, index) => node.type === "heading" ? [{ title: nodeText(node), depth: node.depth, headingIndex: tree.children.slice(0, index).filter(item => item.type === "heading").length }] : []) };
+  return { body, overview:chapterOverview(body,tree.children,generated), headings: tree.children.flatMap((node, index) => node.type === "heading" ? [{ title: nodeText(node), depth: node.depth, headingIndex: tree.children.slice(0, index).filter(item => item.type === "heading").length }] : []) };
 }

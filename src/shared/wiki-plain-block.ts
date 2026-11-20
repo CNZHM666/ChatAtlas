@@ -3,6 +3,12 @@ export type PlainBlockKind = "table" | "flow" | "list" | "groups" | "terms" | "p
 export interface PlainBlockLayout { kind: PlainBlockKind; markdown: string }
 export const wikiLiteralText = (text: string) => text.replace(/([\\`*_{}[\]<>#|])/gu, "\\$1");
 const linesOf = (text: string) => text.split(/\r?\n/u).map(line=>line.trim()).filter(Boolean);
+/** Demonstration scripts may stay in the original discussion unless they add an acceptance rule. */
+export function illustrativeWikiFlow(text: string) {
+ return /^(?:拍一个|示例|演示|demo\b|example\b)/iu.test(text.trim())
+  && (text.match(/↓|→|->/gu)?.length??0)>=3
+  && !/验收|失败时|拒绝|超时|回滚|必须|至少|仅当|(?:\d+(?:\.\d+)?)\s*(?:毫秒|秒|分钟|%|\bms\b|\bseconds?\b)|\b(?:given|acceptance|must|rollback|should fail)\b/iu.test(text);
+}
 const ARROW = /^(?:↓|→|->|=>|⬇)$/u;
 const BULLET = /^(?:[-*+]\s+|\d+[.)]\s+)/u;
 const valueText = (value: string) => /^#[\da-f]{3,8}(?:\s*\/\s*#[\da-f]{3,8})*$/iu.test(value) ? "`"+value+"`" : wikiLiteralText(value);

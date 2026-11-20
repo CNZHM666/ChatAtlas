@@ -127,7 +127,13 @@ export function withHolderMarks(text: string, marks: Array<{ text: string; holde
     // A claim ending on its own full stop ends there: read from that stop, the sentence end was looked for in the next
     // sentence, and "… remains explicitly undecided. Monthly budgets are simpler …; [Open]" marked the wrong one.
     const closed = /[.!?。！？](?:\*\*)?$/u.test(text.slice(from + range.start, end));
-    let offset = clauseEnd ? end + clauseEnd[0].length : closed ? end : stop < 0 ? end : end - 1 + stop + 1;
+    // A separately scoped aside must not inherit the preceding conclusion's
+    // receipt. The literal check keeps approximate matches out of this path.
+    const literal = (value: string) => value.normalize("NFKC").replace(/\*\*|__|\s/gu, "");
+    const exact = literal(text.slice(from + range.start, end)) === literal(claim);
+    const aside = exact && holder === "decided" && text.slice(end).match(/^(?:\*\*|__)?[ \t]*(?=[（(])/u);
+    let offset = aside ? end + aside[0].trimEnd().length
+      : clauseEnd ? end + clauseEnd[0].length : closed ? end : stop < 0 ? end : end - 1 + stop + 1;
     // A sentence closed inside emphasis keeps its closing marks before the label; the "**" opening the next
     // sentence's emphasis is not one of them (the mark then landed inside that sentence's bold).
     if ((text.slice(0, offset).match(/\*\*/gu) ?? []).length % 2) while (/[*_]/u.test(text[offset] ?? "")) offset++;
@@ -156,15 +162,9 @@ export function withHolderMarks(text: string, marks: Array<{ text: string; holde
     const source = item.source ? ` · ${item.source}` : "";
     // A portable citation needs the whole claim, not a fuzzy match to one of
     // its phrases. Earlier marks may intentionally cover only a clause.
-    const literal = (value: string) => value.normalize("NFKC").replace(/\*\*|__|\s/gu, "");
-    const reference = later < 0 && literal(text.slice(from + range.start, end)) === literal(claim) ? item.reference : undefined;
+    const reference = later < 0 && exact ? item.reference : undefined;
     if (wikiUnmarkedHolder(holder) && !reference) continue;
-    let separation="";
-    if(holder==="decided"&&reference?.includes("C-")&&!/^\s*(?:\||>|[-*+]\s|\d+[.)]\s)/u.test(row)){
-      const start=from+range.start,paragraphStart=text.lastIndexOf("\n\n",start)+2,prefix=text.slice(Math.max(0,paragraphStart),start);
-      if(prefix.trim()&&/[。.!?！？]\s*$/u.test(prefix))at.push({offset:start,mark:"\n\n"});
-      if(closed&&text.slice(offset).split("\n\n")[0].trim())separation="\n\n";
-    }
+    const separation=reference&&closed&&/^[\p{L}\p{N}“「（(*`]/u.test(text.slice(offset))?" ":"";
     at.push({ offset, mark: (zh ? `〔${wikiHolderLabel(holder, true)}${source}〕` : ` [${wikiHolderLabel(holder, false)}${source}]`) + (reference ?? "")+separation });
     from = offset;
   }

@@ -9,14 +9,14 @@ import {AIProviderResponseError} from "./provider-errors";
 import {createWikiPlanningCheckpoints} from "./wiki-planning-checkpoint";
 import {WIKI_EDITORIAL_PASS,WIKI_EDITORIAL_PASS_V4} from "./wiki-editorial-instructions";
 import {WIKI_QUALITY_INSTRUCTIONS} from "./wiki-quality-instructions";
-import {CURRENT_WIKI_READER_STATUS_INSTRUCTIONS,EDITION4_WIKI_COMPOSITION_INSTRUCTIONS,EDITION5_WIKI_COMPOSITION_INSTRUCTIONS,EDITION6_WIKI_COMPOSITION_INSTRUCTIONS,EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,EDITION8_WIKI_COMPOSITION_INSTRUCTIONS,WIKI_COMPOSITION_INSTRUCTIONS,LEGACY_WIKI_COMPOSITION_INSTRUCTIONS,WIKI_CLAIM_LIMIT_INSTRUCTIONS,WIKI_READER_STATUS_INSTRUCTIONS} from "./wiki-composition-instructions";
+import {CURRENT_WIKI_READER_STATUS_INSTRUCTIONS,EDITION4_WIKI_COMPOSITION_INSTRUCTIONS,EDITION5_WIKI_COMPOSITION_INSTRUCTIONS,EDITION6_WIKI_COMPOSITION_INSTRUCTIONS,EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,EDITION8_WIKI_COMPOSITION_INSTRUCTIONS,EDITION9_WIKI_COMPOSITION_INSTRUCTIONS,WIKI_COMPOSITION_INSTRUCTIONS,LEGACY_WIKI_COMPOSITION_INSTRUCTIONS,WIKI_CLAIM_LIMIT_INSTRUCTIONS,WIKI_READER_STATUS_INSTRUCTIONS} from "./wiki-composition-instructions";
 import type {StructuredAIRequest} from "./provider";
 import type {Conversation} from "../shared/types";
 import type {CoverageMaterial} from "./focus-coverage";
 // One-sentence fixtures exercise resume mechanics; the length-based subtopic merge has its own tests.
 vi.mock("./wiki-subtopic-budget",async original=>({...await original<typeof import("./wiki-subtopic-budget")>(),mergeThinWikiChapters:(sections:unknown[])=>({sections,merged:0,toName:[]})}));
 
-it.each([undefined,1,2,3,4,5,6,7,8] as const)("resumes edition %s drafts with their original writing identity while fresh tasks use the new policy",async oldEdition=>{
+it.each([undefined,1,2,3,4,5,6,7,8,9] as const)("resumes edition %s drafts with their original writing identity while fresh tasks use the new policy",async oldEdition=>{
  const db=await getDatabase(),beforeIds=new Set((await db.getAll("semanticDecisionCache")).map(row=>row.id));
  const runId=crypto.randomUUID(),source:Conversation={id:runId,title:"保存规则",platform:"chatgpt",url:"",updatedAt:1,messageCount:1};
  const passages=transcriptPassages(source,[{id:runId,conversationId:runId,messageIndex:0,role:"user",content:"只有确认后才能保存，失败时保留原文。",preview:"",contentHash:"",createdAt:1,updatedAt:1}]);
@@ -32,7 +32,7 @@ it.each([undefined,1,2,3,4,5,6,7,8] as const)("resumes edition %s drafts with th
   if(completing){completions++;if(timeout){timeout=false;throw new AIProviderResponseError("PROVIDER_TIMEOUT");}}
   else{initial++;initialRequest={system:request.system,prompt:request.prompt};}
   expect(request.system.includes(WIKI_EDITORIAL_PASS)).toBe(legacy&&(oldEdition===2||oldEdition===3||oldEdition===4));
-  expect(request.system.includes(WIKI_QUALITY_INSTRUCTIONS)).toBe(!legacy);
+  expect(request.system.includes(WIKI_QUALITY_INSTRUCTIONS)).toBe(!legacy||oldEdition===9);
   expect(request.system.includes(WIKI_CLAIM_LIMIT_INSTRUCTIONS)).toBe(!legacy||oldEdition!==undefined&&oldEdition>=3);
   expect(request.system.includes(WIKI_READER_STATUS_INSTRUCTIONS)).toBe(legacy&&(oldEdition===4||oldEdition===5));
   expect(request.system.includes(CURRENT_WIKI_READER_STATUS_INSTRUCTIONS)).toBe(legacy&&oldEdition===7);
@@ -43,14 +43,14 @@ it.each([undefined,1,2,3,4,5,6,7,8] as const)("resumes edition %s drafts with th
  await expect(run()).rejects.toMatchObject({code:"PROVIDER_TIMEOUT"});
  const entries=(await db.getAll("semanticDecisionCache")).filter(row=>!beforeIds.has(row.id));
  const composition=entries.find(row=>row.id.includes(":composition-editorial-v16:"))!;
- const saved=composition.result as {current:CoverageMaterial[];writingEdition?:number};expect(saved.writingEdition).toBe(9);
+ const saved=composition.result as {current:CoverageMaterial[];writingEdition?:number};expect(saved.writingEdition).toBe(10);
  const writing=entries.find(row=>row.id.includes(":writing:"))!;
  const ledger=createWikiPlanningCheckpoints(()=>ai.getAnalysisKey!(),new AbortController().signal);
  // Model an actual pre-upgrade ledger: the same validated draft was written
  // under the legacy policy, without an edition field. No provider cache needed.
  if(oldEdition===undefined)delete saved.writingEdition;else saved.writingEdition=oldEdition;
  await db.put("semanticDecisionCache",composition);
- const oldId=await ledger.key("writing",[initialRequest!.system.replace(WIKI_COMPOSITION_INSTRUCTIONS,oldEdition===8?EDITION8_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===7?EDITION7_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===6?EDITION6_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===5?EDITION5_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===4?EDITION4_WIKI_COMPOSITION_INSTRUCTIONS:LEGACY_WIKI_COMPOSITION_INSTRUCTIONS+(oldEdition===3?WIKI_EDITORIAL_PASS+WIKI_CLAIM_LIMIT_INSTRUCTIONS:oldEdition===2?WIKI_EDITORIAL_PASS:oldEdition===1?WIKI_EDITORIAL_PASS_V4:"")),initialRequest!.prompt,saved.current]);
+ const oldId=await ledger.key("writing",[initialRequest!.system.replace(WIKI_COMPOSITION_INSTRUCTIONS,oldEdition===9?EDITION9_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===8?EDITION8_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===7?EDITION7_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===6?EDITION6_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===5?EDITION5_WIKI_COMPOSITION_INSTRUCTIONS:oldEdition===4?EDITION4_WIKI_COMPOSITION_INSTRUCTIONS:LEGACY_WIKI_COMPOSITION_INSTRUCTIONS+(oldEdition===3?WIKI_EDITORIAL_PASS+WIKI_CLAIM_LIMIT_INSTRUCTIONS:oldEdition===2?WIKI_EDITORIAL_PASS:oldEdition===1?WIKI_EDITORIAL_PASS_V4:"")),initialRequest!.prompt,saved.current]);
  await ledger.write(oldId,writing.result);await db.delete("semanticDecisionCache",writing.id);
  for(const row of entries)if(!row.providerId.startsWith("focus-"))await db.delete("semanticDecisionCache",row.id);
  legacy=true;const result=await run();

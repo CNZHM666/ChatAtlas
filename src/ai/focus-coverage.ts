@@ -2,7 +2,7 @@ import type {WikiPreviousChapter} from "./wiki-topic-plan";
 import {trimWikiClaimOverflow,wikiClaimIssues,withWikiClaimDetails,wikiClaimRepairRequest} from "./wiki-claim-repair";
 import {applyWikiTitleEdits,renameWikiHeadings,wikiTitleEdits} from "./wiki-title-pass";
 import {wikiExistingExplanations,wikiWritingJobs} from "./wiki-writing-context";
-import {WIKI_COMPOSITION_INSTRUCTIONS,EDITION8_WIKI_COMPOSITION_INSTRUCTIONS,EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,EDITION6_WIKI_COMPOSITION_INSTRUCTIONS,EDITION5_WIKI_COMPOSITION_INSTRUCTIONS,EDITION4_WIKI_COMPOSITION_INSTRUCTIONS,EDITION2_WIKI_COMPOSITION_INSTRUCTIONS,EDITION3_WIKI_COMPOSITION_INSTRUCTIONS,LEGACY_WIKI_COMPOSITION_INSTRUCTIONS,V4_WIKI_COMPOSITION_INSTRUCTIONS} from "./wiki-composition-instructions";
+import {WIKI_COMPOSITION_INSTRUCTIONS,EDITION9_WIKI_COMPOSITION_INSTRUCTIONS,EDITION8_WIKI_COMPOSITION_INSTRUCTIONS,EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,EDITION6_WIKI_COMPOSITION_INSTRUCTIONS,EDITION5_WIKI_COMPOSITION_INSTRUCTIONS,EDITION4_WIKI_COMPOSITION_INSTRUCTIONS,EDITION2_WIKI_COMPOSITION_INSTRUCTIONS,EDITION3_WIKI_COMPOSITION_INSTRUCTIONS,LEGACY_WIKI_COMPOSITION_INSTRUCTIONS,V4_WIKI_COMPOSITION_INSTRUCTIONS} from "./wiki-composition-instructions";
 import {withCrossChapterDuplicates} from "../shared/wiki-cross-duplicates";
 import {refreshWikiChapterOpenings,type WikiOpeningReport} from "./wiki-chapter-openings";
 import {assignGuideOwners,wikiChapterGuide,wikiChapterGuideAllowance,wikiCurrentGuide,wikiGuideCatalogue,type WikiGuideCatalogue} from "./wiki-current-guide";
@@ -88,7 +88,7 @@ export interface CoverageResult {
 const WRITING_INSTRUCTIONS={
  1:V4_WIKI_COMPOSITION_INSTRUCTIONS,2:EDITION2_WIKI_COMPOSITION_INSTRUCTIONS,3:EDITION3_WIKI_COMPOSITION_INSTRUCTIONS,
  4:EDITION4_WIKI_COMPOSITION_INSTRUCTIONS,5:EDITION5_WIKI_COMPOSITION_INSTRUCTIONS,6:EDITION6_WIKI_COMPOSITION_INSTRUCTIONS,
- 7:EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,8:EDITION8_WIKI_COMPOSITION_INSTRUCTIONS,9:WIKI_COMPOSITION_INSTRUCTIONS,
+ 7:EDITION7_WIKI_COMPOSITION_INSTRUCTIONS,8:EDITION8_WIKI_COMPOSITION_INSTRUCTIONS,9:EDITION9_WIKI_COMPOSITION_INSTRUCTIONS,10:WIKI_COMPOSITION_INSTRUCTIONS,
 };
 type WritingEdition=keyof typeof WRITING_INSTRUCTIONS;
 interface CompositionCheckpoint {
@@ -458,13 +458,13 @@ async function createCoveragePipeline(input:CoverageInput) {
     // Paired titles are renamed beside writing, which keeps the planned titles
     // and its cache identity; a failed rename keeps the plan's own titles.
     let titleReview:WikiTitleReview|undefined;
-    const titleEdits=final&&topicPlan&&input.mode==="work"&&input.ai.generateStructured?wikiTitleEdits(topicPlan,input.locale,{generateStructured:request=>input.ai.generateStructured!(request)},input.signal,{runId:input.runId,onReport:value=>{titleReview=value;},...(!input.wikiProjectBoundary?{project:{goal:input.goal,sourceTitles:input.sources.map(source=>source.title)}}:{})}):undefined;
+    const titleEdits=final&&topicPlan&&input.mode==="work"&&input.ai.generateStructured?wikiTitleEdits(topicPlan,input.locale,{generateStructured:request=>input.ai.generateStructured!(request)},input.signal,{runId:input.runId,onReport:value=>{titleReview=value;}}):undefined;
     // Writing can fail before joining the parallel title work. Observe that
     // rejection now; awaiting the original promise below still propagates abort.
     void titleEdits?.catch(()=>undefined);
     const current=preparation?(topicPlan?assignWikiOwners(preparation.current,topicPlan):preparation.current):raw;
     const retired=preparation?.retired??[],globalWritingGuide=preparation?.globalWritingGuide??"",writingScale=preparation?.writingScale??1;
-    const writingEdition=preparation?preparation.writingEdition:9;
+    const writingEdition=preparation?preparation.writingEdition:10;
     const workInstructions=writingEdition===undefined?LEGACY_WIKI_COMPOSITION_INSTRUCTIONS:WRITING_INSTRUCTIONS[writingEdition];
     const factCatalogue=topicPlan?preparation?.factCatalogue:undefined,ownerTitles=new Map(topicPlan?.map(page=>[page.ownerId??page.sectionIds[0],page.title]));
     // Batch sizing reserves the largest per-request catalogue, never less than the

@@ -1,8 +1,10 @@
 import {wikiQualityCsvMetrics,WIKI_QUALITY_CSV_COLUMNS} from "../shared/wiki-quality-metrics";
+import { wikiOrganizationIncomplete } from "../shared/wiki-knowledge";
 import {projectDocument} from "../export/project-document";
 import {failuresByOrigin,isSentUsage,usageFailureOrigin} from "./failure-origin";
 import { aiFeatureLabel, usageFeature } from "./ai-diagnostics";
 import { analyzeAILifecycle, aiRequestExport } from "./lifecycle-analysis";
+import { retryRecoveryMetrics, stageBudgetMetrics } from "./request-budget-metrics";
 import type { AIUsageEvent, AnalysisDiagnostics, OrganizationRun } from "../shared/types";
 import type { FocusSession } from "../shared/focus-session";
 
@@ -23,6 +25,7 @@ export interface OrganizationAnalysis {
   lifecycle: ReturnType<typeof analyzeAILifecycle>;
   byStage?: Array<{stage:string;requests:number;cacheHits:number;failed:number;inputTokens:number;outputTokens:number;durationMs:number;timed:number;unavailable:number}>;
   run: OrganizationRun;
+  executionStatus: OrganizationRun["status"];
   diagnostics?: AnalysisDiagnostics;
   synthetic?: boolean;
   statusScope: "wiki" | "run";
@@ -38,6 +41,8 @@ export interface OrganizationAnalysis {
   retries: number;
   recoveryRequests: number;
   recoveryReservedOutputTokens: number;
+  stageBudgets: ReturnType<typeof stageBudgetMetrics>;
+  retryRecovery: ReturnType<typeof retryRecoveryMetrics>;
   generationAttempts: number;
   latestGenerationMs?: number;
   requestQueueMs?: number;
@@ -51,6 +56,7 @@ export interface OrganizationAnalysis {
   elapsedMs?: number;
   elapsedScope?: "latest_generation" | "run";
   firstReadableMs?: number;
+  completeWikiMs?: number;
   queueMs?: number;
   timedRequests: number;
   models: string[];
@@ -63,7 +69,7 @@ export interface OrganizationAnalysis {
   focusCoverage?: FocusSession["coverage"];
   focusPlan?: AIUsageEvent["coveragePlan"];
   sentInputTokensEstimate: number;
-  requestTransport: Array<{ taskType: AIUsageEvent["taskType"]; stage?: string; requestId?: string; durationMs?: number; estimatedInputTokens?: number; tokenEstimateVersion?: string; actualInputTokens?: number; actualOutputTokens?: number; tokenSource?: AIUsageEvent["tokenSource"]; costCny?: number; responseHeadersMs?: number; firstTokenMs?: number; receivedCharacters?: number; reasoningCharacters?: number; reasoningTokens?: number; outputTokenLimit?: number; finishReason?: string; timeoutStage?: string; streaming?: boolean }>;
+  requestTransport: Array<{ taskType: AIUsageEvent["taskType"]; stage?: string; requestId?: string; durationMs?: number; estimatedInputTokens?: number; tokenEstimateVersion?: string; actualInputTokens?: number; actualOutputTokens?: number; tokenSource?: AIUsageEvent["tokenSource"]; costCny?: number; responseHeadersMs?: number; firstTokenMs?: number; receivedCharacters?: number; reasoningCharacters?: number; reasoningTokens?: number; inputTokenLimit?: number; plannedOutputTokens?: number; predictedOutputTokens?: number; outputTokenLimit?: number; finishReason?: string; timeoutStage?: string; streaming?: boolean }>;
   byTask: Array<{ feature?:import("./ai-diagnostics").AIFeature; task: AIUsageEvent["taskType"]; requests: number; tokens: number; durationMs: number }>;
 }
 
@@ -99,7 +105,8 @@ export function analyzeOrganizationRuns(runs: OrganizationRun[], events: AIUsage
   return [...runs, ...synthetic].sort((a, b) => b.startedAt - a.startedAt).map((run) => {
     const focus = focusByRun.get(run.id);
     const quality=focus?.wikiKnowledge?.draft?.quality;
-    const wikiOutcome=quality&&(quality.uncovered||quality.sources==="partial"||quality.organization==="partial")?"partial":quality&&!quality.passed?"needs_review":"ready";
+    const wikiOutcome=focus?.wikiKnowledge?.lastFailure||focus?.wikiKnowledge?.status==="partial"||focus?.wikiKnowledge?.draft?.status==="partial"||wikiOrganizationIncomplete(focus?.wikiKnowledge?.organization)
+      ||quality&&(quality.uncovered||quality.sources==="partial"||quality.organization==="partial")?"partial":quality&&!quality.passed?"needs_review":"ready";
     const usage = eventsByRun.get(run.id) ?? [];
     const requests = usage.filter((event) => isSentUsage(event));
     const tasks = new Map<string, { feature?:import("./ai-diagnostics").AIFeature; task: AIUsageEvent["taskType"]; requests: number; tokens: number; durationMs: number }>();
@@ -130,18 +137,29 @@ export function analyzeOrganizationRuns(runs: OrganizationRun[], events: AIUsage
     const runElapsed=generationStart!==undefined&&ready!==undefined?Math.max(0,ready-generationStart):undefined;
     const latestGenerationMs=focus?.coverage?.elapsedMs??generations.at(-1)?.durationMs;
     const recoveries=requests.filter(event=>event.recoveryReason!==undefined);
+    const unresolvedSpan = run.pipelineSpans?.some(span => span.status === "failed" &&
+      !run.pipelineSpans?.some(next => next.phase === span.phase && next.status === "completed" && next.startedAt >= span.startedAt));
+    const finishedGeneration = generations.some(span => span.status === "completed" &&
+      !usage.some(event => event.status === "failed" && event.createdAt > span.startedAt + span.durationMs));
+    const diagnosticStatus = unresolvedSpan ? "failed" : finishedGeneration ? "completed" : inferredStatus(usage);
+    const executionStatus = run.diagnosticOnly
+      ? run.status === "running" && !generations.length && !unresolvedSpan && !focus ? "running" : diagnosticStatus
+      : run.status;
     return {
       wikiQuality:documentMetrics&&focus?.sections.some(section=>section.body.trim())?(options.preparedQuality?.sessionId===focus.id&&options.preparedQuality.updatedAt===focus.updatedAt?options.preparedQuality.metrics:wikiQualityCsvMetrics(projectDocument(focus,{overview:true,wikiIds:focus.sections.map(section=>section.id),matters:false,history:false,sources:false},"md").text)):undefined,
       failuresByOrigin:failuresByOrigin(usage),
       lifecycle:analyzeAILifecycle(usage),
       byStage:[...stages.values()],
-      run: focus ? { ...run, status: "completed" as const } : run.diagnosticOnly ? {...run,status:run.pipelineSpans?.some(span=>span.status==="failed"&&!run.pipelineSpans?.some(next=>next.phase===span.phase&&next.status==="completed"&&next.startedAt>=span.startedAt))?"failed" as const:run.pipelineSpans?.some(span=>span.phase==="wiki:generation"&&span.status==="completed"&&!usage.some(event=>event.status==="failed"&&event.createdAt>span.startedAt+span.durationMs))?"completed" as const:inferredStatus(usage)} : run,
+      stageBudgets: stageBudgetMetrics(requests),
+      retryRecovery: retryRecoveryMetrics(usage),
+      run: focus ? { ...run, status: "completed" as const } : run.diagnosticOnly ? { ...run, status: executionStatus } : run,
       statusScope: focus ? "wiki" as const : "run" as const,
+      executionStatus,
       outcomes: focus ? { wiki: wikiOutcome, architecture: focus.projectStateAnalysis?.status === "failed" ? "failed" as const : focus.projectState ? "ready" as const : "unavailable" as const, history: focus.projectHistoryStatus?.status ?? (focus.projectHistoryAnalysis ? "ready" as const : "unavailable" as const) } : undefined,
       focusCoverage: focus?.coverage,
       focusPlan: usage.flatMap((event) => event.coveragePlan ? [event.coveragePlan] : []).sort((a, b) => b.plannedBatches - a.plannedBatches)[0],
       sentInputTokensEstimate: usage.filter((event) => isSentUsage(event)).reduce((sum, event) => sum + (event.estimatedInputTokens ?? 0), 0),
-      requestTransport: usage.filter((event) => isSentUsage(event)).map((event) => ({ taskType: event.taskType, stage: event.stage, requestId: event.requestId, durationMs: event.durationMs, estimatedInputTokens: event.estimatedInputTokens, tokenEstimateVersion: event.tokenEstimateVersion, actualInputTokens: event.tokenSource === "provider" ? event.inputTokens : undefined, actualOutputTokens: event.tokenSource === "provider" ? event.outputTokens : undefined, tokenSource: event.tokenSource, costCny: event.costCny, responseHeadersMs: event.responseHeadersMs, firstTokenMs: event.firstTokenMs, receivedCharacters: event.receivedCharacters, reasoningCharacters: event.reasoningCharacters, reasoningTokens: event.reasoningTokens, outputTokenLimit: event.outputTokenLimit, finishReason: event.finishReason, timeoutStage: event.timeoutStage, streaming: event.streaming })),
+      requestTransport: usage.filter((event) => isSentUsage(event)).map((event) => ({ taskType: event.taskType, stage: event.stage, requestId: event.requestId, durationMs: event.durationMs, estimatedInputTokens: event.estimatedInputTokens, tokenEstimateVersion: event.tokenEstimateVersion, actualInputTokens: event.tokenSource === "provider" ? event.inputTokens : undefined, actualOutputTokens: event.tokenSource === "provider" ? event.outputTokens : undefined, tokenSource: event.tokenSource, costCny: event.costCny, responseHeadersMs: event.responseHeadersMs, firstTokenMs: event.firstTokenMs, receivedCharacters: event.receivedCharacters, reasoningCharacters: event.reasoningCharacters, reasoningTokens: event.reasoningTokens, inputTokenLimit: event.inputTokenLimit, plannedOutputTokens: event.plannedOutputTokens, predictedOutputTokens: event.predictedOutputTokens, outputTokenLimit: event.outputTokenLimit, finishReason: event.finishReason, timeoutStage: event.timeoutStage, streaming: event.streaming })),
       synthetic: !knownIds.has(run.id)||Boolean(run.diagnosticOnly),
       readingCacheHits: usage.filter(event=>event.status==="cached"&&event.cacheLayer==="result"&&event.taskType==="focus_session"&&event.stage==="reading").length,
       cacheHits: usage.filter((event) => event.status === "cached").length,
@@ -171,7 +189,9 @@ export function analyzeOrganizationRuns(runs: OrganizationRun[], events: AIUsage
       unavailableRequests: usage.filter((event) => event.tokenSource === "unavailable").length,
       elapsedMs: runElapsed??latestGenerationMs,
       elapsedScope: runElapsed!==undefined?"run":latestGenerationMs!==undefined?"latest_generation":undefined,
-      firstReadableMs: generationStart !== undefined && run.firstReadableAt !== undefined ? Math.max(0, run.firstReadableAt - generationStart) : undefined,
+      firstReadableMs: generationStart !== undefined && run.firstReadableAt !== undefined ? Math.max(0, run.firstReadableAt - generationStart)
+        : focus?.sections.some(section => section.body.trim()) ? runElapsed : undefined,
+      completeWikiMs: focus?.wikiKnowledge?.draft && wikiOutcome === "ready" && (executionStatus === "completed" || executionStatus === "waiting_review") ? runElapsed : undefined,
       queueMs: run.executionStartedAt !== undefined ? Math.max(0, run.executionStartedAt - run.startedAt) : undefined,
       requestDurationMs: usage.reduce((sum, event) => sum + (event.durationMs ?? 0), 0),
       timedRequests: usage.filter((event) => event.durationMs !== undefined && isSentUsage(event)).length,
@@ -217,8 +237,8 @@ function csvCell(value: string | number | undefined): string {
 }
 
 export function organizationAnalysisCsv(rows: OrganizationAnalysis[]): string {
-  const headers = ["run_id", "started_at", "target_type", "conversation_count", "status", "models", "requests", "failed_requests", "retries", "input_tokens", "output_tokens", "provider_tokens", "estimated_tokens", "unavailable_requests", "request_duration_ms", "timed_requests", "questions_analyzed", "cached_questions", "schema_failures", "unsupported_relation_rate", "needs_review_rate", "compression_ratio", "score", "cache_hits", "embedding_tokens", "usage_cost_cny", "pending_cost_cny", "unpriced_requests", "elapsed_ms", "first_readable_ms", "queue_ms", "error_codes", "request_ids", "stages", "task_versions", "observed_request_span_ms", "failed_request_details", "coverage_method", "source_characters", "material_blocks", "planned_batches", "planned_coverage_method", "sent_input_tokens_estimate", "request_transport_details", "elapsed_scope", "retry_scope", "status_scope", "wiki_status", "architecture_status", "history_status", "project_analysis_kind", "phase_timings", "reused_analysis_results", "reviewed_wiki_references", "request_stage_metrics", "request_lifecycle", "bottleneck_signals", "local_pipeline_spans", "latest_generation_ms", "generation_attempts", "recovery_requests", "recovery_reserved_output_tokens", "request_queue_ms", "max_scheduling_ms", "first_readable_scope", "request_metrics_scope", "cached_input_tokens", "estimate_to_actual_input_ratio", "estimate_ratio_by_stage", "preflight_blocks", "writing_input_scale", "models_by_stage", "failures_by_origin", "reading_cache_hits",...WIKI_QUALITY_CSV_COLUMNS];
-  const lines = rows.map(({ run, diagnostics, ...metrics }) => [run.id, new Date(run.startedAt).toISOString(), run.targetType, run.targetIds.length, run.status, metrics.models.join(";"), metrics.requests, metrics.failedRequests, metrics.retries, metrics.inputTokens, metrics.outputTokens, metrics.providerTokens, metrics.estimatedTokens, metrics.unavailableRequests, metrics.requestDurationMs, metrics.timedRequests, diagnostics?.questionsAnalyzed, diagnostics?.cachedQuestionsReused, diagnostics?.schemaFailures, diagnostics?.unsupportedRelationRate, diagnostics?.needsReviewRate, diagnostics?.compressionRatio, run.evaluation?.score || undefined, metrics.cacheHits, metrics.embeddingTokens, metrics.unpricedRequests && !metrics.costCny ? undefined : metrics.costCny, metrics.pendingCostCny, metrics.unpricedRequests, metrics.elapsedMs, metrics.firstReadableMs, metrics.queueMs, metrics.errorCodes.join(";"), metrics.requestIds.join(";"), metrics.stages.join(";"), metrics.taskVersions.join(";"), metrics.observedRequestSpanMs, JSON.stringify(metrics.failures), metrics.focusCoverage?.method, metrics.focusCoverage?.sourceCharacters ?? metrics.focusPlan?.sourceCharacters, metrics.focusCoverage?.processedSegments ?? metrics.focusPlan?.materialBlocks, metrics.focusCoverage?.batchCount ?? metrics.focusPlan?.plannedBatches, metrics.focusPlan?.method, metrics.sentInputTokensEstimate, JSON.stringify(metrics.requestTransport), metrics.elapsedScope, "automatic", metrics.statusScope, metrics.outcomes?.wiki, metrics.outcomes?.architecture, metrics.outcomes?.history, run.projectAnalysis?.kind, run.projectAnalysis ? JSON.stringify(run.projectAnalysis.phases) : undefined, run.projectAnalysis?.reusedRequests, run.projectAnalysis?.reusedWikiSections, JSON.stringify(metrics.byStage),JSON.stringify(aiRequestExport(metrics.lifecycle.events)),metrics.lifecycle.findings.join(";"),JSON.stringify(run.pipelineSpans??[]),metrics.latestGenerationMs,metrics.generationAttempts,metrics.recoveryRequests,metrics.recoveryReservedOutputTokens,metrics.requestQueueMs,metrics.maxSchedulingMs,metrics.firstReadableMs===undefined?undefined:"run","run",metrics.cachedInputTokens,metrics.estimateRatio,metrics.estimateRatioByStage?JSON.stringify(metrics.estimateRatioByStage):undefined,metrics.preflightBlocks,metrics.writingInputScale,metrics.modelsByStage?JSON.stringify(metrics.modelsByStage):undefined,JSON.stringify(metrics.failuresByOrigin),metrics.readingCacheHits,...WIKI_QUALITY_CSV_COLUMNS.map(column=>metrics.wikiQuality?.[column])].map(csvCell).join(","));
+  const headers = ["run_id", "started_at", "target_type", "conversation_count", "status", "models", "requests", "failed_requests", "retries", "input_tokens", "output_tokens", "provider_tokens", "estimated_tokens", "unavailable_requests", "request_duration_ms", "timed_requests", "questions_analyzed", "cached_questions", "schema_failures", "unsupported_relation_rate", "needs_review_rate", "compression_ratio", "score", "cache_hits", "embedding_tokens", "usage_cost_cny", "pending_cost_cny", "unpriced_requests", "elapsed_ms", "first_readable_ms", "queue_ms", "error_codes", "request_ids", "stages", "task_versions", "observed_request_span_ms", "failed_request_details", "coverage_method", "source_characters", "material_blocks", "planned_batches", "planned_coverage_method", "sent_input_tokens_estimate", "request_transport_details", "elapsed_scope", "retry_scope", "status_scope", "wiki_status", "architecture_status", "history_status", "project_analysis_kind", "phase_timings", "reused_analysis_results", "reviewed_wiki_references", "request_stage_metrics", "request_lifecycle", "bottleneck_signals", "local_pipeline_spans", "latest_generation_ms", "generation_attempts", "recovery_requests", "recovery_reserved_output_tokens", "request_queue_ms", "max_scheduling_ms", "first_readable_scope", "request_metrics_scope", "cached_input_tokens", "estimate_to_actual_input_ratio", "estimate_ratio_by_stage", "preflight_blocks", "writing_input_scale", "models_by_stage", "failures_by_origin", "reading_cache_hits","execution_status","stage_budget_metrics","retry_recovery_metrics","complete_wiki_ms",...WIKI_QUALITY_CSV_COLUMNS];
+  const lines = rows.map(({ run, diagnostics, ...metrics }) => [run.id, new Date(run.startedAt).toISOString(), run.targetType, run.targetIds.length, run.status, metrics.models.join(";"), metrics.requests, metrics.failedRequests, metrics.retries, metrics.inputTokens, metrics.outputTokens, metrics.providerTokens, metrics.estimatedTokens, metrics.unavailableRequests, metrics.requestDurationMs, metrics.timedRequests, diagnostics?.questionsAnalyzed, diagnostics?.cachedQuestionsReused, diagnostics?.schemaFailures, diagnostics?.unsupportedRelationRate, diagnostics?.needsReviewRate, diagnostics?.compressionRatio, run.evaluation?.score || undefined, metrics.cacheHits, metrics.embeddingTokens, metrics.unpricedRequests && !metrics.costCny ? undefined : metrics.costCny, metrics.pendingCostCny, metrics.unpricedRequests, metrics.elapsedMs, metrics.firstReadableMs, metrics.queueMs, metrics.errorCodes.join(";"), metrics.requestIds.join(";"), metrics.stages.join(";"), metrics.taskVersions.join(";"), metrics.observedRequestSpanMs, JSON.stringify(metrics.failures), metrics.focusCoverage?.method, metrics.focusCoverage?.sourceCharacters ?? metrics.focusPlan?.sourceCharacters, metrics.focusCoverage?.processedSegments ?? metrics.focusPlan?.materialBlocks, metrics.focusCoverage?.batchCount ?? metrics.focusPlan?.plannedBatches, metrics.focusPlan?.method, metrics.sentInputTokensEstimate, JSON.stringify(metrics.requestTransport), metrics.elapsedScope, "automatic", metrics.statusScope, metrics.outcomes?.wiki, metrics.outcomes?.architecture, metrics.outcomes?.history, run.projectAnalysis?.kind, run.projectAnalysis ? JSON.stringify(run.projectAnalysis.phases) : undefined, run.projectAnalysis?.reusedRequests, run.projectAnalysis?.reusedWikiSections, JSON.stringify(metrics.byStage),JSON.stringify(aiRequestExport(metrics.lifecycle.events)),metrics.lifecycle.findings.join(";"),JSON.stringify(run.pipelineSpans??[]),metrics.latestGenerationMs,metrics.generationAttempts,metrics.recoveryRequests,metrics.recoveryReservedOutputTokens,metrics.requestQueueMs,metrics.maxSchedulingMs,metrics.firstReadableMs===undefined?undefined:"run","run",metrics.cachedInputTokens,metrics.estimateRatio,metrics.estimateRatioByStage?JSON.stringify(metrics.estimateRatioByStage):undefined,metrics.preflightBlocks,metrics.writingInputScale,metrics.modelsByStage?JSON.stringify(metrics.modelsByStage):undefined,JSON.stringify(metrics.failuresByOrigin),metrics.readingCacheHits,metrics.executionStatus,metrics.stageBudgets.length?JSON.stringify(metrics.stageBudgets):undefined,JSON.stringify(metrics.retryRecovery),metrics.completeWikiMs,...WIKI_QUALITY_CSV_COLUMNS.map(column=>metrics.wikiQuality?.[column])].map(csvCell).join(","));
   return `\uFEFF${headers.map(csvCell).join(",")}\r\n${lines.join("\r\n")}${lines.length ? "\r\n" : ""}`;
 }
 

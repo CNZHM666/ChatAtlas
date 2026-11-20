@@ -7,11 +7,37 @@ import { listAIUsage } from "../storage/ai-usage";
 import { AIProviderHttpError, AIProviderResponseError, type AtlasAIProvider, type StructuredAIRequest } from "./provider";
 import { atlasApiClient, DemoApiError } from "./demo-api";
 import { AIProviderValidationError } from "./provider-errors";
+import { recordWikiOutput } from "./wiki-output-calibration";
 
 const settings: AISettings = { id: "ai-settings", provider: "deepseek", baseUrl: "https://api.deepseek.com/v1", apiKey: "test", model: "one-model", updatedAt: 1 };
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("AtlasAI facade", () => {
+  it("discards a parseable Wiki response marked as truncated and caches only the complete replacement", async () => {
+    const runId = crypto.randomUUID(), modelId = "wiki-budget-fixture";
+    for (let sample = 0; sample < 6; sample++) recordWikiOutput("deepseek", modelId, "wiki_chapter_write", 2000, 900);
+    const caps: number[] = [];
+    const generateStructured = async <T,>(request: StructuredAIRequest<T>) => {
+      caps.push(request.maxOutputTokens!);
+      request.onDiagnostics?.({ finishReason: caps.length === 1 ? "length" : "stop" });
+      return request.validate({ complete: caps.length > 1 });
+    };
+    const atlas = createAtlasAIFromProvider({
+      modelId, testConnection: vi.fn(), generateStructured,
+      capabilities: { textGeneration: true, structuredOutput: "json", embeddings: false, maxOutputTokens: 1700 },
+    }, settings, undefined, runId);
+    const request: StructuredAIRequest<unknown> = { taskType: "other", system: "Read", prompt: JSON.stringify({ presentation: "wiki_chapter_write", fixture: runId }),
+      maxAttempts: 1, maxOutputTokens: 2000, validate: (value: unknown) => value };
+    await expect(atlas.generateStructured(request)).resolves.toEqual({ complete: true });
+    await expect(atlas.generateStructured(request)).resolves.toEqual({ complete: true });
+    expect(caps).toEqual([1400, 1700]);
+    const events = (await listAIUsage()).filter(event => event.runId === runId);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ attempt: 1, status: "failed", errorCode: "PROVIDER_OUTPUT_TRUNCATED", finishReason: "length", outputTokenLimit: 1400 }),
+      expect.objectContaining({ attempt: 2, status: "completed", outputTokenLimit: 1700 }),
+      expect.objectContaining({ status: "cached" }),
+    ]));
+  });
   it("records ownership repair counts independently of the rejected source directory",async()=>{
     const failure=new AIProviderValidationError("wiki_directory_ownership_incomplete"),runId=crypto.randomUUID();failure.wikiOwnershipDetails={expectedSlots:17,receivedSlots:2,reason:"count"};failure.fieldPaths=["owners"];
     const generateStructured=vi.fn().mockRejectedValue(failure);

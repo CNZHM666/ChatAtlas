@@ -30,7 +30,7 @@ Model requests go directly to your selected provider. Connection tests may also 
 
 The overview introduces the project and maintained matters. Wiki holds lasting detail. Open chapter navigation, source comparisons or continuous originals when needed. Previous/next navigation follows saved reading order and does not mark content understood automatically.
 
-Add, edit and resolve personal matters without implying a historical feature was delivered. Preview updates before adopting them; personal edits are not silently overwritten. New project questions and evolution analysis are experimental under secondary features; saved history remains readable. Architecture AI generation is gated; existing diagrams remain available.
+Open **Review evidence** to read the original quote and surrounding conversation. The Wiki marks confirmed decisions, AI suggestions, user reports, and items needing review. Start an update from the overview when sources change. Preview changes before adoption. Personal edits are preserved, and previously saved matters and history are available in the export dialog.
 
 ## Use the AI website sidebar
 
@@ -44,9 +44,7 @@ The composer adapters support ChatGPT and the six Beta websites. Explicit insert
 
 ## Hand knowledge to another AI
 
-Open **Use project context**, enter a task, choose chapters automatically or manually and review before copying, exporting or saving. Default packing is local and has no model cost. You can manually paste the output into another AI.
-
-For a shorter draft, open **AI refinement** and choose a quick question or task handoff. Only the reviewed preview and task are sent to the configured model. Review the candidate before adoption; the original can be restored. See [Context](CONTEXT.md).
+Open **Export** in the workbench, select the overview and relevant Wiki chapters, and choose Markdown. Use **Select overview only** for a short handoff. Choose reference numbers, key quotes and confirmations, or cited excerpts. The file is generated locally and can be shared with another AI.
 
 ## Backups and troubleshooting
 
@@ -54,6 +52,6 @@ Download a backup in **Settings → Capture & data** before uninstalling, cleari
 
 - Cannot generate: check selected sources, saved text, goal and AI connection.
 - Cannot list models: check provider, region and permissions, or enter the provider's documented exact model ID.
-- Refinement over budget: reduce chapters. Whole chapters are not silently cut or automatically split into paid rounds.
+- Export too long: select just the overview and chapters relevant to the task.
 - Long wait: inspect the actual stage and usage records. The first complete read still has a real input cost.
 - Sources changed: saved knowledge remains readable, but review originals and update the preview before relying on current status.

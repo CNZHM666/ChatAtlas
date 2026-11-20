@@ -6,7 +6,7 @@ import {wikiUiCopy,wikiUiCopySupports} from "./wiki-ui-copy";
 import {isRequiredWikiSourceBlock} from "./wiki-source-code";
 import type { WikiDraftChapter, WikiKnowledgeUnit } from "./wiki-knowledge";
 
-import {plainBlockLayout,wikiLiteralText} from "./wiki-plain-block";
+import {illustrativeWikiFlow,plainBlockLayout,wikiLiteralText} from "./wiki-plain-block";
 import {WIKI_SUPPLEMENT,wikiSupplementTitle,groupWikiSupplements,wikiSupplementRanges,normalizeWikiSupplementHeadings} from "./wiki-source-supplements";
 export {WIKI_SUPPLEMENT} from "./wiki-source-supplements";
 export interface WikiBlockAdmission {
@@ -143,6 +143,7 @@ export function planWikiSourceBlock(code: SourceBlock, caption = "", units: Wiki
     return result("supplement", "Literal preservation does not require inline display; examples remain complete in the subsection attachment.");
   }
   const layout=plainBlockLayout(code.text);
+  if(!required&&layout?.kind==="flow"&&illustrativeWikiFlow(code.text))return result("source_only","The demonstration adds no distinct acceptance condition; it remains in the original discussion.");
   if(layout)return result("reformat", "The original grouping and explicit relationships determine the layout.",layout.kind);
   if (STRUCTURE.test(code.text) || /界面草图|UI sketch|目录结构|file layout|提示词|prompt/iu.test(caption)) return result("supplement", "Layout-sensitive material remains intact in an optional source example.");
   if (lines.length === 1 && lines[0].length <= 120) {

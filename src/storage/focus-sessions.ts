@@ -3,6 +3,7 @@ import type { FocusSession } from "../shared/focus-session";
 import { projectQueryThreadId } from "./project-query-threads";
 import { getDatabase } from "./db";
 import {focusTaskResult} from "../shared/focus-task-result";
+import { renamedCanvas } from "./canvases";
 
 export async function listFocusSessions(): Promise<FocusSession[]> {
   const deleted = new Set((await listDeletedProjects()).map(project => project.id));
@@ -48,6 +49,28 @@ export async function saveFocusSession(session: FocusSession): Promise<void> {
   await tx.done;
   if(tasksChanged&&typeof window!=="undefined")window.dispatchEvent(new Event("atlas-focus-tasks-changed"));
   if (session.status !== "preview" && JSON.stringify([previous?.sourceSignatures, previous?.scope]) !== JSON.stringify([session.sourceSignatures, session.scope])) void import("../search/semantic-index").then(module => module.refreshProjectVectors(session)).catch(() => undefined);
+}
+
+/** Save the visible project name together with the active Wiki version. */
+export async function renameFocusProject(session: FocusSession, name: string): Promise<FocusSession> {
+  const db = await getDatabase();
+  const tx = db.transaction(["canvases", "focusSessions"], "readwrite");
+  const sessions = tx.objectStore("focusSessions");
+  const saved = await sessions.get(session.id);
+  const canvas = session.canvasId ? await tx.objectStore("canvases").get(session.canvasId) : undefined;
+  if (saved?.deletedAt || session.canvasId && !canvas) {
+    void tx.done.catch(() => undefined);
+    tx.abort();
+    throw new Error("项目或版本已不存在 / The project or version no longer exists.");
+  }
+  const current = saved ?? session;
+  const updatedAt = Date.now();
+  const next = { ...current, title: name, wikiSuggestedTitle: undefined, updatedAt,
+    wikiProjectBoundary: current.wikiProjectBoundary ? { ...current.wikiProjectBoundary, name } : undefined };
+  if (canvas) await tx.objectStore("canvases").put(renamedCanvas(canvas, name, updatedAt));
+  await sessions.put(next);
+  await tx.done;
+  return next;
 }
 
 /** Attach the result and its explicitly confirmed sources together. */

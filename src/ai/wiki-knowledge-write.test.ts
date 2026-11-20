@@ -149,7 +149,7 @@ it("re-exports a legacy project with a missing rule and its source, respecting m
   const selection = { overview: false, wikiIds: saved.sections.map(section => section.id), matters: false, history: false, sources: false };
   const exported = projectDocument(session, selection, "md").text;
   expect(exported.split(table)).toHaveLength(2);
-  expect(exported).toMatch(/\| V2 \| Shared workspaces \|\n\n原文来源 \[S-/u);
+  expect(exported).toMatch(/\[来源\d+\]\(#source-S-[\w-]+\)\n\n\| Version \| Scope \|/u);
   expect(exported).not.toContain(example.evidence.code.text);
   expect(saved.sections[0].body).not.toContain(table);
 
@@ -837,14 +837,16 @@ it("drops settling words the marks say instead (正式确立的, 最终方案确
   expect(draft.chapters[0].paragraphs.map(paragraph => paragraph.text)).toEqual(["三大核心模块包括 Workspace、Sidebar 和 Context Engine。", "当时方案为原生推开式分屏，用户原话是「最终方案确定为分屏」。"]);
 });
 
-it("ends a paragraph on the user's decision, so the suggestions after it are not read as decided", async () => {
+it("preserves a continuous paragraph and binds the user's decision to its own sentence", async () => {
   const decision = { ...unit(1, "增加书签功能，允许用户手动标注对话内容。", { role: "user", kind: "decision", adoption: "user_decision" }) };
   const units = [{ ...decision, evidence: { ...decision.evidence, quote: "我打算加个书签功能" } }, unit(2, "采用带注释的智能书签，增加独立的 bookmarks 表。")];
   const text = "增加书签功能，允许用户手动标注对话内容。采用带注释的智能书签，增加独立的 bookmarks 表。";
   const { ai } = model(data => { const ids = data.subtopics[0].units.map(item => item.id); return { opening: "书签。", subtopics: [{ title: "全文索引", paragraphs: [{ text, unitIds: ids, claims: [{ text: "增加书签功能，允许用户手动标注对话内容。", unitIds: [ids[0]] }] }] }] }; });
   const draft = await writeWikiDraft({ ledger: ledger(units), ai, locale: "zh-CN", signal });
-  expect(draft.chapters[0].paragraphs[0].text).toBe("增加书签功能，允许用户手动标注对话内容。\n\n采用带注释的智能书签，增加独立的 bookmarks 表。");
-  expect(draft.report.decisions_set_apart).toBe(1);
+  expect(draft.chapters[0].paragraphs[0].text).toBe(text);
+  expect(draft.chapters[0].paragraphs[0].claims?.filter(claim=>claim.unitIds.includes(decision.id))).toEqual([
+    expect.objectContaining({text:decision.statement,unitIds:[decision.id]}),
+  ]);
 });
 
 it("removes a list item telling an earlier one again and keeps the list a list; drops 用户确认采用", async () => {

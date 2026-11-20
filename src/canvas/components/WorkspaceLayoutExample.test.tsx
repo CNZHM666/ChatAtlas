@@ -46,7 +46,8 @@ it("exports the document and traces its original discussion without AI calls", a
   expect(within(dialog).getByRole("button", { name: "选择 Wiki 章节" })).toHaveAttribute("aria-expanded", "false");
   expect(within(dialog).getByRole("combobox", { name: "文件格式" })).toHaveValue("md");
   fireEvent.click(within(dialog).getByRole("button", { name: "关闭导出" }));
-  fireEvent.click(screen.getByRole("button", { name: "查看来源对话" }));
+  expect(screen.queryByRole("button", { name: "查看来源对话" })).toBeNull();
+  fireEvent.click(navigation().getByRole("button", { name: /^来源/u }));
   fireEvent.click(screen.getByRole("button", { name: /^产品定位与首版范围/ }));
   await waitFor(()=>expect(screen.getByRole("dialog", { name: "原文依据" })).toHaveTextContent("我们想做 Circuit Studio")); noWork();
 });

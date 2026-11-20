@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { WikiDraftChapter, WikiKnowledgeUnit } from "../shared/wiki-knowledge";
-import { restoredConditionalNegation, wikiChapterIntegrity, wikiIncompleteProse } from "./wiki-integrity";
+import { restoreDetachedWikiScope, restoredConditionalNegation, wikiChapterIntegrity, wikiIncompleteProse } from "./wiki-integrity";
+import { lostNegation, recheckWikiTableNegation } from "./wiki-negation-review";
 
 const point = (id: string, statement: string, quote = statement, section?: string): WikiKnowledgeUnit => ({
   id, statement, subject: "设计", kind: "plan", details: [], delivery: "unknown", adoption: { status: "proposal" },
@@ -9,6 +10,34 @@ const point = (id: string, statement: string, quote = statement, section?: strin
 const check = (body: string, claims: NonNullable<WikiDraftChapter["paragraphs"][number]["claims"]>, units: WikiKnowledgeUnit[]) =>
   wikiChapterIntegrity({ id: "c", title: "设计", group: "", question: "", body, problems: [],
     paragraphs: [{ text: body, subtopic: "规则", unitIds: units.map(unit => unit.id), claims }] }, id => units.find(unit => unit.id === id), true);
+
+it("restores a detached release scope from the stored complete sentence only", () => {
+  const tail = "的核心约束是以确定性规则验证结果。";
+  expect(restoreDetachedWikiScope(tail, ["第一版" + tail])).toBe("第一版" + tail);
+  expect(restoreDetachedWikiScope(tail, ["第一版" + tail, "第二版" + tail])).toBe(tail);
+});
+
+it("keeps a supported example command distinct from a general prohibition", () => {
+  const source = point("command", "完整支持“不要 OLED，改成温度超过 30℃时蜂鸣器报警”的修改。");
+  const sentence = "涵盖 DHT22、OLED、MOSFET 等元件。";
+  expect(lostNegation(sentence, [source.statement])).toBeUndefined();
+  expect(lostNegation("系统允许使用 OLED。", ["系统绝对禁止使用 OLED。"])).toBeDefined();
+  expect(recheckWikiTableNegation('"涵盖 DHT22、OLED…" drops the negation of "完整支持“不要 OLED…"', sentence,
+    [{ text: sentence, unitIds: [source.id] }], new Map([[source.id, source]]))).toBe(true);
+});
+
+it("clears negation warnings for response labels while retaining actual constraints", () => {
+  const labels = "通过“我有/没有/不确定”及拍照识别来更新库存状态";
+  const restriction = "禁止根据拍照识别直接写入库存或零件目录";
+  const source = point("inventory", `库存不再作为独立导航项，${labels}。${restriction}。`);
+  const sentence = `库存不再作为独立导航项，${labels}。${restriction}。`;
+  const claims = [{ text: labels, unitIds: [source.id] }], units = new Map([[source.id, source]]);
+  const warning = `"通过及拍照识别来更新库存状态…" drops the negation of "${labels}…"`;
+  expect(lostNegation(sentence, [source.statement])).toBeUndefined();
+  expect(recheckWikiTableNegation(warning, sentence, claims, units)).toBe(true);
+  expect(recheckWikiTableNegation(warning, sentence, [{ ...claims[0], unitIds: ["unbound"] }], units)).toBe(false);
+  expect(lostNegation("系统可以根据拍照识别直接写入库存或零件目录。", [source.statement])?.source).toBe(restriction);
+});
 
 it("keeps both source conditions for the saved short rule and resolves only its matching warning",()=>{
  const value="返回 unsupportedOrUnsafe=true 并阻止加入 Inventory";
@@ -43,6 +72,21 @@ it("completes a truncated flow only when its bound source gives a unique continu
   expect(check(text, claims, [ambiguous])).toMatchObject({ body: text, repaired: 0, problems: [expect.stringContaining("incomplete generated prose")] });
   expect(wikiIncompleteProse("正常的流程 A -> B。\n\n```text\nA -> B-。\n```")).toEqual([]);
   expect(wikiIncompleteProse("前置校验成功。随后运行 Prepare->Validate-。结果写入日志。")[0]?.preserved).toBe("前置校验成功。结果写入日志。");
+});
+
+it("flags a dangling term while preserving the complete explanation and literal code",()=>{
+ const text="架构视图展示模块间的逻辑关系。I²C）。";
+ expect(wikiIncompleteProse(text)[0]?.preserved).toBe("架构视图展示模块间的逻辑关系。");
+ expect(wikiIncompleteProse("接口为 I²C（可选）。\n\n```text\nI²C）。\n```")).toEqual([]);
+});
+
+it("restores a missing Chinese subject only from its complete bound statement", () => {
+ const tail="的通过标准包含查询速度和覆盖率。";
+ const source=point("a",`夜间回归测试${tail}`);
+ const claims=[{text:tail,unitIds:[source.id]}];
+ expect(check(tail,claims,[source])).toMatchObject({body:source.statement,repaired:1,problems:[]});
+ expect(check(tail,[{text:tail,unitIds:[source.id,"missing"]}],[source]).problems).toHaveLength(1);
+ expect(wikiIncompleteProse(`> ${tail}\n\n的确还有一项计划需要验证。`)).toEqual([]);
 });
 
 it("removes editing residue and restores only the bound complete claim", () => {

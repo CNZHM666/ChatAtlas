@@ -12,7 +12,8 @@ import { READER_PAGE_MESSAGES, readerPageEnd, readerWindow } from "../reader-win
 import { queueReaderRender } from "../reader-render-queue";
 import { useReaderPlugins } from "../hooks/useReaderPlugins";
 import { readerQuestionIndex } from "../reader-position";
-import { evidenceSourceRanges, evidenceTextRange } from "../evidence-highlight";
+import { evidenceSourceRanges, evidenceTextLocator, evidenceTextRange } from "../evidence-highlight";
+import { historySearchRanges } from "../../search/history-search-display";
 import { ReaderEvidenceHighlight } from "./ReaderEvidenceHighlight";
 import { sourceMessageSignature } from "../../shared/source-signature";
 import { readerEvidenceTarget } from "../reader-evidence-location";
@@ -80,7 +81,7 @@ const VisibleMarkdown = memo(function VisibleMarkdown({ content, uiParts, source
   return <div ref={root}>{ready || immediate ? segments.map((part, index) => part.kind === "text" ? <ReaderMarkdown key={index} content={part.text} sourceStart={part.sourceStart} zh={zh} literalWidgets={literalWidgets} literalCode={literalCode} /> : <div key={index} data-reader-ui-part={part.partIndex}><ReaderPlatformUI raw={part.raw} fallbackText={part.fallbackText} truncated={part.truncated} zh={zh} sourceUrl={sourceUrl} /></div>) : <div className="reader-long-text reader-markdown-placeholder" aria-busy="true">{placeholder}</div>}</div>;
 });
 
-export const ReaderConversation = memo(function ReaderConversation({ messages, zh, focusMessageId, focusExcerpt, focusRange, focusNonce = 0, focusPlacement = "question", selectedQuestionId, focusOnly = false, hidden = false, highlightTurn = true, onCopy, onMark, citations, onCitation }: { messages: ConversationMessage[]; zh: boolean; focusMessageId?: string; focusExcerpt?: string; focusRange?: MessageSourceRange; focusNonce?: number; focusPlacement?: "question" | "evidence"; selectedQuestionId?: string; focusOnly?: boolean; hidden?: boolean; highlightTurn?: boolean; onCopy?: (message: ConversationMessage) => void; onMark?: (message: ConversationMessage, kind: "conclusion" | "decision") => void; citations?: Map<string, ReaderCitation[]>; onCitation?: (citation: ReaderCitation) => void }) {
+export const ReaderConversation = memo(function ReaderConversation({ messages, zh, focusMessageId, focusExcerpt, focusRange, searchQuery, focusNonce = 0, focusPlacement = "question", selectedQuestionId, focusOnly = false, hidden = false, highlightTurn = true, onCopy, onMark, citations, onCitation }: { messages: ConversationMessage[]; zh: boolean; focusMessageId?: string; focusExcerpt?: string; focusRange?: MessageSourceRange; searchQuery?: string; focusNonce?: number; focusPlacement?: "question" | "evidence"; selectedQuestionId?: string; focusOnly?: boolean; hidden?: boolean; highlightTurn?: boolean; onCopy?: (message: ConversationMessage) => void; onMark?: (message: ConversationMessage, kind: "conclusion" | "decision") => void; citations?: Map<string, ReaderCitation[]>; onCitation?: (citation: ReaderCitation) => void }) {
   const readableMessages = useMemo(() => messages.filter((message) => !isInternalSearchQueryMessage(message)), [messages]);
   const questionIndex = useMemo(() => readerQuestionIndex(readableMessages), [readableMessages]);
   const windowFocus = focusPlacement === "question" && focusMessageId ? questionIndex.get(focusMessageId) ?? focusMessageId : focusMessageId;
@@ -119,6 +120,7 @@ export const ReaderConversation = memo(function ReaderConversation({ messages, z
   const root = useRef<HTMLDivElement>(null);
   const proofHost = useRef<HTMLDivElement>(null);
   const [proofRange, setProofRange] = useState<Range | null>(null);
+  const [searchRanges, setSearchRanges] = useState<Range[]>();
   const previousFocus = useRef(windowFocus);
   const previousNonce = useRef(focusNonce);
   const located = useRef<string>();
@@ -133,10 +135,13 @@ export const ReaderConversation = memo(function ReaderConversation({ messages, z
     });
   }, [readableMessages, focusWindow, windowFocus, focusNonce]);
   useEffect(() => {
-    if (hidden || !focusMessageId || !root.current) { setProofRange(null); return; }
+    if (hidden || !focusMessageId || !root.current) {
+      located.current = undefined;
+      setProofRange(null); setSearchRanges(undefined); return;
+    }
     const container = root.current;
     const source = readableMessages.find(message => message.id === focusMessageId);
-    const locationKey = JSON.stringify([focusMessageId, focusExcerpt, focusRange, focusNonce, focusOnly, focusPlacement, windowFocus, sourceMessageSignature(source?.content ?? ""), source?.uiParts]);
+    const locationKey = JSON.stringify([focusMessageId, focusExcerpt, focusRange, searchQuery, focusNonce, focusOnly, focusPlacement, windowFocus, sourceMessageSignature(source?.content ?? ""), source?.uiParts]);
     if (located.current === locationKey) return;
     const locate = () => {
       const element = [...container.querySelectorAll<HTMLElement>("[data-reader-message-id]")].find((item) => item.dataset.readerMessageId === focusMessageId);
@@ -152,10 +157,22 @@ export const ReaderConversation = memo(function ReaderConversation({ messages, z
       const blockStart = Number(target.dataset.readerSourceStart ?? 0);
       const occurrence = quote && validRange ? Math.max(0, field!.slice(blockStart, validRange.start).split(quote).length - 1) : 0;
       const sourceRange=validRange&&validRange.part!=="ui"&&original?evidenceSourceRanges(element,original.content,[{start:validRange.start,end:validRange.end,kind:"quote"}])[0]?.range:undefined;
-      setProofRange(sourceRange??(quote ? evidenceTextRange(target, quote, occurrence) ?? null : null));
+      const exact = sourceRange ?? (quote ? evidenceTextRange(target, quote, occurrence) : undefined);
+      const content = element.querySelector<HTMLElement>(".conversation-answer-markdown") ?? element;
+      const locateTerms = searchQuery ? evidenceTextLocator(content, true) : undefined;
+      const matches = locateTerms ? historySearchRanges(searchQuery!, locateTerms.text).flatMap(hit => locateTerms.at(hit.start, hit.end) ?? []) : undefined;
+      setProofRange(exact ?? null);
+      setSearchRanges(matches);
       const question = [...container.querySelectorAll<HTMLElement>("[data-reader-message-id]")].find(item => item.dataset.readerMessageId === windowFocus);
       const landing = validRange ? target : focusPlacement === "question" ? question ?? element : target;
       landing.scrollIntoView?.({ block: validRange || focusPlacement === "evidence" ? "center" : "start" });
+      const term = searchQuery && (exact ?? matches?.[0]);
+      const scroll = term && readerScrollContainer(element);
+      const rect = term ? term.getBoundingClientRect?.() : undefined;
+      if (scroll && rect?.height) {
+        const bounds = scroll.getBoundingClientRect();
+        if (rect.top < bounds.top + 42 || rect.bottom > bounds.bottom - 24) scroll.scrollTop += rect.top - bounds.top - bounds.height * .4;
+      }
       located.current = locationKey;
       return true;
     };
@@ -177,7 +194,7 @@ export const ReaderConversation = memo(function ReaderConversation({ messages, z
     // Run after the focus window commits, rather than scrolling the previous page.
     const timer = window.setTimeout(locate, 0);
     return () => { stop(); window.clearTimeout(timer); events.forEach(event => container.ownerDocument.removeEventListener(event, stop, true)); };
-  }, [focusMessageId, focusExcerpt, focusRange, focusNonce, range.start, range.end, readableMessages, focusOnly, focusPlacement, windowFocus, hidden]);
+  }, [focusMessageId, focusExcerpt, focusRange, searchQuery, focusNonce, range.start, range.end, readableMessages, focusOnly, focusPlacement, windowFocus, hidden]);
   // Reading earlier messages adds them above the one being read. That message stays where it is on screen while
   // the new ones render (their heights are only estimated until then), so the page does not jump.
   const pinned = useRef<{ id: string; top: number }>();
@@ -221,7 +238,7 @@ export const ReaderConversation = memo(function ReaderConversation({ messages, z
     return () => observer.disconnect();
   }, [hasMore, range.end, readableMessages]);
   if (hidden) return null;
-  return <div className="reader-proof-host" ref={proofHost}><ReaderEvidenceHighlight range={proofRange} host={proofHost}/><div className="reader-conversation" ref={root}>
+  return <div className="reader-proof-host" ref={proofHost}><ReaderEvidenceHighlight range={proofRange} matches={searchRanges} host={proofHost}/><div className="reader-conversation" ref={root}>
     {!focusOnly && range.start > 0 ? <button type="button" className="reader-load-more" onClick={readEarlier}>{zh ? `阅读更早的内容（前面 ${range.start} 条）` : `Read earlier (${range.start} messages)`}</button> : null}
     {shown.map((message, index) => {
       const group = replyGroups.get(message.id);

@@ -16,19 +16,19 @@ class PreviewBoundary extends Component<{children:ReactNode;raw:string;zh:boolea
 }
 /** First paint contains the preview shell and chapter headings. Markdown work
  * starts in separate tasks only near the viewport; no offscreen full-document mount. */
-export function PreviewContent({children,raw,zh}:{children:ReactNode;raw:string;zh:boolean}){
+export function PreviewContent({children,raw,zh,reserveSpace=false}:{children:ReactNode;raw:string;zh:boolean;reserveSpace?:boolean}){
  const root=useRef<HTMLDivElement>(null),[ready,setReady]=useState(false);
  useEffect(()=>{
   let stopped=false,cancel:(()=>void)|undefined;
   const schedule=()=>{if(!cancel)cancel=queueReaderRender(()=>{if(!stopped)setReady(true);});};
-  const observer=typeof IntersectionObserver==="undefined"?undefined:new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){schedule();observer?.disconnect();}},{rootMargin:"240px"});
+  const observer=typeof IntersectionObserver==="undefined"?undefined:new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){schedule();observer?.disconnect();}},{rootMargin:"480px 0px"});
   if(observer&&root.current)observer.observe(root.current);else schedule();
   return()=>{stopped=true;observer?.disconnect();cancel?.();};
  },[]);
  return <div ref={root} className="preview-content">
   {ready
    ? <PreviewBoundary key={raw} raw={raw} zh={zh}>{children}</PreviewBoundary>
-   : <div className="preview-content-pending">
+   : <div className="preview-content-pending" style={reserveSpace?{minBlockSize:Math.min(480,Math.max(80,Math.ceil(raw.length/10)))}:undefined}>
     <span role="status">{zh?"正在准备预览…":"Preparing preview…"}</span>
     <button type="button" onClick={()=>setReady(true)}>{zh?"立即查看":"Show now"}</button>
    </div>}

@@ -3,6 +3,8 @@ import { AIProviderResponseError, AIProviderValidationError } from "./provider-e
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import type { WikiCandidateIndex } from "./wiki-candidate-index";
 import { sourceMessageSignature } from "../shared/source-signature";
+import { wikiCannotFit, wikiRecoveryRequest, wikiRequestIdentity, wikiSplitReason, type WikiRecoveryReason } from "./wiki-batch-recovery";
+import { wikiRequestFits, wikiStructuredOutput, type WikiBudgetModel } from "./wiki-request-budget";
 import { coreHeldBy, modalityConflict, protectedDifference, type WikiExplanationGroup, type WikiKnowledgeUnit, type WikiProgressFn, type WikiSubject } from "../shared/wiki-knowledge";
 
 /** Redesign phase 2: explanation groups, units that state one core, explained once. Step 1 recalls which
@@ -14,7 +16,7 @@ export const GROUP_CANDIDATES = 8, GROUP_MIN_OVERLAP = .35, GROUP_CLUSTER = 12;
 /** A term in more than this share of units says nothing about which units belong together. */
 const COMMON_TERM_SHARE = .15;
 /** Units per confirmation request and the answer's budget; a cut-off request is asked again in halves, once. */
-const GROUP_REQUEST_UNITS = 40, GROUP_OUTPUT_TOKENS = 2500;
+const GROUP_REQUEST_UNITS = 40, GROUP_OUTPUT_TOKENS = 3200, GROUP_RECOVERY_DEPTH = 2;
 /** Group requests in flight at once; the provider's adaptive limit still decides how many run. */
 const GROUP_CONCURRENCY = 8;
 /** Why a confirmation request failed: an answer cut off at the output limit, an answer that is not the
@@ -80,7 +82,7 @@ export function groupCandidateClusters(candidates: GroupCandidate[]): string[][]
 
 // ---- Step 2: confirmation, local checks, merging across clusters ----
 
-type AI = { generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> };
+type AI = WikiBudgetModel & { generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> };
 /** A group's fingerprint: rules, core, and each member's id and statement. Any change means the group is redone. */
 export const groupSignature = (core: string, members: Array<{ unitId: string }>, byId: Map<string, WikiKnowledgeUnit>) => sourceMessageSignature(JSON.stringify([GROUP_RULES, core, members.map(member => [member.unitId, byId.get(member.unitId)?.statement ?? ""])]));
 export interface GroupInput { ai: AI; locale: string; signal: AbortSignal; progress?: WikiProgressFn; previous?: WikiExplanationGroup[] }
@@ -163,7 +165,7 @@ function readGroups(value: unknown, ids: Map<string, string>, clauseOf: Map<stri
 /** Groups of units sharing a core, built from candidate clusters; every member passes the local checks and the
  * group keeps two or more members, at least one supporting the core. Ids carry over from previous groups
  * sharing most members; moves are returned for an update to record. */
-export async function buildExplanationGroups(units: WikiKnowledgeUnit[], clusters: string[][], subjectOf: Map<string, string>, input: GroupInput, report: Record<string, number>): Promise<{ groups: WikiExplanationGroup[]; moves: Array<{ from: string[]; to: string[] }> }> {
+export async function buildExplanationGroups(units: WikiKnowledgeUnit[], clusters: string[][], subjectOf: Map<string, string>, input: GroupInput, report: Record<string, number>): Promise<{ groups: WikiExplanationGroup[]; moves: Array<{ from: string[]; to: string[] }>; failedClusters?: string[][] }> {
   const byId = new Map(units.map(unit => [unit.id, unit]));
   if (typeof input.ai.generateStructured !== "function" || !clusters.length) return { groups: [], moves: [] };
   // Clusters packed into requests of about GROUP_REQUEST_UNITS units; a failed request is asked again in halves.
@@ -174,34 +176,59 @@ export async function buildExplanationGroups(units: WikiKnowledgeUnit[], cluster
   // Requests run GROUP_CONCURRENCY at a time; answers are kept in queue order (a halved batch in its place),
   // so a rerun builds the same groups whatever finishes first.
   const answered: Array<{ order: number[]; drafts: Draft[] }> = [];
+  const failedClusters: string[][] = [];
   // Progress counts units, so a retry never grows the total; a batch counts once it is answered or given up.
-  const pending = queue.map((part, index) => ({ part, split: false, order: [index] }));
+  type GroupJob = { part: string[][]; depth: number; order: number[]; parent?: StructuredAIRequest<Draft[]>; recovery?: WikiRecoveryReason; expanded?: true };
+  const pending: GroupJob[] = queue.map((part, index) => ({ part, depth: 0, order: [index] }));
   let done = 0, failedInRow = 0;
   const total = clusters.reduce((sum, cluster) => sum + cluster.length, 0);
   input.progress?.({ stage: "group", done, total });
   const worker = async () => { while (pending.length) {
     input.signal.throwIfAborted();
-    const { part, split, order } = pending.shift()!, ids = new Map<string, string>(), clauseOf = new Map<string, string[]>();
+    const { part, depth, order, parent, recovery, expanded } = pending.shift()!, ids = new Map<string, string>(), clauseOf = new Map<string, string[]>();
     part.flat().forEach(id => { const key = `u${ids.size + 1}`; ids.set(key, id); clauseOf.set(key, unitClauses(byId.get(id)!)); });
     const alias = new Map([...ids].map(([key, id]) => [id, key]));
+    const clauseCount = [...clauseOf.values()].reduce((sum, clauses) => sum + clauses.length, 0);
+    const expected = wikiStructuredOutput(ids.size, 48, Infinity, 1050) + clauseCount * 6 + part.length * 100;
+    const limit = Math.min(GROUP_OUTPUT_TOKENS, expanded ? Math.ceil(expected * 1.75) : expected);
+    const primary = wikiRequestIdentity<Draft[]>({ taskType: "other", temperature: 0, maxAttempts: 1, resendUnsent: true, maxOutputTokens: limit, signal: input.signal, trace: { feature: "wiki", operation: "wiki:knowledge-organize" }, system: GROUP_SYSTEM + " Use compact JSON and short core sentences. Keep every support and adds clause number.",
+        prompt: JSON.stringify({ presentation: "wiki_unit_groups", version: 1, rules: GROUP_RULES, locale: input.locale, clusters: part.map((cluster, index) => ({ id: `c${index + 1}`, units: cluster.map(id => ({ id: alias.get(id), clauses: clauseOf.get(alias.get(id)!)!.map((clause, index) => `${index + 1}. ${clause}`) })) })) }),
+        validate: value => readGroups(value, ids, clauseOf) });
+    const request = parent && recovery ? wikiRecoveryRequest(primary, parent, recovery) : primary;
+    const enqueueHalves = (level: number, origin = parent, reason = recovery) => {
+      const half = Math.ceil(part.length / 2);
+      pending.unshift({ part: part.slice(0, half), depth: level, order: [...order, 0], parent: origin, recovery: reason },
+        { part: part.slice(half), depth: level, order: [...order, 1], parent: origin, recovery: reason });
+    };
+    if (part.length > 1 && !wikiRequestFits(request, input.ai, expected)) {
+      enqueueHalves(depth);
+      report.group_preflight_split = (report.group_preflight_split ?? 0) + 1;
+      continue;
+    }
     report.group_requests = (report.group_requests ?? 0) + 1;
     try {
-      answered.push({ order, drafts: await input.ai.generateStructured!({ taskType: "other", temperature: 0, maxAttempts: 1, resendUnsent: true, maxOutputTokens: GROUP_OUTPUT_TOKENS, signal: input.signal, trace: { feature: "wiki", operation: "wiki:knowledge-organize" }, system: GROUP_SYSTEM,
-        prompt: JSON.stringify({ presentation: "wiki_unit_groups", version: 1, rules: GROUP_RULES, locale: input.locale, clusters: part.map((cluster, index) => ({ id: `c${index + 1}`, units: cluster.map(id => ({ id: alias.get(id), clauses: clauseOf.get(alias.get(id)!)!.map((clause, index) => `${index + 1}. ${clause}`) })) })) }),
-        validate: value => readGroups(value, ids, clauseOf) }) });
+      answered.push({ order, drafts: await input.ai.generateStructured!(request) });
       failedInRow = 0;
     } catch (error) {
       input.signal.throwIfAborted();
       const reason = failureReason(error);
       report[`group_fail_${reason}`] = (report[`group_fail_${reason}`] ?? 0) + 1;
       failedInRow++;
-      // Only a cut-off answer gets shorter when halved; a batch is halved once, and never after three failures in a row.
-      if (reason === "truncated" && !split && part.length > 1 && failedInRow < 3) {
-        const half = Math.ceil(part.length / 2);
-        pending.unshift({ part: part.slice(0, half), split: true, order: [...order, 0] }, { part: part.slice(half), split: true, order: [...order, 1] });
-        report.group_halved = (report.group_halved ?? 0) + 1;
-        continue;
+      if ((wikiCannotFit(error) || reason === "invalid") && depth < GROUP_RECOVERY_DEPTH && failedInRow < 3) {
+        if (part.length > 1) {
+          enqueueHalves(depth + 1, request, reason === "invalid" ? "schema" : wikiSplitReason(error));
+          report.group_halved = (report.group_halved ?? 0) + 1;
+          continue;
+        }
+        const larger = Math.min(GROUP_OUTPUT_TOKENS, Math.ceil(expected * 1.75));
+        if (input.ai.modelId && !expanded && reason === "truncated" && larger > limit &&
+          wikiRequestFits({ ...request, maxOutputTokens: larger }, input.ai, larger)) {
+          pending.unshift({ part, order, depth: depth + 1, parent: request, recovery: "output_truncation", expanded: true });
+          report.group_output_expanded = (report.group_output_expanded ?? 0) + 1;
+          continue;
+        }
       }
+      failedClusters.push(...part);
       report.group_failed = (report.group_failed ?? 0) + 1;
     }
     done += part.flat().length;
@@ -273,7 +300,7 @@ export async function buildExplanationGroups(units: WikiKnowledgeUnit[], cluster
       signature: groupSignature(group.core, group.members, byId) };
   });
   Object.assign(report, { groups: result.length, group_members: result.reduce((sum, group) => sum + group.members.length, 0), group_restates: result.reduce((sum, group) => sum + group.members.filter(member => member.role === "restates").length, 0) });
-  return { groups: result, moves };
+  return { groups: result, moves, ...(failedClusters.length ? { failedClusters } : {}) };
 }
 
 /** Where a group is explained (design 6.2): among the subjects its members sit in, the one whose name
@@ -314,7 +341,7 @@ export function chooseGroupHomes(groups: WikiExplanationGroup[], subjects: WikiS
 /** Design section 7, incremental organizing: groups whose members all remain, unchanged under the same
  * rules, are kept; candidates are recalled again only around new units and changed groups, and a kept group
  * a new unit's candidate reaches is redone with it, so new units can join. Ids follow the old groups. */
-export async function updateExplanationGroups(previous: WikiExplanationGroup[], units: WikiKnowledgeUnit[], fresh: Set<string>, subjectOf: Map<string, string>, input: GroupInput, report: Record<string, number>): Promise<{ groups: WikiExplanationGroup[]; moves: Array<{ from: string[]; to: string[] }> }> {
+export async function updateExplanationGroups(previous: WikiExplanationGroup[], units: WikiKnowledgeUnit[], fresh: Set<string>, subjectOf: Map<string, string>, input: GroupInput, report: Record<string, number>): Promise<{ groups: WikiExplanationGroup[]; moves: Array<{ from: string[]; to: string[] }>; failedClusters?: string[][] }> {
   const byId = new Map(units.map(unit => [unit.id, unit]));
   const affected = new Set(previous.filter(group => !group.members.every(member => byId.has(member.unitId)) || group.signature !== groupSignature(group.core, group.members, byId)).map(group => group.id));
   const groupOfUnit = new Map(previous.flatMap(group => group.members.map(member => [member.unitId, group] as const)));
@@ -338,5 +365,5 @@ export async function updateExplanationGroups(previous: WikiExplanationGroup[], 
   const built = clusters.length ? await buildExplanationGroups(units, clusters, subjectOf, { ...input, previous: previous.filter(group => affected.has(group.id)) }, report) : { groups: [], moves: [] };
   const groups = [...kept, ...built.groups];
   Object.assign(report, { groups: groups.length, group_members: groups.reduce((sum, group) => sum + group.members.length, 0) });
-  return { groups, moves: built.moves };
+  return { groups, moves: built.moves, ...(built.failedClusters ? { failedClusters: built.failedClusters } : {}) };
 }

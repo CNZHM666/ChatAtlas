@@ -18,10 +18,13 @@ export function placeWikiChoices(chapters:WikiDraftChapter[],ledger:WikiKnowledg
   if(!choice||ledger.decisions?.[id]?.verdict!=="confirmed")continue;
   const anchors=new Set(answer.unitIds);
   const subjectIds=new Set(ledger.organization.subjects.filter(subject=>subject.unitIds.includes(id)||subject.unitIds.some(unit=>anchors.has(unit))).map(subject=>subject.id));
-  const routes:Array<{chapter:WikiDraftChapter|undefined;topic:string}>=ledger.organization.chapters.flatMap(plan=>plan.subtopics.filter(topic=>topic.subjectIds.some(subject=>subjectIds.has(subject))&&!wikiHistoricalHeading(topic.title))
-   .map(topic=>({chapter:out.find(item=>item.id===plan.id),topic:topic.title})));
-  if(routes.length!==1||!routes[0].chapter)continue;
-  const {chapter,topic}=routes[0],supplements=wikiSupplementRanges(chapter.body);
+  const choiceHomes=new Set(ledger.organization.subjects.filter(subject=>subject.unitIds.includes(id)).map(subject=>subject.id));
+  const routes:Array<{chapter:WikiDraftChapter|undefined;topic:string;direct:boolean}>=ledger.organization.chapters.flatMap(plan=>plan.subtopics.filter(topic=>topic.subjectIds.some(subject=>subjectIds.has(subject))&&!wikiHistoricalHeading(topic.title))
+   .map(topic=>({chapter:out.find(item=>item.id===plan.id),topic:topic.title,direct:topic.subjectIds.some(subject=>choiceHomes.has(subject))})));
+  const direct=routes.filter(route=>route.direct);
+  const route=direct.length===1?direct[0]:routes.length===1?routes[0]:undefined;
+  if(!route?.chapter)continue;
+  const {chapter,topic}=route,supplements=wikiSupplementRanges(chapter.body);
   const all=wikiDocumentBlocks(chapter.body).filter(block=>!supplements.some(([start,end])=>block.start>=start&&block.end<=end));
   const heading=all.find(block=>block.kind==="heading"&&block.text.replace(/^#+\s+/u,"")===topic);
   if(!heading)continue;

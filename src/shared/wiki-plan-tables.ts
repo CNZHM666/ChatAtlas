@@ -119,7 +119,7 @@ function mergeComparisons(tables: ReadingTable[], zh: boolean) {
 }
 
 type TableOptions = {units?: WikiKnowledgeUnit[]; citeTable?: (unit: WikiKnowledgeUnit) => string};
-export const isWikiTableIntroduction = (text:string) => /^(?:下表(?:按|说明|记录|列出|对照两份检索方案)|以下对照「|以下是(?:「[^」]+」|本节)讨论过的规划。|The table compares |These proposals cover different priorities and delivery sequences\.)/u.test(text.trim());
+export const isWikiTableIntroduction = (text:string) => /^(?:下表(?:按|说明|记录|列出|对照两份检索方案)|以下对照「|以下是(?:「[^」]+」|本节)讨论过的规划。|这里记录了「[^」]+」讨论中的范围取舍。|The table compares |This records the proposed scope for |These proposals cover different priorities and delivery sequences\.)/u.test(text.trim());
 
 function tableIntroduction(header: string[], caption: string | undefined, zh: boolean) {
   const [first, ...attributes] = header.map(value => value.replace(/\*\*|__|\x60/gu, "").trim()).filter(Boolean);
@@ -133,10 +133,17 @@ function tableIntroduction(header: string[], caption: string | undefined, zh: bo
   if (zh && first === "指标" && fields === "怎么测、重点") return `下表列出各项指标的测量方式和验收重点${context}。`;
   if (zh && /场景|用户输入/u.test(first) && /优先内容|打包内容|LLM|推荐策略/u.test(fields))
     return `下表说明不同${first}该选哪些内容或处理方式${context}。`;
+  if (/^(?:模块|part|module)$/iu.test(first) && /负责|职责|responsib/i.test(fields)) return zh
+    ? "沿着模块分工，可以看出每一步由谁处理，以及结果在哪里交给下一个模块。"
+    : "The responsibilities show who handles each step and where the result is handed off.";
   if (zh && /^(?:维度|对比|对比维度)$/u.test(first)) return `下表按相同维度比较${attributes.join("和")}${context}。`;
+  if (/^(?:事项|item)$/iu.test(first)) {
+    const release = caption || attributes.find(attribute => LOCAL_SCOPE.test(attribute));
+    return release ? zh ? `这里记录了「${release}」讨论中的范围取舍。` : `This records the proposed scope for ${release}.` : "";
+  }
   if (attributes.length===1 && !/^(?:项目|功能|阶段|版本|维度|类型|平台|工具|模块|优先级|字段|feature|stage|version|kind|component|priority)$/iu.test(first))
     return zh ? `以下对照「${first}」和「${attributes[0]}」${context}。` : `The table compares ${first} and ${attributes[0]}${context}.`;
-  return zh ? `下表按「${first}」列出${fields}${context}。` : `The table compares ${fields} by ${first}${context}.`;
+  return caption ? (zh ? `适用范围为「${caption}」。` : `Scope: ${caption}.`) : "";
 }
 
 const SEARCH_STEPS = [
@@ -238,7 +245,9 @@ export function consolidateWikiPlanTables(body: string, zh: boolean, {units, cit
     const useLocated=locatedOrigin.includes(WIKI_EVIDENCE_LINK)&&(legacyLocator||savedOrigin?.includes(WIKI_EVIDENCE_LINK));
     const origin = useLocated ? locatedOrigin : savedOrigin ?? locatedOrigin;
     const subject = new Set(matched.map(unit=>unit.subject)).size===1 ? matched[0].subject : "";
-    const ownIntro = previous?.kind === "paragraph" && previous.text === tableIntroduction(header, scope, zh);
+    const ownIntro = previous?.kind === "paragraph" && (previous.text === tableIntroduction(header, scope, zh) ||
+      /^(?:以下对照「事项」和「[^」]+」(?:（[^）]+）)?。|The table compares item and [^.]+\.)$/iu.test(previous.text) ||
+      /^(?:下表按「[^」]+」列出[^。\n]+。|The table compares [^\n]+ by [^.\n]+\.)$/u.test(previous.text));
     const hasLead = Boolean(caption || ownIntro);
     const start = hasLead ? previous.start : block.start, end = reference?.end ?? block.end;
     // Keep an existing explanation ahead of an uncoupled table.
@@ -315,7 +324,7 @@ export function consolidateWikiPlanTables(body: string, zh: boolean, {units, cit
     const intro = table.needsIntro ? tableIntroduction(table.header,table.scope,zh) : "";
     const row = (values:string[])=>`| ${values.join(" | ")} |`;
     const text = !table.rows.length ? "" : table.rows.length===1 && table.changed
-      ? `${table.scope?`**${table.scope}** · `:""}${table.rows[0].map((value,column)=>emptyCell.test(plain(value))?"":`${table.header[column]}${zh?"为":" is "}${value}`).filter(Boolean).join(zh?"，":", ")}${zh?"。":"."}${source}`
+      ? `${table.scope?`**${table.scope}** · `:""}${table.rows[0].map((value,column)=>emptyCell.test(plain(value))?"":`${table.header[column]}${zh?"为":" is "}${value}`).filter(Boolean).join(zh?"，":", ")}${zh?"。":"."}${table.origin?` ${table.origin}`:""}`
       : `${intro ? intro+"\n\n" : ""}${table.changed?[table.header,table.divider,...table.rows].map(row).join("\n"):table.table}${source}`;
     edits.push({start:table.start,end:table.end,text});
   }

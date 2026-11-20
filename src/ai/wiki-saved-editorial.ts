@@ -1,15 +1,18 @@
 import type {FocusEvidence,FocusSection} from "../shared/focus-session";
 import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
 import {wikiSupplementRanges} from "../shared/wiki-source-supplements";
-import {wikiLedgerUnits,type WikiDraftChapter,type WikiKnowledgeLedger,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
+import {statesCore,wikiLedgerUnits,type WikiDraftChapter,type WikiKnowledgeLedger,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 import type {WikiClaim} from "../shared/wiki-claims";
 import {reviewWikiEditorial} from "./wiki-editorial-review";
 import {claimSupported} from "./wiki-claim-support";
 import {wikiDecisionRestatement} from "./wiki-confirmation-scope";
-import {answerLeavesDetailsOpen,wikiChoiceQuestionText,wikiLocalAnswer} from "./wiki-question-parse";
+import {answerLeavesDetailsOpen,wikiChoiceQuestionText,wikiLocalAnswer,wikiScopedIntegration} from "./wiki-question-parse";
 import {wikiUnconfirmedWorkflowFeedback} from "./wiki-workflow-scope";
 import {placeWikiChoices} from "./wiki-choice-placement";
 import {wikiHistoricalHeading} from "../shared/wiki-history-layout";
+import {wikiBoundClosedListChoices} from "./wiki-number-diagnostics";
+import {wikiStatesClosedList} from "../shared/wiki-closed-list";
+import {withStop} from "../shared/wiki-sentences";
 
 /** Apply the same answer reconciliation to saved generated prose as to new
  * drafts. All receipts must still belong to this chapter's selected sources.
@@ -17,6 +20,22 @@ import {wikiHistoricalHeading} from "../shared/wiki-history-layout";
 export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowledgeLedger,sourceOf:(unit:WikiKnowledgeUnit)=>FocusEvidence|undefined):FocusSection{
  if(section.userEdited||section.origin||ledger.documentType==="learning")return section;
  const units=new Map(wikiLedgerUnits(ledger).map(unit=>[unit.id,unit]));
+ const storedClaims=ledger.draft?.chapters.find(chapter=>chapter.id===section.id)?.paragraphs.flatMap(paragraph=>paragraph.claims??[])??[];
+ for(const claim of storedClaims){
+  const id=claim.unitIds.length===1?claim.unitIds[0]:"";
+  if(!id.startsWith("answer:")||!/[和与及].{1,26}(?:已确认|已决定)(?:集成|接入)/u.test(claim.text)||!section.body.includes(claim.text))continue;
+  const choice=units.get(id), answer=wikiLocalAnswer(ledger,id), ref=choice&&sourceOf(choice);
+  const scoped=answer&&wikiScopedIntegration(answer.question,answer.answer);
+  if(!choice||!ref||!scoped||!choice.statement.startsWith(scoped)||section.claims?.some(item=>item.text===claim.text&&item.checked))continue;
+  const already=section.body.includes(choice.statement);
+  const blocks=wikiDocumentBlocks(section.body);
+  if(!blocks.some(block=>block.kind==="paragraph"&&block.text===claim.text)||section.body.indexOf(claim.text)!==section.body.lastIndexOf(claim.text))continue;
+  const body=section.body.replace(claim.text,()=>already?"":choice.statement).replace(/\n{3,}/gu,"\n\n");
+  const claims=(section.claims??[]).filter(item=>item.text!==claim.text);
+  if(!claims.some(item=>item.text===choice.statement))claims.push({text:choice.statement,quote:choice.evidence.quote,
+   unitIds:[id],evidenceIds:[ref.id],holder:"decided",holderMark:true,userDecided:true,verification:"supported"});
+  section={...section,body,claims};
+ }
  const narrowed = new Map<string, {choice:WikiKnowledgeUnit;ref:FocusEvidence;ask:string}>();
  for (const answer of ledger.userAnswers ?? []) {
   const choice=units.get(`answer:${answer.questionId}:${answer.optionId}`);
@@ -24,6 +43,30 @@ export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowled
   const question=ledger.writingQuestions?.find(item=>item.id===answer.questionId);
   const option=question?.options.find(item=>item.id===answer.optionId);
   if(!choice||!ref||!question||!option||!wikiLocalAnswer(ledger,choice.id))continue;
+  const scoped=wikiScopedIntegration(answer.question,answer.answer);
+  if(scoped){
+   const canonical=withStop(scoped);
+   const tail=scoped.match(/(?:具体采用|The specific choice)[^\n]+$/u)?.[0];
+   const echoes=tail?section.claims?.filter(claim=>!claim.checked&&claim.unitIds?.length===1&&claim.unitIds[0]===choice.id
+    &&claim.text.startsWith(tail)&&claim.text!==tail&&/但.{0,16}(?:已获批准|已确认|已决定)|\bbut.{0,40}(?:approved|confirmed)\b/iu.test(claim.text))??[]:[];
+   if(echoes.length){
+    let body=section.body;
+    const removed=new Set<WikiClaim>();
+    for(const claim of echoes){
+     if(!body.includes(claim.text)||body.indexOf(claim.text)!==body.lastIndexOf(claim.text))continue;
+     body=body.replace(claim.text,()=>body.includes(canonical)?"":canonical);
+     removed.add(claim);
+    }
+    if(removed.size){
+     const claims=(section.claims??[]).filter(claim=>!removed.has(claim));
+     if(!claims.some(claim=>claim.text===canonical))claims.push({text:canonical,quote:choice.evidence.quote,
+      unitIds:[choice.id],evidenceIds:[ref.id],holder:"decided",holderMark:true,userDecided:true,verification:"supported"});
+     section={...section,body,claims};
+    }
+   }
+   // The backed design option remains an independently attributable proposal.
+   continue;
+  }
   const confirmedIds=option.actions.filter(action=>action.do==="confirm").flatMap(action=>action.units);
   for(const id of option.actions.length?confirmedIds:answer.unitIds){
    const unit=units.get(id);
@@ -41,6 +84,14 @@ export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowled
    if(!selected||claim.checked||claim.markOnly){replacements.push(claim);continue;}
    const original=units.get(claim.unitIds!.find(id=>narrowed.get(id)===selected)!);
    const {choice,ref,ask}=selected;
+   // An independently grounded proposal still needs its source after a
+   // separate answer fixes the current scope.
+   const proposalBasis=original&&sourceOf(original);
+   if(claim.holder==="ai"&&!claim.userDecided&&claim.verification==="supported"&&proposalBasis
+    &&ledger.decisions?.[original.id]?.verdict!=="confirmed"&&claim.evidenceIds.includes(proposalBasis.id)){
+    replacements.push(claim);
+    continue;
+   }
    const block=blocks.find(item=>item.kind==="paragraph"&&item.text.includes(claim.text));
    const isPrompt=wikiChoiceQuestionText(claim.text,ask)||Boolean(original&&wikiChoiceQuestionText(claim.text,original.statement));
    if(block&&isPrompt&&body.indexOf(claim.text)===body.lastIndexOf(claim.text)&&body.includes(claim.text)){
@@ -59,7 +110,12 @@ export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowled
  const safeClaims=section.claims?.map(claim=>{
   if(claim.holder!=="decided"&&!claim.userDecided){
    const unit=claim.unitIds?.length===1?units.get(claim.unitIds[0]):undefined;
-   if(unit?.id.startsWith("answer:")&&wikiLocalAnswer(ledger,unit.id)&&sourceOf(unit)&&wikiDecisionRestatement(claim.text,unit.statement))
+   if(!unit||!sourceOf(unit)||!wikiLocalAnswer(ledger,unit.id))return claim;
+   const [list,...otherLists]=wikiBoundClosedListChoices(claim.text,[unit],ledger);
+   const prefix=claim.text.match(/^(.*?)[，,]\s*(?:仅限|只限|only)\s*(?:列出|上述|上面|the listed)/iu)?.[1];
+   const confirmedList=list&&!otherLists.length&&wikiStatesClosedList(claim.text,list,true)
+    &&Boolean(prefix&&statesCore(prefix,unit.statement)&&claimSupported(prefix,[unit]));
+   if(unit.id.startsWith("answer:")&&wikiDecisionRestatement(claim.text,unit.statement)||confirmedList)
     return {...claim,holder:"decided" as const,holderMark:true,userDecided:true,workStatus:undefined,verification:"supported" as const};
    return claim;
   }
@@ -75,6 +131,7 @@ export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowled
   if(block.kind==="heading")subtopic=block.text.replace(/^#+\s+/u,"");
   const candidates=block.kind==="list"&&!/[`~]{3}/u.test(block.text)?(section.claims??[]).filter(claim=>[claim.text,...claim.formulations??[]].some(form=>form&&block.text.includes(form))):block.claims;
   const claims=candidates.flatMap(claim=>{
+   if(claim.checked)return [];
    const ids=claim.unitIds??[];
    if(!ids.length||!ids.every(id=>{const unit=units.get(id);return unit&&sourceOf(unit);}))return [];
    return [claim.text,...claim.formulations??[]].filter((form,index,all)=>form&&block.text.includes(form)&&all.indexOf(form)===index).map(from=>{

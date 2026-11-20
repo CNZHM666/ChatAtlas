@@ -1,10 +1,16 @@
 import { expect, it } from "vitest";
 import { wikiHolderOf, withHolderMarks } from "./wiki-holder";
 
-it("isolates a locally confirmed sentence from adjacent proposed behavior",()=>{
+it("marks only the locally confirmed sentence within a continuous paragraph",()=>{
  const body="建议采用缓存架构。团队上限为10人。后续增加多人编辑。";
  const out=withHolderMarks(body,[{text:"团队上限为10人。",holder:"decided",reference:" [S-1-a] 〔发起人在整理时确认 · C-1-a〕"}],true);
- expect(out).toBe("建议采用缓存架构。\n\n团队上限为10人。〔已定〕 [S-1-a] 〔发起人在整理时确认 · C-1-a〕\n\n后续增加多人编辑。");
+ expect(out).toBe("建议采用缓存架构。团队上限为10人。〔已定〕 [S-1-a] 〔发起人在整理时确认 · C-1-a〕 后续增加多人编辑。");
+});
+
+it("keeps a receipt outside a parenthetical with a separate open proposal",()=>{
+ const claim="默认卡片圆角统一为 8px",aside="（登录卡片拟用 16px；例外待确定）。";
+ const result=withHolderMarks(claim+aside,[{text:claim,holder:"decided",reference:" [S-1-a]"}],true);
+ expect(result).toBe(claim+"〔已定〕 [S-1-a]"+aside);
 });
 
 it("holds a sentence as decided only when every unit is the user's decision, and as the weakest holder otherwise", () => {

@@ -6,14 +6,40 @@ import {ledgerDocument} from "../ai/wiki-ledger-document";
 import {withDecision} from "../ai/wiki-key-decisions";
 import type {WikiKnowledgeLedger,WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 import {wikiOverviewSignature} from "../shared/wiki-overview";
+import {numberedWikiReferences} from "./wiki-numbered-references";
 
 const selection:ProjectExportSelection={overview:false,wikiIds:["database"],matters:false,history:false,sources:false};
+
+it("attaches table evidence to its own caption instead of leaving an orphan source line",()=>{
+ const caption="下表说明正式版如何处理不同类型的内容。";
+ const table="| 内容 | 正式版处理方式 |\n| --- | --- |\n| 文本 | 原样导出 |";
+ const markdown=`上一段解释导出的意义。\n\n${caption}\n\n${table}\n\n原文来源 [S-1-abcd]\n\n继续说明其他流程。`;
+ const rendered=numberedWikiReferences(markdown,new Map([["S-1-abcd",1]]),new Map(),true);
+ expect(rendered).toContain(`${caption} [来源1](#source-S-1-abcd)\n\n${table}`);
+ expect(rendered.match(/\[来源1\]/gu)).toHaveLength(1);
+ expect(rendered).toContain("上一段解释导出的意义。\n\n");
+});
+
+it("exports standalone flows as ordered Markdown and a titled HTML card",()=>{
+ const session=contextKnowledge().session,page=session.sections[0];
+ const inline="阈值调整为 CPU → 80%。";
+ page.body=`### 值班规则\n\n**事件处理流程**：记录事件 → 指派人员（当班 → 备班） → 核实影响 → 恢复值班〔建议〕\n\n${inline}`;
+ const options={...selection,wikiIds:[page.id]};
+ const markdown=projectDocument(session,options,"md").text;
+ expect(markdown).toContain("**事件处理流程** 〔建议〕\n\n记录事件 → 指派人员（当班 → 备班） → 核实影响 → 恢复值班");
+ expect(markdown).toContain(inline);
+ const html=projectDocument(session,options,"html").text;
+ expect(html).toContain('<figure class="wiki-flow"><figcaption><span><strong>事件处理流程</strong>');
+ expect(html).toContain("<li>指派人员（当班 → 备班）</li>");
+ page.userEdited=true;
+ expect(projectDocument(session,options,"md").text).toContain("记录事件 → 指派人员");
+});
 
 it("exports the user-set plan as the only current plan and leaves discussions in the chapter",()=>{
  const session=contextKnowledge().session,page=session.sections[0];
  page.body="### 实施路线图\n\n另一个方案建议首版引入 Embedding。";
  const options={...selection,overview:true,wikiIds:[]};
- expect(projectDocument(session,options,"md").text).toContain("当前版本范围待确认。");
+ expect(projectDocument(session,options,"md").text).toContain("完整发布范围待确认。");
  session.projectMaintenance={currentPlan:"v0.1 首先完成全文搜索。"};
  const markdown=projectDocument(session,options,"md").text;
  expect(markdown).toContain("### 当前规划\n\nv0.1 首先完成全文搜索。");
@@ -32,7 +58,7 @@ it("identifies a matching ledger and reports source-read failures separately fro
  const md=projectDocument(session,selection,"md").text;
  const snapshot=JSON.parse(projectLedgerFile(session).text);
  expect(md).toContain(snapshot.snapshotId);
- expect(md).toMatch(/未抽出知识点\*\* · #2/u);
+ expect(md).toMatch(/待判定\*\* · #2/u);
  expect(md).toMatch(/补读失败\*\* · #3/u);
  expect(md).toMatch(/读取批次失败\*\* · #4/u);
 });
@@ -49,10 +75,10 @@ it("keeps a sourced release decision in the overview without a separate scope ta
  const opts={...selection,overview:true,wikiIds:[]};
  const markdown=projectDocument(session,opts,"md").text;
  expect(markdown).not.toMatch(/^### .*版本范围$/mu);
- expect(markdown).toMatch(/### 当前规划\n\n完整版本范围待确认。以下安排有确认依据。\n\n- 第一版纳入本地全文搜索。 \[S-/u);
- expect(markdown).toMatch(/- 第一版纳入本地全文搜索。 \[S-/u);
+ expect(markdown).toContain("### 当前规划\n\n完整发布范围待确认。");
+ expect(markdown.match(/^\| 第一版纳入本地全文搜索。〔已定〕\[〔已确认1〕\]\(#confirmation-C-[\w-]+\) \[来源1\]/gmu)).toHaveLength(1);
  expect(markdown).not.toContain(alternative);
- const locator=markdown.match(/^\[(S-\d+-[a-z0-9]+)\]: #source-\1$/mu)?.[1];
+ const locator=markdown.match(/\[来源1\]\(#source-(S-\d+-[a-z0-9]+)\)/u)?.[1];
  expect(locator).toBeDefined();
  expect(markdown).toContain(`<a id="source-${locator}"></a>`);
  expect(projectDocument(session,opts,"html").text).toContain(`href="#source-${locator}"`);
@@ -583,11 +609,11 @@ it("says under the header what the automatic checks left, with the counts in the
  session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[],draft} as unknown as typeof session.wikiKnowledge;
  const file=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
  const head=file.slice(0,file.indexOf("\n## "));
- expect(head).toContain("> **2 项关键检查未通过** · 83 条用户消息未提取知识点 · 整理未全部完成");
- expect(file).toContain("| 自动检查 | 质量检查未通过 · 整理完整性部分完成 · 关键检查未通过 2 项 · 提示 32 项 · 未抽出知识点的消息 83 条 |");
+ expect(head).toContain("> **2 项关键检查未通过** · 83 条用户消息仍待补读或核对 · 部分整理任务待重试");
+ expect(file).toContain("| 自动检查 | 质量检查未通过 · 整理完整性部分完成 · 关键检查未通过 2 项 · 提示 32 项 · 83 条消息待补读或核对 |");
  draft.quality={sources:"complete",failedBatches:0,uncovered:1,organization:"complete",critical:0,problems:1,passed:true};
  const reviewed=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
- expect(reviewed).toContain("> **关键检查通过** · 1 条用户消息未提取知识点");
+ expect(reviewed).toContain("> **关键检查通过** · 1 条用户消息仍待补读或核对");
  draft.quality={sources:"complete",failedBatches:0,uncovered:0,organization:"complete",critical:0,problems:0,passed:true};
  const clean=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
  expect(clean).not.toContain("本次仍有");expect(clean).not.toContain("自动检查");
@@ -615,6 +641,27 @@ it("keeps discussion plans separate from reported project status",()=>{
  expect(overview).toContain("- 定义 2 个验收场景〔未见确认〕\n\n  1. 离线可用\n  2. 保存失败时保留原稿。");
 });
 
+it("labels only plans explicitly set aside by the current recorded choice",()=>{
+ const session=contextKnowledge().session,page=session.sections[0];
+ const selected="按里程碑逐步交付。",alternative="先加固执行链路，再开发零件识别。",other="下期研究本地模式。";
+ const baseline=[{part:"now",text:alternative,unitIds:["alternative"]},{part:"now",text:other,unitIds:["other"]}];
+ const ledger={
+  version:1,generatedAt:1,status:"complete",materials:1,batches:[],
+  draft:{version:1,generatedAt:1,status:"complete",chapters:[],report:{},baseline},
+  writingQuestions:[{id:"roadmap",about:"路线",ask:"选哪套交付路线？",unitIds:["chosen","alternative"],organization:1,options:[
+   {id:"a",label:selected,actions:[{do:"confirm",units:["chosen"]},{do:"reject",units:["alternative"]}]},
+   {id:"b",label:alternative,actions:[{do:"confirm",units:["alternative"]}]}]}],
+  userAnswers:[{questionId:"roadmap",question:"选哪套交付路线？",unitIds:["chosen","alternative"],answer:selected,optionId:"a",at:2}],
+  decisions:{chosen:{verdict:"confirmed",at:2},alternative:{verdict:"rejected",at:2},other:{verdict:"rejected",at:2}},
+ } as unknown as WikiKnowledgeLedger;
+ session.wikiKnowledge=ledger;
+ const file=()=>projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ expect(file()).toContain(`- ${alternative}〔本次未选〕`);
+ expect(file()).toContain(`- ${other}〔未见确认〕`);
+ ledger.decisions!.alternative={verdict:"open",at:3};
+ expect(file()).toContain(`- ${alternative}〔未见确认〕`);
+});
+
 it("keeps a suggestion's status and stable source locator in Markdown without exporting the excerpt",()=>{
  const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
  const proposal="第一版建议使用规则评分。";
@@ -624,14 +671,14 @@ it("keeps a suggestion's status and stable source locator in Markdown without ex
  session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[]};
  const options={...selection,overview:true,wikiIds:[page.id]};
  const file=projectDocument(session,options,"md").text;
- const id=file.match(/第一版建议使用规则评分。 〔建议／分析〕 \[(S-[\w-]+)\]/u)?.[1];
+ const id=file.match(/第一版建议使用规则评分。 〔建议／分析〕 \[来源1\]\(#source-(S-[\w-]+)\)/u)?.[1];
  expect(id).toBeTruthy();
- expect(file).toContain(`## 引用定位\n\n- **${id}**`);
+ expect(file).toContain(`## 引用定位\n\n- **来源1**<a id="source-${id}"></a>`);
  expect(file).toContain(source.messageId);
  expect(file).not.toContain("这句补充原文未选导出");
  const old=source.id;source.id="renamed";page.evidenceIds=[source.id];page.claims[0].evidenceIds=[source.id];
- expect(projectDocument(session,options,"md").text).toContain(`[${id}]`);
- expect(projectDocument(session,{...options,wikiIds:[]},"md").text).not.toContain(`[${id}]`);
+ expect(projectDocument(session,options,"md").text).toContain(`[来源1](#source-${id})`);
+ expect(projectDocument(session,{...options,wikiIds:[]},"md").text).not.toContain(`[来源1](#source-${id})`);
  source.id=old;
 });
 
@@ -652,7 +699,7 @@ it("uses the ledger's sourced, conditional proposal in both reading entry points
   draft:{version:1,generatedAt:1,status:"complete",report:{},chapters:[{...plan,body:page.body,openingUnitIds:["u1"],paragraphs:[{subtopic:"索引",text:statement,unitIds:["u1"]},{subtopic:"索引",text:control,unitIds:["u2"]}],problems:[]}]}};
  const options={...selection,overview:true,wikiIds:[page.id]};
  const markdown=projectDocument(session,options,"md").text;
- const lead=markdown.match(/> (.*原文限定：如果本地性能验证通过.* 〔AI 建议〕 \[S-[\w-]+\])/u)?.[1];
+ const lead=markdown.match(/> (.*原文限定：如果本地性能验证通过.* 〔AI 建议〕 \[来源\d+\]\(#source-S-[\w-]+\))/u)?.[1];
  expect(lead).toBeTruthy();
  expect(markdown).toContain(`| ${lead} |`);
  page.userEdited=true;page.body="手动编辑的正文。";
@@ -673,9 +720,9 @@ it("identifies where a decision was confirmed and keeps original approval text o
   organization:{version:1,generatedAt:1,status:"complete",subjects:[{id:"s",name:"索引",aliases:[],unitIds:[unit.id]}],merged:[],relations:[],report:{},chapters:[chapter]},
   draft:{version:1,generatedAt:1,status:"complete",report:{},chapters:[{...chapter,body:statement,openingUnitIds:[unit.id],paragraphs:[{subtopic:"索引",text:statement,unitIds:[unit.id],claims:[{text:statement,unitIds:[unit.id]}]}],problems:[]}]}};
  const render=(sources=false)=>projectDocument({...session,...ledgerDocument(ledger,{}),wikiKnowledge:ledger},{...selection,wikiIds:[chapter.id],overview:true,sources},"md").text;
- const sourced=render(),approval=sourced.match(/〔已定〕 \[S-[\w-]+\] 〔用户在原对话确认〕 \[(S-[\w-]+)\]/u)?.[1];
+ const sourced=render(),approval=sourced.match(/〔已定〕 \[来源\d+\]\(#source-S-[\w-]+\) 〔用户在原对话确认〕 \[来源\d+\]\(#source-(S-[\w-]+)\)/u)?.[1];
  expect(approval).toBeTruthy();
- expect(sourced).toMatch(new RegExp(`\\*\\*${approval}\\*\\*.*用户.*reply-message`,"u"));
+ expect(sourced).toMatch(new RegExp(`id="source-${approval}".*用户.*reply-message`,"u"));
  expect(sourced).not.toContain(reply);
  expect(render(true)).toContain(reply);
  unit.adoption={status:"proposal"};
@@ -683,14 +730,56 @@ it("identifies where a decision was confirmed and keeps original approval text o
  ledger.userAnswers=[{questionId:"ask",question:"采用本地索引吗？",answer:"使用本地索引",optionId:"yes",at:2,unitIds:[unit.id]}];
  ledger.decisions={[unit.id]:{verdict:"confirmed",at:2}};
  const text=render();
- const receipt=text.match(/〔已定〕 \[S-[\w-]+\] 〔用户在整理时确认 · (C-[\w-]+)〕/u)?.[1];
+ const receipt=text.match(/〔已定〕\[〔已确认1〕\]\(#confirmation-(C-[\w-]+)\) \[来源\d+\]/u)?.[1];
  expect(receipt).toBeTruthy();
- expect(text).toContain(`- **${receipt}** · 用户在整理时确认`);
+ expect(text).toContain(`- **已确认1**<a id="confirmation-${receipt}"></a> · 用户在整理时确认`);
  expect(text).toContain("1970-01-01T00:00:00.002Z");
  expect(text).toContain("- 问题 采用本地索引吗？");
  expect(text).toContain("- 选择 使用本地索引");
  expect(render()).toContain(receipt);
  expect(render()).not.toContain("reply-message");
+});
+
+it("projects a saved release checklist choice into prose and keeps the other checks as a proposal in tables",()=>{
+ const session=contextKnowledge().session,source=session.evidence[0];
+ session.sourceRoles={[source.conversationId]:{[source.messageId]:"assistant"}};
+ const value="至少检查文件名是否合法、内容是否为空以及重复文件",statement=`第一版${value}。`;
+ const question="第一版是否立即实施文件名是否合法与重复文件检查？",answer="实施检查",decision="answer:q:yes";
+ const unit:WikiKnowledgeUnit={id:"proposal",subject:"同步规则",statement,kind:"mechanism",details:[],delivery:"unknown",adoption:{status:"proposal"},
+  evidence:{evidenceId:source.id,conversationId:source.conversationId,messageId:source.messageId,messageIndex:1,role:"assistant",pasted:false,quote:statement}};
+ source.excerpt=statement;
+ const chapter={id:"checklist",title:"同步规则",question:"同步如何验证？",group:"",subtopics:[{title:"验证",subjectIds:["s"]}]};
+ const ledger:WikiKnowledgeLedger={version:1,generatedAt:1,status:"complete",materials:1,batches:[{sourceIds:[source.id],status:"ok",rejected:{},units:[unit]}],
+  organization:{version:1,generatedAt:1,status:"complete",subjects:[{id:"s",name:"规则",aliases:[],unitIds:[unit.id]}],merged:[],relations:[],report:{},chapters:[chapter]},
+  writingQuestions:[{id:"q",about:"同步规则",ask:question,unitIds:[unit.id],organization:1,options:[{id:"yes",label:answer,actions:[{do:"confirm",units:[unit.id]}]},{id:"later",label:"暂不实施",actions:[{do:"open",units:[unit.id]}]}]}],
+  userAnswers:[{questionId:"q",question,answer,optionId:"yes",at:2,unitIds:[unit.id]}]};
+ const render=(body:string,text:string,id:string)=>{
+  ledger.draft={version:1,generatedAt:2,status:"complete",report:{},chapters:[{...chapter,body,openingUnitIds:[],problems:[],paragraphs:[{subtopic:"验证",text:body,unitIds:[id],claims:[{text,unitIds:[id]}]}]}]};
+  return projectDocument({...session,...ledgerDocument(ledger,{}),wikiKnowledge:ledger},{...selection,wikiIds:[chapter.id]},"md").text;
+ };
+ const prose="同步规则：实施检查。";
+ const written=render(prose,prose,decision);
+ expect(written).toMatch(/第一版计划实施文件名是否合法与重复文件检查。\s*〔已定〕.*#confirmation-/u);
+ expect(written).not.toContain(prose);
+ const table=`| 事项 | 第一版 |\n| --- | --- |\n| 同步规则 | ${value} |`;
+ const tabular=render(table,value,unit.id);
+ expect(tabular).toMatch(/\| 同步规则（已确认纳入） \| 检查文件名是否合法、重复文件.*#confirmation-/u);
+ expect(tabular).toMatch(/\| 同步规则（待确认） \| 至少检查内容是否为空[^\n]*\|/u);
+});
+
+it("exports platform reference tokens only when they resolve and retains real external URLs",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const token="\uE002REFtestReference123\uE003",unknown="\uE002REFnoMapping456\uE003";
+ page.evidenceIds=[source.id];
+ page.body=`查阅资料${token}。另一段缺少链接${unknown}。\n\n\uE200url\uE202官方文档\uE202https://example.com/docs\uE201`;
+ source.excerpt=`查阅资料${token}。`;
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[]};
+ const file=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
+ expect(file).toMatch(/查阅资料 \[来源\d+\]\(#source-(S-[\w-]+)\)。/u);
+ expect(file).toContain("[官方文档](https://example.com/docs)");
+ expect(file).toContain("另一段缺少链接。");
+ expect(file).not.toMatch(/[\uE002\uE003\uE200\uE201\uE202]/u);
+ expect(source.excerpt).toContain(token);
 });
 
 it("retains an affirmative mobile choice with proposal and confirmation evidence on repeated projection",()=>{
@@ -707,9 +796,9 @@ it("retains an affirmative mobile choice with proposal and confirmation evidence
   userAnswers:[{questionId:"q",unitIds:[unit.id],question:"手机端是否支持完整编辑？",answer:"支持完整画布编辑",optionId:"yes",at:2}],
   draft:{version:1,generatedAt:1,status:"complete",report:{},chapters:[{...chapter,body:"画布功能见讨论。",paragraphs:[{subtopic:"手机端",text:"画布功能见讨论。",unitIds:[unit.id],claims:[]}],problems:[]}]}};
  const projected=ledgerDocument(ledger,{}),render=()=>projectDocument({...session,...projected,wikiKnowledge:ledger},{...selection,wikiIds:[chapter.id]},"md").text;
- const once=render(),receipt=once.match(/手机端第一阶段能力：支持完整画布编辑。〔已定〕 \[S-[\w-]+\] 〔发起人在整理时确认 · (C-[\w-]+)〕/u)?.[1];
+ const once=render(),receipt=once.match(/手机端第一阶段能力：支持完整画布编辑。〔已定〕\[〔已确认1〕\]\(#confirmation-(C-[\w-]+)\) \[来源1\]/u)?.[1];
  expect(receipt,once).toBeTruthy();
- expect(once).toContain(`- **${receipt}** · 用户在整理时确认`);
+ expect(once).toContain(`- **已确认1**<a id="confirmation-${receipt}"></a> · 用户在整理时确认`);
  expect(once).toContain("- 问题 手机端是否支持完整编辑？");
  expect(once).toContain("- 选择 支持完整画布编辑");
  const keyEvidence=projectDocument({...session,...projected,wikiKnowledge:ledger},{...selection,wikiIds:[chapter.id],sourceMode:"key"},"md").text.split("## 关键证据")[1];
@@ -740,7 +829,7 @@ it("leads with the user's choice as decided and the rest of the proposal it conf
   draft:{version:1,generatedAt:1,status:"complete",report:{},chapters:[{...chapter,body:statement,openingUnitIds:[unit.id],paragraphs:[{subtopic:"存储",text:statement,unitIds:[unit.id]}],problems:[]}]}};
  const render=(stored=ledger)=>projectDocument({...session,...ledgerDocument(stored,{}),wikiKnowledge:stored},{...selection,wikiIds:[chapter.id],overview:true},"md").text;
  const markdown=render(),lead=markdown.match(/^> (?!阅读方式)(.*〔已定〕.*)$/mu)?.[1];
- expect(lead).toMatch(/^存储方式：本地存储。 〔已定〕 〔用户在整理时确认 · C-[\w-]+〕；AI 对具体细节的建议：使用 IndexedDB 保存账目，保留 30 天自动备份，每 5 分钟同步一次。 〔AI 建议〕 \[S-[\w-]+\]$/u);
+ expect(lead).toMatch(/^存储方式：本地存储。 〔已定〕\[〔已确认1〕\]\(#confirmation-C-[\w-]+\)；AI 对具体细节的建议：使用 IndexedDB 保存账目，保留 30 天自动备份，每 5 分钟同步一次。 〔AI 建议〕 \[来源1\]\(#source-S-[\w-]+\)$/u);
  // The chosen mode is not said twice, and the terms the user never chose are not marked decided.
  expect(lead).not.toContain("采用本地存储方案");
  expect(markdown).toContain("| [数据存储](#数据存储) | 账目存在哪里？ |");expect(markdown).toContain(lead);
@@ -760,7 +849,7 @@ it("leads with the user's choice as decided and the rest of the proposal it conf
  unit.statement=unit.evidence.quote="采用本地存储方案。";ledger.draft!.chapters[0].body=ledger.draft!.chapters[0].paragraphs[0].text=unit.statement;
  ledger.decisions![unit.id].at=2;
  const whole=render();
- expect(whole).toMatch(/^> 采用本地存储方案。 〔已定〕 \[S-[\w-]+\] 〔用户在整理时确认 · C-[\w-]+〕$/mu);expect(whole).not.toContain("AI 对具体细节的建议");
+ expect(whole).toMatch(/^> 采用本地存储方案。 〔已定〕\[〔已确认1〕\]\(#confirmation-C-[\w-]+\) \[来源1\]\(#source-S-[\w-]+\)$/mu);expect(whole).not.toContain("AI 对具体细节的建议");
 });
 
 it("preserves the same proposal status in an older overview, the chapter lead and chapter prose",()=>{
@@ -786,7 +875,7 @@ it("preserves the same proposal status in an older overview, the chapter lead an
  expect(render()).toContain(overview);
 });
 
-it("labels a saved draft's unverified sentence at its original location without restoring a decision mark",()=>{
+it("moves a saved draft's unverified sentence into the Markdown review notes",()=>{
  const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
  const failed="首版将同时支持数据库备份、三个端侧索引和每日同步 999 次。";
  const adjacent="数据库使用 IndexedDB。";
@@ -799,9 +888,29 @@ it("labels a saved draft's unverified sentence at its original location without 
  expect(read).toContain(adjacent);
  expect(read).toContain(`来源待核对的草稿原句「${failed}」`);
  expect(read.match(/来源待核对的草稿原句/gu)).toHaveLength(1);
+ expect(read.split("### 需要核对的位置")[0]).not.toContain(failed);
  expect(read).not.toContain(`${failed}〔已定〕`);
  page.userEdited=true;
  expect(projectDocument(session,options,"md").text).not.toContain("来源待核对的草稿原句");
+});
+
+it("limits a saved confirmation to the Starter Kit rule and sends an unsupported catalog list to review",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const decision="AI推荐元件时只能从预定义的Starter Kit中选择，以避免推荐用户买不到的奇怪芯片。";
+ const extra="该 Kit 仅限列出的组件：ESP32、LED、按钮、蜂鸣器、DHT22、SHT30、LDR、PIR。";
+ const text=`同时，AI 推荐元件时只能从预定义的 Starter Kit 中选择，以避免推荐用户买不到的奇怪芯片，${extra}`;
+ source.excerpt=decision;
+ const unit:WikiKnowledgeUnit={id:"starter",subject:"元件推荐",statement:decision,kind:"constraint",details:[],delivery:"unknown",adoption:{status:"proposal"},
+  evidence:{evidenceId:source.id,conversationId:source.conversationId,messageId:source.messageId,messageIndex:1,role:"assistant",pasted:false,quote:source.excerpt}};
+ page.body=text;
+ page.claims=[{text,quote:source.excerpt,unitIds:[unit.id],evidenceIds:[source.id],holder:"decided",holderMark:true}];
+ const chapter={id:page.id,title:page.title,question:"",group:"",body:text,paragraphs:[{subtopic:"元件推荐",text,unitIds:[unit.id],claims:[{text,unitIds:[unit.id]}]}],problems:[]};
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[{sourceIds:[source.id],status:"ok",rejected:{},units:[unit]}],decisions:{[unit.id]:{verdict:"confirmed",at:2}},draft:{version:1,generatedAt:1,status:"complete",chapters:[chapter],report:{}}};
+ const md=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
+ const [prose,notes]=md.split("### 需要核对的位置");
+ expect(prose).toMatch(/Starter\s*Kit.*奇怪芯片。\s*〔已定〕/u);
+ expect(prose).not.toContain("SHT30");
+ expect(notes).toContain(extra);
 });
 
 it("restores a measured proposal in an older draft and reviews only the unbound clause",()=>{
@@ -819,10 +928,10 @@ it("restores a measured proposal in an older draft and reviews only the unbound 
  session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[{sourceIds:[source.id],status:"ok",rejected:{},units:[point]}],draft:{version:1,generatedAt:1,status:"complete",chapters:[chapter],report:{}}};
  const render=()=>projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
  const result=render();
- expect(result).toMatch(/观察两周.*50%\+ 启用了邮件提醒.*\[S-[^\]]+\]/u);
+ expect(result).toMatch(/观察两周.*50%\+ 启用了邮件提醒.*\[来源1\]\(#source-S-[\w-]+\)/u);
  expect(result).not.toContain("扩展成功");
  expect(result).toContain(`来源待核对的草稿原句「${pending}」`);
- expect(result).toContain(`“${pending}…”句子的来源无法核对`);
+ expect(result).not.toContain(`“${pending}…”句子的来源无法核对`);
  expect(result).not.toContain(`“${text.slice(0,36)}…”句子的来源无法核对`);
  expect(page.body).toContain(broad);
  session.sourceSignatures={[source.conversationId]:{}};

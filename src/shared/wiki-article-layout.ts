@@ -2,6 +2,7 @@ import {unified} from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import type {Paragraph,RootContent} from "mdast";
+import {wikiHistoricalHeading} from "./wiki-history-layout";
 
 const parser=unified().use(remarkParse).use(remarkGfm);
 const textOf=(node:RootContent):string=>"value" in node?node.value:"children" in node?node.children.map(child=>textOf(child as RootContent)).join(""):"";
@@ -47,6 +48,17 @@ export function wikiArticleLayout(body:string):string {
    continue;
   }
   if(details>0)continue;
+  if(node.type==="heading"&&node.depth>=3&&wikiHistoricalHeading(raw(node))){
+   const next=nodes[at+1];
+   if(!next||next.type==="heading"&&next.depth<=node.depth||next.type==="thematicBreak"){
+    // Consume only the separator of the empty heading. Previous content and
+    // source/code blocks still occupy their own Markdown blocks.
+    const {start,end}=offset(node);
+    const blank=body.slice(end).match(/^\r?\n(?:[ \t]*\r?\n)*/u)?.[0].length??0;
+    edits.push({start,end:end+blank,text:""});
+    continue;
+   }
+  }
   // Compact previously exported category + singleton-list runs without guessing from arbitrary prose.
   const pairs:Array<[string,string]>=[];let end=at,partialEnd:number|undefined;
   while(end+1<nodes.length){

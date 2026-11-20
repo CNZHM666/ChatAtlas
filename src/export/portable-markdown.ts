@@ -11,6 +11,27 @@ const apply=(body:string,edits:Edit[])=>edits.sort((a,b)=>b.start-a.start).reduc
 /** Common heading-link convention. Count duplicates across all visible headings. */
 export const markdownHeadingSlug=(title:string)=>title.toLowerCase().replace(/[^\p{L}\p{N}\p{M}\s_-]/gu,"").replace(/\s/gu,"-");
 
+/** A generated chapter is already under a level-two heading. Normalize its
+ * topic outline while leaving literal and application disclosure contents alone. */
+export function generatedTopicHeadings(body:string):string{
+ const levels:number[]=[],edits:Edit[]=[];
+ let disclosure=0;
+ for(const node of parser.parse(body).children){
+  if(node.type==="html"){
+   if(/^<details\b/u.test(node.value))disclosure++;
+   else if(/^<\/details>/u.test(node.value))disclosure=Math.max(0,disclosure-1);
+  }
+  if(disclosure||node.type!=="heading")continue;
+  const {start,end}=at(node),raw=body.slice(start,end),marker=/^#{1,6}(?=\s)/u.exec(raw)?.[0];
+  if(!marker)continue;
+  while(levels.length&&levels.at(-1)!>=node.depth)levels.pop();
+  levels.push(node.depth);
+  const depth=Math.min(6,2+levels.length);
+  if(depth!==node.depth)edits.push({start,end:start+marker.length,text:"#".repeat(depth)});
+ }
+ return edits.length?apply(body,edits):body;
+}
+
 /** Export projection only: remove application HTML scaffolding, never HTML examples
  * or arbitrary authored markup. Keep literal source blocks byte-for-byte. */
 export function portableMarkdown(body:string):string {

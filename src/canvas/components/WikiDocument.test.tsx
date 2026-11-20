@@ -92,6 +92,42 @@ it("passes chapter scope to the shared source sidebar when no sentence can be ma
  fireEvent.click(screen.getByRole("button",{name:"核对依据"}));
  expect(open).toHaveBeenCalledWith(ref,expect.objectContaining({sectionId:session.sections[0].id,references:[ref]}));
 });
+it("opens the source from the dedicated workflow heading",()=>{
+ const session=projectSession(),open=vi.fn();
+ const text="**事件响应流程**：记录事件 → 指派人员 → 核实影响 → 恢复服务〔建议〕";
+ const statement=text.replace(/\*\*/gu,"");
+ const source={...session.evidence[0],excerpt:statement};
+ session.evidence=[source];
+ const section={...session.sections[0],body:text,evidenceIds:[source.id],claims:[{text:statement,quote:statement,evidenceIds:[source.id]}]};
+ const {container}=render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
+ const button=screen.getByText("来源",{selector:"button"});
+ expect(container.querySelector("figure.wiki-flow figcaption")).toContainElement(button);
+ fireEvent.click(button);
+ expect(open).toHaveBeenCalledWith(source,expect.objectContaining({quote:statement,pointIndex:0,references:[source]}));
+});
+it("names a generic flow from its steps and locates an exact sequence without a claim marker",()=>{
+ const session=projectSession(),open=vi.fn();
+ const exact="记录回执 -> **分派工单** -> 校验材料 -> 归档结果";
+ const basis={...session.evidence[0],excerpt:`参考步骤：${exact}。遇到异常需另行处理。`};
+ const unrelated={...basis,id:"other-flow",messageId:"other-message",excerpt:"记录回执 → 分派工单 → 归档结果 → 校验材料"};
+ const section={...session.sections[0],body:"**流程**：记录回执 → 分派工单 → 校验材料 → 归档结果〔建议〕",evidenceIds:[unrelated.id,basis.id],claims:[]};
+ session.sections=[section];session.evidence=[unrelated,basis];
+ render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
+ const caption=screen.getByText("从记录回执到归档结果").closest("figcaption")!;
+ expect(caption).not.toHaveTextContent("建议");
+ fireEvent.click(within(caption).getByRole("link",{name:"来源"}));
+ expect(open).toHaveBeenCalledWith(basis,expect.objectContaining({quote:exact,references:[basis]}));
+});
+it("never attaches a source to a flow from shared terms or reordered steps",()=>{
+ const session=projectSession();
+ const basis={...session.evidence[0],excerpt:"记录回执 → 校验材料 → 分派工单 → 归档结果"};
+ const section={...session.sections[0],body:"**流程**：记录回执 → 分派工单 → 校验材料 → 归档结果〔建议〕",evidenceIds:[basis.id],claims:[]};
+ session.sections=[section];session.evidence=[basis];
+ render(<WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/>);
+ const caption=screen.getByText("从记录回执到归档结果").closest("figcaption")!;
+ expect(within(caption).getByText("来源待核对")).toBeVisible();
+ expect(within(caption).queryByRole("link")).toBeNull();
+});
 it("marks each claim in the prose and opens only that claim's originals, point by point",()=>{
  const session=projectSession(),ref=session.evidence[0],open=vi.fn();
  const first={...ref,id:"p1",messageId:"m-first",excerpt:"先在本地检索候选消息。"},second={...ref,id:"p2",messageId:"m-second",excerpt:"基础搜索不依赖付费模型。"};

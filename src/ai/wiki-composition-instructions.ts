@@ -3,7 +3,7 @@ import {PROJECT_KNOWLEDGE_POLICY} from "../shared/project-knowledge-policy";
 import {WIKI_EDITORIAL_PASS,WIKI_EDITORIAL_PASS_V4} from "./wiki-editorial-instructions";
 import {MAX_WIKI_SECTION_CLAIMS} from "../shared/wiki-claims";
 import {WIKI_QUALITY_INSTRUCTIONS,WIKI_QUALITY_EDITION7_INSTRUCTIONS,WIKI_QUALITY_V1_INSTRUCTIONS,WIKI_QUALITY_V2_INSTRUCTIONS} from "./wiki-quality-instructions";
-import {WIKI_PROSE_EDITION8_INSTRUCTIONS} from "./wiki-prose-instructions";
+import {WIKI_EDITORIAL_FINISH,WIKI_PROSE_EDITION8_INSTRUCTIONS} from "./wiki-prose-instructions";
 
 /** One writing policy instead of repeating the extraction, Brief, directory
  * and rewrite contracts in every final request. The wire schema owns format. */
@@ -40,6 +40,9 @@ CURRENT WIKI EDITION v8. Write in the requested locale under the assigned ## top
 Use the native claims schema. Bind important decisions, progress, quantities, boundaries and order to literal evidence for the complete assertion. Keep status in workStatus and scope in claim metadata. A relation requires the source to establish it. Use a short History note only for a sourced replacement that helps the reader.
 Tag a few existing claims for overviewRole. Purpose describes the stable audience, problem and outcome. Workflow explains the core path. Scope states the supported boundary. Stage and progress need dated evidence when supplied. Next names a supported action. Keep their qualifiers. The overview reuses these facts.`;
 
-export const WIKI_COMPOSITION_INSTRUCTIONS=EDITION8_WIKI_COMPOSITION_INSTRUCTIONS
+export const EDITION9_WIKI_COMPOSITION_INSTRUCTIONS=EDITION8_WIKI_COMPOSITION_INSTRUCTIONS
  .replace(WIKI_PROSE_EDITION8_INSTRUCTIONS,()=>WIKI_QUALITY_INSTRUCTIONS)
  .replace("CURRENT WIKI EDITION v8.","CURRENT WIKI EDITION v9.");
+
+export const WIKI_COMPOSITION_INSTRUCTIONS=EDITION9_WIKI_COMPOSITION_INSTRUCTIONS
+ .replace("CURRENT WIKI EDITION v9.","CURRENT WIKI EDITION v10.")+WIKI_EDITORIAL_FINISH;

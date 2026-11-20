@@ -1,6 +1,16 @@
 /** Keep real headings stable in navigation and exports, irrespective of section length. */
 export function wikiReadingLayout(body:string,_originalTexts:string[]=[]):string {
  void _originalTexts; // Retained for callers supplying source text; heading structure no longer depends on it.
+ if (body.includes("见上表") && body.includes("〔未定〕")) {
+  const blocks = wikiDocumentBlocks(body);
+  for (let index = blocks.length - 1; index > 0; index--) {
+   const block = blocks[index], table = blocks[index - 1];
+   const topic = block.kind === "blockquote" && /^> (?:\*\*)?版本未定(?:\*\*)?[：:]\s*([^（()\n]+)[（(]见上表[）)](?:，尚未决定)?[。.]?$/u.exec(block.text)?.[1];
+   if (topic && table.kind === "table" && table.text.split("\n").some(row => row.includes(topic.trim()) && row.includes("〔未定〕"))) {
+    body = body.slice(0, table.end) + body.slice(block.end);
+   }
+  }
+ }
  return openNotesLayout(body);
 }
 
@@ -25,3 +35,4 @@ export function openNotesLayout(body:string):string {
   return [`> **${label}${topic?` · ${topic}`:""}**`,">",...sides.map(side=>`> - ${noteSide(side)}`)].join("\n");
  });
 }
+import { wikiDocumentBlocks } from "./wiki-document-blocks";

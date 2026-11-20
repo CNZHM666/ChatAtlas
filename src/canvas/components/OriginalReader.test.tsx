@@ -101,7 +101,7 @@ it("opens a message-level match directory and restores the existing question out
   const { container } = render(<PreferencesProvider><OriginalReader conversation={conversation} messages={messages} loading={false} targetMessageId="match-1" searchContext={{ query: "Orama", hits }} onBack={vi.fn()}/></PreferencesProvider>);
   const sidebar = screen.getByRole("complementary", { name: "命中目录" });
   expect(within(sidebar).getAllByRole("listitem")).toHaveLength(2);
-  fireEvent.click(within(sidebar).getByRole("button", { name: /AI · 4/ }));
+  fireEvent.click(within(sidebar).getByRole("button", { name: /后来修正 Orama 缓存/ }));
   await waitFor(() => expect(container.querySelector(".reader-evidence-target")).toHaveTextContent("后来修正 Orama 缓存"));
   fireEvent.click(screen.getByRole("button", { name: "返回原目录" }));
   expect(screen.queryByRole("complementary", { name: "命中目录" })).not.toBeInTheDocument();
@@ -109,6 +109,21 @@ it("opens a message-level match directory and restores the existing question out
   fireEvent.click(screen.getByRole("button", { name: "返回命中目录" }));
   fireEvent.click(screen.getByRole("button", { name: "返回原目录" }));
   expect(screen.getByRole("textbox", { name: "搜索问题或回答" })).toHaveValue("第二个问题");
+});
+
+it("highlights a search term split by rendered Markdown even without an exact raw range", async () => {
+  const highlights = new Map<string, { ranges: Range[] }>();
+  vi.stubGlobal("CSS", { highlights });
+  vi.stubGlobal("Highlight", class {
+    ranges: Range[];
+    constructor(...ranges: Range[]) { this.ranges = ranges; }
+  });
+  const conversation: Conversation = { id: "rendered-match", title: "界面规划", platform: "chatgpt", url: "", messageCount: 1, updatedAt: 1 };
+  const message: ConversationMessage = { id: "rendered-m1", conversationId: conversation.id, role: "user",
+    content: "**首**页可以展示首页搜索", preview: "", contentHash: "", messageIndex: 0, createdAt: 1, updatedAt: 1 };
+  render(<PreferencesProvider><OriginalReader conversation={conversation} messages={[message]} loading={false}
+    targetMessageId={message.id} searchContext={{ query: "首页", hits: [{ messageId: message.id, excerpt: "" }] }} onBack={vi.fn()}/></PreferencesProvider>);
+  await waitFor(() => expect(highlights.get("atlas-reader-proof")?.ranges.map(range => range.toString())).toEqual(["首页", "首页"]));
 });
 
 it("uses the current reading question when opening the original platform instead of the initial search hit", async () => {

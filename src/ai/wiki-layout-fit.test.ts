@@ -10,6 +10,20 @@ const organization = (subjects: Array<[string, string[]]>, chapters: Array<[stri
   subjects: subjects.map(([id, unitIds]) => ({ id, name: id, aliases: [], unitIds })), chapters: chapters.map(([id, title, subjectIds]) => ({ id, title, question: "", group: "", subtopics: [{ title, subjectIds }] })) });
 
 describe("points routed by their role", () => {
+  it("moves appearance specs from a journey to visual design and keeps step actions in the journey", () => {
+    const points = [
+      unit("s", "审批页圆角与字号", "审批页圆角为 6–8px，正文使用 14px。", "constraint"),
+      unit("t", "审批步骤过渡", "审批页过渡动画时长建议设为 180ms。", "plan"),
+      unit("a", "报销单审批动作", "点击提交后送给直属经理核对。", "constraint"),
+      unit("v", "界面视觉", "告警状态使用橙色徽标。", "constraint"),
+    ];
+    const routed = routeWikiUnits(organization([["flow", ["s", "a", "t"]], ["visual", ["v"]]], [
+      ["c1", "报销用户旅程与交互", ["flow"]], ["c2", "界面视觉设计", ["visual"]],
+    ]), new Map(points.map(item => [item.id, item])));
+    expect(routed.subjects.find(subject => subject.id === "flow")?.unitIds).toEqual(["a"]);
+    const ids = new Set(routed.chapters.find(chapter => chapter.id === "c2")?.subtopics.flatMap(topic => topic.subjectIds));
+    expect(routed.subjects.filter(subject => ids.has(subject.id)).flatMap(subject => subject.unitIds)).toEqual(expect.arrayContaining(["s", "t"]));
+  });
   it("reads a screen's structure as the interface's, not the architecture's", () => {
     expect(wikiUnitLane(unit("a", "首页架构", "首页设计为“看板 + 报销列表”的混合模式。"))).toBeUndefined();
     expect(wikiUnitLane(unit("b", "技术架构", "服务端采用队列处理报销单。", "mechanism"))).toBe("technical");
@@ -36,6 +50,19 @@ it("keeps an answered question's points where they read best when routing moves 
   expect(kept.subjects.find(subject => subject.id === "queue")!.unitIds).toEqual(["u9"]);
   expect(report).toMatchObject({ answered_kept_home: 1 });
   expect(report.answered_moved_together).toBeUndefined();
+});
+
+it("lets an independently supported layout detail move away from a scoped answer", () => {
+  const choice="answer:q:o1";
+  const detail=unit("s","正文排版","审核界面的正文使用 14px 字号。");
+  const accepted=unit(choice,"审批动作","点击提交发送审批。");
+  const flow=unit("p","审批动作","点击提交发送审批。");
+  const original=organization([["flow",["s","p",choice]],["visual",[]]],[["c1","审批流程",["flow"]],["c2","视觉设计",["visual"]]]);
+  const after={...original,subjects:[{...original.subjects[0],unitIds:["p",choice]},{...original.subjects[1],unitIds:["s"]}]};
+  const answers=[{questionId:"q",optionId:"o1",unitIds:["p","s"],question:"提交如何处理？",answer:"点击提交发送审批",at:1}];
+  const kept=answeredTogether(original,after,answers,{}, {[choice]:{verdict:"confirmed",at:1}},new Map([detail,accepted,flow].map(item=>[item.id,item])));
+  expect(kept.subjects[0].unitIds).toEqual(["p",choice]);
+  expect(kept.subjects[1].unitIds).toEqual(["s"]);
 });
 
 describe("a draft written for another layout", () => {

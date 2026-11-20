@@ -23,7 +23,7 @@ const PAGE = 40;
 /** Every knowledge point the document was written from, by chapter and subject: what it says, whose it is, and its
  * original one click away. The key decisions sit on top; a verdict here is kept in the ledger and the document is
  * rewritten around it on request. */
-export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions, pageReading }: { session: FocusSession; zh: boolean; onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void; onApplyDecisions?: () => void; pageReading?: ProjectWikiPages | null }) {
+export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions, pageReading }: { session: FocusSession; zh: boolean; onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void; onApplyDecisions?: () => void; pageReading?: Partial<ProjectWikiPages> | null }) {
   const actions = useContext(ProjectKnowledgeActions);
   const cache = useProjectReadingCache();
   const ledger = session.wikiKnowledge;

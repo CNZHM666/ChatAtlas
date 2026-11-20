@@ -74,3 +74,9 @@ it("spaces English sentences glued at a period, leaving file names as they are",
   expect(englishPunctuation("They return after several days.In comparison, it is free.")).toBe("They return after several days. In comparison, it is free.");
   expect(englishPunctuation("It keeps privacy.v1 is web only. Format with Intl.NumberFormat and Array.From(x).")).toBe("It keeps privacy. v1 is web only. Format with Intl.NumberFormat and Array.From(x).");
 });
+it("quotes whole confirmed ranges in a section with alternative specifications", () => {
+ const body="### Controls\n\nFade 300~600ms。Corner radius 6–8px。\n\nAnother animation 1200ms.\n\nAlternative input 28px.\n\nAlternative title 20px.";
+ const result=decidedValuesNotes(body,[{text:"Fade 300~600ms。Corner radius 6–8px。",holder:"decided"}],true);
+ expect(result).toContain("本节只有 300~600ms、6–8px");
+ expect(result).not.toContain("本节只有 600ms、8px");
+});

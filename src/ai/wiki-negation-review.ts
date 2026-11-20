@@ -14,14 +14,27 @@ const ENGLISH_STOP = /(?<=[A-Za-z0-9)\]"'’*%`])(?<!\b(?:e\.g|i\.e|vs|etc|incl|
 const clausesOf = (text: string) => text.split(new RegExp(`[，,；;。！？!?\\n]|${ENGLISH_STOP.source}`, "u")).map(clause => clause.trim()).filter(Boolean);
 /** The clauses of each sentence in turn. */
 const sentenceClauses = (text: string) => text.split(new RegExp(`(?<=[。！？!?\\n])|${ENGLISH_STOP.source}`, "u")).map(clausesOf).filter(clauses => clauses.length);
+const QUOTE = /“([^”\n]*)”|「([^」\n]*)」|"([^"\n]*)"/gu;
+const CHOICE_LABEL = /^(?:是|否|我?有|我?没有|无|未知|不确定|未确定|已完成|未完成|yes|no|unknown|unsure|not sure|done|not done)$/iu;
+
+/** Built-in response labels and example commands describe input, not what the product rules out. */
+function withoutQuotedExamples(text: string) {
+  return text.replace(/((?:支持|执行|识别|处理|示例指令|示例输入|\b(?:supports?|handles?|command|example input)\b)\s*[:：]?\s*)[“"「][^”"」\n]+[”"」]/giu, "$1")
+    .replace(QUOTE, (quote, curly, corner, straight) => {
+      const labels = (curly ?? corner ?? straight).split(/\s*[/／、,，]\s*/u);
+      return labels.length > 1 && labels.every((label: string) => CHOICE_LABEL.test(label.trim())) ? "" : quote;
+    });
+}
+
+const withoutQuotes = (text: string) => text.replace(QUOTE, "");
 /** Latin names in a text, lowercased, without the words that name no option (AI, LLM, the product itself). */
 const latinNames = (text: string) => (text.toLowerCase().match(/[a-z][a-z0-9.+#-]*/gu) ?? []).map(word => word.replace(/[.#-]+$/u, "")).filter(word => word.length > 1 && !["ai", "llm", "api", "app", "atlas", "chatatlas"].includes(word));
 /** A clause the paragraph turned around: a cited unit rules something out ("避免使用 margin-left 平移页面"), and the
  * paragraph names the same thing (its Latin names and most of its words) in a clause with no negation of its own
  * or in the clause before it ("或通过 margin-left 平移页面"). The reader then takes what was ruled out as an option. */
 export function lostNegation(text: string, statements: string[]): { clause: string; source: string } | undefined {
-  const sentences = sentenceClauses(text.replace(/[“"「][^”"」]*[”"」]/gu, ""));
-  for (const statement of statements) for (const source of clausesOf(statement)) for (const clauses of sentences) {
+  const sentences = sentenceClauses(withoutQuotes(text));
+  for (const statement of statements) for (const source of clausesOf(withoutQuotedExamples(statement))) for (const clauses of sentences) {
     const at = source.search(NEGATION);
     if (at < 0) continue;
     const object = source.slice(at).replace(NEGATION, ""), names = latinNames(object), terms = knowledgeTerms(object);
@@ -86,6 +99,15 @@ export function recheckWikiTableNegation(problem: string, body: string, claims: 
     const unit = units.get(id);
     return unit ? clausesOf(unit.statement).filter(clause => key(clause).startsWith(key(saved[2]))) : [];
   });
+  const affected = claims.filter(claim => body.includes(claim.text) && [claim.text, withoutQuotes(claim.text)]
+    .some(text => clausesOf(text).some(clause => key(clause).startsWith(key(saved[1])))));
+  if (affected.length && affected.every(claim => {
+    const statements = claim.unitIds.flatMap(id => units.get(id)?.statement ?? []);
+    const matches = (clause: string) => key(clause).startsWith(key(saved[2]));
+    return statements.some(statement => clausesOf(statement).some(matches))
+      && !statements.some(statement => clausesOf(withoutQuotedExamples(statement)).some(matches))
+      && !lostNegation(claim.text, statements);
+  })) return true;
   const equivalent = claims.some(claim => body.includes(claim.text) && clausesOf(claim.text).some(clause => key(clause).startsWith(key(saved[1]))
     && PREVENTS.test(clause) && !ALLOWS_PREVENTED_ACTION.test(clause) && claim.unitIds.some(id => {
       const unit = units.get(id);

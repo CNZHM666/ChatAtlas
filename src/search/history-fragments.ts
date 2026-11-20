@@ -94,7 +94,7 @@ export function historyFragments(match:HistoryMatch,originals:ConversationMessag
   }
   const best=hits.find(hit=>hit.excerpt)??hits[0];
   const text=best.excerpt||(best.message.id===match.messages[0]?.id?match.excerpt:"")||best.message.content;
-  return [{id,...(anchor?{question:firstLine(anchor.content)}:{}),targetMessageId:hits[0].message.id,hitCount:hits.length,excerpt:firstLine(text,160),...(date===undefined?{}:{date}),firstIndex:hits[0].message.messageIndex}];
+  return [{id,...(anchor?{question:firstLine(anchor.content)}:{}),targetMessageId:best.message.id,hitCount:hits.length,excerpt:firstLine(text,200),...(date===undefined?{}:{date}),firstIndex:hits[0].message.messageIndex}];
  });
  // The fragment with the most hits leads; ties keep the discussion's order.
  fragments.sort((a,b)=>b.hitCount-a.hitCount||a.firstIndex-b.firstIndex);

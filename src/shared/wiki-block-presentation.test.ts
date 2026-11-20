@@ -61,9 +61,9 @@ it("reformats short UI copy, explicit field pairs and unbranched flows without i
   expect(wikiBlockPresentation(fence("输入\n↓\n验证\n↓\n提交")).body).toBe("输入 → 验证 → 提交");
   const stages = ["自然语言", "Hardware IR", "硬件综合", "KiCad", "ERC检查", "AI修复", "Firmware"];
   const long = "*讨论中的原文代码 · AI 建议，未确认*\n\n" + fence(stages.join("\n ↓\n"));
-  expect(wikiReadingFormat(long, {})).toBe(stages.join(" → ") + "（AI 建议，未确认）");
+  expect(wikiReadingFormat(long, {})).toBe(stages.join(" → ") + "〔建议〕");
   const reference = {...unit(stages.join("\r\n ↓\r\n")),about:{name:"Boardsmith",role:"reference" as const}};
-  expect(wikiReadingFormat(long, {}, {units:[reference]})).toBe("**Boardsmith 参考流程**：" + stages.join(" → ") + "（AI 建议，未确认）");
+  expect(wikiReadingFormat(long, {}, {units:[reference]})).toBe("**Boardsmith 参考流程**：" + stages.join(" → ") + "〔建议〕");
   expect(wikiBlockPresentation(fence("模式：\n架构\n来源：\n本地")).body).toBe("| 项目 | 内容 |\n| --- | --- |\n| 模式 | 架构 |\n| 来源 | 本地 |");
   expect(wikiBlockPresentation(fence("- 保留原文\n- 按需展开")).body).toBe("- 保留原文\n- 按需展开");
   const branch = fence("输入\n↓\n有效 → 提交\n无效 → 返回");

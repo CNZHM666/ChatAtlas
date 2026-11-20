@@ -204,7 +204,7 @@ export function projectKeyEvidence(session:FocusSession,pages:readonly FocusSect
  return chapters.flat().filter(row=>selected.has(row)).slice(0,MAX_ENTRIES);
 }
 
-export function keyEvidenceMarkdown(entries:ReturnType<typeof projectKeyEvidence>,zh:boolean){
+export function keyEvidenceMarkdown(entries:ReturnType<typeof projectKeyEvidence>,zh:boolean,sourceLink?:(source:ReturnType<typeof projectKeyEvidence>[number]["sources"][number])=>string){
  const l=(cn:string,en:string)=>zh?cn:en;
  const escape=(value:string)=>value.replace(/[\\`*_[\]<>|]/gu,"\\$&");
  const labels={confirmed:l("已确认","Confirmed"),open:l("待决","Open"),scope:l("范围记录","Scope"),historical:l("历史记录","Earlier record")};
@@ -225,7 +225,8 @@ export function keyEvidenceMarkdown(entries:ReturnType<typeof projectKeyEvidence
     const fence="~".repeat(Math.max(3,...[...source.excerpt.matchAll(/~+/gu)].map(match=>match[0].length+1)));
     quote=`> ${fence}text\n${source.excerpt.split("\n").map(line=>`> ${line}`).join("\n")}\n> ${fence}`;
    }
-   const meta=`**${label}** · ${role} · ${l("来源","Source")} ${message.number}${source.discussedAt?` · ${shortDate(source.discussedAt)}`:""}`;
+   const location=sourceLink?sourceLink(source):`${l("来源","Source")} ${message.number}`;
+   const meta=[`**${label}**`,role,location,source.discussedAt&&shortDate(source.discussedAt)].filter(Boolean).join(" · ");
    if(source.excerpt)return `${meta}\n\n${quote}`;
    const note=entry.confirmation?l("结论依据见下方整理确认。","See the organization confirmation below for the decision.")
     :l("原文摘录与本条结论的对应关系待核对。","The connection to this conclusion needs review.");
@@ -236,6 +237,6 @@ export function keyEvidenceMarkdown(entries:ReturnType<typeof projectKeyEvidence
    ...confirmation?[`**${l("整理确认","Confirmed during organization")}**${confirmation.at?` · ${shortDate(confirmation.at)}`:""}${confirmation.question?`\n\n- ${l("问题","Question")} ${escape(confirmation.question)}\n- **${l("选择","Selection")}** ${escape(confirmation.answer??"")}`:""}`]:[],
    ...entry.replacedBy?[`${l("后续决定","Later decision")} · ${escape(entry.replacedBy)}`]:[]];
  });
- if(messages.size)sections.push(`### ${l("消息索引","Message index")}`,Array.from(messages.values(),message=>`${message.number}. \`${message.id.replace(/[`\n]/gu,"")}\``).join("\n"));
+ if(!sourceLink&&messages.size)sections.push(`### ${l("消息索引","Message index")}`,Array.from(messages.values(),message=>`${message.number}. \`${message.id.replace(/[`\n]/gu,"")}\``).join("\n"));
  return sections.join("\n\n");
 }

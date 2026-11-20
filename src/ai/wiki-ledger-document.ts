@@ -1,14 +1,17 @@
+import { confirmedRoadmapText, confirmedRoadmaps, withPinnedRoadmapChapters } from "../shared/wiki-confirmed-roadmap";
 import { LEAVES_OUT } from "../shared/negation";
 import {retainWikiDecisions,reviewWikiEditorial} from "./wiki-editorial-review";
 import {placeWikiChoices} from "./wiki-choice-placement";
 import {wikiUnconfirmedWorkflowFeedback} from "./wiki-workflow-scope";
 import { retainCapabilityReports } from "./wiki-capability-state";
 import { wikiDecisionRestatement } from "./wiki-confirmation-scope";
+import { mergeWikiRelatedParagraphs } from "./wiki-paragraph-repeats";
+import { rehomedStrayParagraphs } from "./wiki-stray-paragraphs";
 import {wikiProjectVoice} from "../shared/wiki-project-voice";
 import {restoreWikiChapterLiterals} from "../shared/wiki-block-presentation";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { FIRST_VERSION_ZH, ITERATION_ZH, PHASE } from "../shared/stage-words";
-import { claimSourceUnits, claimSupported, unitClaimText } from "./wiki-claim-support";
+import { claimSourceUnits, claimSupported, expandedWikiIdentifierClaim, unitClaimText } from "./wiki-claim-support";
 import { qualifiedDiscussionIdea, qualifyWikiDatedReport, qualifyWikiOpeningOffer, wikiUserIdea } from "./wiki-claim-review";
 import type { FocusEvidence, FocusSection } from "../shared/focus-session";
 import type { WikiClaim } from "../shared/wiki-claims";
@@ -197,9 +200,18 @@ export function setLedgerPassProbe(probe: LedgerPassProbe | undefined): void { l
 
 export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: Record<string, string>): { sections: FocusSection[]; evidence: FocusEvidence[] } {
   const { ledger: reading, organization, units: all, statuses } = resolveWikiReading(ledger);
-  const draft = reading.draft;
-  if (!draft || !organization) return { sections: [], evidence: [] };
+  const savedDraft = reading.draft;
+  if (!savedDraft || !organization) return { sections: [], evidence: [] };
   const units = new Map(all.map(unit => [unit.id, unit]));
+  const draft = { ...savedDraft, chapters: savedDraft.chapters.map(chapter => {
+    if (!chapter.problems.some(problem => problem.endsWith("not in the paragraph"))) return chapter;
+    return { ...chapter, paragraphs: chapter.paragraphs.map(paragraph => ({ ...paragraph, claims: paragraph.claims?.map(claim => {
+      const cited = claim.unitIds.flatMap(id => units.get(id) ?? []);
+      const text = cited.length === claim.unitIds.length ? expandedWikiIdentifierClaim(claim.text, paragraph.text, cited) : undefined;
+      return text ? { ...claim, text } : claim;
+    }) })) };
+  }) };
+  const acceptedRoadmaps = confirmedRoadmaps(reading);
   const groupConditions = new Map<string, string[]>();
   for (const group of organization.groups ?? []) for (const member of group.members) {
     const unit = units.get(member.unitId);
@@ -1338,8 +1350,12 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     if (!refused.length || saysDeclined && !toldAsProposal && !others.some(unit => unit.evidence.role !== "user") || !saysDeclined && refused.length < listed.length && !TOLD_EARLIER.test(claim.text.trim())) return undefined;
     // The answer that turned it down names what holds instead: 「……该方案已被否定」 under the chosen 免费体验+订阅制 read as if
     // the 30-day plan itself were dropped, while only buying it once was.
-    const chosen = [...new Set(refused.flatMap(unit => chosenInstead(unit.id)))];
-    return { text: `你在回答中否定了${refused.map(unit => `「${bareStatement(unit)}」`).join("和")}的方案${chosen.length ? `，选择了${chosen.map(answer => `「${answer}」`).join("、")}` : ""}${others.length ? `；此前另有建议：${others.map(bareStatement).join("；")}` : ""}。` };
+    const pinned = new Set(acceptedRoadmaps.flatMap(({plan,answer}) => chapter.paragraphs.some(paragraph => paragraph.unitIds.includes(plan.unitId))
+      && refused.some(unit => answer.unitIds.includes(unit.id) && ledger.decisions?.[unit.id]?.at === answer.at) ? [plan.unitId] : []));
+    const distinct = others.filter(unit => !pinned.has(unit.id));
+    const chosen = pinned.size ? [] : [...new Set(refused.flatMap(unit => chosenInstead(unit.id)))];
+    return { text: `你在回答中否定了${refused.map(unit => `「${bareStatement(unit)}」`).join("和")}的方案${chosen.length ? `，选择了${chosen.map(answer => `「${answer}」`).join("、")}` : ""}${distinct.length ? `；此前另有建议：${distinct.map(bareStatement).join("；")}` : ""}。`,
+      ...(pinned.size ? {unitIds:[...refused,...distinct].map(unit=>unit.id)} : {}) };
   });
   // A sentence joining the AI's restatement of the user's figures, which its own quote never gives (「日活约30人（近期降至22
   // 人）」, from a reply about the 19% retention), to a figure worked from the user's report (15人，占比约68%, 15 ÷ 22): read
@@ -2824,16 +2840,22 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     const next = restoreWikiChapterLiterals(originals,pass(written)); ledgerPassProbe?.(name, originals, next); return next;
   }, draft.chapters)
     .map(chapter => {
-      const checked = wikiChapterIntegrity(chapter, id => units.get(id), zhDraft);
+      const originalClaims=draft.chapters.find(original=>original.id===chapter.id)?.paragraphs.flatMap(paragraph=>paragraph.claims??[]);
+      const checked = wikiChapterIntegrity(chapter, id => units.get(id), zhDraft, originalClaims);
       return checked.repaired ? { ...chapter, body: checked.body, paragraphs: checked.paragraphs } : chapter;
     });
+  const editorialSubjects = new Map(organization.subjects.flatMap(subject => subject.unitIds.map(id => [id, subject.id] as const)));
+  const editorialGroups = new Map(organization.groups?.flatMap(group => group.members.map(member => [member.unitId, group.id] as const)));
+  if (ledger.documentType !== "learning") rehomedStrayParagraphs(chapters, organization, editorialSubjects, units);
   const reviewed = ledger.documentType === "learning" ? chapters : placeWikiChoices(retainWikiDecisions(reviewWikiEditorial(chapters, reading), reading, new Set(confirmed.map(unit => unit.id)), zhDraft), reading);
   if (ledger.documentType !== "learning") retainCapabilityReports(reviewed, all, statuses);
   if (ledger.documentType !== "learning") for (const chapter of reviewed) {
     chapter.body = wikiProjectVoice(chapter.body);
     chapter.paragraphs = chapter.paragraphs.map(paragraph => ({ ...paragraph, text: wikiProjectVoice(paragraph.text), claims: paragraph.claims?.map(claim => ({ ...claim, text: wikiProjectVoice(claim.text) })) }));
   }
-  const sections = reviewed.filter(chapter => chapter.paragraphs.length).map((chapter): FocusSection => {
+  const pinned = new Map(acceptedRoadmaps.map(({ plan }) => [confirmedRoadmapText(plan, zhDraft), plan.unitId]));
+  const sections = withPinnedRoadmapChapters(reviewed, reading, zhDraft).filter(chapter => chapter.paragraphs.length).map((draftChapter): FocusSection => {
+    const chapter = ledger.documentType === "learning" ? draftChapter : mergeWikiRelatedParagraphs(draftChapter, editorialSubjects, statuses, editorialGroups);
     const chapterUnits = [...new Set([...chapter.openingUnitIds ?? [], ...chapter.paragraphs.flatMap(paragraph => paragraph.unitIds)])].flatMap(id => units.get(id) ?? []);
     // The opening has no claims of its own: a decision it states ("优先实现复制上下文功能……") gets one on the sentence
     // saying it, so its mark shows there too.
@@ -2867,6 +2889,13 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
       if (!written.length && (SHOWN_BLOCK.test(paragraph.text.trim()) || /^>\s*(?:版本未定|范围有分歧|Not settled)[：:]/u.test(paragraph.text.trim()))) return [];
       return holderMarks(paragraph.text, written.length ? written : [claimOn(sentenceOf(paragraph.text), paragraph.unitIds)].flatMap(claim => claim ?? []), claim => [...new Set(claim.evidenceIds.flatMap(id => evidence.find(item => item.id === id)?.conversationId ?? []))].sort().join(" "));
     })];
+    for (const paragraph of chapter.paragraphs) {
+      const id = pinned.get(paragraph.text), unit = id && units.get(id);
+      if (!unit || !paragraph.unitIds.includes(unit.id)) continue;
+      const claim = { text: paragraph.text, quote: unit.evidence.quote, evidenceIds: [cite(unit)], unitIds: [unit.id], userDecided: true, holder: "decided" as const };
+      const at = claims.findIndex(item => item.text === paragraph.text);
+      if (at < 0) claims.push(claim); else claims[at] = claim;
+    }
     const cited = chapterUnits.flatMap(unit => {
       const source = cite(unit), approval = unit.adoption.approval;
       if (statuses.get(unit.id) !== "confirmed" || unit.adoption.status !== "user_adopted" || !approval) return [source];

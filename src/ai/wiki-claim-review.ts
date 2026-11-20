@@ -8,18 +8,26 @@ import { daysIn, figuresIn } from "../shared/wiki-figures";
 import { wikiMeasure, wikiSaidWhen } from "../shared/wiki-section-status";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { isSourceCodeParagraph, sourceBlockResolvedProblems, withoutSourceBlockRepeats } from "../shared/wiki-source-code";
-import { claimSupported, wikiLabelledThresholdClaims } from "./wiki-claim-support";
+import { claimSupported, expandedWikiIdentifierClaim, wikiLabelledThresholdClaims } from "./wiki-claim-support";
+import { separateUnconfirmedWikiPlans } from "./wiki-draft-checks";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
-import { withAnswerScope } from "./wiki-question-parse";
-import { applyWikiConfirmationScope, wikiConfirmationDetails, wikiConfirmationScopes } from "./wiki-confirmation-scope";
+import { wikiLocalAnswer, wikiScopedIntegration, withAnswerScope } from "./wiki-question-parse";
+import { wikiDesignContrast, wikiIntegrationProposal, wikiWithoutUnsupportedExample } from "./wiki-prose-grounding";
+import { composeSavedWikiParagraphs } from "./wiki-paragraph-repeats";
+import { wikiClosedListChoice, wikiClosedListStatement, wikiRestatesClosedList } from "../shared/wiki-closed-list";
+import { confirmedRoadmaps, confirmedRoadmapText } from "../shared/wiki-confirmed-roadmap";
+import { applyWikiConfirmationScope, wikiAddedDecisionList, wikiConfirmationDetails, wikiConfirmationScopes, wikiReleaseChecklistStatement, type WikiConfirmationScope } from "./wiki-confirmation-scope";
 import { measuredSourceScope, sourceScopeConflict } from "./wiki-source-scope";
-import { wikiTemporalCandidate, wikiTemporalClaim } from "./wiki-claim-temporality";
+import { wikiTemporalCandidate, wikiTemporalClaim, wikiUnsupportedRejection, wikiWithoutRejectionTail } from "./wiki-claim-temporality";
 import { wikiClaimStanding, wikiOpeningStanding, wikiStandingCandidate } from "./wiki-claim-standing";
 import { recheckWikiTableNegation } from "./wiki-negation-review";
-import { INCOMPLETE_WIKI_PROSE, restoredConditionalNegation, wikiChapterIntegrity, wikiIncompleteProse, wikiIntegrityCandidate, wikiIntegrityNote } from "./wiki-integrity";
+import { INCOMPLETE_WIKI_PROSE, literalWikiProse, restoreDetachedWikiScope, restoredConditionalNegation, wikiChapterIntegrity, wikiIncompleteProse, wikiIntegrityCandidate, wikiIntegrityNote } from "./wiki-integrity";
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
+import { availableWikiEvidence, wikiEvidenceKey } from "../shared/wiki-evidence-link";
 import { wikiHolderOf } from "../shared/wiki-holder";
 import { reviewWikiHistory } from "./wiki-history-review";
+import { assertsWikiReplacement, wikiReplacementSupported } from "./wiki-version-conflict";
+import { withStop } from "../shared/wiki-sentences";
 
 const UNSUPPORTED_CLAIM = /^claim "(.+)…" has no supported source after final formatting$/u;
 const LOST_CONDITION = /^"(.+)…" drops a source condition/u;
@@ -29,7 +37,106 @@ const ASSERTED_PLAN = /(?:^|[；;]\s*)(?:现行|当前)(?:的)?(?:策略|方案|
 const ASSERTED_PLAN_EN = /(?:^|;\s*)(?:the )?current (?:strategy|plan|approach) (?:is to|is)\s+([^\n]+)$/iu;
 const DRAFT_EXCERPT = /(?:来源待核对的草稿原句「|Draft excerpt requiring source review “)$/u;
 const excerptPending = (text: string, zh: boolean) => zh ? `来源待核对的草稿原句「${text}」` : `Draft excerpt requiring source review “${text}”`;
+
+function obsoleteScopeExcerpt(excerpt:string,prose:string){
+  if(!/该(?:例外|方案|取值)已被[^。！？]{2,40}(?:覆盖|替代|取代)/u.test(excerpt))return false;
+  const former=excerpt.match(/(?:提及|提到|提出)\s*([^，。！？]{2,50}?)\s*(?:可能|拟|建议)(?:使用|采用)\s*(\d+\s*[-–—~～至]\s*\d+\s*[a-z%]+)\s*([^，。！？]{1,12})/iu);
+  if(!former)return false;
+  const normalize=(value:string)=>value.normalize("NFKC").replace(/\s|\*\*/gu,"").replace(/[–—~～至]/gu,"-");
+  const [,subject,range,property]=former.map(normalize);
+  return prose.split(/\n+/u).some(line=>{
+    const text=normalize(line);
+    return !/覆盖|取代|替代/u.test(text)&&text.includes(subject+property+range)
+      &&/(?:例外|后续规范|后来(?:的)?规范)[^。！？]{0,50}(?:未明确|未确认|待核对|尚未确定)/u.test(text);
+  });
+}
+
+/** Keep review excerpts out of the generated reading path in exported Markdown. */
+export function separateWikiDraftExcerpts(body: string) {
+  const excerpts = new Set<string>();
+  for (const block of wikiDocumentBlocks(body).reverse()) {
+    if (block.kind !== "paragraph" && block.kind !== "list") continue;
+    const edits = [...block.text.matchAll(/来源待核对的草稿原句「|Draft excerpt requiring source review “/gu)].flatMap(mark => {
+      const start = mark.index + mark[0].length;
+      const opening = mark[0].at(-1), closing = opening === "「" ? "」" : "”";
+      let depth = 1, end = start;
+      for (; end < block.text.length && depth; end++) {
+        if (block.text[end] === opening) depth++;
+        if (block.text[end] === closing) depth--;
+      }
+      if (depth || end <= start + 1) return [];
+      return [{ start: mark.index, end, text: block.text.slice(mark.index, end) }];
+    });
+    if (!edits.length) continue;
+    for (const edit of edits) excerpts.add(edit.text);
+    let next = block.text;
+    for (const { start, end } of edits.reverse()) next = next.slice(0, start) + next.slice(end);
+    if (block.kind === "list") next = next.split("\n").filter(line => !/^\s*(?:[-+*]|\d+[.)])\s*$/u.test(line)).join("\n");
+    // Labels on a failed excerpt are writer scaffolding, not independent prose.
+    if (block.kind === "paragraph" && /^[\p{Script=Han} \t]{0,12}[：:]?$/u.test(next.trim())) next = "";
+    body = body.slice(0, block.start) + next.trimEnd() + body.slice(block.end);
+  }
+  return { body: excerpts.size ? body.replace(/\n{3,}/gu, "\n\n").trim() : body,
+    excerpts: [...excerpts].filter(excerpt=>!obsoleteScopeExcerpt(excerpt,body)) };
+}
 const normalizeDetail = (text: string) => text.normalize("NFKC").toLocaleLowerCase().replace(/[*_`]/gu, "").replace(/[\s，,。.!?！？；;]+$/u, "").replace(/\s+/gu, "");
+
+function restoreChecklistConfirmation(section: FocusSection, draft: readonly { text: string; unitIds: string[] }[], scope: WikiConfirmationScope, evidenceId: string, statement: string,
+  source: (id: string) => { unit: WikiKnowledgeUnit; evidenceId: string } | undefined): FocusSection {
+  const { decision, choice } = scope;
+  const saved = section.claims ?? [];
+  const bound = (claim: { unitIds?: string[] }) => claim.unitIds?.length === 1 && claim.unitIds[0] === decision.id;
+  const reply = normalizeDetail(choice), topic = normalizeDetail(decision.subject);
+  const shortReply = (text: string) => {
+    const value = normalizeDetail(text);
+    if (!value.endsWith(reply)) return false;
+    const lead = value.slice(0, -reply.length).replace(/:$/u, "").replace(/(?:检查项|校验项|验证项|检测项|执行|已确认|确认)$/u, "");
+    return !lead || topic === lead || lead.length >= 3 && topic.endsWith(lead);
+  };
+  const candidates = new Set([...saved, ...draft].filter(claim => bound(claim) && shortReply(claim.text) &&
+    !saved.some(item => item.checked && item.text === claim.text)).map(claim => claim.text));
+  const mixed = saved.flatMap(claim => {
+    if (claim.checked || !claim.unitIds?.includes(decision.id) || claim.unitIds.length < 2) return [];
+    const divider = claim.text.search(/[，,]/u);
+    if (divider < 0) return [];
+    const head = claim.text.slice(0, divider).trim(), remaining = claim.text.slice(divider + 1).trim();
+    if (!shortReply(head) || !remaining) return [];
+    const ids = claim.unitIds.filter(id => id !== decision.id);
+    const sources = ids.flatMap(id => source(id) ?? []);
+    if (sources.length !== ids.length || !claimSupported(remaining, sources.map(item => item.unit))) return [];
+    return [{ claim, head, tail: { ...claim, text: remaining, unitIds: ids, evidenceIds: sources.map(item => item.evidenceId),
+      quote: sources[0].unit.evidence.quote, holder: "ai" as const, userDecided: undefined, workStatus: "proposed" as const,
+      sourceReading: undefined, formulations: undefined } }];
+  });
+  for (const { head } of mixed) candidates.add(head);
+  if (!candidates.size) return section;
+  const paragraphs = wikiDocumentBlocks(section.body).filter(block => block.kind === "paragraph");
+  const longestFirst = [...candidates].sort((a, b) => b.length - a.length);
+  const hits = paragraphs.flatMap(block => {
+    const text = longestFirst.find(candidate => block.text.startsWith(candidate));
+    if (!text) return [];
+    if (text === block.text.trim()) return [{ text, start: block.start, end: block.end, standalone: true }];
+    if (!/^[，,。.!！？]/u.test(block.text.slice(text.length))) return [];
+    return [{ text, start: block.start, end: block.start + text.length + 1, standalone: false }];
+  });
+  if (!hits.length) return section;
+  const already = paragraphs.some(block => block.text.includes(statement)) && saved.some(claim => bound(claim) && claim.text === statement);
+  const [first] = hits;
+  let body = section.body;
+  for (const hit of [...hits].reverse()) {
+    const text = hit === first && !already ? statement + (hit.standalone ? "" : "\n\n") : "";
+    body = body.slice(0, hit.start) + text + body.slice(hit.end);
+  }
+  if (body === section.body) return section;
+  const updated = saved.flatMap(claim => {
+    const split = mixed.find(part => part.claim === claim && hits.some(hit => hit.text === part.head));
+    if (split) return [split.tail];
+    return !bound(claim) || !hits.some(hit => hit.text === claim.text) && claim.text !== statement ? [claim] : [];
+  });
+  const claim: WikiClaim = { text: statement, unitIds: [decision.id], quote: decision.evidence.quote, evidenceIds: [evidenceId],
+    holder: "decided", holderMark: true, userDecided: true, workStatus: "planned", verification: "supported" };
+  return { ...section, body: body.replace(/\n{3,}/gu, "\n\n").trim(), claims: [...updated, claim].sort((a, b) => body.indexOf(a.text) - body.indexOf(b.text)) };
+}
 const PRICED_PLAN = /[¥￥$€£]\s*\d|\d+(?:\.\d+)?\s*(?:元|USD|CNY|EUR)/iu;
 const PRICE_PROPOSAL = /建议|提议|拟定|\b(?:suggest(?:ed|ion)?|proposal|recommend(?:ed|ation)?)\b/iu;
 const needsPriceAttribution = (text: string) => PRICED_PLAN.test(text) && !PRICE_PROPOSAL.test(text) && !/[\n|]/u.test(text);
@@ -62,8 +169,13 @@ export function qualifyWikiArchitecture(text: string, units: WikiKnowledgeUnit[]
   }).join("");
 }
 
+export function wikiOverviewNeedsClaimReview(text: string, session: FocusSession) {
+  return Boolean(session.wikiKnowledge?.draft && session.wikiKnowledge.documentType !== "learning"
+    && (NAMED_ARCHITECTURE.test(text) || wikiConfirmationDetails(text).length));
+}
+
 export function qualifyWikiOverviewClaims(text: string, session: FocusSession, reading?: ReturnType<typeof resolveWikiReading>) {
-  if (!session.wikiKnowledge?.draft || session.wikiKnowledge.documentType === "learning" || !NAMED_ARCHITECTURE.test(text) && !wikiConfirmationDetails(text).length) return text;
+  if (!session.wikiKnowledge || !wikiOverviewNeedsClaimReview(text, session)) return text;
   const { ledger, units, statuses } = reading ?? resolveWikiReading(session.wikiKnowledge);
   const openings = new Set(ledger.draft?.chapters.filter(chapter => session.sections.some(section => section.id === chapter.id && !section.userEdited && !section.origin))
     .flatMap(chapter => chapter.openingUnitIds ?? []));
@@ -188,13 +300,32 @@ export function supportedProposal(text: string, unit: WikiKnowledgeUnit | undefi
   return zh ? `AI 建议${detail}` : `AI proposal: ${detail}`;
 }
 
+/** Recover a measurable test proposal from its own literal source when the
+ * writer appended metrics or timing not established in that excerpt. */
+function recoverTestPlanCore(text:string,unit:WikiKnowledgeUnit,status:WikiUnitStatus|undefined){
+  if(status!=="proposal"||unit.evidence.role!=="assistant"||unit.evidence.pasted||unit.about||unit.kind!=="plan"
+    ||missingWikiConditions(unit,text).length)return;
+  const path=text.match(/(?:^|[^\w/-])((?:[\w-]+\/)*(?:tests?|benchmarks?)\/[\w/-]+)/iu)?.[1].replace(/\/$/u,"");
+  if(!path||!unit.evidence.quote.includes(path)||!unit.statement.includes(path)
+    ||wikiUnitConditions(unit).length)return;
+  const metric=unit.evidence.quote.split("\n").map(line=>line.trim()).filter(line=>
+    /^(?:(?:第[一二三四五六七八九十\d]+(?:阶段|版)|(?:首版|第一版))\s*)?(?:准备|建立|覆盖|包含|执行)\s*(?:至少|最多|约)?\s*\d+\s*(?:个|条|项)\s*(?:任务|场景|测试用例)[。！]?[：:]?$/u.test(line));
+  if(metric.length!==1)return;
+  const rest=metric[0].match(/((?:至少|最多|约)?\s*\d+\s*(?:个|条|项)\s*(?:任务|场景|测试用例))/u)?.[1].trim();
+  if(!rest||!normalizeDetail(text).includes(normalizeDetail(rest))||!normalizeDetail(unit.statement).includes(normalizeDetail(rest)))return;
+  const act=metric[0].replace(/[。！：:]$/u,"");
+  return `基准测试提案将 \`${path}\` 作为测试目录，${act}。`;
+}
+
 /** Older saved chapters also surface their recorded review failures at the affected
  * sentence. This projects the stored prose without editing the document or its sources. */
-export function wikiChapterReviewContext(session: FocusSession) {
+export function wikiChapterReviewContext(session: FocusSession, projected?: ReturnType<typeof resolveWikiReading>) {
   const ledger = session.wikiKnowledge;
   const units = wikiLedgerUnits(ledger);
-  let reading: ReturnType<typeof resolveWikiReading> | undefined;
-  return { units, byId: new Map(units.map(unit => [unit.id, unit])), reading: () => ledger && (reading ??= resolveWikiReading(ledger)) };
+  let reading = projected;
+  let sources: Map<string, FocusSession["evidence"][number]> | undefined;
+  return { units, byId: new Map(units.map(unit => [unit.id, unit])), reading: () => ledger && (reading ??= resolveWikiReading(ledger)),
+    sources: () => sources ??= new Map(session.evidence.filter(ref => availableWikiEvidence(session, ref)).map(ref => [wikiEvidenceKey(ref), ref])) };
 }
 
 export function reviewWikiChapter(section: FocusSection, session: FocusSession, zh = session.locale !== "en", diagnostics?: { resolved: Set<string>; scopeProblems: Set<string> }, context = wikiChapterReviewContext(session)): FocusSection {
@@ -203,6 +334,29 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
   const ledger = session.wikiKnowledge;
   const chapter = ledger?.draft?.chapters.find(item => item.id === section.id);
   if (!ledger || !chapter) return restoreWikiSourceNegation(section, session);
+  if (Object.values(ledger.scopeAnswers ?? {}).includes("exclude")) {
+    const reading = context.reading();
+    const scoped = reading?.ledger.draft;
+    const visible = scoped?.chapters.find(item => item.id === section.id);
+    if (scoped?.report.scope_filtered && visible?.body !== chapter.body) {
+      const retained = new Set(visible?.paragraphs.flatMap(paragraph => paragraph.unitIds));
+      const claims = section.claims?.filter(claim => claim.unitIds?.some(id => retained.has(id)));
+      const units = new Map(reading?.units.map(unit => [unit.id, unit]));
+      const plan = visible && reading ? separateUnconfirmedWikiPlans(visible, units,
+        new Set([...retained].filter(id => reading.statuses.get(id) === "confirmed"))) : undefined;
+      const inTable = plan && plan !== visible ? plan.paragraphs.filter(paragraph => paragraph.text.startsWith("|") && !visible?.paragraphs.includes(paragraph))
+        .flatMap(paragraph => paragraph.claims ?? []).flatMap((claim): WikiClaim[] => {
+          const unit = units.get(claim.unitIds[0]);
+          if (!unit || claim.unitIds.length !== 1) return [];
+          const ref = context.sources().get(wikiEvidenceKey({ ...unit.evidence, excerpt: unit.evidence.quote }));
+          return ref ? [{ ...claim, evidenceIds: [ref.id], quote: ref.excerpt, holder: unit.evidence.role === "user" && !unit.evidence.pasted ? "user" : "ai",
+            holderMark: true, workStatus: "proposed", verification: "supported" }] : [];
+        }) : [];
+      section = { ...section, body: plan?.body ?? visible?.body ?? "",
+        claims: inTable.length ? [...claims ?? [], ...inTable] : claims,
+        evidenceIds: inTable.length ? [...new Set([...section.evidenceIds, ...inTable.flatMap(claim => claim.evidenceIds)])] : section.evidenceIds };
+    }
+  }
   const { units: storedUnits, byId: storedById } = context;
   const selected = new Set(section.evidenceIds), conversations = new Set(session.sourceConversationIds);
   const evidence = session.evidence.filter(ref => selected.has(ref.id) && conversations.has(ref.conversationId));
@@ -221,18 +375,277 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
   });
   const excludedKeys = new Set([...session.wikiScopeReview?.excludeKeys ?? [], ...session.wikiScopeReview?.ignoredKeys ?? []]);
   const excluded = session.wikiScopeReview?.materials.filter(item => (item.keys ?? [item.key]).every(key => excludedKeys.has(key))) ?? [];
-  const scopeSource = (unit: WikiKnowledgeUnit) => {
-    const ref = sourceOf(unit), versions = session.sourceSignatures?.[unit.evidence.conversationId];
+  const eligibleSource = (unit: WikiKnowledgeUnit, ref: ReturnType<typeof sourceOf>) => {
+    const versions = session.sourceSignatures?.[unit.evidence.conversationId];
     const role = session.sourceRoles?.[unit.evidence.conversationId]?.[unit.evidence.messageId];
     if (!ref || role && role !== unit.evidence.role || versions && !versions[unit.evidence.messageId] || excluded.some(item => item.evidenceIds.includes(ref.id) || item.evidenceIds.includes(unit.evidence.evidenceId)
       || item.quote.trim().length >= 12 && unit.evidence.quote.includes(item.quote.trim()))) return;
     return ref;
   };
+  const scopeSource = (unit: WikiKnowledgeUnit) => eligibleSource(unit, sourceOf(unit));
+  const restoredScope = restoreDetachedWikiScope(section.body, chapter.paragraphs.map(paragraph => paragraph.text));
+  if (restoredScope !== section.body) section = { ...section, body: restoredScope };
+  // A final formatting pass can add a source's literal examples to a claim.
+  // Rebind that exact sentence if every identifier is present in its original evidence.
+  const missingClaim = /^claim "(.+)…" (?:not in the paragraph|has no supported source after final formatting)$/u;
+  if (chapter.problems.some(problem => missingClaim.test(problem))) {
+    const claims = [...section.claims ?? []];
+    for (const paragraph of chapter.paragraphs) for (const claim of paragraph.claims ?? []) {
+      const problem = chapter.problems.find(item => {
+        const prefix = missingClaim.exec(item)?.[1]?.trimEnd();
+        return prefix && claim.text.startsWith(prefix);
+      });
+      if (!problem) continue;
+      const units = claim.unitIds.flatMap(id => storedById.get(id) ?? []);
+      const text = expandedWikiIdentifierClaim(claim.text, section.body, units);
+      if (!text || units.length !== claim.unitIds.length || !units.every(unit => scopeSource(unit) && !droppedWikiConditions(unit, text).length)) continue;
+      const replacement: WikiClaim = { text, unitIds: claim.unitIds, evidenceIds: [...new Set(units.map(unit => scopeSource(unit)!.id))],
+        quote: units[0].evidence.quote, holder: "ai", holderMark: true, workStatus: "proposed", verification: "supported" };
+      const existing = claims.findIndex(item => item.text === claim.text || item.text === text);
+      if (existing < 0) claims.push(replacement); else claims[existing] = replacement;
+      resolvedProblems?.add(problem);
+    }
+    section = { ...section, claims };
+  }
+  const reviewedDraftClaims = chapter.paragraphs.flatMap(paragraph => paragraph.claims ?? []);
+  const resolveClaimProblem = (text: string) => {
+    for (const problem of chapter.problems) {
+      const prefix = (problem.match(UNSUPPORTED_CLAIM) ?? problem.match(/^"(.+)…" tells a change without a resolved replacement/u))?.[1];
+      if (prefix && text.startsWith(prefix)) resolvedProblems?.add(problem);
+    }
+  };
+  if(ledger.documentType!=="learning"&&chapter.problems.some(problem=>UNSUPPORTED_CLAIM.test(problem))){
+    let body=section.body, claims=section.claims??[];
+    const prose=wikiDocumentBlocks(section.body).filter(block=>block.kind==="paragraph");
+    for(const claim of reviewedDraftClaims){
+      if(claim.unitIds.length!==1||!prose.some(block=>block.text.includes(claim.text))||section.body.indexOf(claim.text)!==section.body.lastIndexOf(claim.text)
+        ||!chapter.problems.some(problem=>claim.text.startsWith(problem.match(UNSUPPORTED_CLAIM)?.[1]??"\0")))continue;
+      const reading=context.reading()!;
+      const unit=storedById.get(claim.unitIds[0]),source=unit&&scopeSource(unit);
+      const text=source&&unit&&recoverTestPlanCore(claim.text,unit,reading.statuses.get(unit.id));
+      if(!unit||!source||!text||claims.some(other=>other.checked&&other.text===claim.text))continue;
+      body=body.replace(claim.text,()=>`\n\n${text}\n\n`).replace(/\n{3,}/gu,"\n\n").trim();
+      claims=[...claims.filter(other=>other.text!==claim.text&&!other.formulations?.includes(claim.text)),
+        {text,unitIds:[unit.id],evidenceIds:[source.id],quote:unit.evidence.quote,holder:"ai",holderMark:true,workStatus:"proposed",verification:"supported"}];
+      resolveClaimProblem(claim.text);
+      const neighbors=chapter.paragraphs.find(paragraph=>paragraph.claims?.includes(claim))?.claims??[];
+      for(const neighbor of neighbors){
+        if(neighbor===claim||neighbor.unitIds.length!==1||!body.includes(neighbor.text)||body.indexOf(neighbor.text)!==body.lastIndexOf(neighbor.text)
+          ||claims.some(point=>point.checked&&point.text===neighbor.text))continue;
+        const other=storedById.get(neighbor.unitIds[0]),ref=other&&scopeSource(other);
+        if(!other||!ref||reading.statuses.get(other.id)!=="proposal"||!claimSupported(neighbor.text,[other])
+          ||missingWikiConditions(other,neighbor.text).length)continue;
+        body=body.replace(neighbor.text,()=>`\n\n${neighbor.text}\n\n`).replace(/\n{3,}/gu,"\n\n").trim();
+        claims=[...claims.filter(point=>point.text!==neighbor.text&&!point.formulations?.includes(neighbor.text)),
+          {text:neighbor.text,unitIds:[other.id],evidenceIds:[ref.id],quote:other.evidence.quote,holder:"ai",holderMark:true,workStatus:"proposed",verification:"supported"}];
+      }
+    }
+    if(body!==section.body)section={...section,body,claims};
+  }
+  if (ledger.documentType !== "learning" && (/替代|取代|未采纳|历史计划|确认.{0,8}(?:集成|接入)|例如[把将]|for example/iu.test(section.body)
+    || chapter.problems.some(problem=>problem.includes("tells a change without a resolved replacement")))) {
+    const reading = context.reading()!;
+    const byId = new Map(reading.units.map(unit => [unit.id, unit]));
+    const integration = new Map((reading.ledger.userAnswers ?? []).flatMap(answer => {
+      if (!wikiScopedIntegration(answer.question, answer.answer)) return [];
+      const choice = byId.get(`answer:${answer.questionId}:${answer.optionId}`);
+      if (!choice || !wikiLocalAnswer(reading.ledger, choice.id) || !scopeSource(choice)) return [];
+      return answer.unitIds.map(id => [id, choice] as const);
+    }));
+    const plans = confirmedRoadmaps(reading.ledger);
+    const currentBlocks = wikiDocumentBlocks(section.body);
+    for (const original of reviewedDraftClaims) {
+      const units = original.unitIds.flatMap(id => byId.get(id) ?? []);
+      if (!units.length || units.length !== original.unitIds.length || units.some(unit => !scopeSource(unit))) continue;
+      const existing = (section.claims ?? []).filter(claim => claim.unitIds?.some(id => original.unitIds.includes(id)) && section.body.includes(claim.text));
+      if (existing.some(claim => claim.checked && (claim.text.includes(original.text) || original.text.includes(claim.text)))) continue;
+      const choice = units.length === 1 && integration.get(units[0].id);
+      const proposal = choice && ["proposal","analysis"].includes(reading.statuses.get(units[0].id) ?? "")
+        ? wikiIntegrationProposal(original.text, units[0], zh) : undefined;
+      const contrast = units.length === 1 && reading.statuses.get(units[0].id) === "proposal" ? wikiDesignContrast(original.text, units[0]) : undefined;
+      const trimmed = original.text.replace(/\*\*|__/gu, "");
+      const candidate = [excerptPending(original.text, zh), original.text, trimmed, proposal, contrast].find((text): text is string =>
+        Boolean(text && section.body.includes(text) && section.body.indexOf(text) === section.body.lastIndexOf(text)
+        && currentBlocks.some(block => ["paragraph","list"].includes(block.kind) && block.text.includes(text))));
+      if (!candidate) continue;
+      const example = wikiWithoutUnsupportedExample(original.text, units);
+      const route = plans.find(({plan}) => section.body.includes(confirmedRoadmapText(plan, zh)) &&
+        (section.claims ?? []).some(claim => claim.unitIds?.includes(plan.unitId) && section.body.includes(claim.text)));
+      const summaryOfAlternatives = route && units.length > 1 && units.every(unit => unit.kind === "plan" && !unit.about && !unit.evidence.pasted && ledger.decisions?.[unit.id]?.verdict === "rejected")
+        && /早先|早期|earlier/iu.test(original.text) && /现行|为准|current/iu.test(original.text);
+      const parts = summaryOfAlternatives ? units.map(unit => ({ text: withStop((zh ? "此前讨论的备选方案：" : "Earlier alternative: ") + wikiStatementWithConditions(unit, zh)), units: [unit], earlier: true }))
+        : proposal || example || contrast ? [{ text: (proposal ?? example ?? contrast)!, units, earlier: false }] : [];
+      const repeatedBridge = units.length > 1 && /^这(?:一|项)(?:决策|决定|安排)取代了早期.{1,80}讨论/u.test(trimmed)
+        && !wikiReplacementSupported(original.text, units, reading.organization?.relations ?? [])
+        && units.every(unit => existing.some(claim => claim.text !== original.text && claim.unitIds?.includes(unit.id)
+          && !trimmed.includes(claim.text) && claimSupported(claim.text, [unit])));
+      if (!parts.length && !repeatedBridge) continue;
+      let end = section.body.indexOf(candidate) + candidate.length;
+      if (choice && proposal && section.body.includes(choice.statement)) {
+        const tail = choice.statement.split(/(?<=[。.!?])\s*/u).filter(Boolean).at(-1)?.replace(/[。.!?]$/u, "");
+        const extra = tail && section.body.slice(end).match(/^\s*([^。\n]+)[。]/u)?.[0];
+        if (extra && extra.includes(tail!) && /但.{0,16}(?:已获批准|已确认|已决定)/u.test(extra)) end += extra.length;
+      }
+      const at = section.body.indexOf(candidate);
+      const inList = summaryOfAlternatives && /^[-*+]\s+$/u.test(section.body.slice(section.body.lastIndexOf("\n", at - 1) + 1, at));
+      const body = section.body.slice(0, at) + parts.map(part => part.text).join(inList ? "\n- " : " ") + section.body.slice(end);
+      const claims = (section.claims ?? []).filter(claim => !claim.text.includes(original.text) && claim.text !== trimmed && claim.text !== proposal && claim.text !== contrast &&
+        !(proposal && claim.unitIds?.includes(choice ? choice.id : "") && !body.includes(claim.text)));
+      for (const part of parts) claims.push({text:part.text,quote:part.units[0].evidence.quote,
+        evidenceIds:[...new Set(part.units.map(unit=>scopeSource(unit)!.id))],unitIds:part.units.map(unit=>unit.id),
+        holder:part.earlier?"earlier":"ai",holderMark:true,verification:"supported",workStatus:part.earlier?undefined:"proposed"});
+      section = {...section,body,claims};
+      resolveClaimProblem(original.text);
+    }
+  }
+  if (ledger.documentType !== "learning") for (const claim of reviewedDraftClaims) {
+    if (claim.unitIds.length !== 1 || section.claims?.some(point => point.checked && point.text === claim.text)) continue;
+    const id = claim.unitIds[0];
+    const coveredList = claim.text.match(/[，,。]\s*((?:该|此)(?:套件|清单|列表|目录)(?:仅限|只限)[^\n]+)$/u)?.[1];
+    const overstatedChoice = /^(?:这些|上述|前述)[^。]{0,38}(?:已被拒绝|已被否决|已被否定)[，,]/u.test(claim.text);
+    if (!coveredList && !overstatedChoice) continue;
+    const reading = context.reading()!;
+    const unit = reading.units.find(item => item.id === id), source = unit && scopeSource(unit);
+    const answer = unit && wikiLocalAnswer(reading.ledger, id);
+    if (!unit || !source || !answer || unit.about || unit.evidence.pasted) continue;
+    const choice = coveredList && answer.unitIds.length === 1 && wikiClosedListChoice(answer);
+    const verifiedList = choice && wikiRestatesClosedList(coveredList!, choice);
+    const clean = (value: string) => normalizeDetail(value).replace(/[()（）]/gu, "");
+    const verifiedChoice = overstatedChoice && id.startsWith("answer:") && clean(unit.statement).includes(clean(answer.answer))
+      && clean(claim.text.slice(claim.text.search(/[，,]/u) + 1)).includes(clean(answer.answer));
+    if (!verifiedList && !verifiedChoice) continue;
+    const replacement = verifiedList ? wikiClosedListStatement(choice) : unit.statement;
+    const target = [excerptPending(coveredList ?? claim.text, zh), claim.text, coveredList].find(value =>
+      value && section.body.includes(value) && section.body.indexOf(value) === section.body.lastIndexOf(value));
+    const isVisible = section.body.includes(replacement);
+    if (!target && !isVisible) continue;
+    const lead = verifiedList && target === claim.text ? withStop(claim.text.slice(0, claim.text.lastIndexOf(coveredList!) - 1)) + " " : "";
+    const body = target ? section.body.replace(target, () => lead + (isVisible ? "" : replacement)).replace(/\n{3,}/gu, "\n\n") : section.body;
+    const claims = (section.claims ?? []).filter(point => point.text !== claim.text && point.text !== coveredList && point.text !== replacement);
+    claims.push({ text: replacement, quote: unit.evidence.quote, unitIds: [id], evidenceIds: [source.id], holder: "decided", holderMark: true, userDecided: true, verification: "supported" });
+    section = { ...section, body, claims };
+    resolveClaimProblem(claim.text);
+  }
+  for (const claim of reviewedDraftClaims) {
+    const prior = wikiWithoutRejectionTail(claim.text);
+    if (!prior || claim.unitIds.length !== 1 || !section.body.includes(prior) || section.body.indexOf(prior) !== section.body.lastIndexOf(prior)) continue;
+    const unit = storedById.get(claim.unitIds[0]), source = unit && scopeSource(unit);
+    if (!unit || !source || ledger.decisions?.[unit.id]?.verdict === "rejected"
+      || section.claims?.some(point => point.checked && point.text === prior)
+      || context.reading()?.statuses.get(unit.id) !== "proposal") continue;
+    const relations = context.reading()?.organization?.relations ?? [];
+    if (!wikiUnsupportedRejection(claim.text, [unit], relations)) continue;
+    const statement = wikiStatementWithConditions(unit, zh);
+    if (!claimSupported(statement, [unit])) continue;
+    const text = withStop((zh ? (statement.includes("建议") ? "" : "讨论中的建议：") : "Proposal from the discussion: ") + statement);
+    section = {...section, body: section.body.replace(prior, () => text),
+      claims: [...(section.claims ?? []).filter(point => point.text !== prior), {text, quote: unit.evidence.quote, evidenceIds: [source.id],
+        unitIds: [unit.id], holder: "ai", holderMark: true, workStatus: "proposed", verification: "supported"}]};
+    resolveClaimProblem(claim.text);
+  }
   const finish=(reviewed:FocusSection)=>{
     if(ledger.documentType==="learning")return restoreWikiSourceNegation(reviewed,session);
     const reading=context.reading()!;
-    const current=reviewSavedWikiEditorial(reviewed,reading.ledger,scopeSource);
-    return restoreWikiSourceNegation(reviewWikiHistory(current,chapter,reading.units,reading.statuses,unit=>Boolean(scopeSource(unit)),zh),session);
+    let current=reviewSavedWikiEditorial(reviewed,reading.ledger,scopeSource);
+    if (zh && current.body.includes("需逐步检查") && current.body.includes("计划先补充")) {
+      for (const points of wikiDocumentBlocks(current.body).filter(block => block.kind === "paragraph")) {
+        const claims = current.claims?.filter(claim => !claim.checked && !claim.userDecided && claim.unitIds?.length && points.text.includes(claim.text)) ?? [];
+        const broad = claims.find(claim => /^在后续规划中[，,]\s*需逐步检查[^。]+。$/u.test(claim.text));
+        const priority = claims.find(claim => /^(?:同时[，,]\s*)?计划先补充[^。]+等规则/u.test(claim.text));
+        if (!broad || !priority) continue;
+        const eligible = [...broad.unitIds!,...priority.unitIds!].every(id => {
+          const unit = reading.units.find(item => item.id === id);
+          return unit && !unit.about && scopeSource(unit) && reading.statuses.get(id) === "proposal";
+        });
+        if (!eligible) continue;
+        const left = broad.text.match(/^在后续规划中[，,]\s*需逐步检查([^。]+)。(?:$)/u)![1].split(/、/u);
+        const first = new Set(priority.text.match(/计划先补充([^。]+?)等规则/u)![1].split(/、/u).map(normalizeDetail));
+        const remaining = left.filter(item => !first.has(normalizeDetail(item)));
+        if (!remaining.length || remaining.length === left.length || current.body.indexOf(broad.text) !== current.body.lastIndexOf(broad.text)) continue;
+        const text = "后续检查还包括" + remaining.join("、") + "。";
+        current = {...current,body:current.body.replace(broad.text,()=>text),
+          claims:current.claims?.map(claim=>claim===broad?{...claim,text,formulations:undefined,sourceReading:undefined}:claim)};
+      }
+    }
+    if (current.body.includes("；此前另有建议：")) for (const {plan, answer} of confirmedRoadmaps(reading.ledger)) {
+      if (!current.body.includes(confirmedRoadmapText(plan, zh))) continue;
+      const choice = reading.units.find(unit => unit.id === plan.unitId);
+      if (!choice || !scopeSource(choice)) continue;
+      const alternatives = new Set(answer.unitIds.filter(id => ledger.decisions?.[id]?.verdict === "rejected" && ledger.decisions[id].at === answer.at));
+      let body = current.body;
+      const claims = current.claims?.map(claim => {
+        if (claim.checked || !claim.unitIds?.includes(plan.unitId) || !claim.unitIds.some(id => alternatives.has(id))) return claim;
+        const [prior, echo, ...rest] = claim.text.split("；此前另有建议：");
+        if (!echo || rest.length || normalizeDetail(echo) !== normalizeDetail(choice.statement)
+          || !body.includes(claim.text) || body.indexOf(claim.text) !== body.lastIndexOf(claim.text)) return claim;
+        const unitIds = claim.unitIds.filter(id => id !== plan.unitId);
+        const evidenceIds = unitIds.flatMap(id => {
+          const unit = reading.units.find(item => item.id === id), ref = unit && scopeSource(unit);
+          return ref ? [ref.id] : [];
+        });
+        if (!evidenceIds.length) return claim;
+        const text = withStop(prior);
+        body = body.replace(claim.text, () => text);
+        return {...claim, text, unitIds, evidenceIds, holder:"earlier" as const, userDecided:undefined, formulations:undefined, sourceReading:undefined};
+      });
+      if (body !== current.body) current = {...current, body, claims};
+    }
+    const owned = new Map(reading.units.filter(unit => unit.about && unit.about.role !== "other_project").map(unit => [unit.id, unit]));
+    if (owned.size) {
+      let body = current.body;
+      const rawClaims = chapter.paragraphs.flatMap(paragraph => paragraph.claims ?? []).filter(claim =>
+        claim.unitIds.some(id => owned.has(id)) && !current.claims?.some(saved => saved.text === claim.text) && body.includes(claim.text));
+      const addedRefs = new Set<string>();
+      const candidates: WikiClaim[] = [...current.claims ?? [], ...rawClaims.map(claim => ({...claim, quote: "", evidenceIds: []}))];
+      const paragraphs = candidates.some(claim => claim.unitIds?.some(id => owned.has(id)))
+        ? wikiDocumentBlocks(body).filter(block => block.kind === "paragraph") : [];
+      const claims = candidates.flatMap(claim => {
+        const ids = claim.unitIds ?? [];
+        const unit = owned.get(ids[0]);
+        const keep = () => claim.evidenceIds.length ? [claim] : [];
+        if (!unit?.about || claim.userDecided || claim.checked || claim.markOnly || claim.text.toLowerCase().includes(unit.about.name.toLowerCase())
+          || !paragraphs.some(block => block.text.includes(claim.text)) || !body.includes(claim.text)
+          || body.indexOf(claim.text) !== body.lastIndexOf(claim.text)) return keep();
+        const refs = ids.flatMap(id => {
+          const other = owned.get(id);
+          return other?.about?.name.toLowerCase() === unit.about!.name.toLowerCase()
+            ? eligibleSource(other, sourceOf(other) ?? context.sources().get(wikiEvidenceKey({...other.evidence, excerpt: other.evidence.quote}))) ?? [] : [];
+        });
+        if (refs.length !== ids.length) return keep();
+        const at = body.indexOf(claim.text), end = at + claim.text.length;
+        const detail = ids.length === 1 ? wikiStatementWithConditions(unit, zh) : claim.text;
+        const statement = /[。.!?！？]/u.test(body[end] ?? "") ? detail.replace(/[。.!?！？]$/u, "") : detail;
+        const text = zh ? `外部参考（${unit.about.name}）：${statement}` : `External reference (${unit.about.name}): ${statement}`;
+        const terminal = body.slice(end).match(/^[。.!?！？]/u)?.[0] ?? "";
+        const left = body.slice(0, at), right = body.slice(end + terminal.length);
+        const prior = /[。.!?！？][ \t]*$/u.test(left) ? "\n\n" : "";
+        const next = /[。.!?！？]$/u.test(text + terminal) && /^[ \t]*[^\s\n]/u.test(right) ? "\n\n" : "";
+        body = (prior ? left.trimEnd() : left) + prior + text + terminal + next + (next ? right.trimStart() : right);
+        for (const ref of refs) addedRefs.add(ref.id);
+        return [{ ...claim, text, quote: unit.evidence.quote, evidenceIds: [...new Set(refs.map(ref => ref.id))],
+          formulations: undefined, holder: "ai" as const, holderMark: true, workStatus: undefined, sourceReading: undefined,
+          verification: claimSupported(statement, ids.map(id => owned.get(id)!)) ? "supported" as const : claim.verification }];
+      });
+      if (body !== current.body) current = { ...current, body, claims, evidenceIds: [...new Set([...current.evidenceIds, ...addedRefs])] };
+    }
+    if (zh && ledger.userAnswers?.length) {
+      const draft = chapter.paragraphs.flatMap(paragraph => paragraph.claims ?? []);
+      const cited = new Set([...draft, ...current.claims ?? []].flatMap(claim => claim.unitIds ?? []));
+      if ([...cited].some(id => id.startsWith("answer:"))) {
+        const units = new Map(reading.units.map(unit => [unit.id, unit]));
+        for (const scope of wikiConfirmationScopes(reading.ledger, units, reading.statuses)) {
+          if (!scope.question || !cited.has(scope.decision.id) || !scopeSource(scope.proposal)) continue;
+          const statement = wikiReleaseChecklistStatement(scope.question, scope.choice, scope.proposal);
+          const ref = statement && scopeSource(scope.decision);
+          if (statement && ref) current = restoreChecklistConfirmation(current, draft, scope, ref.id, statement, id => {
+            const unit = units.get(id), linked = unit && scopeSource(unit);
+            return unit && linked && reading.statuses.get(id) === "proposal" ? { unit, evidenceId: linked.id } : undefined;
+          });
+        }
+      }
+    }
+    const checked = restoreWikiSourceNegation(reviewWikiHistory(current,chapter,reading.units,reading.statuses,unit=>Boolean(scopeSource(unit)),zh),session);
+    return composeSavedWikiParagraphs(checked,reading.organization,new Map(reading.units.filter(unit=>scopeSource(unit)).map(unit=>[unit.id,unit])),reading.statuses);
   };
   if (ledger.documentType !== "learning" && wikiStandingCandidate(section.body)) {
     const reading = context.reading()!;
@@ -246,7 +659,8 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     const byId = new Map(scoped.map(unit => [unit.id, unit]));
     let body = section.body;
     const opening = body.startsWith("### ") ? "" : body.split(/\n### /u)[0];
-    const lead = wikiOpeningStanding(opening, scoped, reading.statuses, zh);
+    const openingUnits = (chapter.openingUnitIds ?? []).flatMap(id => byId.get(id) ?? []);
+    const lead = wikiOpeningStanding(opening, scoped, reading.statuses, zh, openingUnits);
     if (lead !== opening) body = lead + body.slice(opening.length);
     const prose = wikiDocumentBlocks(body).filter(block => block.kind === "paragraph" || block.kind === "list");
     const claims = section.claims?.flatMap(claim => {
@@ -292,26 +706,61 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
       if (restored || recheckWikiTableNegation(problem, section.body, bound, available)) resolvedProblems?.add(problem);
     }
   }
-  if (wikiTemporalCandidate.test(section.body) || /^### 早先版本$/mu.test(section.body)) {
+  if (wikiTemporalCandidate(section.body) || /^### 早先版本$/mu.test(section.body)) {
     let body = section.body;
     const prose = wikiDocumentBlocks(body).filter(block => block.kind === "paragraph" || block.kind === "list");
-    const claims = section.claims?.map(claim => {
+    const claims = section.claims?.flatMap(claim => {
       const dualRisk=/低风险.{0,30}直接(?:执行|应用).{0,80}(?:多步|复杂|结构性).{0,80}(?:预览|Preview)/iu.test(claim.text);
-      if (!claim.unitIds?.length || !dualRisk&&!wikiTemporalCandidate.test(claim.text)
-        || !prose.some(block => block.text.includes(claim.text))) return claim;
+      if (!claim.unitIds?.length || claim.checked || !dualRisk&&!wikiTemporalCandidate(claim.text)
+        || !prose.some(block => block.text.includes(claim.text)) || body.indexOf(claim.text) !== body.lastIndexOf(claim.text)) return claim;
       const cited = claim.unitIds.flatMap(id => storedById.get(id) ?? []);
       if (cited.length !== claim.unitIds.length || !cited.every(unit => sourceOf(unit))) return claim;
-      const relations=context.reading()?.organization?.relations ?? [];
+      const reading = context.reading();
+      const relations=reading?.organization?.relations ?? [];
+      const rejected = cited.length === 1 && ledger.decisions?.[cited[0].id]?.verdict === "rejected";
+      if (cited.length > 1 && assertsWikiReplacement(claim.text) && !wikiReplacementSupported(claim.text, cited, relations)
+        && !/是否|尚未确认|待确认|\b(?:whether|not confirmed)\b/iu.test(claim.text) && !cited.some(unit=>unit.about||unit.evidence.pasted)) {
+        const ids = new Set(cited.map(unit=>unit.id));
+        const competing = ledger.organization?.relations.filter(relation => relation.kind === "replaces" && ids.has(relation.older) && ids.has(relation.newer));
+        if (competing?.length === 1 && cited.length === 2 && body.includes(claim.text) && body.indexOf(claim.text) === body.lastIndexOf(claim.text)) {
+          const [edge] = competing;
+          const parts = [edge.older, edge.newer].map(id => {
+            const unit = cited.find(item=>item.id===id)!;
+            const confirmed = reading?.statuses.get(id) === "confirmed";
+            const prefix = confirmed ? "" : zh ? "讨论中的方案：" : "Plan discussed: ";
+            return { ...claim, text: prefix + withStop(wikiStatementWithConditions(unit, zh)), unitIds: [id],
+              quote: unit.evidence.quote, evidenceIds: [sourceOf(unit)!.id], formulations: undefined,
+              holder: confirmed ? "decided" as const : "ai" as const, holderMark: confirmed, userDecided: confirmed || undefined,
+              workStatus: confirmed ? undefined : "proposed" as const };
+          });
+          const end = body.indexOf(claim.text) + claim.text.length;
+          const note = (zh ? " 两份方案是否互相替代，仍待确认。" : " Whether one replaces the other remains open.")
+            .replace(/[。.]$/u, stop => /[。.!?！？]/u.test(body[end] ?? "") ? "" : stop);
+          body = body.replace(claim.text, () => parts.map(part=>part.text).join(" ") + note);
+          return parts;
+        }
+      }
       const unsupportedHistory=dualRisk&&claim.holder==="earlier"&&cited.every(unit=>unit.evidence.role==="assistant"&&!unit.evidence.pasted&&!unit.about)
         &&!relations.some(relation=>relation.status==="resolved"&&["replaces","rejects"].includes(relation.kind)&&cited.some(unit=>unit.id===relation.older)
           &&(relation.evidence||ledger.decisions?.[relation.newer]?.verdict==="confirmed"));
       const rewrite = unsupportedHistory ? {text:claim.text.replace(/^此前(?:曾)?(?:建议)?\s*/u,"讨论中提出，"),restoredProposal:true}
-        : wikiTemporalClaim(claim.text, cited, relations, zh);
+        : rejected && wikiUnsupportedRejection(claim.text, cited, relations) ? undefined : wikiTemporalClaim(claim.text, cited, relations, zh);
       if (!rewrite || rewrite.text === claim.text) return claim;
       const text = /[。.!?]$/u.test(rewrite.text) && !/[。.!?]$/u.test(claim.text) && /[。.!?]/u.test(body[body.indexOf(claim.text) + claim.text.length] ?? "")
         ? rewrite.text.slice(0, -1) : rewrite.text;
       body = body.replace(claim.text, () => text);
-      if (rewrite.restoredProposal && claim.holder === "earlier") return { ...claim, text, formulations: undefined, holder: "ai" as const, holderMark: false, workStatus: "proposed" as const };
+      if (rewrite.restoredProposal) {
+        const source = cited.length === 1 && scopeSource(cited[0]);
+        const supported = source && claimSupported(wikiStatementWithConditions(cited[0], zh), [cited[0]]);
+        if (supported && wikiUnsupportedRejection(claim.text, cited, relations)) {
+          for (const problem of chapter.problems) {
+            const prefix = problem.match(UNSUPPORTED_CLAIM)?.[1];
+            if (prefix && claim.text.startsWith(prefix)) resolvedProblems?.add(problem);
+          }
+        }
+        return { ...claim, text, formulations: undefined, holder: "ai" as const, holderMark: Boolean(supported),
+          verification: supported ? "supported" as const : claim.verification, userDecided: undefined, sourceReading: undefined, workStatus: "proposed" as const };
+      }
       return { ...claim, text, formulations: undefined };
     });
     if (body !== section.body) section = { ...section, body, claims };
@@ -356,7 +805,7 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
       });
       section = { ...section, body: fixed.body, claims: updated };
     }
-    const faults = wikiIncompleteProse(section.body).filter(fault => !evidence.some(ref => ref.excerpt.includes(fault.text.trim())));
+    const faults = wikiIncompleteProse(section.body).filter(fault => !evidence.some(ref => literalWikiProse(fault.text, ref.excerpt)));
     if (faults.length) {
       let body = section.body;
       for (const fault of faults.reverse()) {
@@ -402,13 +851,17 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     .filter(claim => !/[\n|]/u.test(claim.text) && section.body.includes(claim.text)
       && (NAMED_ARCHITECTURE.test(claim.text) || ACTIVITY_RANGE.test(claim.text) || PAYMENT_TRIGGER.test(claim.text) || GROUP_ACTION.test(claim.text) && GROUP_TRIGGER.test(claim.text))) : [];
   const mightExtendConfirmation = (ledger.userAnswers?.length || ledger.organization?.relations.some(relation => relation.status === "resolved" && (relation.kind === "supplements" || relation.kind === "narrows")))
-    && wikiConfirmationDetails(section.body).length;
+    && (wikiConfirmationDetails(section.body).length || zh && /^\|[^\n]+、[^\n]+\|/mu.test(section.body));
+  const mightAddList = (section.claims ?? []).some(claim => claim.unitIds?.some(id => {
+    const unit = ledger.decisions?.[id]?.verdict === "confirmed" && storedById.get(id);
+    return unit && wikiAddedDecisionList(claim.text, unit.statement);
+  }));
   const reviewable = chapter.paragraphs.flatMap(paragraph => {
     if (/^\s*(?:```|~~~|>)/u.test(paragraph.text)) return [];
     return (paragraph.claims ?? []).filter(claim => !/[\n|]/u.test(claim.text) && section.body.includes(claim.text));
   });
   const scopeChanges = new Set(reviewable.filter(claim => sourceScopeConflict(claim.text, claim.unitIds.flatMap(id => storedById.get(id) ?? []))).map(claim => claim.text));
-  if (!checks.length && !scopeChanges.size && !saved.length && !priced.length && !time && !offer && !ideaTopics.size && !recordedDecisions && !architecture && !workflow.length && !mightExtendConfirmation) return finish(section);
+  if (!checks.length && !scopeChanges.size && !saved.length && !priced.length && !time && !offer && !ideaTopics.size && !recordedDecisions && !architecture && !workflow.length && !mightExtendConfirmation && !mightAddList) return finish(section);
   const failed = reviewable.filter(claim => scopeChanges.has(claim.text) || checks.some(({ prefix }) => claim.text.startsWith(prefix)));
   const reading = context.reading()!;
   const units = new Map(reading?.units.map(unit => [unit.id, unit]));
@@ -574,7 +1027,10 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
   const scopes = wikiConfirmationScopes(reading.ledger, units, reading.statuses).filter(scope => sourceOf(scope.proposal));
   const confirmed = reading.units.filter(unit => reading.statuses.get(unit.id) === "confirmed" && sourceOf(unit));
   const originals = new Set(storedUnits.flatMap(unit => unit.evidence.code?.language === "table" ? [unit.evidence.code.text.trim()] : []));
-  const scoped = applyWikiConfirmationScope(body, scopes, confirmed, zh, originals);
+  const scoped = applyWikiConfirmationScope(body, scopes, confirmed, zh, originals, (value, scope) =>
+    Boolean(scopeSource(scope.proposal) && scopeSource(scope.decision)
+      && reviewable.some(claim => claim.text === value && claim.unitIds.length === 1 && claim.unitIds[0] === scope.proposal.id)
+      && !claims?.some(claim => claim.text === value && claim.checked)));
   if (scoped.edits.length) {
     body = scoped.text;
     for (const edit of scoped.edits) {
@@ -585,11 +1041,39 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
         if (!unit || !source) continue;
         const decided = reading.statuses.get(unit.id) === "confirmed";
         claims = [...claims ?? [], { text, quote: unit.evidence.quote, evidenceIds: [source.id], unitIds: [unit.id], holder: decided ? "decided" : "ai",
-          ...(decided ? { holderMark: true, userDecided: true } : { workStatus: "proposed" }) }];
+          ...(decided ? { holderMark: true, userDecided: true } : { workStatus: "proposed" }),
+          ...(edit.replacement ? { holderMark: true, verification: "supported", workStatus: decided ? "planned" : "proposed" } : {}) }];
       }
     }
   }
-  if (claims && claims !== section.claims && (scopeChanges.size || scoped.edits.length)) {
+  for (const claim of [...claims ?? []]) {
+    if (!claim.unitIds?.length || claim.markOnly || /[\n|]/u.test(claim.text)) continue;
+    const choices = confirmed.filter(unit => claim.unitIds?.includes(unit.id));
+    const added = choices.flatMap(decision => {
+      const extra = wikiAddedDecisionList(claim.text, decision.statement);
+      return extra ? [{ decision, extra }] : [];
+    })[0];
+    if (!added) continue;
+    const block = wikiDocumentBlocks(body).find(block => block.kind === "paragraph" && block.text.includes(claim.text));
+    if (!block) continue;
+    const at = body.indexOf(claim.text, block.start), end = at + claim.text.length;
+    if (at < 0 || end > block.end) continue;
+    const { decision, extra } = added;
+    const source = sourceOf(decision)!;
+    const proposal = claim.unitIds.flatMap(id => units.get(id) ?? []).find(unit => reading.statuses.get(unit.id) === "proposal"
+      && sourceOf(unit) && wikiConfirmationDetails(extra).every(detail => wikiConfirmationDetails(unit.statement).includes(detail))
+      && claimSupported(extra, [unit]) && knowledgeTerms(extra).size > 0
+      && [...knowledgeTerms(extra)].every(term => knowledgeTerms(unit.statement).has(term)));
+    const proposed = proposal && (zh ? `AI 建议：${extra}` : `AI proposal: ${extra}`);
+    const revised = proposed || excerptPending(extra, zh);
+    const parts = [body.slice(block.start, at).trim(), decision.statement, revised, body.slice(end, block.end).trim()];
+    body = body.slice(0, block.start) + parts.filter(Boolean).join("\n\n") + body.slice(block.end);
+    claims = [...claims?.filter(point => point !== claim && point.text !== claim.text) ?? [],
+      { text: decision.statement, quote: decision.evidence.quote, evidenceIds: [source.id], unitIds: [decision.id], holder: "decided", holderMark: true, userDecided: true },
+      ...proposal && proposed ? [{ text: proposed, quote: proposal.evidence.quote, evidenceIds: [sourceOf(proposal)!.id], unitIds: [proposal.id], holder: "ai" as const, workStatus: "proposed" as const }] : []];
+    if (!proposal) diagnostics?.scopeProblems.add(`claim "${extra.slice(0, 36)}…" has no supported source after final formatting`);
+  }
+  if (claims && claims !== section.claims && (scopeChanges.size || scoped.edits.length || mightAddList)) {
     claims.sort((first, second) => {
       const at = (claim: WikiClaim) => {
         const position = body.indexOf(claim.text);
@@ -598,6 +1082,6 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
       return at(first) - at(second);
     });
   }
-  const reviewed=body === section.body && (!claims || claims.every((claim, index) => claim === section.claims?.[index])) ? section : { ...section, body, claims };
+  const reviewed=body === section.body && (!claims || claims.length === section.claims?.length && claims.every((claim, index) => claim === section.claims?.[index])) ? section : { ...section, body, claims };
   return finish(reviewed);
 }

@@ -43,6 +43,12 @@ it("finds the sentences closest in wording to an original, and none for unrelate
   root.remove();
 });
 
+it("does not use a sentence with the opposite scope as an approximate match", () => {
+  const root = document.createElement("div");
+  root.innerHTML = "<p>第一版不支持云端同步。</p>";
+  expect(derivedSentenceRanges(root, ["第一版支持云端同步。"])).toEqual([]);
+});
+
 const numericBranches='<p>如果：</p><p><strong>5～8个人</strong></p><p>主动继续玩，我认为值得继续开发。</p><p>如果：</p><p><strong>10个人以上</strong></p><p>明显愿意做自己的硬件项目：</p><p>那你就应该非常认真地做下去。</p>';
 it("joins a short numeric condition and its predicate, without borrowing the previous branch",()=>{
  const root=document.createElement('div');root.innerHTML=numericBranches;

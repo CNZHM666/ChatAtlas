@@ -1,23 +1,37 @@
-import { flushSync } from "react-dom";
+import { startTransition } from "react";
 
 const pending = new Set<() => void>();
-let timer: ReturnType<typeof setTimeout> | undefined;
+let cancelScheduled: (() => void) | undefined;
 
-/** One Markdown commit per browser task, with a paint/input opportunity between turns. */
+function schedule() {
+  if (cancelScheduled || !pending.size) return;
+  const run = () => {
+    cancelScheduled = undefined;
+    const next = pending.values().next().value;
+    if (next) {
+      pending.delete(next);
+      startTransition(next);
+    }
+    schedule();
+  };
+  if (typeof requestIdleCallback === "function") {
+    const id = requestIdleCallback(run, { timeout: 250 });
+    cancelScheduled = () => cancelIdleCallback(id);
+  } else {
+    const timer = setTimeout(run, 16);
+    cancelScheduled = () => clearTimeout(timer);
+  }
+}
+
+/** Prepare nearby Markdown without forcing a synchronous React commit while scrolling. */
 export function queueReaderRender(render: () => void): () => void {
   pending.add(render);
-  const schedule = () => {
-    if (timer !== undefined || !pending.size) return;
-    timer = setTimeout(() => {
-      timer = undefined;
-      const next = pending.values().next().value;
-      if (next) { pending.delete(next); flushSync(next); }
-      schedule();
-    }, 16);
-  };
   schedule();
   return () => {
     pending.delete(render);
-    if (!pending.size && timer !== undefined) { clearTimeout(timer); timer = undefined; }
+    if (!pending.size) {
+      cancelScheduled?.();
+      cancelScheduled = undefined;
+    }
   };
 }

@@ -29,6 +29,7 @@ import { getMessagesForConversation } from "../../storage/messages";
 import { OriginalReader } from "./OriginalReader";
 import { historyFragments, historyPlatformMatches, mergeHistoryFilters, parseHistoryFilters, type HistoryFilters, type HistoryFragment } from "../../search/history-fragments";
 import { platformName } from "../../shared/platforms";
+import { HistorySearchText } from "./HistorySearchText";
 
 export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, projectsReady = true, zh, onStart, onContinue, onBack, onHydrate, onConfigureAI, requestedAction, onRead, initialRecord, initialActivity, onHistory, initialDraft, initialPaused, localSearch = false, readOnly = false, onOpenChapter }: {
   localSearch?: boolean; readOnly?:boolean;
@@ -70,10 +71,6 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
   const lastRecord = useRef(initialRecord);
   const parsedSearch = useMemo(() => parseHistoryFilters(historyRequest(taskGoal).query, zh), [taskGoal, zh]);
   // Already organized knowledge comes first, as in the sidebar: the saved Wiki chapters that match, at most three.
-  // Conversations the reader picked from the results to organize; a new search starts with none.
-  const [picked, setPicked] = useState<{ goal: string; ids: string[] }>({ goal: "", ids: [] });
-  const pickedIds = picked.goal === taskGoal ? picked.ids : [];
-  const togglePick = (id: string) => setPicked({ goal: taskGoal, ids: pickedIds.includes(id) ? pickedIds.filter(item => item !== id) : [...pickedIds, id] });
   const savedProjects = useMemo(() => savedSidecarProjects(sessions), [sessions]);
   const knowledgeHits = useMemo(() => localOnly && parsedSearch.query ? searchKnowledge(parsedSearch.query, savedProjects, zh) : [], [localOnly, parsedSearch.query, savedProjects, zh]);
   const activeChips = parsedSearch.chips.filter(chip => !(removed?.goal === taskGoal && removed.keys.includes(chip.key)));
@@ -185,7 +182,7 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
     const request=++sourceRequest.current;
     returnPosition.current = { conversationId: match.conversation.id, top: searchBody.current?.scrollTop ?? 0 };
     setOpening(match.conversation.id); setError(undefined);
-    const first = match.messages[0];
+    const first = match.messages.find(message => message.id === target) ?? match.messages[0];
     try {
       const db = await getDatabase();
       const [current, conversation] = await Promise.all([db.get("messages", first.id), db.get("conversations", match.conversation.id)]);
@@ -193,9 +190,8 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
       invalidateReaderMessages(match.conversation.id);
       const originals=await getMessagesForConversation(match.conversation.id);
       if(request!==sourceRequest.current)return;
-      const query = parseHistoryFilters(historyRequest(clarifiedGoal).query, zh).query;
-      const search = historyReaderContext(match,query,originals);
-      if(!search.hits.length)throw new Error(zh?"匹配消息已变化，请重新搜索。":"Matching messages changed. Search again.");
+      const search = historyReaderContext(match, parsedSearch.query, originals);
+      if (!search.hits.length || target && !search.hits.some(hit => hit.messageId === target)) throw new Error(zh ? "匹配消息已变化，请重新搜索。" : "Matching messages changed. Search again.");
       setSource(undefined);
       setReading({ conversation: conversation ?? { ...match.conversation, url: "" }, messages: originals, search, metadataMissing: !conversation, ...(target && search.hits.some(hit => hit.messageId === target) ? { target } : {}) });
     } catch (failure) { if(request===sourceRequest.current)setError({ message: failure instanceof Error ? failure.message : zh ? "暂时无法读取原文。" : "Could not read the source." }); }
@@ -204,6 +200,7 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
   const searchLocal = () => {
     if (!searchDraft.trim()) return;
     controller.current?.abort(); plan.current = undefined;
+    setExpanded([]);
     setTopicGoal(searchDraft.trim()); setClarifiedGoal(searchDraft.trim()); setRun(true); setRetry(value => value + 1);
   };
   const unsynced = conversations.filter(conversation => poolIds.includes(conversation.id) && !isCurrentHydrationComplete(conversation)).map(conversation => conversation.id);
@@ -226,7 +223,7 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
         {initialActivity ? <p className="home-recall-limit">{zh?"历史搜索 · 匹配当前可用正文":"Past search · matched against current messages"}</p>:null}
         <form role="search" onSubmit={event => { event.preventDefault(); searchLocal(); }}><Search size={19} aria-hidden="true"/><label><span className="sr-only">{zh ? "搜索历史对话" : "Search past conversations"}</span><input value={searchDraft} maxLength={500} onChange={event => setSearchDraft(event.target.value)} placeholder={zh ? "输入主题、项目名或关键词" : "Enter a topic, project or keyword"}/></label><button className="primary" disabled={!searchDraft.trim()}>{zh ? "搜索" : "Search"}</button></form>
         <div className="home-recall-result-tools"><p role="status">{localLoading ? zh ? "搜索中…" : "Searching…" : zh ? `${shownMatches.length} 个对话 · ${fragmentTotal} 处讨论 · 本地搜索` : `${shownMatches.length} conversations · ${fragmentTotal} discussions · Local search`}</p><button type="button" className="home-recall-secondary" onClick={() => onBack(taskGoal)}>{zh ? "调整材料" : "Adjust sources"}</button><button type="button" className="home-recall-secondary" disabled={localLoading} onClick={() => { setLocalOnly(false); setRun(true); }}><Sparkles size={15} aria-hidden="true"/>{zh ? "使用 AI 分析" : "Analyze with AI"}</button></div>
-        {knowledgeHits.length ? <section className="home-recall-knowledge" aria-label={zh ? "已整理的知识" : "Organized knowledge"}><h3>{zh ? "已整理的知识" : "Organized knowledge"}</h3><ul>{knowledgeHits.map(hit => <li key={`${hit.sessionId}:${hit.sectionId}`}><button type="button" disabled={!onOpenChapter} onClick={() => onOpenChapter?.(hit.sessionId, hit.sectionId)}><span><strong>{hit.chapter}</strong><small>{hit.project}</small></span><span>{hit.excerpt}</span></button></li>)}</ul></section> : null}
+        {knowledgeHits.length ? <section className="home-recall-knowledge" aria-label={zh ? "已整理的知识" : "Organized knowledge"}><h3 className="home-search-results-heading">{zh ? "已整理的知识" : "Organized knowledge"}</h3><ul>{knowledgeHits.map(hit => <li key={`${hit.sessionId}:${hit.sectionId}`}><button type="button" disabled={!onOpenChapter} onClick={() => onOpenChapter?.(hit.sessionId, hit.sectionId)}><span><strong><HistorySearchText text={hit.chapter} query={parsedSearch.query}/></strong><small>{hit.project}</small></span><span><HistorySearchText text={hit.excerpt} query={parsedSearch.query} limit={190}/></span></button></li>)}</ul></section> : null}
         {parsedSearch.chips.length ? <div className="home-recall-filters" aria-label={zh ? "筛选条件" : "Filters"}>{activeChips.map(chip => <button type="button" key={chip.key} aria-label={zh ? `移除条件：${chip.label}` : `Remove filter: ${chip.label}`} onClick={() => setRemoved({ goal: taskGoal, keys: [...(removed?.goal === taskGoal ? removed.keys : []), chip.key] })}><span>{chip.label}</span><X size={13} aria-hidden="true"/></button>)}{!includeUndated && undated && activeChips.some(chip => chip.kind === "time") ? <p>{zh ? `另有 ${undated} 处讨论没有原始日期，未按时间筛选。` : `${undated} discussions have no original date and were left out of the time filter.`}<button type="button" onClick={() => setUndatedFor(taskGoal)}>{zh ? "一并显示" : "Show them too"}</button></p> : null}</div> : null}
         {localError || error && !source ? <div className="home-recall-search-error"><p role="alert">{localError || error?.message}</p><button type="button" onClick={() => setRetry(value => value + 1)}>{zh ? "重试搜索" : "Retry search"}</button></div> : null}
         {saveError && localActivity.current ? <p className="home-recall-limit" role="alert">{zh?"历史记录保存失败。":"Could not save history."}<button onClick={()=>void saveHomeResult(localActivity.current!).then(()=>setSaveError(false)).catch(()=>setSaveError(true))}>{zh?"重新保存":"Save again"}</button></p>:null}
@@ -240,26 +237,47 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
         : stage === "sync" ? <><h3>{zh ? "相关讨论需要同步正文" : "Sync related discussions"}</h3><button className="primary" onClick={() => onHydrate(pending)}>{zh ? `同步相关 ${pending.length} 条对话` : `Sync ${pending.length} conversations`}</button></>
         : <div className="home-task-message is-loading" role="status"><LoaderCircle size={18} /><span>{zh ? !projectsReady ? "读取项目记录…" : aiBusy ? "切换 AI…" : stage === "verifying" ? "核对主题与回答…" : stage === "answering" ? "结合原始讨论回答…" : stage === "planning" ? "理解你的目标…" : stage === "assessing" ? "定位相关材料…" : stage === "refining" ? "补查相关讨论…" : "检索相关讨论与上下文…" : "Finding and checking related discussions…"}</span></div>}
       </section> : null}
-      {!answer && shownMatches.length ? <section className="home-recall-results" aria-label={zh ? "搜索结果" : "Search results"}>{shownMatches.slice(0, visibleMatches).map(match => {
-        const {fragments} = fragmentsById.get(match.conversation.id)!, [top, ...rest] = fragments, open = expanded.includes(match.conversation.id);
-        const busy = opening === match.conversation.id;
-        const meta = (fragment: HistoryFragment) => fragment.date ? <time dateTime={new Date(fragment.date).toISOString()}>{new Date(fragment.date).toLocaleDateString(zh ? "zh-CN" : "en")}</time> : null;
-        // One card per conversation: its strongest discussion first, the others as rows that open at their own place.
-        const chosen = pickedIds.includes(match.conversation.id);
-        return <article key={match.conversation.id} className={`home-history-hit${localOnly ? " is-pickable" : ""}${chosen ? " is-picked" : ""}`}>
-          {localOnly ? <label className="home-history-pick"><input type="checkbox" checked={chosen} onChange={() => togglePick(match.conversation.id)} /><span className="sr-only">{zh ? `选择对话：${match.conversation.title}` : `Choose conversation: ${match.conversation.title}`}</span></label> : null}
-          <button type="button" className="home-history-hit-main" data-history-conversation={match.conversation.id} disabled={busy} aria-busy={busy || undefined} aria-label={zh ? `阅读对话：${match.conversation.title}` : `Read conversation: ${match.conversation.title}`} onClick={() => void openMatch(match, top.targetMessageId)}><div>
-            <span className="home-history-hit-meta"><strong>{match.conversation.title}</strong><span>·</span><span>{platformName(match.conversation.platform, zh ? "zh-CN" : "en")}</span>{top.date ? <><span>·</span>{meta(top)}</> : null}<span>·</span><span>{zh ? `${new Set(match.messages.map(message => message.id)).size} 条匹配消息` : `${new Set(match.messages.map(message => message.id)).size} matching messages`}</span></span>
-            {top.question ? <p className="home-history-question">{top.question}</p> : null}{top.excerpt !== top.question ? <p>{top.excerpt}</p> : null}</div><ChevronRight size={18} aria-hidden="true"/></button>
-          {rest.length ? <div className="home-history-fragments">{(open ? rest : rest.slice(0, 2)).map(fragment => <button type="button" key={fragment.id} disabled={busy} onClick={() => void openMatch(match, fragment.targetMessageId)}><span>{fragment.question ?? fragment.excerpt}</span>{fragment.question ? <small>{fragment.excerpt}</small> : null}{meta(fragment)}</button>)}{rest.length > 2 ? <button type="button" className="home-history-fragments-toggle" aria-expanded={open} onClick={() => setExpanded(open ? expanded.filter(id => id !== match.conversation.id) : [...expanded, match.conversation.id])}>{open ? zh ? "收起" : "Show less" : zh ? `本对话另有 ${rest.length - 2} 处` : `${rest.length - 2} more in this conversation`}</button> : null}</div> : null}
-        </article>;
-      })}{visibleMatches < shownMatches.length ? <button type="button" className="home-recall-secondary" onClick={() => setVisibleMatches(value => value + 10)}>{zh ? "显示更多结果" : "Show more results"}</button> : null}{localCapped ? <p className="home-recall-limit">{zh ? "匹配较多，已显示本次检索范围；可补充关键词缩小范围。" : "Many matches; refine your keywords to narrow the search."}</p> : null}
-        {localOnly && pickedIds.length ? <div className="home-recall-pick-bar" role="region" aria-label={zh ? "已选对话" : "Chosen conversations"}>
-          <span>{zh ? `已选 ${pickedIds.length} 个对话` : `${pickedIds.length} chosen`}</span>
-          <button type="button" className="home-recall-secondary" onClick={() => setPicked({ goal: taskGoal, ids: [] })}>{zh ? "清空" : "Clear"}</button>
-          {onContinue && savedProjects.length ? <select aria-label={zh ? "加入已有项目" : "Add to a project"} value="" onChange={event => { const project = savedProjects.find(item => item.id === event.target.value); if (project) onContinue(project, taskGoal, pickedIds); }}><option value="">{zh ? "加入已有项目…" : "Add to a project…"}</option>{savedProjects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select> : null}
-          <button type="button" className="primary" onClick={() => onStart(zh ? `整理这些讨论：${taskGoal}` : `Organize these discussions: ${taskGoal}`, "work", pickedIds, { kind: "all", sourceConversationIds: pickedIds })}>{zh ? "整理成项目" : "Organize as a project"}</button>
-        </div> : null}</section> : null}
+      {!answer && shownMatches.length ? <section className="home-recall-results" aria-label={zh ? "对话里的讨论" : "Discussions in conversations"}>
+        <h3 className="home-search-results-heading">{zh ? "对话里的讨论" : "Discussions in conversations"}</h3>
+        {shownMatches.slice(0, visibleMatches).map(match => {
+          const { fragments } = fragmentsById.get(match.conversation.id)!;
+          const [top, ...rest] = fragments, id = match.conversation.id, open = expanded.includes(id);
+          const busy = opening === id, query = parsedSearch.query;
+          const date = (fragment: HistoryFragment) => fragment.date
+            ? <time dateTime={new Date(fragment.date).toISOString()}>{new Date(fragment.date).toLocaleDateString(zh ? "zh-CN" : "en")}</time> : null;
+          const row = (fragment: HistoryFragment) => <button type="button" key={fragment.id} disabled={busy} onClick={() => void openMatch(match, fragment.targetMessageId)}>
+            <span><HistorySearchText text={fragment.question ?? fragment.excerpt} query={query} limit={115}/></span>
+            {fragment.question && fragment.excerpt !== fragment.question ? <small><HistorySearchText text={fragment.excerpt} query={query}/></small> : null}
+            {date(fragment)}
+          </button>;
+          return <article key={id} className="home-history-hit">
+            <button type="button" className="home-history-hit-main" data-history-conversation={id} disabled={busy} aria-busy={busy || undefined}
+              aria-label={zh ? "阅读对话：" + match.conversation.title : "Read conversation: " + match.conversation.title}
+              onClick={() => void openMatch(match, top.targetMessageId)}>
+              <div>
+                <span className="home-history-hit-meta">
+                  <strong><HistorySearchText text={match.conversation.title} query={query}/></strong>
+                  <span>{platformName(match.conversation.platform, zh ? "zh-CN" : "en")}</span>
+                  {date(top)}<span>{zh ? new Set(match.messages.map(message => message.id)).size + " 条匹配消息" : new Set(match.messages.map(message => message.id)).size + " matching messages"}</span>
+                </span>
+                {top.question ? <p className="home-history-question"><HistorySearchText text={top.question} query={query}/></p> : null}
+                {top.excerpt !== top.question ? <p><HistorySearchText text={top.excerpt} query={query}/></p> : null}
+              </div>
+              <ChevronRight size={18} aria-hidden="true"/>
+            </button>
+            {rest.length ? <div className="home-history-fragments">
+              {rest.slice(0, 2).map(row)}
+              {rest.length > 2 ? <button type="button" className="home-history-fragments-toggle" aria-expanded={open}
+                onClick={() => setExpanded(previous => previous.includes(id) ? previous.filter(value => value !== id) : [...previous, id])}>
+                {open ? zh ? "收起更多命中" : "Show fewer matches" : zh ? "本对话另有 " + (rest.length - 2) + " 处" : (rest.length - 2) + " more in this conversation"}
+              </button> : null}
+              {open ? rest.slice(2).map(row) : null}
+            </div> : null}
+          </article>;
+        })}
+        {visibleMatches < shownMatches.length ? <button type="button" className="home-recall-secondary" onClick={() => setVisibleMatches(value => value + 10)}>{zh ? "显示更多结果" : "Show more results"}</button> : null}
+        {localCapped ? <p className="home-recall-limit">{zh ? "匹配较多，已显示本次检索范围；可补充关键词缩小范围。" : "Many matches; refine your keywords to narrow the search."}</p> : null}
+      </section> : null}
       {draftAnswer && !answer ? <article className="home-recall-answer"><small>{zh ? "正在生成 · 待核对" : "Generating · awaiting verification"}</small><ReaderGuide content={draftAnswer} zh={zh} complete hideEvidenceMarkers /></article> : null}
       {answer ? <><HomeRecallAnswer answer={answer} zh={zh} onSource={ref => setSource({session: answer, reference: ref, references: answer.evidence})} onLocate={ref => void locate(ref.conversationId, ref.messageId, ref.sourceSignature)} />{error && !source ? <p role="alert">{error.message}</p> : null}{saveError && record ? <p role="alert">{zh ? "记录保存失败。" : "Could not save the result."}<button onClick={() => void saveHomeResult(record).then(() => setSaveError(false)).catch(() => setSaveError(true))}>{zh ? "重新保存" : "Save again"}</button></p> : null}<div className="home-answer-actions">{!readOnly?<button onClick={() => { plan.current = undefined; setStage("planning"); setRun(true); setRetry(value => value + 1); }}>{zh ? "重新查找" : "Search again"}</button>:null}<button onClick={() => inputs.current.onStart(zh ? `整理这些讨论：${taskGoal}` : `Organize these discussions: ${taskGoal}`, "work", answer.sourceConversationIds, { kind: "all", sourceConversationIds: answer.sourceConversationIds })}>{zh ? "整理为项目" : "Organize as a project"}</button></div></> : null}
     </div></div>

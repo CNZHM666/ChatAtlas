@@ -63,6 +63,44 @@ export function statementEvidence(content:string,quote:string){
  };
 }
 
+const optionNumber = (label: string) => "一二三四五六七八九".includes(label) ? "一二三四五六七八九".indexOf(label) + 1
+ : /^[a-z]$/iu.test(label) ? label.toUpperCase().charCodeAt(0) - 64 : Number(label);
+
+function replyOptionNumber(text: string) {
+ const reply = text.normalize("NFKC").trim();
+ const label = reply.match(/^(?:就|可以)?(?:按|用|选|选择|采用)\s*(?:第\s*)?(?:方案\s*)?([一二三四五六七八九1-9A-I])(?:\s*(?:种|个|项|套|方案|来))*[。.!！\s]*$/iu)?.[1]
+  ?? reply.match(/^(?:let(?:'|’)s\s+)?(?:go with|choose|use|pick|select)\s+(?:option|approach)\s+([1-9A-I])[.!\s]*$/iu)?.[1];
+ return label ? optionNumber(label) : undefined;
+}
+
+export const isWikiOptionReply = (text: string) => replyOptionNumber(text) !== undefined;
+export const isWikiDeicticChoice = (text: string) => /^(?:(?:就)?按(?:这个|这一(?:个|套))(?:方案)?(?:来|做|执行)?|(?:就)?用这个方案|go with this (?:option|approach)|use this approach)[。.!！\s]*$/iu.test(text.trim());
+
+const OPTION_HEAD = /^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?(?:\*{1,2})?(?:(方案|选项|Option|Approach)[ \t]*([一二三四五六七八九1-9A-I])(?:\*{1,2})?(?=[ \t：:、.．)）—–-]|$)|([1-9A-I])[.)、][ \t]+)/gimu;
+
+/** Range within the original reply, including only the explicitly selected alternative. */
+export function wikiReplyOption(reply: string, offered: string) {
+ const number = replyOptionNumber(reply);
+ if (number === undefined) return;
+ const headings = [...offered.matchAll(OPTION_HEAD)];
+ const explicit = headings.filter(option => option[1]);
+ const options = explicit.length >= 2 ? explicit : headings;
+ const labels = options.map(option => optionNumber(option[2] ?? option[3]));
+ const named = options.filter(option => option[1]).length;
+ if (labels.length < 2 || new Set(labels).size !== labels.length
+  || named < 2 && !/二选一|备选|(?:以下|这几种).{0,8}(?:方案|选项)|\b(?:alternatives|options|choose one)\b/iu.test(offered)) return;
+ const index = labels.indexOf(number);
+ if (index < 0) return;
+ const match = options[index], start = match.index! + match[0].length;
+ const tail = offered.slice(start, options[index + 1]?.index ?? offered.length);
+ const level = match[0].trimStart().match(/^#+/u)?.[0].length;
+ let end = start + tail.length;
+ for (const boundary of tail.matchAll(/\n[ \t]*(#{1,6})[ \t]+|\n[ \t]*(?:-{3,}|\*{3,})[ \t]*(?=\n|$)/gu)) {
+  if (!boundary[1] || !level || boundary[1].length <= level) { end = start + boundary.index!; break; }
+ }
+ return offered.slice(start, end).trim() ? {start,end} : undefined;
+}
+
 /** Short assent needs one unambiguous adjacent proposal, not merely a later user role. */
 export function confirmsProposal(approval:{content:string;conversationId?:string;messageIndex?:number;replyToMessageId?:string},quote:string,proposal:{content:string;conversationId?:string;messageIndex?:number;id?:string;role?:string;partial?:boolean},proposalQuote=proposal.content){
  const sameConversation=approval.conversationId===proposal.conversationId;
@@ -70,20 +108,15 @@ export function confirmsProposal(approval:{content:string;conversationId?:string
  const intent=statementEvidence(approval.content,quote);
  if(!sameConversation||intent.preference||intent.reference||!wikiQuoteRange(approval.content,quote))return false;
  // Resolve only explicit, bounded enumerations. A clipped proposal quote cannot hide alternatives.
- const explicitOptions=[...proposal.content.matchAll(/(?:^|\n)\s*(?:方案\s*[一二三123ABCabc]|(?:Option|Approach)\s*[123ABCabc])/giu)].length>1;
- const numbered=[...proposal.content.matchAll(/(?:^|\n)\s*[123ABCabc][.)、]/giu)].length>1;
+ const optionHeads=[...proposal.content.matchAll(OPTION_HEAD)];
+ const explicitOptions=optionHeads.filter(option=>option[1]).length>1;
+ const numbered=optionHeads.filter(option=>option[3]).length>1;
  const sequence=/分步|步骤|实施|执行计划|优化方案|优化计划|修复计划|\b(?:implementation plan|steps)\b/iu.test(proposal.content);
  const enumerated=explicitOptions||numbered&&(!sequence||/二选一|备选|可选方案|以下.{0,8}(?:方案|选项)|(?:选择|选一个|choose|alternatives|options)\s*[:：]/iu.test(proposal.content));
- const ordinal=approval.content.trim().match(/^(?:就|可以)?(?:按|用|选|选择|采用)(?:第)?([一二三123ABCabc])(?:种|个|项|套|方案)?[。.!！\s]*$/u);
- if(ordinal){
-  if(!adjacent)return false;
-  const numbers:Record<string,number>={一:1,二:2,三:3,A:1,B:2,C:3,a:1,b:2,c:3};
-  const index=numbers[ordinal[1]]??Number(ordinal[1]);
-  const options=[...proposal.content.matchAll(/(?:^|\n)\s*(?:方案\s*([一二三123ABCabc])|(?:Option|Approach)\s*([123ABCabc])|([123ABCabc])[.)、])\s*[：:]?\s*/giu)];
-  if(options.length<2||new Set(options.map(item=>(item[1]??item[2]??item[3]).toUpperCase())).size!==options.length)return false;
-  const at=options.findIndex(item=>(numbers[item[1]??item[2]??item[3]]??Number(item[1]??item[2]??item[3]))===index);
-  if(at<0)return false;
-  const selected=proposal.content.slice(options[at].index!+options[at][0].length,options[at+1]?.index??proposal.content.length).trim();
+ if(isWikiOptionReply(approval.content)){
+  const option=adjacent&&wikiReplyOption(approval.content,proposal.content);
+  if(!option)return false;
+  const selected=proposal.content.slice(option.start,option.end).trim();
   const range=wikiQuoteRange(selected,proposalQuote);
   return Boolean(range)&&!statementEvidence(selected,proposalQuote).preference;
  }
@@ -104,7 +137,7 @@ export function confirmsProposal(approval:{content:string;conversationId?:string
   return adjacent&&!enumerated&&!/(?:还是|或者|\bor\b|option\s*[AB12])/iu.test(proposal.content);
  }
  const assent=approval.content.trim();
- return /^(?:可以|好(?:的)?|同意|就这样|按这个来|yes|ok(?:ay)?|agreed)[，,。.!！\s]*(?:(?:帮我|请)?(?:实现|执行|继续)(?:吧|了)?[。.!！]?)?$/iu.test(assent)
+ return (isWikiDeicticChoice(assent) || /^(?:可以|好(?:的)?|同意|就这样|yes|ok(?:ay)?|agreed)[，,。.!！\s]*(?:(?:帮我|请)?(?:实现|执行|继续)(?:吧|了)?[。.!！]?)?$/iu.test(assent))
   && wikiQuoteRange(approval.content,quote)!==undefined && adjacent
   && !enumerated && !/(?:还是|或者|二选一|方案\s*[AB]|\bor\b|option\s*[AB12])/iu.test(proposal.content)
   && statementEvidence(proposal.content,proposal.content).suggestion;

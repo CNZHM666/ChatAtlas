@@ -61,7 +61,7 @@ export function matchesNearbyQuery(query: MessageQuery, fields: string[], distan
 }
 
 /** Exact raw offsets, independent of the length changes caused by NFKC. */
-export function messageQueryRange(query: MessageQuery, raw: string): { start: number; end: number } | undefined {
+function queryRanges(query: MessageQuery, raw: string, all: boolean): Array<{ start: number; end: number }> {
   const needles = [...query.phrases, ...query.terms].sort((a, b) => b.length - a.length);
   const normalized: string[] = [], positions: number[] = [];
   let at = 0;
@@ -71,12 +71,27 @@ export function messageQueryRange(query: MessageQuery, raw: string): { start: nu
     at += char.length;
   }
   const text = normalized.join("");
+  const found: Array<{ start: number; end: number }> = [];
   for (const needle of needles) {
-    const start = text.indexOf(needle);
-    if (start >= 0) {
+    for (let start = text.indexOf(needle); start >= 0 && found.length < 240; start = text.indexOf(needle, start + needle.length)) {
       const last = positions[start + needle.length - 1];
-      return { start: positions[start], end: last + (raw.codePointAt(last)! > 0xffff ? 2 : 1) };
+      found.push({ start: positions[start], end: last + (raw.codePointAt(last)! > 0xffff ? 2 : 1) });
+      if (!all) return found;
     }
   }
-  return undefined;
+  const merged: typeof found = [];
+  for (const item of found.sort((a, b) => a.start - b.start || b.end - a.end)) {
+    const previous = merged.at(-1);
+    if (previous && item.start < previous.end) previous.end = Math.max(previous.end, item.end);
+    else merged.push(item);
+  }
+  return merged;
+}
+
+export function messageQueryRange(query: MessageQuery, raw: string) {
+  return queryRanges(query, raw, false)[0];
+}
+
+export function messageQueryRanges(query: MessageQuery, raw: string) {
+  return queryRanges(query, raw, true);
 }

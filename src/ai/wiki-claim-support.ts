@@ -64,10 +64,29 @@ function lentBy(value: string, ofRange: boolean, text: string, units: WikiKnowle
 }
 /** A day or span a figure is dated by, in brackets: （6月14日—7月7日）, (Jun 14–Jul 7). */
 const SAID_ON = /[（(]\s*\d{1,2}月\d{1,2}日(?:\s*[—–-]\s*\d{1,2}月\d{1,2}日)?\s*[）)]|[（(](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(?:\s*[–-]\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2})?[）)]/gu;
+const IDENTIFIER = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/gu;
+
+/** The prose is unchanged and the expanded examples are literal identifiers
+ * from a single cited excerpt. Every other edit still needs a new binding. */
+export function expandedWikiIdentifierClaim(original: string, body: string, units: WikiKnowledgeUnit[]): string | undefined {
+  if (body.includes(original)) return undefined;
+  const withoutExamples = (text: string) => text.trim().replace(/\s*[（(](?:如|例如|e\.g\.)[^）)\n]*[）)][。.]?$/u, "");
+  const label = withoutExamples(original);
+  if (label === original.trim() || label.length < 12 || !claimSupported(label, units)) return undefined;
+  const matches = body.split(/(?<=[。！？])|\n/u).map(line => line.trim()).filter(line => withoutExamples(line) === label);
+  if (matches.length !== 1) return undefined;
+  const ids = matches[0].match(IDENTIFIER);
+  return ids?.length && units.some(unit => {
+    const quoted = new Set(unit.evidence.quote.match(IDENTIFIER));
+    return ids.every(id => quoted.has(id));
+  }) ? matches[0] : undefined;
+}
+
 export function claimSupported(said: string, units: WikiKnowledgeUnit[]): boolean {
   // The day a figure was said, added after it from its conversation ("每天稳定在22人（6月14日—7月7日）"): no unit states that
   // day in its words, and its numbers read as unsourced. The user's report lost 〔你〕 for it.
-  const text = said.replace(SAID_ON, "");
+  const knownIdentifiers = new Set(units.flatMap(unit => unit.evidence.quote.match(IDENTIFIER) ?? []));
+  const text = said.replace(SAID_ON, "").replace(IDENTIFIER, token => knownIdentifiers.has(token) ? token.replace(/\d+/gu, "") : token);
   if (sourceScopeConflict(text, units)) return false;
   const reading = metricOf(text);
   if (reading) {

@@ -9,6 +9,9 @@ const QUOTED=/“[^”]*”|「[^」]*」|『[^』]*』|"[^"\n]*"/gu;
 // "本批材料未提供……" reports what one writing batch lacked; other paragraphs may supply it.
 const BATCH_NOTE=/(^|[。！？；]\s*)(?:本批|这批|该批|本组|这一批)材料[^。！？]*[。！？]?/gu;
 const RULES:Array<[RegExp,string]>=[
+ [/(?:讨论中的建议|AI\s*建议|AI\s*对具体细节的建议)[：:]\s*(?:AI\s*对具体细节的建议|AI\s*建议|建议)[：:]\s*/gu,"讨论中建议"],
+ [/。(?=并(?:理解|了解|查看|解释|核对|提供|生成)[\p{Script=Han}])/gu,"，"],
+ [/(?<![\\*])\*\*(?!\*)(?=\S)|(?<=\S)(?<![\\*])\*\*(?!\*)/gu,""],
  // "据讨论，…（未核实）" is the completion qualifier and stays; a bare lead-in only names the material.
  [/(^|[。！？；]\s*)据讨论[，,]\s*(?![^。！？]*（未核实）)/gu,"$1"],
  [/(^|[。！？；]\s*)(?:本次|当前)?材料(?:显示|表明|记录)[，,]\s*/gu,"$1"],
@@ -23,7 +26,7 @@ const RULES:Array<[RegExp,string]>=[
  * instead of the knowledge. Quotations, code, links, blockquotes, tables and
  * headings are unchanged. */
 export function wikiNarration(body:string):string {
- if(!/据讨论|材料|本次/u.test(body))return body;
+ if(!/据讨论|材料|本次|建议[：:]|。并|\*\*/u.test(body))return body;
  const changes:Array<{start:number;end:number;text:string}>=[];
  const visit=(node:RootContent)=>{
   if(["blockquote","code","inlineCode","html","link","image","heading","table"].includes(node.type))return;

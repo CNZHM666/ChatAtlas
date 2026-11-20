@@ -78,6 +78,19 @@ it("keeps structural bold labels while re-selecting emphasis",()=>{
  expect(result).toContain("**智能书签与混合检索**");expect(result).toContain("**记忆层借鉴**。");
 });
 
+it("keeps one grounded explanation and filters illustrative proposal fragments from generated prose",()=>{
+ const explanation="校验器报错时，画布高亮冲突元件，用户可以修复并重新验证。";
+ const flows="Validator → Canvas visualization → Fix → Revalidate（AI 建议，未确认）\n\nESP32 → DHT22（AI 建议，未确认）";
+ expect(wikiReadingFormat(`${explanation}\n\n${flows}`,{})).toBe(explanation);
+ expect(wikiReadingFormat(flows,{userEdited:true})).toBe(flows);
+});
+
+it("keeps a proposed flow when the prose explicitly denies one of its steps",()=>{
+ const proposed="Validator → Canvas visualization → Fix → Revalidate（AI 建议，未确认）";
+ const limitation="校验器报错时，画布高亮冲突元件，系统不提供修复及重新验证。";
+ expect(wikiReadingFormat(`${limitation}\n\n${proposed}`,{})).toContain("Revalidate〔建议〕");
+});
+
 it("leaves no empty block where a generated chapter copied a block's summary as a fence; a chapter edited by hand keeps its text",()=>{
  const body="仓库首页列出最近的构建。\n\n```text, 2 lines\n```\n点击一行查看日志。\n\n*讨论中的原文代码 · AI 建议，未确认*\n\n```text\n构建 #12  通过\n构建 #11  失败\n```";
  const shown=wikiReadingFormat(body,{});
@@ -167,4 +180,29 @@ it("aligns comparable retrieval stages and keeps numbering, extra milestones and
  expect(originals).toContain(milestones);
  const reversed=[...versions.split("\n").slice(0,2),...versions.split("\n").slice(2).reverse()].join("\n");
  expect(wikiReadingFormat([reversed,milestones].join("\n\n"),{})).not.toContain("共同要点");
+});
+
+it("leaves an illustrative recording in the original while retaining a distinct validation requirement", () => {
+ const proposal="拍一个 DHT22 → 识别成功 → 加入我的零件 → Canvas 自动出现 → Validator PASS〔建议〕";
+ const acceptance="拍一个 DHT22 → 加入我的零件 → 模拟 2 秒超时 → 必须回滚〔建议〕";
+ const body=wikiReadingFormat("## 交付\n\n"+proposal+"\n\n"+acceptance,{});
+ expect(body).not.toContain("Validator PASS");
+ expect(body).toContain("必须回滚");
+});
+
+it("keeps the purpose of a blank study worksheet in the text and its literal table with examples",()=>{
+ const table="| 指标 | A组 | B组 |\n| --- | --- | --- |\n| 正确率 | ？ | ？ |\n| 完成时间 | ？ | ？ |";
+ const result=wikiReadingFormat("### 试验设计\n\n表格来源 [S-1-a]\n\n"+table,{});
+ const [body,example]=result.split("<details");
+ expect(body).toContain("对照试验拟记录正确率、完成时间。");
+ expect(body).not.toContain("？");
+ expect(example).toContain("表格来源 [S-1-a]");
+ expect(example).toContain(table);
+ expect(wikiReadingFormat(table.replace("完成时间 | ？","完成时间 | 30 分钟"),{})).not.toContain("<details");
+});
+
+it("orders recognition explanations by entry, candidate, recovery and completion",()=>{
+ const entry="拍照入口从草稿页打开。",candidate="系统展示候选项供用户确认。",failure="识别失败时允许重新拍摄。",done="确认成功后加入零件盒。";
+ const title="### 图像识别与库存",body=[title,done,failure,entry,candidate].join("\n\n");
+ expect(wikiReadingFormat(body,{})).toBe([title,entry,candidate,failure,done].join("\n\n"));
 });

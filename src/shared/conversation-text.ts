@@ -19,17 +19,25 @@ function widgetJsonEnd(value: string, start: number): number | undefined {
   return undefined;
 }
 
-/** Platform citation IDs are not usable ChatAtlas references. Preserve literal code examples. */
-export function withoutPlatformCitations(value: string): string {
-  if (!/\uE200(?:filecite|cite|memcite|url)|(?:<|&lt;)Cite\b/u.test(value)) return value;
+const PLATFORM_CITATION = /\uE002REF[A-Za-z\d_-]{1,256}\uE003|\uE200(?:filecite|cite|memcite|url)|(?:<|&lt;)Cite\b/u;
+
+/** Platform citation IDs are not URLs. Preserve code and only link a verified target. */
+export function withoutPlatformCitations(value: string, exportReference?: (token: string, offset: number) => string | undefined): string {
+  if (!PLATFORM_CITATION.test(value)) return value;
   const protectedRanges = codeRanges(value);
   const protectedAt = (offset: number) => protectedRanges.some(([from, to]) => offset >= from && offset < to);
-  const pattern = /\uE200url\uE202([^\uE200\uE201]*)\uE201|\uE200(?:filecite|cite|memcite)(?:(?:\uE202[^\uE200\uE201]*)?\uE201|(?:\uE202[\w:.-]*)*(?=\s|$|[^\w:.\-\uE202\uE201]))|\\?(?:<|&lt;)Cite\s+refs=\{\[(?:\s*"turn[\w:.-]+"\s*,?)+\]\}\s*\/(?:>|&gt;)/gu;
+  const pattern = /\uE002REF[A-Za-z\d_-]{1,256}\uE003|\uE200url\uE202([^\uE200\uE201]*)\uE201|\uE200(?:filecite|cite|memcite)(?:(?:\uE202[^\uE200\uE201]*)?\uE201|(?:\uE202[\w:.-]*)*(?=\s|$|[^\w:.\-\uE202\uE201]))|\\?(?:<|&lt;)Cite\s+refs=\{\[(?:\s*"turn[\w:.-]+"\s*,?)+\]\}\s*\/(?:>|&gt;)/gu;
   return value.replace(pattern, (token: string, urlPayload: string | undefined, offset: number) => {
     if (protectedAt(offset)) return token;
-    // A platform source ID is not a URL. Keep the visible label without inventing a link.
-    return urlPayload?.split("\uE202").filter(part => !/^turn[\w:.-]+$/u.test(part)).join(" · ") ?? "";
+    const parts = urlPayload?.split("\uE202").filter(part => !/^turn[\w:.-]+$/u.test(part)) ?? [];
+    const urls = parts.filter(part => validPlatformUrl(part));
+    if (exportReference && urls.length === 1) return externalMarkdownLink(urls[0], parts.filter(part => part !== urls[0]).join(" · ") || urls[0]);
+    return parts.join(" · ") || exportReference?.(token, offset) || "";
   });
+}
+
+export function portablePlatformReferences(value: string, locate: (token: string, offset: number) => string | undefined = () => undefined) {
+  return readablePlatformLinks(withoutPlatformCitations(value, locate));
 }
 
 export function platformWidgetRanges(value: string): Array<{ start: number; end: number; kind: string; payload: string }> {
@@ -97,6 +105,17 @@ export function readablePlatformMarkup(value: string): string {
 }
 
 /** Render exported platform links without a DOM dependency or executable HTML. */
+function validPlatformUrl(url: string) {
+  if (!/^https?:\/\//iu.test(url) || Array.from(url).some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) return false;
+  try { new URL(url); return true; } catch { return false; }
+}
+
+function externalMarkdownLink(url: string, label: string) {
+  const safeLabel = label.replace(/[\\[\]|]/gu, "\\$&");
+  const escape = (character: string) => character === "(" ? "%28" : character === ")" ? "%29" : encodeURIComponent(character);
+  return validPlatformUrl(url) ? `[${safeLabel}](${url.replace(/[()\s<>|]/gu, escape)})` : safeLabel;
+}
+
 function readablePlatformLinks(value: string): string {
   if (!/(?:<|&lt;)Link\b/u.test(value)) return value;
   const protectedRanges = codeRanges(value);
@@ -105,10 +124,7 @@ function readablePlatformLinks(value: string): string {
     if (protectedRanges.some(([start, end]) => offset >= start && offset < end)) return raw;
     const attrs = new Map([...raw.matchAll(/([a-z]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|&quot;(.*?)&quot;)/giu)].map(match => [match[1].toLowerCase(), decode(match[2] ?? match[3] ?? match[4] ?? "")]));
     const url = attrs.get("url") ?? attrs.get("href") ?? "", label = attrs.get("title") ?? attrs.get("label") ?? url;
-    const safeLabel = label.replace(/[\\[\]]/gu, "\\$&");
-    if (!/^https?:\/\//iu.test(url) || Array.from(url).some(character => character.charCodeAt(0) < 32)) return safeLabel;
-    try { new URL(url); } catch { return safeLabel; }
-    return `[${safeLabel}](${url.replace(/[()\s<>]/gu, character => encodeURIComponent(character))})`;
+    return externalMarkdownLink(url, label);
   });
 }
 

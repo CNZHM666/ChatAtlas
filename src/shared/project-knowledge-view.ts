@@ -165,7 +165,11 @@ export function projectKnowledgeReading(section:FocusSection,session:FocusSessio
   const ref=sourceOf(unit);
   return ref&&unit.evidence.code?`[${zh?"来源":"Source"}](${wikiEvidenceHref(ref,wikiTableSignature(unit.evidence.code.text))})`:"";
  });
- const body=wikiChapterLinks(wikiReadingFormat(projected.body,projected,{zh,units,citeTable:linkTable}),projected,reviewed,zh,homes);
+ let body=wikiChapterLinks(wikiReadingFormat(projected.body,projected,{zh,units,citeTable:linkTable}),projected,reviewed,zh,homes);
+ if(session.wikiKnowledge&&/\|\s*(?:交付主题|Delivery topic)\s*\|/iu.test(body)){
+  for(const {plan} of confirmedRoadmaps(session.wikiKnowledge))if(units.some(unit=>unit.id===plan.unitId))
+   body=groupWikiConfirmedRoadmap(body,plan,zh);
+ }
  const competitorChapter=session.wikiKnowledge?.documentType!=="learning"&&/竞品|竞争对手|competitor|competitive landscape/iu.test(projected.title)
   &&units.some(unit=>unit.about?.role==="competitor");
  const sourceNote=competitorChapter?(zh?"下文为讨论时的竞品记录。来源链接与核实日期以原文为准，未明确核实的能力仍待核验。":"Competitor information reflects the discussion. Links and verification dates come from its sources. Capabilities without explicit verification remain unverified."):"";
@@ -177,3 +181,4 @@ export function projectKnowledgeReadingContext(session:FocusSession) {
  const context=wikiChapterReviewContext(session);
  return {view:projectKnowledgeView(session),chapters:wikiSections(session).map(section=>reviewWikiChapter(section,session,undefined,undefined,context))};
 }
+import {confirmedRoadmaps,groupWikiConfirmedRoadmap} from "./wiki-confirmed-roadmap";

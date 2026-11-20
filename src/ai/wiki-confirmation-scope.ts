@@ -1,6 +1,7 @@
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { wikiUnitConditions, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
+import { wikiTableCells } from "../shared/wiki-table-source";
 import { claimSupported } from "./wiki-claim-support";
 
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase();
@@ -13,7 +14,7 @@ const ADDITIONAL = /(?:^|[，,；;：:]\s*)(?:同时|并且|另需|还需|(?:and
 const ADOPTION = /确认|决定|已定|敲定|\b(?:confirmed|decided|approved|agreed|settled)\b/iu;
 const CHOSEN_DIRECTION = /采用|使用|启用|选用|\b(?:adopt\w*|use|enable\w*)\b/iu;
 const NEGATED_CHOICE = /(?:不(?:再)?|禁止|拒绝)(?:采用|启用|使用|保留|支持|开放|加入|执行|增加|引入|提供)|\b(?:not|never|without|reject\w*|disabl\w*)\b/iu;
-const TENTATIVE = /(?:^|[：:；;，,]\s*)(?:AI[^。！？\n]{0,18}建议|AI\s+(?:proposal|suggestion)\b|建议|提议|未确认|待确认|待核对|暂定|\b(?:suggest\w*|propos\w*|tentative|unconfirmed|pending review)\b)|细节待核对|details requiring review|（AI 建议，待确认）|\(AI proposal, pending confirmation\)/iu;
+const TENTATIVE = /(?:^|[：:；;，,]\s*)(?:AI[^。！？\n]{0,18}建议|AI\s+(?:proposal|suggestion)\b|建议|提议|未确认|待确认|待核对|暂定|\b(?:suggest\w*|propos\w*|tentative|unconfirmed|pending review)\b)|细节待核对|details requiring review|（(?:AI\s*建议，)?待确认）|\(AI proposal, pending confirmation\)/iu;
 const CONFIRMED_CELL = /^(?:已定|已确认|已通过|confirmed|approved|decided)$/iu;
 const SENTENCE = /(?<=[。！？])|(?<=[.!?])(?=\s+\D)/u;
 const CLAUSE = /[：:；;，]|,(?!\d{3}\b)|\s+[—–]\s+/gu;
@@ -33,18 +34,18 @@ export function wikiUnitConfirmationDetails(unit: WikiKnowledgeUnit): string[] {
   return [...new Set([...wikiConfirmationDetails(unit.statement), ...wikiUnitConditions(unit).map(compact)])];
 }
 
-export interface WikiConfirmationScope { decision: WikiKnowledgeUnit; proposal: WikiKnowledgeUnit; choice: string }
+export interface WikiConfirmationScope { decision: WikiKnowledgeUnit; proposal: WikiKnowledgeUnit; choice: string; question?: string }
 
 /** Use the selected action, not every alternative mentioned in the question. */
 export function wikiConfirmationScopes(ledger: WikiKnowledgeLedger, units: Map<string, WikiKnowledgeUnit>, statuses: ReadonlyMap<string, WikiUnitStatus>): WikiConfirmationScope[] {
   const proposed = (unit: WikiKnowledgeUnit | undefined): unit is WikiKnowledgeUnit => Boolean(unit && statuses.get(unit.id) === "proposal" && unit.evidence.role === "assistant" && !unit.evidence.pasted && !unit.about);
-  const selected = (ledger.userAnswers ?? []).flatMap(answer => {
+  const selected = (ledger.userAnswers ?? []).flatMap<WikiConfirmationScope>(answer => {
     const option = ledger.writingQuestions?.find(question => question.id === answer.questionId)?.options.find(item => item.id === answer.optionId);
     const id = `answer:${answer.questionId}:${answer.optionId}`, decision = units.get(id);
     if (!option || !decision || statuses.get(id) !== "confirmed") return [];
     return option.actions.flatMap(action => action.do === "confirm" || action.do === "both" ? action.units : []).flatMap(id => {
       const proposal = units.get(id);
-      return proposed(proposal) ? [{ decision, proposal, choice: answer.answer || option.label }] : [];
+      return proposed(proposal) ? [{ decision, proposal, choice: answer.answer || option.label, question: answer.question }] : [];
     });
   });
   for (const relation of ledger.organization?.relations ?? []) {
@@ -75,10 +76,23 @@ export function wikiDecisionRestatement(text: string, choice: string) {
   const exact = key(choice);
   const framed = text.replace(/^(?:\*\*|__)*/u, "")
     .replace(/^(?:现行决定是|[^，。；：:]{1,24}?(?:已确认|确认为|已决定|决定为|确认采用)|(?:项目发起人)?(?:已确认|已决定|确认采用)|决定(?=先|采用|保留|暂缓|不))\s*[：:]?\s*/u, "");
-  const named = key(text).replace(/^([^：:，。；]{1,26}?)确认为/u, "$1:");
+  const named = key(text).replace(/^([^：:，。；]{1,26}?)(?:已)?确认为/u, "$1:");
   const releaseChoice = exact.match(/^发布(v\d+(?:\.\d+)+(?:-[\w.-]+)?)标签$/iu)?.[1];
   const releaseRestatement = key(text).match(/^(?:首个公开版本|首发版本|发布标签)(?:已)?确认为(v\d+(?:\.\d+)+(?:-[\w.-]+)?)标签$/iu)?.[1];
   return Boolean(exact && (key(text) === exact || key(framed) === exact || named === exact || releaseChoice && releaseChoice === releaseRestatement));
+}
+
+/** A closed list added after a confirmed rule needs its own evidence. */
+export function wikiAddedDecisionList(text: string, choice: string) {
+  for (const boundary of text.matchAll(/[，,；;]\s*/gu)) {
+    const lead = text.slice(0, boundary.index).trim().replace(/^(?:同时|另外|此外|also)[，,\s]*/iu, "");
+    if (!wikiDecisionRestatement(lead, choice)) continue;
+    const tail = text.slice(boundary.index + boundary[0].length).trim();
+    const list = tail.match(/^[^：:\n]{2,60}[：:]\s*(.+)$/u)?.[1] ?? tail.match(/\b(?:including|limited to|consists of)\s+(.+)$/iu)?.[1];
+    const items = list?.replace(/[。.!?！？]$/u, "").split(/\s*[、，,]\s*/u).filter(Boolean);
+    if (items && items.length >= 3 && items.some(item => !compact(choice).includes(compact(item)))) return tail;
+  }
+  return undefined;
 }
 
 export function wikiChoiceTrigger(question: string, answer: string) {
@@ -103,7 +117,72 @@ export function wikiLayerDeferral(question: string, answer: string) {
   return `${layer}：维持预留，暂不开发。`;
 }
 
-export interface WikiScopedClaim { before: string; parts: Array<{ text: string; unit?: WikiKnowledgeUnit }> }
+export interface WikiScopedClaim { before: string; replacement?: string; parts: Array<{ text: string; unit?: WikiKnowledgeUnit }> }
+
+const RELEASE_CHECKLIST = /^(首版|第[一二三四五六七八九十\d]+版|v\d+(?:\.\d+)*)\s*(?:中)?是否(?:立即|优先)?(?:实施|实现|支持|启用|开展|执行|纳入|包含|进行)\s*([^？?。；;，,]+)[？?]$/iu;
+const POSITIVE_CHECKLIST_CHOICE = /^(?:是|确认|同意|立即实施|优先实现|(?:实施|实现|执行|启用|纳入|开展|进行)(?:检查|校验|验证|检测))[。.!！]?$/u;
+const checklistRelease = (text: string) => compact(text).replace(/^(?:首版|第1版)$/u, "第一版");
+const checklistItems = (text: string) => text.replace(/、\s*(?:以及|及|和|与)/gu, "、").split(/、|以及/gu).map(item => item.trim());
+
+function releaseChecklistChoice(question: string, choice: string) {
+  const selected = question.match(RELEASE_CHECKLIST);
+  if (!selected || !POSITIVE_CHECKLIST_CHOICE.test(choice.trim())) return;
+  const target = selected[2].match(/^(.+?)(检查|校验|验证|检测)$/u);
+  if (!target) return;
+  const keys = target[1].split(/\s*(?:、|以及|与|和|及)\s*/u).map(compact);
+  if (keys.length < 2 || keys.some(key => key.length < 2) || new Set(keys).size !== keys.length) return;
+  return { release: selected[1], target: selected[2], keys };
+}
+
+function confirmedChecklistIndices(keys: string[], items: string[]) {
+  const matches = keys.map(key => items.flatMap((item, index) => {
+    const text = compact(item);
+    return text.startsWith(key) && /^(?:(?:明显)?(?:不兼容|兼容性?)|(?:检查|校验|验证|检测))?$/u.test(text.slice(key.length)) ? [index] : [];
+  }));
+  const picked = new Set(matches.flat());
+  if (matches.every(indices => indices.length === 1) && picked.size === keys.length && picked.size < items.length) return picked;
+}
+
+/** A short affirmative answer to a release checklist confirms only the
+ * checks named in the question and present in its cited proposal. */
+export function wikiReleaseChecklistStatement(question: string, choice: string, proposal: WikiKnowledgeUnit) {
+  const selected = releaseChecklistChoice(question, choice);
+  if (!selected) return;
+  const release = proposal.statement.match(/^(首版|第[一二三四五六七八九十\d]+版|v\d+(?:\.\d+)*)/iu)?.[1];
+  if (release && checklistRelease(release) !== checklistRelease(selected.release)) return;
+  const content = proposal.statement.slice(release?.length ?? 0).trimStart();
+  const listed = content.match(/^(?:应|需|要)?(?:至少|优先|首先)?(?:检查|校验|验证|检测)[：:\s]*([^。；;\n]+)[。]?$/u);
+  const items = listed ? checklistItems(listed[1]) : [];
+  const evidence = compact(proposal.evidence.quote);
+  if (items.length < 3 || !items.every(item => item && evidence.includes(compact(item))) || !confirmedChecklistIndices(selected.keys, items)) return;
+  return `${selected.release}计划实施${selected.target}。`;
+}
+
+/** Keep a selected subset on its own row, with the decision as the binding.
+ * The original proposal and literal release still govern the remaining checks. */
+function splitReleaseChecklist(row: string, header: string[], scopes: WikiConfirmationScope[], bound: (value: string, scope: WikiConfirmationScope) => boolean): WikiScopedClaim | undefined {
+  const [topic, storedValue, extra] = wikiTableCells(row);
+  if (!topic || !storedValue || extra !== undefined || header.length !== 2 || !storedValue.includes("、")) return;
+  const value = storedValue.replace(/（AI\s*建议，待确认）$/u, "").trimEnd();
+  const checklist = value.match(/^((?:至少|优先|首先)?(?:检查|校验|验证|检测))\s*([^。；;：:]+?)[。]?$/u);
+  if (!checklist) return;
+  const items = checklistItems(checklist[2]);
+  if (items.length < 3 || items.some(item => !item || item.length > 40)) return;
+  for (const scope of scopes) {
+    const { decision, proposal, choice, question } = scope;
+    const selected = question && releaseChecklistChoice(question, choice);
+    if (!selected || checklistRelease(selected.release) !== checklistRelease(header[1]) || !bound(value, scope)) continue;
+    const confirmed = confirmedChecklistIndices(selected.keys, items);
+    if (!confirmed) continue;
+    const evidence = compact(proposal.evidence.quote);
+    if (!items.every(item => evidence.includes(compact(item)))) continue;
+    const action = checklist[1].replace(/^(?:至少|优先|首先)/u, "");
+    const agreed = action + items.filter((_, index) => confirmed.has(index)).join("、");
+    const pending = checklist[1] + items.filter((_, index) => !confirmed.has(index)).join("、");
+    return { before: row, replacement: `| ${topic}（已确认纳入） | ${agreed} |\n| ${topic}（待确认） | ${pending} |`,
+      parts: [{ text: agreed, unit: decision }, { text: pending, unit: proposal }] };
+  }
+}
 
 /** Confirmation may cover the leading choice while the following clause names
  * terms from an unadopted proposal. Repair only the generated assertion. */
@@ -160,7 +239,8 @@ export function reviewWikiScopedClaims(text: string, scopes: WikiConfirmationSco
 
 const UNDER_LABEL = /(?:AI 对具体细节的建议|以下细节待核对|AI proposal for the details|Details requiring review)[：:]$/u;
 
-export function applyWikiConfirmationScope(text: string, scopes: WikiConfirmationScope[], confirmed: WikiKnowledgeUnit[], zh: boolean, originals = new Set<string>()) {
+export function applyWikiConfirmationScope(text: string, scopes: WikiConfirmationScope[], confirmed: WikiKnowledgeUnit[], zh: boolean, originals = new Set<string>(),
+  boundTableRow?: (value: string, scope: WikiConfirmationScope) => boolean) {
   const edits: WikiScopedClaim[] = [];
   if (!scopes.length) return { text, edits };
   for (const block of wikiDocumentBlocks(text).reverse()) {
@@ -169,9 +249,20 @@ export function applyWikiConfirmationScope(text: string, scopes: WikiConfirmatio
     if (block.kind === "list" && UNDER_LABEL.test(text.slice(0, block.start).trimEnd())) continue;
     const parts = block.kind === "list" ? block.text.split("\n").flatMap(line => reviewWikiScopedClaims(line, scopes, confirmed, zh))
       : reviewWikiScopedClaims(block.text, scopes, confirmed, zh, block.kind === "table");
+    if (block.kind === "table" && zh && boundTableRow) {
+      const [heading, , ...rows] = block.text.split("\n");
+      const header = wikiTableCells(heading);
+      for (const row of rows) {
+        const split = splitReleaseChecklist(row.trim(), header, scopes, boundTableRow);
+        if (!split) continue;
+        const existing = parts.findIndex(part => part.before === split.before);
+        if (existing >= 0) parts[existing] = split;
+        else parts.push(split);
+      }
+    }
     if (!parts.length) continue;
     let revised = block.text;
-    for (const edit of parts) revised = revised.replace(edit.before, () => edit.parts.map(part => part.text).join(zh ? "" : " "));
+    for (const edit of parts) revised = revised.replace(edit.before, () => edit.replacement ?? edit.parts.map(part => part.text).join(zh ? "" : " "));
     text = text.slice(0, block.start) + revised + text.slice(block.end);
     edits.unshift(...parts);
   }

@@ -16,6 +16,17 @@ import { sourceMessageSignature } from "../shared/source-signature";
 afterEach(() => { vi.unstubAllGlobals(); generateStructured.mockReset(); synthesizeCoveredFocus.mockReset(); });
 const extractions = () => generateStructured.mock.calls.filter(([request]) => JSON.parse(request.prompt).presentation === "wiki_unit_extract").length;
 
+it("reuses verified reading across separate runs without a previous session", async () => {
+  const first = await generate("cross-task-reading");
+  expect(first.wikiKnowledge?.batches[0].status).toBe("ok");
+  expect(extractions()).toBeGreaterThan(0);
+  generateStructured.mockClear();
+  const repeated = await generate("cross-task-reading");
+  expect(extractions()).toBe(0);
+  expect(repeated.runId).not.toBe(first.runId);
+  expect(repeated.wikiKnowledge?.batches[0].units).toEqual(first.wikiKnowledge?.batches[0].units);
+});
+
 async function generate(id: string, extra: Parameters<typeof generateFocusSession>[9] = {}, onProgress?: Parameters<typeof generateFocusSession>[8]) {
   const db = await getDatabase(), conversation: Conversation = { id, title: "硬件项目", platform: "chatgpt", url: "", messageCount: 2, updatedAt: 1 };
   const originals: ConversationMessage[] = ["我建议先做浏览器产品，用 Orama 做全文索引。", "好，就这样。"].map((content, i) => ({ id: `${id}-${i}`, conversationId: id, messageIndex: i, role: i ? "user" : "assistant", content, preview: content, contentHash: String(i), createdAt: 1, updatedAt: 1 }));
@@ -52,8 +63,7 @@ it("writes a new project document from the knowledge-unit ledger, keeping the le
   expect(result.sections[0].evidenceIds).toEqual(["u1", "u2"]);
   expect(result.sections[0].claims?.[0]).toMatchObject({ text: "全文索引使用 Orama。", evidenceIds: ["u1"] });
   expect(result).toMatchObject({ wikiEdition: "current-v2", wikiKnowledge: { draft: { status: "complete" } } });
-  // No one named the project: the directory plan names it, not the request text.
-  expect(result.title).toBe("Orama 检索器");
+  expect(result.title).toBe("硬件项目");
   expect(result.wikiKnowledge!.organization!.projectName).toBe("Orama 检索器");
   expect(units).toHaveLength(1);
 });
@@ -78,13 +88,15 @@ it("writes with the earlier pipeline behind the fallback switch, reading no ledg
 });
 
 it("shows the planned directory first, then each chapter as a preview once it is written", async () => {
-  const previews: Array<{ id: string; status?: string; titles: string[]; outline: boolean[]; body: string }> = [];
-  const result = await generate("ledger-preview", { onPartial: session => previews.push({ id: session.id, status: session.status, titles: session.sections.map(section => section.title), outline: session.sections.map(section => Boolean(section.wikiOutline)), body: session.sections[0].body }) });
+  const previews: Array<{ id: string; status?: string; title: string; titles: string[]; outline: boolean[]; body: string }> = [];
+  const result = await generate("ledger-preview", { wikiProjectBoundary: { name: "我的项目名" }, onPartial: session => previews.push({ id: session.id, status: session.status, title: session.title, titles: session.sections.map(section => section.title), outline: session.sections.map(section => Boolean(section.wikiOutline)), body: session.sections[0].body }) });
   // The planned directory shows first, each chapter's question and parts; the written chapter replaces it.
   expect(previews.map(({ id, status, titles, outline }) => ({ id, status, titles, outline }))).toEqual([
     { id: `partial:${result.runId}`, status: "preview", titles: ["检索"], outline: [true] },
     { id: `partial:${result.runId}`, status: "preview", titles: ["检索"], outline: [false] },
   ]);
+  expect(previews.map(item => item.title)).toEqual(["我的项目名", "我的项目名"]);
+  expect(result.title).toBe("我的项目名");
   expect(previews[0].body).toBe("如何检索？\n\n本章包括：全文索引");
 });
 
@@ -107,12 +119,13 @@ it("applies the user's scope to the writing outline and finished chapters", asyn
   expect(result.wikiKnowledge?.scopeAnswers?.sideproject).toBe("exclude");
 });
 
-it("reports each ledger step to the progress view, from extraction to writing", async () => {
+it("reports each ledger step to the progress view, from extraction through proofreading", async () => {
   const stages: string[] = [];
   await generate("ledger-progress", {}, (_done, _total, _stage, detail) => { if (detail?.ledger && stages.at(-1) !== detail.ledger.stage) stages.push(detail.ledger.stage); });
   expect(stages[0]).toBe("extract");
   expect(stages).toContain("plan");
-  expect(stages.at(-1)).toBe("write");
+  expect(stages).toContain("write");
+  expect(stages.at(-1)).toBe("proofread");
 });
 
 it("puts the key decisions to the user after planning the directory, and writes from their verdicts", async () => {

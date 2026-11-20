@@ -148,9 +148,14 @@ it("revalidates a corrupted checkpoint, reuses the valid provider cache, and res
  const saved=(await db.getAll("semanticDecisionCache")).find(row=>row.id.includes(":revision-v1:")&&(row.result as {blocks?:unknown[]})?.blocks?.length)!;
  const bad=structuredClone(saved);(bad.result as {blocks:Array<{unitIds:string[]}>}).blocks[0].unitIds=["foreign-unit"];await db.put("semanticDecisionCache",bad);
  const again=await reviseWikiChapters(session,["one"],[raw],"",ai,new AbortController().signal);expect(calls).toHaveLength(before);expect(again.wikiRevisionReceipt?.cachedBatches).toBe(again.wikiRevisionReceipt?.batches);
- const small={...ai,capabilities:{textGeneration:true as const,structuredOutput:"json" as const,embeddings:false,maxContextTokens:8000}};
+ const smallerContext=12000;
+ const small={...ai,capabilities:{textGeneration:true as const,structuredOutput:"json" as const,embeddings:false,maxContextTokens:smallerContext}};
  const prepared=prepareWikiRevisionBatches(session,session.sections[0],[raw],"",small,new AbortController().signal);
- for(const {request} of prepared.batches)expect(requestBudget(request,"fixture").inputTokens+request.maxOutputTokens!).toBeLessThanOrEqual(8000);
+ expect(prepared.batches.length).toBeGreaterThan(0);
+ for(const {request} of prepared.batches)expect(requestBudget(request,"fixture").inputTokens+request.maxOutputTokens!).toBeLessThanOrEqual(smallerContext);
+ const insufficient={...small,capabilities:{...small.capabilities,maxContextTokens:8000}};
+ expect(()=>prepareWikiRevisionBatches(session,session.sections[0],[raw],"",insufficient,new AbortController().signal))
+   .toThrow(expect.objectContaining({code:"WIKI_REWRITE_BUDGET"}));
 },20000);
 
 it("keeps the short-chapter request path and reuses its existing model result cache",async()=>{

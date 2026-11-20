@@ -4,6 +4,7 @@ import type { FocusSession } from "./focus-session";
 const NAVIGATION = new Set(["activeSectionId", "visitedSectionIds", "wikiCollapsedGroups", "updatedAt"]);
 /** Workspace updates replace content fields by reference, while navigation can shallow-copy the session. */
 export function sameProjectReadingInputs(before: FocusSession, after: FocusSession) {
+  if (before === after) return true;
   const keys = new Set([...Object.keys(before), ...Object.keys(after)] as Array<keyof FocusSession>);
   return [...keys].every(key => NAVIGATION.has(key) || Object.is(before[key], after[key]));
 }

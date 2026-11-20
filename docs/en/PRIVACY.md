@@ -2,16 +2,15 @@
 
 [简体中文](../PRIVACY.md) · **English**
 
-Version 0.1.3, updated 2026-10-24. Conversations, source versions, projects, notes, saved contexts, reading state, analysis caches and API configuration remain in the current browser. The public version provides neither a shared AI service nor knowledge cloud sync. Export files are chosen by you and read locally. Website capture for Claude, Gemini, DeepSeek, Doubao, Kimi and Qianwen (including Qwen international) runs automatically after browser website permission. Settings can pause or resume each platform. Pausing retains saved material. Capture makes no model calls or uploads to ChatAtlas servers.
+Conversations, source versions, projects, notes, the knowledge ledger, reading state, analysis caches and API configuration remain in the current browser. The public version provides neither a shared AI service nor knowledge cloud sync. Export files are chosen by you and read locally. Website capture for Claude, Gemini, DeepSeek, Doubao, Kimi and Qianwen (including Qwen international) runs automatically after browser website permission. Settings can pause or resume each platform. Pausing retains saved material. Capture makes no model calls or uploads to ChatAtlas servers.
 
 ## When data leaves the device
 
 - Web scanning, sync and capture access ChatGPT for the selected material. Export files are parsed locally.
-- Explicit organization, questions, evolution and other AI tasks send needed material and tasks directly to your chosen provider.
-- Context refinement sends only the current preview and task, including explicitly added collections or edits. Merely opening the controls sends nothing.
+- Explicit Wiki generation or updates send the necessary material from the selected scope and the task directly to your chosen provider. Recovery and retries may resend the affected material.
 - Optional semantic enhancement and embedding indexing can send relevant content to the configured provider; these are advanced settings.
 - Explicit connection tests may send small requests and incur charges.
-- Ordinary reading, local keyword search, basic context packing and editing do not invoke a model.
+- Reading, local keyword search, editing, and export run locally. Export can include original quotes and source IDs. Review sensitive content before sharing a file.
 
 Provider handling depends on its policies and your configuration. ChatAtlas does not proxy BYOK keys or generation requests through its own server.
 
@@ -19,7 +18,7 @@ Provider handling depends on its policies and your configuration. ChatAtlas does
 
 API keys are stored in the current browser and excluded from knowledge backups. Browser storage is not an independent key vault. Protect the device and profile, and never upload configuration, backups or keys to a public repository.
 
-Successful analysis and refinement may be cached locally to reduce repeated cost. Usage diagnostics retain phase, model, duration and token metadata. Full diagnostic exports may include private project metadata; redact them before sharing. Unknown billing does not mean free, and cancellation does not establish that a provider charged nothing.
+Validated extraction and writing results may be cached locally for reuse. Usage diagnostics retain phase, model, duration and token metadata. Full diagnostic exports may include private project metadata. Redact them before sharing. Billing can remain unknown even when a task is canceled.
 
 ## Extension permissions
 

@@ -73,6 +73,71 @@ it("rejects a color quote for a static-animation claim and finds its short sourc
   expect(highlighted).toContain("不要大量动画");
   expect(highlighted).not.toContain("默认中性灰");
   expect(screen.getByText("措辞相近")).toBeVisible();
+  expect(screen.queryByText("虚线标出措辞相近的原文。")).toBeNull();
+});
+
+it("finds the complete flow across nearby source paragraphs instead of a similar UI example", async () => {
+ const session = projectSession(); session.projectState = undefined;
+ const wrong = "之前的示例只调整 Hardware IR 与 Canvas 的面板外观。";
+ const content = `${wrong}\n\n## 下一阶段\n\n让用户用自然语言修改 Hardware IR。\n\nCanvas 随数据实时变化，并自动运行 Validator 检查。\n\n后面再讨论配色和字体。`;
+ const ref = { ...session.evidence[0], excerpt: wrong, sourceSignature: undefined };
+ session.evidence = [ref];
+ vi.mocked(readSessionSource).mockResolvedValue([{ ...original, content }]);
+ const marks = new Map<string, Set<Range>>();
+ vi.stubGlobal("CSS", { ...globalThis.CSS, highlights: marks });
+ vi.stubGlobal("Highlight", class extends Set<Range> { constructor(...ranges: Range[]) { super(ranges); } });
+ render(<WorkspaceSourcePanel session={session} reference={ref} quote={wrong}
+   claim="优先实现自然语言修改 Hardware IR、Canvas 实时变化以及 Validator 自动检查的闭环。" zh onSelect={vi.fn()} onClose={vi.fn()}/>);
+ await waitFor(() => {
+   const ranges = markedRanges(marks).map(range => range.toString()).join("|");
+   expect(ranges).toContain("自然语言修改 Hardware IR");
+   expect(ranges).toContain("Validator 检查");
+   expect(ranges).not.toContain("面板外观");
+ });
+});
+
+it("treats an image and a feedback question as context and finds the matching reply in that turn", async () => {
+ const session = projectSession(); session.projectState = undefined;
+ const quote = "![图片 / Image](<atlas-image:example>)\n現在怎麽樣";
+ const reference = { ...session.evidence[0], excerpt: quote, sourceSignature: undefined };
+ session.evidence = [reference];
+ const response = "不要继续微调视觉，先验证用户能修改硬件。\n\n> 自然语言 → 修改 Hardware IR → Canvas 实时变化 → Validator 自动检查\n\n其他说明：按钮还可以修改圆角。";
+ const following = "下一阶段优先实现自然语言修改 Hardware IR 和 Canvas 实时变化的闭环。";
+ vi.mocked(readSessionSource).mockResolvedValue([
+   { ...original, content: quote }, { ...original, id: "reply", role: "assistant", content: response, messageIndex: 3 },
+   { ...original, id: "next-turn", content: following, messageIndex: 4 },
+ ]);
+ const marks = new Map<string, Set<Range>>();
+ vi.stubGlobal("CSS", { ...globalThis.CSS, highlights: marks });
+ vi.stubGlobal("Highlight", class extends Set<Range> { constructor(...ranges: Range[]) { super(ranges); } });
+ render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote}
+   claim="下一阶段优先实现自然语言修改 Hardware IR、Canvas 实时变化和 Validator 自动检查，而非继续微调视觉。"
+   zh onSelect={vi.fn()} onClose={vi.fn()}/>);
+ await waitFor(() => expect([...marks.get("atlas-original-support") ?? []].map(range => range.toString()).join("|")).toContain("Canvas 实时变化"));
+ expect(markedRanges(marks)).toEqual([]);
+ fireEvent.click(screen.getByRole("button", { name: "前后文" }));
+ await screen.findByText(following);
+ const support = [...marks.get("atlas-original-support") ?? []];
+ expect(support.every(range => range.startContainer.parentElement?.closest("[data-message-id]")?.getAttribute("data-message-id") === "reply")).toBe(true);
+});
+
+it("uses each reference's own quotation when switching sources for an overview claim", async () => {
+ const session = projectSession(); session.projectState = undefined;
+ const first = { ...session.evidence[0], excerpt: "修改 Hardware IR 后刷新 Canvas。", sourceSignature: undefined };
+ const second = { ...first, id: "second", messageId: "reply", excerpt: "Canvas 根据 Hardware IR 的变动重新渲染。" };
+ session.evidence = [first, second];
+ vi.mocked(readSessionSource).mockResolvedValue([
+   { ...original, content: first.excerpt }, { ...original, id: second.messageId, role: "assistant", content: second.excerpt, messageIndex: 3 },
+ ]);
+ const marks = new Map<string, Set<Range>>();
+ vi.stubGlobal("CSS", { ...globalThis.CSS, highlights: marks });
+ vi.stubGlobal("Highlight", class extends Set<Range> { constructor(...ranges: Range[]) { super(ranges); } });
+ const props = { session, references: [first, second], quote: first.excerpt, claim: "修改 Hardware IR 后 Canvas 会更新。", zh: true,
+   onSelect: vi.fn(), onClose: vi.fn(), sourcePassages: [first, second].map(ref => ({ referenceId: ref.id, quote: ref.excerpt })) };
+ const view = render(<WorkspaceSourcePanel {...props} reference={first}/>);
+ await waitFor(() => expect(markedRanges(marks).map(range => range.toString())).toEqual([first.excerpt]));
+ view.rerender(<WorkspaceSourcePanel {...props} reference={second}/>);
+ await waitFor(() => expect(markedRanges(marks).map(range => range.toString())).toEqual([second.excerpt]));
 });
 
 it("rebuilds code evidence ranges when lazy formatting replaces the original text nodes",async()=>{
@@ -145,13 +210,15 @@ it("keeps the same claim on its second source and never borrows another claim on
  view.rerender(<WorkspaceSourcePanel {...props} quote="不存在的引文" reference={second}/>);
  expect(await screen.findByText("该来源中未定位到此结论的引文")).toBeVisible();expect(marks.has("atlas-original-proof")).toBe(false);
 });
-it("marks every quote of the claims citing an original and displays local role warnings, without listing the claims",async()=>{
+it("marks quoted evidence and flags unproven completion without repeating the assistant source label",async()=>{
  const session=projectSession(),ref=session.evidence[0],content="用户可选择本地存储。建议下阶段加入同步。";
  session.projectState=undefined;session.sections[0].evidenceIds=[ref.id];session.sections[0].claims=[{text:"用户确认本地存储",quote:"用户可选择本地存储。",evidenceIds:[ref.id]},{text:"同步已完成",quote:"建议下阶段加入同步。",evidenceIds:[ref.id]}];
  vi.mocked(readSessionSource).mockResolvedValue([{...original,role:"assistant",content}]);
  const marks=new Map<string,Set<Range>>();vi.stubGlobal("CSS",{...globalThis.CSS,highlights:marks});vi.stubGlobal("Highlight",class extends Set<Range>{constructor(...ranges:Range[]){super(ranges);}});
  render(<WorkspaceSourcePanel session={session} reference={ref} references={[ref]} sectionId={session.sections[0].id} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
- expect(await screen.findByText(/引文来自助手消息/)).toBeVisible();expect(screen.getByText(/依据是计划或建议/)).toBeVisible();
+ expect(await screen.findByText(/依据是计划或建议/)).toBeVisible();
+ expect(screen.queryByText(/引文来自助手消息/)).toBeNull();
+ expect(screen.getAllByText("AI 回复").length).toBeGreaterThan(0);
  // Every quote of the claims citing this original is marked; the claims are highlighted in the document, not listed here.
  await waitFor(()=>expect(markedRanges(marks).length).toBe(2));
  expect(screen.queryByRole("button",{name:"1. 用户确认本地存储"})).toBeNull();

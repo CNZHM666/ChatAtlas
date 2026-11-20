@@ -1,6 +1,6 @@
 import {projectKnowledgeReading,projectKnowledgeReadingContext} from "../../shared/project-knowledge-view";
 import {useProjectReadingCache} from "../project-reading-cache";
-import { WorkspaceEvidenceContext, needsConfirmation, type EvidencePoint } from "../workspace-evidence-context";
+import { WorkspaceEvidenceContext, needsConfirmation, type EvidencePoint, type WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import { EvidenceReviewButton } from "./EvidenceReviewButton";
 import { localizedWikiTitle, wikiReadingLocation } from "../../shared/wiki-navigation";
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
@@ -31,7 +31,8 @@ import { useEvidencePoints } from "../use-evidence-points";
 import { wikiHolderReadingLabel, wikiHolderTitle, type WikiHolder } from "../../shared/wiki-holder";
 import type { WikiReadingProjection } from "../wiki-reading-worker";
 import { createPortal } from "react-dom";
-import { WIKI_EVIDENCE_LINK, availableWikiEvidence, wikiEvidenceTarget } from "../../shared/wiki-evidence-link";
+import { WIKI_EVIDENCE_LINK, availableWikiEvidence, currentWikiEvidence, wikiEvidenceTarget } from "../../shared/wiki-evidence-link";
+import { wikiFlowSourceQuote } from "../../shared/wiki-flow-block";
 
 export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,pendingReview,readingProjection,toolsHost }: {
   section: FocusSection; session: FocusSession; zh: boolean; structure: ReactNode; editor?: ReactNode;
@@ -42,7 +43,7 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   pendingReview?:EvidencePoint[];
   /** The request to open the check is used once: coming back to the chapter or switching wikis does not reopen it. */
   onAutoReviewed?: () => void;
-  onLocate: (ref: FocusEvidence) => void; onCurrent: () => void;
+  onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void; onCurrent: () => void;
   onFinishEdit?: () => void;
   /** Opens the editor at this text: the paragraph in view, or the problem being shown. */
   onEdit?: (target?: string) => void; updatedConversationIds?: string[];
@@ -53,19 +54,30 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
 }) {
   const evidencePanel=useContext(WorkspaceEvidenceContext);
   const review=session.mode==="review",[updatesOpen,setUpdatesOpen]=useState(false);
-  const sourceIds=new Set([...section.evidenceIds,...(section.claims??[]).flatMap(claim=>claim.evidenceIds)]);
-  const sources=session.evidence.filter(ref=>sourceIds.has(ref.id));
+  const sources=useMemo(()=>{
+    const ids=new Set([...section.evidenceIds,...(section.claims??[]).flatMap(claim=>claim.evidenceIds)]);
+    return session.evidence.filter(ref=>ids.has(ref.id));
+  },[session.evidence,section]);
+  const sourceTexts=useMemo(()=>{
+    const ids=new Set(section.evidenceIds);
+    return sources.filter(ref=>ids.has(ref.id)).map(ref=>ref.excerpt);
+  },[sources,section.evidenceIds]);
+  const flowSources=useMemo(()=>{
+    const current=new Set(currentWikiEvidence(session));
+    return sources.filter(ref=>current.has(ref));
+  },[session,sources]);
   const location=review?section.origin==="user"?zh?"我的理解":"My understanding":section.kind==="proposal"?zh?"AI 建议":"AI proposal":section.kind==="open_question"?zh?"待确认":"Open question":zh?"复习章节":"Review chapter":wikiReadingLocation(section,zh);
   const readingCache=useProjectReadingCache();
   // Previews can supply an updated chapter before it is in session.sections.
   const readingSession=useMemo(()=>session.sections.includes(section)?session:{...session,sections:session.sections.map(chapter=>chapter.id===section.id?section:chapter)},[session,section]);
-  const reading=readingCache.get(readingSession,`chapter:${section.id}`,()=>{
+  const reading=useMemo(()=>readingCache.get(readingSession,`chapter:${section.id}`,()=>{
    if(section.userEdited||section.origin)return section;
    if(readingProjection?.chapter?.id===section.id)return readingProjection.chapter;
    const context=readingCache.get(readingSession,"chapter-context",()=>readingProjection?.context??projectKnowledgeReadingContext(readingSession));
    return projectKnowledgeReading(context.chapters.find(chapter=>chapter.id===section.id)??section,readingSession,context.view,context.chapters,true);
-  });
-  const page=readingCache.get(readingSession,`chapter-page:${section.id}`,()=>wikiDocument(reading.body,!section.userEdited&&!section.origin,session.evidence.filter(ref=>section.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt),reading.claims?.flatMap(claim=>[claim.text,...claim.formulations??[]]))),content=useRef<HTMLDivElement>(null);
+  }),[readingCache,readingSession,section,readingProjection]);
+  const page=useMemo(()=>readingCache.get(readingSession,`chapter-page:${section.id}`,()=>wikiDocument(reading.body,!section.userEdited&&!section.origin,sourceTexts,reading.claims?.flatMap(claim=>[claim.text,...claim.formulations??[]]))),[readingCache,readingSession,section,sourceTexts,reading]);
+  const content=useRef<HTMLDivElement>(null);
   // Point-by-point evidence: each claim found in the prose gets a marker; the panel
   // steps through markers in reading order, then through claims with no position.
   const generated=!section.userEdited&&!section.origin;
@@ -88,6 +100,7 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   // them on, checking included: the check highlights only the sentence it is on. 已定, 未定 and 此前 always show.
   const [holderMarks,setHolderMarks]=useHolderMarks(),hasHolders=useMemo(()=>ordered.some(point=>point.holder),[ordered]),marksHidden=hasHolders&&!holderMarks;
   const learning=session.wikiKnowledge?.documentType==="learning";
+  const claimContext=useMemo(()=>({...markerContext,learning}),[markerContext,learning]);
   const statusGroups=([
     ["decided",false],["open",false],["user",true],["user",false],["material",false],["earlier",false],["ai",false],["corrected",false],
   ] as Array<[WikiHolder,boolean]>).flatMap(([holder,reported])=>{
@@ -182,8 +195,8 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   // belongs here; topic keywords must not inject a generation suggestion card.
   const hasDiagram=!review&&hasChapterDiagram(section,session)&&!section.wikiDiagram?.hidden;
   const readingBody=!review?page.overview?.readingBody??page.body:page.body;
-  const parts=wikiDiagramParts(readingBody,section.wikiDiagram?.afterHeading??suggestedDiagramHeading(section));
-  const read=(body:string)=>body.trim()?<div className="chapter-guide"><ReaderGuide hideCitationAnnotations content={body} sourceTexts={session.evidence.filter(ref=>section.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt)} zh={zh} complete hideEvidenceMarkers={!section.userEdited&&section.origin!=="user"} claimMarkers={claimMarkers}/></div>:null;
+  const parts=useMemo(()=>wikiDiagramParts(readingBody,section.wikiDiagram?.afterHeading??suggestedDiagramHeading(section)),[readingBody,section]);
+  const read=(body:string)=>body.trim()?<div className="chapter-guide"><ReaderGuide hideCitationAnnotations content={body} sourceTexts={sourceTexts} flowSources={flowSources} zh={zh} complete hideEvidenceMarkers={!section.userEdited&&section.origin!=="user"} claimMarkers={claimMarkers}/></div>:null;
   const tools = !editor ? <nav className="wiki-tool-rail" aria-label={zh?"文档工具":"Document tools"}>
       {ordered.length||attention.length?<button type="button" className={`wiki-tool evidence-review-button${attention.length?" has-attention":""}`} aria-label={attention.length?zh?`核对依据 · ${attention.length} 条待确认`:`Check evidence · ${attention.length} to confirm`:zh?"来源已定位":"Sources located"} title={attention.length?zh?`核对依据：${attention.length} 处需要你确认，逐条带你看`:`Check evidence: ${attention.length} points need your look`:zh?"点开查看来源":"Open sources"} onClick={reviewEvidence}><Quote size={17} aria-hidden="true"/>{attention.length?<span className="wiki-tool-badge" aria-hidden="true">{attention.length}</span>:null}</button>:<EvidenceReviewButton iconOnly sources={sources} zh={zh} onLocate={onLocate} historical={Boolean(section.userEdited||section.origin)}/>}
       {hasHolders?<div className="wiki-status-control" ref={statusControl} onKeyDown={event=>{
@@ -215,16 +228,19 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
       {changes.length?<button type="button" className="wiki-tool" aria-label={zh?"当前方案":"Current plan"} title={zh?"当前方案":"Current plan"} onClick={onCurrent}><Layers size={17} aria-hidden="true"/></button>:null}
       {!review&&(changes.length||session.wikiSuggestions?.[section.id])?<button type="button" className="wiki-tool" aria-label={zh?"相关更新":"Related updates"} title={zh?"相关更新":"Related updates"} onClick={()=>setUpdatesOpen(true)}><History size={17} aria-hidden="true"/></button>:null}
     </nav> : null;
-  return <WorkspaceEvidenceContext.Provider value={evidencePanel?{...evidencePanel,open:(ref,options)=>evidencePanel.open(ref,options?.points?options:{...options,sectionId:section.id,references:sources})}:undefined}><WikiClaimMarkerContext.Provider value={{...markerContext,learning}}><article ref={articleRef} className={`wiki-document${marksHidden?" hides-holder-marks":""}`} aria-label={review?zh?"复习文档":"Review document":zh?"Wiki 文档":"Wiki document"} onClick={event=>{
+  return <WorkspaceEvidenceContext.Provider value={evidencePanel?{...evidencePanel,open:(ref,options)=>evidencePanel.open(ref,options?.points?options:{...options,sectionId:section.id,references:sources})}:undefined}><WikiClaimMarkerContext.Provider value={claimContext}><article ref={articleRef} className={`wiki-document${marksHidden?" hides-holder-marks":""}`} aria-label={review?zh?"复习文档":"Review document":zh?"Wiki 文档":"Wiki document"} onClick={event=>{
     const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>(`a[href^="${WIKI_EVIDENCE_LINK}"]`):null;
     if(!link)return;
     event.preventDefault();
     const target=wikiEvidenceTarget(link.getAttribute("href")??"");
     const ref=target&&sources.find(source=>source.id===target.id&&availableWikiEvidence(session,source));
     if(!target||!ref)return;
-    if(evidencePanel)evidencePanel.open(ref,{sectionId:section.id,mode:"view",locationRevision:performance.now(),
-      ...(target.table?{tableTarget:target.table,references:[ref]}:{quote:ref.excerpt,references:sources})});
-    else onLocate(ref);
+    const flow=link.closest(".wiki-flow");
+    const quote=flow&&wikiFlowSourceQuote([...flow.querySelectorAll(".wiki-flow-card li")].map(step=>step.textContent??""))(ref.excerpt);
+    const options={sectionId:section.id,mode:"view" as const,locationRevision:performance.now(),
+      ...(target.table?{tableTarget:target.table,references:[ref]}:{quote:quote||ref.excerpt,references:flow?[ref]:sources})};
+    if(evidencePanel)evidencePanel.open(ref,options);
+    else onLocate(ref,options);
   }}>
     {toolsHost && tools ? createPortal(tools, toolsHost) : tools}
     <header className="wiki-document-heading"><div className="wiki-document-location"><span>{location}</span>{editor&&onFinishEdit?<div><button type="button" onClick={onFinishEdit}>{zh?"保存并结束编辑":"Save and finish editing"}</button></div>:null}</div><h1 title={section.title}>{localizedWikiTitle(section,zh)}</h1>{section.userEdited?<small className="muted">{zh?"个人编辑内容":"Your edited content"}</small>:null}</header>

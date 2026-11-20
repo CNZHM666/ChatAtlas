@@ -19,6 +19,15 @@ File import accepts official exports from ChatGPT, Claude, Gemini (Google Takeou
 
 ## Organization pipeline
 
+### Knowledge ledger
+
+1. Extract knowledge from the selected sources in batches and keep each quote, author role, and message ID. Reuse validated batches for matching material and extraction context. Recover uncovered messages within the full request budget.
+2. Merge and group related points and verify chapter placement. Ask about consequential scope choices separately and associate each confirmation with the chosen point.
+3. Set budgets by task and model, split long work where needed, and reject truncated output as incomplete. Check that writing preserves negation, exceptions, numbers, and release scope. Keep validated fragments and repair the affected passage.
+4. Review and save the overview and chapters. Preview source-driven changes before adoption. Automatic checks and source coverage are tracked separately, so processed batches may still contain messages that need review.
+
+### Compatibility workflow and directory protocol
+
 1. Check confirmed scope, content signatures and reusable analysis. Budget the initial read into batches.
 2. Start complete catalogue windows from the contiguous finished reading prefix while later reading continues. Reading and directory work share one provider allowance, capped at three. Preserve window boundaries, source order and request caches; do not create smaller paid windows merely to start earlier. Small catalogues still use one request after reading. From its first round, global reconciliation targets at most seven parents (strictly fewer than eight) and regroups both parents and related child questions; shared materials travel together, with complete original support mapped locally to the final scopes. Input windows, convergence and recovery remain bounded. The UI keeps this work under “Read and organize sources”, without a false completed percentage during final ownership checks.
 3. Write from assigned chapters and subtopics. Remove exact duplicate notes; similar passages with different conditions/sources remain distinct.

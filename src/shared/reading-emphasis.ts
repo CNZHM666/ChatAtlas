@@ -8,8 +8,9 @@ import type {VFile} from "vfile";
 import type {Root,Paragraph,PhrasingContent} from "mdast";
 import {aiAdvicePresentation} from "./ai-advice-presentation";
 import {sourceQuoteText} from "./source-quote-text";
+import {wikiDocumentBlocks} from "./wiki-document-blocks";
 
-export interface ReaderHighlights {lead?:boolean;phrases?:string[];sectioned?:boolean;userEdited?:boolean;origin?:string;onHighlight?:(start:number,end:number)=>void}
+export interface ReaderHighlights {lead?:boolean;phrases?:string[];sectioned?:boolean;plainTables?:boolean;userEdited?:boolean;origin?:string;onHighlight?:(start:number,end:number)=>void}
 const compact=(value:string)=>aiAdvicePresentation(value).normalize("NFKC").replace(/\s/gu,"");
 function phraseRange(value:string,phrase:string):{start:number;end:number}|undefined{
  const exact=value.indexOf(phrase);if(exact>=0)return {start:exact,end:exact+phrase.length};
@@ -24,6 +25,11 @@ const LATIN=/[A-Za-z0-9]/u;
 // So does one starting or ending at a joiner inside a command or path ("benchmark:**providers…**", "lib/**ai**"): the
 // bold broke a command a reader copies.
 const JOINER=/[:/._-]/u;
+const QUANTITY_RANGE=/(?<![\w.])\d+(?:\.\d+)?(?:\s*(?:px|ms|s|%|毫秒|秒|分钟))?\s*(?:[~～–—×-]|至|到)\s*\d+(?:\.\d+)?(?:\s*(?:px|ms|s|%|毫秒|秒|分钟))?/giu;
+const splitsQuantity=(text:string,start:number,end:number)=>[...text.matchAll(QUANTITY_RANGE)].some(match=>{
+ const left=match.index,right=left+match[0].length;
+ return start<right&&end>left&&(start>left||end<right);
+});
 const splitsWord=(text:string,start:number,end:number)=>LATIN.test(text[start-1]??"")&&LATIN.test(text[start]??"")||LATIN.test(text[end-1]??"")&&LATIN.test(text[end]??"")
  ||JOINER.test(text[start-1]??"")&&LATIN.test(text[start-2]??"")&&LATIN.test(text[start]??"")||JOINER.test(text[end]??"")&&LATIN.test(text[end-1]??"")&&LATIN.test(text[end+1]??"");
 
@@ -52,7 +58,7 @@ export function readerGuideHighlights({enabled=false,lead=false,phrases=[],secti
     }
     // The lead sentence may itself be a comment on the paragraph.
     if(!phrase||COMMENTARY_SENTENCE.test(phrase.trim()))continue;
-    const range=phraseRange(value,phrase);if(!range||splitsWord(value,range.start,range.end))continue;
+    const range=phraseRange(value,phrase);if(!range||splitsWord(value,range.start,range.end)||splitsQuantity(value,range.start,range.end))continue;
     // A reading cue must retain a directly attached negation or proposal label.
     const qualification=value.slice(0,range.start).match(/(?:AI建议|助手建议|用户(?:报告|反馈)|建议|计划|尚未|暂不|不得|不能|不应|并未|不|未|\b(?:not|never|should|proposed|planned))\s*$/iu);
     if(qualification)range.start-=qualification[0].length;
@@ -80,29 +86,47 @@ const CONNECTIVE=/^(?:并且?|但(?:是)?|而(?:且|是|不|非)?|且|或者?|�
  * it just said ("这一决定明确了…", "这一原则旨在…"). Bold on it points the reader at the least informative words. */
 const FILLER=/^(?:这(?:种|一|些|样|个)?(?:决定|原则|选型|方案|设计|机制|做法|结构|定位|策略|流程|安排|方向|路线|调整)|此举|以(?:确保|保证|便于?|免)|旨在|用于|为了|确保|保证|从而|进而|有助于|这(?:需要|意味着|使得))/u;
 const COMMENTARY_SENTENCE=/^(?:这(?:种|一|些|样|个)|此举|该(?:设计|策略|方案|机制|流程|原则|定位|结构))[^。！？!?]{0,40}?(?:确保|旨在|体现|避免了|使得|突出了|明确了|构成了|简化了|降低了|提升了|保证了|意味着|有助于|奠定)/u;
+const EDITORIAL_LEAD=/^(?:针对.{2,36}(?:的|进行)(?:视觉|界面|体验|排版)?优化|(?:整体|总体)(?:设计|界面|风格)(?:遵循|追求|采用)|(?:in terms of|with regard to|regarding)\b)/iu;
 /** Same reading policy for Reader, preview and export. Only literal text ranges
  * receive markers; saved prose, quotations, code and personal edits stay intact. */
 export function readingEmphasisMarkdown(body:string,options:ReaderHighlights):string{
  if(options.userEdited||options.origin==="user")return body;
  const preferred:string[]=[];
  const protectedRanges=wikiSupplementRanges(body);
- if(options.sectioned){
+ if(options.sectioned||/\d[~～–—×-].*\*\*|\*\*.*[~～–—×-]\d/u.test(body)){
   const changes:Array<{start:number;end:number;text:string}>=[];
+  const originalTables = new Set(options.plainTables ? wikiDocumentBlocks(body).flatMap((block,index,blocks) =>
+   block.kind==="table"&&/原文来源|原文表格|Original source|Table from the discussion/iu.test(`${blocks[index-1]?.text??""}\n${blocks[index+1]?.text??""}`)?[block.start]:[]) : []);
+  const plainTable=(node:import("mdast").RootContent)=>{
+   if(node.type==="strong"&&node.position){
+    const start=node.position.start.offset!,end=node.position.end.offset!;
+    changes.push({start,end,text:body.slice(start+2,end-2)});
+   }else if("children" in node)for(const child of node.children)plainTable(child as import("mdast").RootContent);
+  };
   const quoted=[...body.matchAll(/“[^”]*”|「[^」]*」|『[^』]*』|‘[^’]*’|'[^'\n]*'|"[^"\n]*"/gu)].map(match=>({start:match.index!,end:match.index!+match[0].length}));
   const clean=(node:import("mdast").RootContent)=>{
    if(node.position&&protectedRanges.some(([start,end])=>node.position!.start.offset!>=start&&node.position!.end.offset!<=end))return;
-   if(node.type==="blockquote"||node.type==="code"||node.type==="table")return;
+   if(node.type==="table"){
+    if(options.plainTables&&!originalTables.has(node.position!.start.offset!))plainTable(node);
+    return;
+   }
+   if(node.type==="blockquote"||node.type==="code")return;
    if(node.type==="paragraph")for(const [index,child] of node.children.entries()){
     if(child.type!=="strong"||!child.position)continue;
     // Structure, not emphasis: a short label line (the whole paragraph) or a short run-in
     // label ("**记忆层借鉴**。…") stays bold; stripping it leaves a bare pseudo-heading.
     // A bolded sentence, with or without inline code, is emphasis and is re-chosen below.
     const after=node.children[index+1],label=child.children.map(item=>"value" in item?item.value:"").join("");
-    // So does a label line with only a note in brackets after it ("**你写的**（第 42 条消息）" over the learner's code).
-    if(label.length<=24&&(node.children.length===1||index===0&&after?.type==="text"&&(/^[。：:]/u.test(after.value)||node.children.length===2&&/^\s*[（(][^（()）\n]{1,30}[）)]\s*$/u.test(after.value))))continue;
     const start=child.position.start.offset!,end=child.position.end.offset!;
+    const previous=node.children[index-1],prefix=previous?.type==="text"?previous.value:"",suffix=after?.type==="text"?after.value:"";
+    const partial=splitsQuantity(prefix+label+suffix,prefix.length,prefix.length+label.length);
+    if(!partial&&!options.sectioned)continue;
+    // So does a label line with only a note in brackets after it ("**你写的**（第 42 条消息）" over the learner's code).
+    if(!partial&&!EDITORIAL_LEAD.test(label)&&!/[。！？!?]$/u.test(label)&&label.length<=24&&(node.children.length===1||index===0&&after?.type==="text"&&(/^[。：:]/u.test(after.value)||node.children.length===2&&/^\s*[（(][^（()）\n]{1,30}[）)]\s*$/u.test(after.value))))continue;
     if(quoted.some(range=>start>=range.start&&end<=range.end))continue;
-    const raw=body.slice(start,end),text=raw.slice(2,-2);preferred.push(sourceQuoteText(text));changes.push({start,end,text});
+    const raw=body.slice(start,end),text=raw.slice(2,-2);
+    if(!partial)preferred.push(sourceQuoteText(text));
+    changes.push({start,end,text});
    }
    else if("children" in node)for(const child of node.children)clean(child as import("mdast").RootContent);
   };
@@ -174,10 +198,10 @@ function highlightSections(tree:Root,file:VFile|undefined,phrases:string[],onHig
     // A clause opening with a connective ("但…", "而不只是…") is half of a sentence, not a conclusion.
     if(CONNECTIVE.test(selected.trim()))return [];
     // Nor is a purpose tail or a sentence commenting on the paragraph: the next best point is bolded instead.
-    if(FILLER.test(selected.trim())||COMMENTARY_SENTENCE.test(sentence.trim()))return [];
+    if(FILLER.test(selected.trim())||EDITORIAL_LEAD.test(selected.trim())||COMMENTARY_SENTENCE.test(sentence.trim()))return [];
     // Nor is the lead-in to a colon ("完整的PR流程包括：…"): it names what follows, and the steps are the point.
     if(/^\s*[：:]/u.test(all.slice(before.length+end)))return [];
-    if(!short(selected)||seen.has(key)||localQuotes.some(range=>before.length+start<range.end&&before.length+end>range.start)||quotations.some(range=>absolute+start<range.end&&absolute+end>range.start))return [];
+    if(!short(selected)||seen.has(key)||splitsQuantity(all,before.length+start,before.length+end)||localQuotes.some(range=>before.length+start<range.end&&before.length+end>range.start)||quotations.some(range=>absolute+start<range.end&&absolute+end>range.start))return [];
     return [{node,index,paragraph,start,end,key,priority:point.priority,score:importance(selected),order}];
    });
   })).sort((a,b)=>a.priority-b.priority||b.score-a.score||a.order-b.order||a.start-b.start);

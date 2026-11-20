@@ -2,7 +2,9 @@ import type { WikiKnowledgeUnit } from "./wiki-knowledge";
 import { wikiSaidInQuote } from "./wiki-said-in-quote";
 
 /** A value a reader may take for a spec: a size, a duration, a share or a colour. */
-const FIGURE = /#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b|\d+(?:\.\d+)?\s*(?:px|ms|%|rem|em|pt)\b/giu;
+const SPEC_UNIT = String.raw`(?:px|ms|rem|em|pt|%)(?![\w%])`;
+const SPEC_VALUE = String.raw`\d+(?:\.\d+)?`;
+const FIGURE = new RegExp(String.raw`#[0-9a-f]{6}\b|#[0-9a-f]{3}\b|${SPEC_VALUE}(?:\s*${SPEC_UNIT})?\s*[-–—~～至到]\s*${SPEC_VALUE}\s*${SPEC_UNIT}|${SPEC_VALUE}\s*${SPEC_UNIT}`, "giu");
 const MIN_OTHER_LINES = 3, MAX_NAMED = 4;
 
 /** A subtopic giving many values of which only a few are the user's: a line under its heading names those, so the rest
@@ -22,7 +24,8 @@ export function decidedValuesNotes(body: string, holders: Array<{ text: string; 
     const lines = prose.split("\n").slice(1).filter(line => line.trim() && !line.startsWith(">"));
     const others = lines.filter(line => (line.match(FIGURE) ?? []).some(figure => !figures.includes(figure.replace(/\s+/gu, ""))) && !own.some(text => line.includes(text)));
     if (others.length < MIN_OTHER_LINES) return block;
-    const named = figures.slice(0, MAX_NAMED);
+    if (figures.length > MAX_NAMED) return block;
+    const named = figures;
     const note = zh
       ? `> 本节只有 ${named.join("、")} 是你确认的取值，其余数值是建议。`
       : `> Only ${named.join(", ")} here ${named.length > 1 ? "are" : "is"} your decision${named.length > 1 ? "s" : ""}; the other values are suggestions.`;

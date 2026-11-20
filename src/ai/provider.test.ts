@@ -147,13 +147,15 @@ describe("AI provider model discovery", () => {
 
   it("normalizes Gemini model names and hides models that cannot generate content", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ models: [
-      { name: "models/gemini-dynamic", displayName: "Gemini Dynamic", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/gemini-dynamic", displayName: "Gemini Dynamic", inputTokenLimit: 32768, outputTokenLimit: 1800, supportedGenerationMethods: ["generateContent"] },
       { name: "models/embedding-only", supportedGenerationMethods: ["embedContent"] },
     ] }), { status: 200 })));
 
     await expect(listAvailableModels(settings("gemini", "https://generativelanguage.googleapis.com/v1beta"))).resolves.toEqual([
-      { id: "gemini-dynamic", name: "Gemini Dynamic" },
+      { id: "gemini-dynamic", name: "Gemini Dynamic", maxInputTokens: 32768, maxOutputTokens: 1800 },
     ]);
+    const provider = createAIProvider({ ...settings("gemini", "https://generativelanguage.googleapis.com/v1beta"), model: "models/gemini-dynamic" });
+    expect(provider.capabilities).toMatchObject({ maxInputTokens: 32768, maxOutputTokens: 1800 });
   });
 
   it("offers the major domestic providers as presets", () => {

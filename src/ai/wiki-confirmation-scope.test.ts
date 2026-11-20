@@ -35,6 +35,31 @@ it("keeps an unchosen trigger separate and labels an unsupported extension for r
   expect(unsupported.edits[0].parts[1].unit).toBeUndefined();
 });
 
+it("splits a release checklist by the recorded choice and keeps each group bound to its own evidence", () => {
+  const decision = unit("choice", "同步校验：实施检查。");
+  const value = "至少检查文件名是否合法、内容是否为空、文件大小是否超限以及重复文件";
+  const proposal = unit("proposal", "第一版" + value + "。");
+  const scope = { decision, proposal, choice: "实施检查", question: "第一版是否立即实施文件名是否合法与重复文件检查？" };
+  const table = `| 事项 | 第一版 |
+| --- | --- |
+| 同步校验 | ${value}（AI 建议，待确认） |
+| 日志 | 保留现有日志 |`;
+  const bound = (text: string): boolean => text === value;
+  const review = (input: string, sourceBound = bound, choice = scope) =>
+    applyWikiConfirmationScope(input, [choice], [decision], true, new Set(), sourceBound);
+  const result = review(table);
+  expect(result.text).toContain("| 同步校验（已确认纳入） | 检查文件名是否合法、重复文件 |\n| 同步校验（待确认） | 至少检查内容是否为空、文件大小是否超限 |");
+  expect(result.text).toContain("| 日志 | 保留现有日志 |");
+  expect(result.edits[0].parts).toEqual([
+    { text: "检查文件名是否合法、重复文件", unit: decision },
+    { text: "至少检查内容是否为空、文件大小是否超限", unit: proposal },
+  ]);
+  expect(review(result.text).text).toBe(result.text);
+  expect(review(table.replace("第一版", "第二版")).text).not.toContain("已确认纳入");
+  expect(review(table, () => false).text).not.toContain("已确认纳入");
+  expect(review(table, bound, { ...scope, choice: "暂不实施" }).text).not.toContain("已确认纳入");
+});
+
 it("keeps unit, sign, comparator, and range attached to a value", () => {
   const detail = wikiConfirmationDetails("Upper bound ≤ -10 ms; window 20–30 days; $30");
   expect(wikiConfirmationCovers("Upper bound ≤ −10ms; window 20-30 days; $30", detail)).toBe(true);

@@ -6,7 +6,7 @@ import { measureAILocalStep } from "./pipeline-timing";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { reviseForAnswers, writeLedgerDraft } from "./wiki-knowledge-write";
 import { ledgerDocument } from "./wiki-ledger-document";
-import { pendingWritingQuestions, wikiNamedProjects, withAnswersRevisited, withWriterQuestions, withWritingQuestions } from "./wiki-writing-questions";
+import { pendingWritingQuestions, settledReviewUnits, wikiNamedProjects, withAnswersFrom, withAnswersRevisited, withWriterQuestions, withWritingQuestions } from "./wiki-writing-questions";
 
 export interface FocusWikiDraftCallbacks {
   onKeyDecisions?: (ledger: WikiKnowledgeLedger) => Promise<WikiKnowledgeLedger>;
@@ -22,17 +22,18 @@ type DraftContext = Pick<Parameters<typeof writeLedgerDraft>[1], "ai" | "locale"
     sources: Conversation[];
     preview: Pick<FocusSession, "goal" | "mode" | "scope" | "locale" | "sourceConversationIds" | "sourceVersionIds" | "sourceSignatures" | "sourceRoles" | "sourceMessageOrder" | "wikiProjectBoundary">;
     title: (ledger: WikiKnowledgeLedger) => string;
+    placement?: { ready: Promise<WikiKnowledgeLedger>; stable: ReadonlySet<string>; pending: () => boolean };
   };
 
 /** Generation and updates share the decision prompts, live directory and chapter previews. */
 export async function writeFocusWikiDraft(planned: WikiKnowledgeLedger, context: DraftContext) {
-  const { ai, signal, locale, runId, originals, project, progress, previous, onKeyDecisions, onPartial, onWriterQuestions, settleWriterQuestions } = context;
+  const { ai, signal, locale, runId, originals, project, progress, previous, placement, onKeyDecisions, onPartial, onWriterQuestions, settleWriterQuestions } = context;
   const asked = onKeyDecisions ? await withWritingQuestions(planned, { ai, signal, locale, runId }) : planned;
   const questions = pendingWritingQuestions(asked);
   const scopeGate = asked.documentType === "learning" || wikiNamedProjects(asked).length > 0
     || questions.some(question => question.options.some(option => option.actions.some(action => action.do === "owner")));
   const decision = onKeyDecisions ? measureAILocalStep(runId, "wiki", "wiki:decision-review", () => onKeyDecisions(asked)) : undefined;
-  const pendingDecisions = decision && !scopeGate && questions.length
+  const pendingDecisions = decision && !placement && !scopeGate && questions.length
     ? { units: new Set(questions.flatMap(question => [...question.unitIds, ...question.options.flatMap(option => option.actions.flatMap(action => action.units))])),
         ready: decision.then(answered => withWikiSections(withAnswersRevisited(answered), originals)) }
     : undefined;
@@ -64,7 +65,7 @@ export async function writeFocusWikiDraft(planned: WikiKnowledgeLedger, context:
   let canAskWriterQuestions = !pendingDecisions;
   const onQuestions = onWriterQuestions ? (questions: WikiWritingQuestion[]) => {
     if (!canAskWriterQuestions) { queuedQuestions.push(...questions); return; }
-    const settled = new Set([...(questionLedger.userAnswers ?? []).flatMap(answer => answer.unitIds), ...Object.keys(questionLedger.decisions ?? {})]);
+    const settled = new Set([...(questionLedger.userAnswers ?? []).flatMap(answer => answer.unitIds), ...Object.keys(questionLedger.decisions ?? {}), ...settledReviewUnits(questionLedger)]);
     const fresh = questions.filter(question => {
       const key = [...question.unitIds].sort().join("|");
       if (shown.has(key) || question.unitIds.some(id => settled.has(id))) return false;
@@ -83,7 +84,15 @@ export async function writeFocusWikiDraft(planned: WikiKnowledgeLedger, context:
     return answered;
   }) };
   writingDecisions?.ready.catch(() => undefined);
-  let ledger = await writeLedgerDraft(withWikiSections(organized, originals), { ai, locale, signal, runId, project, progress, onChapters, previous, pendingDecisions: writingDecisions, onQuestions });
+  const pendingPlacement = placement && { stable: placement.pending() ? placement.stable : new Set<string>(), ready: placement.ready.then(placed => {
+    const answered = withAnswersFrom({ ...placed, writingQuestions: organized.writingQuestions }, organized);
+    questionLedger = answered;
+    return withWikiSections(answered, originals);
+  }) };
+  let ledger = await writeLedgerDraft(withWikiSections(organized, originals), {
+    ai, locale, signal, runId, project, progress, onChapters, previous, pendingDecisions: writingDecisions, pendingPlacement, onQuestions,
+  });
+  if (placement) await placement.ready;
   if (settleWriterQuestions) {
     const raised = withWriterQuestions(ledger);
     if (raised.added.length || offeredQuestions.length) {

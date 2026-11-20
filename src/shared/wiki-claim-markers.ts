@@ -1,20 +1,17 @@
 import type {Root,Paragraph,PhrasingContent,RootContent} from "mdast";
 
 export const WIKI_CLAIM_MARKER="#atlas-claim-";
-export interface WikiClaimMarkerPoint {key:string;phrases:string[]}
+export interface WikiClaimMarkerPoint {key:string;phrases:string[];approximate?:boolean}
 
 const textOf=(node:PhrasingContent|RootContent):string=>"value" in node?String(node.value):"children" in node?(node.children as PhrasingContent[]).map(textOf).join(""):"";
 // Matching ignores whitespace and width differences; offsets map back to the raw text.
 const compact=(text:string)=>text.normalize("NFKC").replace(/\s/gu,"");
 const SENTENCE_END=/[。！？!?；;]/u;
 
-function phraseEnd(text:string,phrase:string):number|undefined {
- const exact=text.indexOf(phrase);if(exact>=0)return exact+phrase.length;
- const needle=compact(phrase);if(!needle)return;
+function compactOffsets(text:string){
  let normalized="";const ends:number[]=[];let offset=0;
  for(const char of text){offset+=char.length;for(const part of compact(char)){normalized+=part;ends.push(offset);}}
- const at=normalized.indexOf(needle);
- return at<0?undefined:ends[at+needle.length-1];
+ return {normalized,ends};
 }
 
 /** Insert `node` at a flat-text offset among inline children. Splits a text node;
@@ -45,13 +42,21 @@ function paragraphs(nodes:RootContent[]):Paragraph[]{
 export function wikiClaimMarkers({points=[]}:{points?:WikiClaimMarkerPoint[]}={}){
  return (tree:Root)=>{
   if(!points.length)return;
-  const pending=points.map(point=>({...point,phrases:point.phrases.filter(phrase=>compact(phrase).length>=6)})).filter(point=>point.phrases.length);
+  const pending=points.map(({key,phrases})=>({key,phrases:phrases.map(text=>({text,needle:compact(text)})).filter(({needle})=>needle.length>=6)})).filter(point=>point.phrases.length);
   for(const paragraph of paragraphs(tree.children)){
    if(!pending.length)break;
    const text=paragraph.children.map(textOf).join("");
+   let compacted:ReturnType<typeof compactOffsets>|undefined;
    const placed:Array<{offset:number;key:string}>=[];
    for(let index=0;index<pending.length;index++){
-    const end=pending[index].phrases.map(phrase=>phraseEnd(text,phrase)).find(value=>value!==undefined);
+    let end:number|undefined;
+    for(const phrase of pending[index].phrases){
+     const exact=text.indexOf(phrase.text);
+     if(exact>=0){end=exact+phrase.text.length;break;}
+     const {normalized,ends}=compacted??=compactOffsets(text);
+     const at=normalized.indexOf(phrase.needle);
+     if(at>=0){end=ends[at+phrase.needle.length-1];break;}
+    }
     if(end===undefined)continue;
     const stop=text.slice(end-1).search(SENTENCE_END);
     placed.push({offset:stop<0?text.length:end-1+stop+1,key:pending[index].key});

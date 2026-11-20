@@ -8,6 +8,21 @@ const event = (id: string, fields: Partial<AIUsageEvent>): AIUsageEvent => ({ id
 const diagnostic: AnalysisDiagnostics = { id: "diagnostic-1", runId: run.id, createdAt: 1000, questionsAnalyzed: 2, cachedQuestionsReused: 3, rawMessagesLoaded: 2, aiRequests: 2, estimatedInputTokens: 0, estimatedOutputTokens: 0, relationsVerified: 0, bridgesGenerated: 0, questionCount: 5, topicCount: 2, relationCount: 1, bridgeCount: 0, schemaFailures: 1 };
 
 describe("organization usage analysis", () => {
+  it("measures only provider usage and requires every split branch to recover", () => {
+    const failed = event("root", { operationId: "root", stage: "wiki_chapter_write", status: "failed", tokenSource: "unavailable", outputTokenLimit: 500 });
+    const left = event("left", { operationId: "left", parentOperationId: "root", stage: failed.stage, recoveryReason: "output_truncation", inputTokenLimit: 1000, outputTokenLimit: 150, costCny: .02 });
+    const right = event("right", { ...left, id: "right", operationId: "right", status: "failed", tokenSource: "unavailable", costCny: undefined });
+    const read = (events: AIUsageEvent[]) => analyzeOrganizationRuns([run], events, [])[0];
+    const partial = read([failed, left, right]);
+    expect(partial.retryRecovery).toMatchObject({ requests: 2, providerTokens: 120, unavailableUsage: 1, knownCostCny: .02, unknownCostRequests: 1, attemptedOperations: 1, recoveredOperations: 0, successRate: 0 });
+    expect(partial.stageBudgets).toEqual([{ stage: failed.stage, requests: 3, unavailable: 2,
+      input: { samples: 1, used: 100, limit: 1000, utilization: .1 },
+      output: { samples: 1, used: 20, limit: 150, utilization: 20 / 150 } }]);
+    const cached = event("cache", { ...right, id: "cache", createdAt: 2000, status: "cached" });
+    const complete = read([failed, left, right, cached]);
+    expect(complete.retryRecovery).toMatchObject({ requests: 2, recoveredOperations: 1, successRate: 1 });
+    expect(organizationAnalysisCsv([complete])).toContain('"execution_status","stage_budget_metrics","retry_recovery_metrics","complete_wiki_ms"');
+  });
   it("snapshots pipeline spans so a later live update cannot disagree with exported attempt counts",()=>{
     const input={...run,pipelineSpans:[{id:"generation-1",feature:"wiki" as const,phase:"wiki:generation",startedAt:1000,durationMs:100,status:"failed" as const,reason:"PROVIDER_SCHEMA_invalid_wiki_claim"}]};
     const rows=analyzeOrganizationRuns([input],[],[]);

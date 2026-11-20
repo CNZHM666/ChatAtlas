@@ -13,12 +13,39 @@ const SEQUENCE = /(?:[、，,；;]\s*(?:先(?:将|把|做|完善|完成|验证|�
 const normalize = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[\s*。`]/gu, "");
 const editorFragment = (text: string) => EDITOR_NOTE.test(text) && /…|\.{3}/u.test(text.slice(0, text.search(EDITOR_NOTE)));
 const BROKEN_FLOW = /(?:->|→|=>)[^\n]{0,90}(?:[-=]|->|→|=>)[。.!！]?(?=\s*(?:$|\n)|(?<=[。.!！]))/mu;
+const DANGLING_TERM = /(?:^|(?<=[。！？\n]))\s*[\p{L}\p{N}][\p{L}\p{N}._+/-]{0,25}\s*[)）][。.!?！？](?=\s|$)/u;
+const DANGLING_POSSESSIVE = /(?:^|(?<=[。！？\n]))[^\S\n]*(?:\*\*)?的(?!确)[\p{Script=Han}][^。！？\n]{3,}[。！？]/u;
+const DETACHED_SCOPE = /^(?:(?:第[一二三四五六七八九十\d]+(?:阶段|版)|首版|Phase\s+[A-Z\d.]+|V\d+(?:\.\d+)*)\s*)(?=的)/iu;
 export const INCOMPLETE_WIKI_PROSE = "has incomplete generated prose";
 export const wikiIntegrityNote = (zh: boolean) => zh
   ? "此处的生成文字不完整，请查阅对应原文。"
   : "Generated text is incomplete here. Check the original source.";
 export const wikiIntegrityCandidate = (body: string) => EDITOR_NOTE.test(body) || BROKEN_FLOW.test(body)
-  || body.includes("|") || /\d+\s*[~～–—-]\s*\d+/u.test(body);
+  || DANGLING_TERM.test(body) || DANGLING_POSSESSIVE.test(body) || body.includes("|") || /\d+\s*[~～–—-]\s*\d+/u.test(body);
+
+export function literalWikiProse(text: string, quote: string) {
+  const wanted = text.trim();
+  if (!DANGLING_POSSESSIVE.test(wanted)) return quote.includes(wanted);
+  // The ending of a valid source sentence is not a literal dangling sentence.
+  return quote.split(/(?<=[。！？])|\n/u).some(line => line.trimStart().startsWith(wanted));
+}
+
+/** Restore a stage prefix lost between drafting and rendering, using the
+ * exact original sentence in this chapter rather than inferring a subject. */
+export function restoreDetachedWikiScope(body: string, original: string[]): string {
+  if (!DANGLING_POSSESSIVE.test(body)) return body;
+  return wikiIncompleteProse(body).reverse().reduce((text, block) => {
+    const tail = /^\s*(的[^。！？\n]{4,}[。！？])/u.exec(block.text)?.[1];
+    if (!tail) return text;
+    const matches = new Set(original.flatMap(paragraph => paragraph.split(/(?<=[。！？])|\n/u).flatMap(raw => {
+      const sentence = raw.trim(), scope = DETACHED_SCOPE.exec(sentence)?.[0];
+      return scope && sentence.slice(scope.length) === tail ? [scope] : [];
+    })));
+    if (matches.size !== 1) return text;
+    const at = block.start + block.text.indexOf(tail);
+    return text.slice(0, at) + [...matches][0] + text.slice(at);
+  }, body);
+}
 
 /** Recover a clipped rule cell from its own cited statement. A matching action
  * with an identifier and the same explicit consequence are required. */
@@ -46,15 +73,15 @@ export function restoredConditionalNegation(problem:string,before:string,after:s
 
 /** Only inspect generated prose. Literal code and quoted source material are left intact. */
 export function wikiIncompleteProse(body: string) {
-  if (!EDITOR_NOTE.test(body) && !BROKEN_FLOW.test(body)) return [];
+  if (!EDITOR_NOTE.test(body) && !BROKEN_FLOW.test(body) && !DANGLING_TERM.test(body) && !DANGLING_POSSESSIVE.test(body)) return [];
   return wikiDocumentBlocks(body).flatMap(block => {
     if (block.kind !== "paragraph" && block.kind !== "list") return [];
     const prose = block.text.replace(/`[^`\n]+`|〔[^〕\n]+〕|\[S-\d+-[a-z0-9]+\]/gu, "");
-    const fragment = prose.split(/(?<=[。！？])|\n/u).find(line => BROKEN_FLOW.test(line) && CUT_FLOW.test(line));
+    const fragment = prose.split(/(?<=[。！？])|\n/u).find(line => BROKEN_FLOW.test(line) && CUT_FLOW.test(line)) ?? prose.match(DANGLING_TERM)?.[0] ?? prose.match(DANGLING_POSSESSIVE)?.[0];
     const note = prose.match(EDITOR_NOTE)?.[0];
     if (!note && !fragment) return [];
     const raw = block.text.split(/(?<=[。！？])|(?<=[.!?])(?=\s)|(?<=\n)/u);
-    const preserved = raw.filter(sentence => !EDITOR_NOTE.test(sentence) && !CUT_FLOW.test(sentence.replace(/〔[^〕\n]+〕|\[S-\d+-[a-z0-9]+\]/gu, "").trim())).join("").trim();
+    const preserved = raw.filter(sentence => !EDITOR_NOTE.test(sentence) && !DANGLING_TERM.test(sentence) && !DANGLING_POSSESSIVE.test(sentence) && !CUT_FLOW.test(sentence.replace(/〔[^〕\n]+〕|\[S-\d+-[a-z0-9]+\]/gu, "").trim())).join("").trim();
     const anchor = (fragment?.split(/->|→|=>/u)[0] ?? preserved).trim().slice(0, 30);
     return [{ ...block, preserved, problem: anchor ? `"${anchor}…" ${INCOMPLETE_WIKI_PROSE}` : INCOMPLETE_WIKI_PROSE }];
   });
@@ -84,7 +111,15 @@ function headingTarget(text: string, unit: WikiKnowledgeUnit): string | undefine
 }
 
 function repairProse(text: string, units: WikiKnowledgeUnit[], zh: boolean): string | undefined {
-  if (units.some(unit => unit.evidence.quote.includes(text))) return;
+  if (units.some(unit => literalWikiProse(text, unit.evidence.quote))) return;
+  if (DANGLING_POSSESSIVE.test(text) && /^\s*的(?!确)/u.test(text) && units.length === 1) {
+    const tail = normalize(text), unit = units[0];
+    const matching = unit.statement.split(/(?<=[。！？])/u).map(sentence => sentence.trim()).find(sentence => {
+      const whole = normalize(sentence);
+      return whole.length > tail.length && whole.endsWith(tail);
+    });
+    if (matching && normalize(matching) === normalize(unit.statement)) return withStop(wikiStatementWithConditions(unit, zh));
+  }
   if (EDITOR_NOTE.test(text)) {
     const note = text.match(EDITOR_NOTE)!;
     const start = note.index!;
@@ -117,7 +152,8 @@ function repairProse(text: string, units: WikiKnowledgeUnit[], zh: boolean): str
 /** The same final pass is used for new drafts and older generated chapters.
  * Claims keep their bindings. Source blocks and personal edits are handled by
  * the caller and never reconstructed here. */
-export function wikiChapterIntegrity(chapter: WikiDraftChapter, unitOf: (id: string) => WikiKnowledgeUnit | undefined, zh: boolean) {
+export function wikiChapterIntegrity(chapter: WikiDraftChapter, unitOf: (id: string) => WikiKnowledgeUnit | undefined, zh: boolean,
+  draftClaims: readonly WikiDraftClaim[] = []) {
   let body = chapter.body, repaired = 0;
   const problems: string[] = [];
   const attachments = wikiSupplementRanges(chapter.body).map(([start,end])=>chapter.body.slice(start,end));
@@ -125,7 +161,7 @@ export function wikiChapterIntegrity(chapter: WikiDraftChapter, unitOf: (id: str
   const paragraphs = chapter.paragraphs.map(paragraph => {
     const original = paragraph.text;
     if(attachments.some(attachment=>attachment.includes(original)))return paragraph;
-    const maybeProse = EDITOR_NOTE.test(original) || BROKEN_FLOW.test(original) || /\d/u.test(original);
+    const maybeProse = EDITOR_NOTE.test(original) || BROKEN_FLOW.test(original) || DANGLING_POSSESSIVE.test(original) || /\d/u.test(original);
     const maybeTable = original.includes("|");
     if (!maybeProse && !maybeTable) return paragraph;
     const sources = known(paragraph.unitIds);
@@ -135,7 +171,17 @@ export function wikiChapterIntegrity(chapter: WikiDraftChapter, unitOf: (id: str
       ? wikiDocumentBlocks(original).filter(block => block.kind === "code" || block.kind === "blockquote").map(block => block.text) : [];
     let claims: WikiDraftClaim[] = (paragraph.claims ?? []).map(claim => {
       if (!maybeProse || !claim.text || !text.includes(claim.text) || /^\s*[>`~|]/u.test(claim.text) || literal.some(block => block.includes(claim.text))) return claim;
-      const next = repairProse(claim.text, known(claim.unitIds), zh);
+      const bound = known(claim.unitIds);
+      if (bound.length !== claim.unitIds.length) return claim;
+      // A display pass can strip a stage label from a previously complete
+      // sentence. Recover its exact wording and bindings from the stored draft.
+      const backed = /^的(?!确)/u.test(claim.text)&&bound.length===1 ? draftClaims.filter(previous=>{
+        const prefix=previous.text.slice(0,-claim.text.length);
+        return previous.unitIds.length===1&&previous.unitIds[0]===bound[0].id&&previous.text.endsWith(claim.text)
+          && /^(?:第[一二三四五六七八九十\d]+(?:阶段|版本?|轮)|Phase\s+\d+)\s*$/iu.test(prefix)
+          && statesCore(bound[0].statement,previous.text);
+      }) : [];
+      const next = backed.length===1 ? backed[0].text : repairProse(claim.text, bound, zh);
       if (!next || next === claim.text) return claim;
       const followingStop = /[。.!?！？]$/u.test(next) && /[。.!?！？]/u.test(text[text.indexOf(claim.text) + claim.text.length] ?? "");
       const actual = followingStop ? next.slice(0, -1) : next;
@@ -192,7 +238,7 @@ export function wikiChapterIntegrity(chapter: WikiDraftChapter, unitOf: (id: str
   // Recheck the delivered Markdown after the repairs, including prose added
   // by local presentation passes. Code, blockquotes and inline code stay literal.
   for (const block of wikiIncompleteProse(body)) {
-    if (paragraphs.some(paragraph => paragraph.text.includes(block.text) && known(paragraph.unitIds).some(unit => unit.evidence.quote.includes(block.text)))) continue;
+    if (paragraphs.some(paragraph => paragraph.text.includes(block.text) && known(paragraph.unitIds).some(unit => literalWikiProse(block.text, unit.evidence.quote)))) continue;
     problems.push(block.problem);
   }
   return { body, paragraphs, repaired, problems };

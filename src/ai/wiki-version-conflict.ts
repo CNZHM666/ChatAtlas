@@ -1,9 +1,10 @@
 import { statementsConflict, type WikiKnowledgeUnit, type WikiUnitRelation } from "../shared/wiki-knowledge";
 import { knowledgeOwner, knowledgeScopesAgree, knowledgeStage, knowledgeTerms } from "../shared/knowledge-subject";
 
-const REPLACES = /取代|替代|代替|已被.+废弃|(?:现|现在|现已|改|后续|后来|随后)(?:简化|改写|调整|切换|改|换|转)(?:成|为)|\b(?:replaced?|superseded?|supplanted?|switched to|now simplified to)\b/iu;
+const REPLACES = /取代|替代|代替|(?:已(?:经)?\s*(?:被\s*)?(?:弃用|废弃|停用|淘汰)|不再(?:沿用|采用)旧)|(?:现|现在|现已|改|后续|后来|随后)(?:简化|改写|调整|切换|改|换|转)(?:成|为)|\b(?:replaced|superseded|supplanted|retired|abandoned|switched to|now simplified to)\b/iu;
 const CONTINUES = /继续保留|仍(?:然)?保留|沿用|保留.{0,36}(?:再|并|同时|另外|但)?(?:增加|新增)|\b(?:still|continue to) (?:keep|use|retain)\b/iu;
-export const assertsWikiReplacement = (text: string) => REPLACES.test(text);
+const NON_REPLACEMENT = /(?:无需|并未|没有|从未|并不|不应|不能|不再|避免|排除)(?:直接)?(?:替代|取代|代替)|(?:是否|可能)(?:已经?|被)?(?:替代|取代|代替|弃用|废弃|停用)|\b(?:never|not|whether|may)\s+(?:be\s+|been\s+|it\s+was\s+)?(?:replaced|superseded|supplanted|retired|abandoned)\b/giu;
+export const assertsWikiReplacement = (text: string) => REPLACES.test(text.replace(NON_REPLACEMENT, ""));
 
 /** A paraphrase can claim replacement only if its own sources or a resolved
  * relation state that change, and both related points occur in the claim. */
@@ -15,8 +16,8 @@ export function wikiReplacementSupported(text: string, cited: WikiKnowledgeUnit[
     const shared = [...own].filter(term => terms.has(term)).length;
     return shared >= Math.min(3, own.size) && own.size > 0 && shared / own.size >= .5;
   };
-  if (cited.some(unit => [unit.statement, unit.evidence.quote].some(source => source.split(/[。！？\n]|\.(?=\s)/u)
-    .some(value => assertsWikiReplacement(value) && !CONTINUES.test(value) && mentions(value))))) return true;
+  if (cited.some(unit => unit.evidence.quote.split(/[。！？\n]|\.(?=\s)/u)
+    .some(value => assertsWikiReplacement(value) && !CONTINUES.test(value) && mentions(value)))) return true;
   const byId = new Map(cited.map(unit => [unit.id, unit]));
   return relations.some(relation => {
     if (relation.kind !== "replaces" || relation.status !== "resolved") return false;

@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <b>简体中文</b> · <a href="README.en.md">English</a> · <b>v0.1.5 Alpha</b>
+  <b>简体中文</b> · <a href="README.en.md">English</a> · <b>v0.1.6 Alpha</b>
 </p>
 
 <p align="center">
-  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.5/ChatAtlas-extension-v0.1.5.zip"><b>下载 Alpha 安装包</b></a>
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip"><b>下载 Alpha 安装包</b></a>
   · <a href="#安装到-chrome-或-edge">安装</a>
   · <a href="CHANGELOG.md">更新记录</a>
   · <a href="https://github.com/CNZHM666/ChatAtlas/issues">反馈</a>
@@ -22,7 +22,7 @@
 
 ## 安装到 Chrome 或 Edge
 
-**[下载 ChatAtlas 安装包（ZIP）](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.5/ChatAtlas-extension-v0.1.5.zip)** · [查看版本发布页](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.5)
+**[下载 ChatAtlas 安装包（ZIP）](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip)** · [查看版本发布页](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.6)
 
 1. 下载 ZIP，解压到一个以后还会保留的文件夹。
 2. 在浏览器地址栏输入 **Chrome** 的 `chrome://extensions` 或 **Edge** 的 `edge://extensions`，打开「开发者模式」。
@@ -65,7 +65,7 @@ flowchart LR
 ```
 
 - **知识点账本**连接原始消息与成文结论。原文、整理稿和用户编辑分别保存，确认只关联对应的决定。
-- **分批生成与增量更新**复用成功的读取结果。来源变化时可以先预览影响的章节，再采用更新。
+- **分批生成与增量更新**复用通过检查的读取结果。补读聚焦遗漏材料，来源变化时先预览受影响章节。
 - **本地存储与按需 AI**。对话、账本与 Wiki 存在浏览器 IndexedDB。主动生成时，选中的材料发给你配置的模型服务商。阅读、基础查找与导出可以在本地完成。
 
 [架构说明](ARCHITECTURE.md) · [AI 工作流](AI_WORKFLOWS.md) · [隐私说明](docs/PRIVACY.md)

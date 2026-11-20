@@ -20,10 +20,10 @@ import { chapterEvidence, evidenceSnapshotKey, evidenceVersion, evidenceReadingG
 import { invalidateMessageReadCache } from "../../storage/message-read-cache";
 import "../workspace-source-panel.css";
 import { originalEvidenceHighlights, originalEvidenceClaims, evidenceRoleWarnings, type EvidenceHighlight } from "../../shared/original-evidence-highlights";
-import { projectKnowledgeView } from "../../shared/project-knowledge-view";
 import { evidenceTextLocator, evidenceTextRange, evidenceSourceRanges } from "../evidence-highlight";
-import { needsConfirmation, type EvidencePoint } from "../workspace-evidence-context";
+import { needsConfirmation, type EvidencePoint, type WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import {evidenceReadingIdentity,markEvidenceRead} from "../../storage/evidence-reading";
+import { wikiQuoteAsksOnlyForFeedback } from "../../shared/wiki-said-in-quote";
 const noMessages:ConversationMessage[]=[];
 
 // Component markup (<box>, <text>) is read through, not as one block of HTML with no words.
@@ -34,14 +34,17 @@ const overlap=(own:Set<string>,theirs:Set<string>)=>{let shared=0;for(const term
  * heading that makes the point. A quote in another language than its claim shares little, and with no such sentence
  * it is still the best guide. */
 function quoteSupports(claim:string,quote:string,content:string){
+  if(wikiQuoteAsksOnlyForFeedback(quote)&&!wikiQuoteRange(quote,claim))return false;
   const conditions=evidenceConditions(claim);
   if(!evidenceConditionsMatch(conditions,sourceQuoteText(quote)))return false;
   if(conditions.length&&!evidenceConditionDescriptionMatches(meaningTerms(evidenceConditionDescription(claim)),visibleTerms(quote)))return false;
   const own=meaningTerms(claim),theirs=visibleTerms(quote);
   if(own.size<3)return true;
   const fit=overlap(own,theirs);
-  if(fit.shared>=3&&fit.cover>=QUOTE_FIT)return true;
-  if(content.split(/(?<=[。！？!?；;])|\n/u).some(sentence=>{const near=overlap(own,visibleTerms(sentence));return near.cover>=CLAIM_SENTENCE.cover&&near.shared>=CLAIM_SENTENCE.shared;}))return false;
+  const good=fit.shared>=3&&fit.cover>=QUOTE_FIT;
+  if(good&&fit.shared/own.size>=.4)return true;
+  if(content.split(/(?<=[。！？!?；;])|\n/u).some(sentence=>{const near=overlap(own,visibleTerms(sentence));return near.cover>=CLAIM_SENTENCE.cover&&near.shared>=Math.max(CLAIM_SENTENCE.shared,fit.shared+2);}))return false;
+  if(good)return true;
   // A numbered code list/vertical flow may state the claim only across lines.
   // Do not keep an unrelated saved quote just because no single line is long.
   if(/(?:^|\n)[ >\t]*(?:`{3,}|~{3,})/u.test(content)){
@@ -99,8 +102,9 @@ function HolderQuestion({ point, zh, asked, canEdit, originalLocated, onAnswer }
 /** Which mark shows where two overlap: the quote over close wording over its surrounding sentence; the lines (cue,
  * rest of the exchange) above them all, since they only underline. */
 const HIGHLIGHT_PRIORITY:Record<string,number>={"atlas-original-context":0,"atlas-original-related":1,"atlas-original-support":1,"atlas-original-similar":2,"atlas-original-proof":3,"atlas-original-cue":4};
-export function WorkspaceSourcePanel({ session, reference, references, onSelect, claim, quote: savedQuote, tableTarget, sectionId, readerError, zh, onClose, onReader, embedded=false, returnLabel, points, pointIndex, onPoint, onHolder, next, mode, locationRevision, onEditClaim, onToolsHost }: {
+export function WorkspaceSourcePanel({ session, reference, references, onSelect, claim, quote: savedQuote, sourcePassages, tableTarget, sectionId, readerError, zh, onClose, onReader, embedded=false, returnLabel, points, pointIndex, onPoint, onHolder, next, mode, locationRevision, onEditClaim, onToolsHost }: {
   session: FocusSession; reference: FocusEvidence; references?: FocusEvidence[]; claim?: string; quote?: string; conversationTitle?: string; zh: boolean;
+  sourcePassages?: WorkspaceEvidenceOptions["sourcePassages"];
   onSelect: (ref: FocusEvidence) => void; onClose: () => void; onReader?: () => void; embedded?:boolean; returnLabel?:string;
   readerError?: string; sectionId?:string; tableTarget?:string;
   /** Point-by-point mode: step through claims; references are only this point's originals. */
@@ -117,8 +121,6 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
   onEditClaim?: (point: EvidencePoint) => void;
 }) {
   const point = points && pointIndex !== undefined ? points[pointIndex] : undefined;
-  const quotes = useMemo(() => savedQuote ? claim ? narrowQuotePassages(claim, savedQuote) : [savedQuote] : [], [claim, savedQuote]);
-  const quote = quotes[0];
   // Asking: the question says what is wrong, so the kind chip, the flag banner and the no-literal-match line go.
   // Checking at all: the question or the recorded status says it, so none of them shows, an answered point included.
   const checking = Boolean(point && onHolder);
@@ -130,8 +132,6 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
   const [highlights,setHighlights]=useState<Array<{top:number;left:number;width:number;height:number;kind:EvidenceHighlight["kind"]|"support"}>>([]),[retry,setRetry]=useState(0);
   const [overlay, setOverlay] = useState(() => window.matchMedia?.("(max-width:940px)").matches ?? false);
   const [conditionMissing,setConditionMissing]=useState(false);
-  // No words of the original state the claim: what is marked is only the closest wording, and the panel says so.
-  const [nearOnly,setNearOnly]=useState(false);
   const [renderRevision,setRenderRevision]=useState(0);
   const [missingTable,setMissingTable]=useState("");
   const manualPosition=useRef("");
@@ -167,6 +167,19 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
   }, [overlay,embedded]);
   useEffect(() => { if(embedded)return;const base = panel.current?.closest(".focus-workspace, .focus-preview")?.querySelector<HTMLElement>(".project-reading-base, .focus-preview-scroll"); if (!base) return; const previous = base.inert; base.inert = overlay || [...document.querySelectorAll(".ai-context-backdrop")].some(element=>!element.closest("[hidden]")); return () => { base.inert = previous; }; });
   const target = messages.find(message => message.id === current.messageId || message.platformMessageId === current.messageId);
+  const quotes = useMemo(() => {
+    const currentIds = sourcePassages && target ? new Set((references ?? [current]).filter(ref =>
+      ref.conversationId === target.conversationId && (ref.messageId === target.id || ref.messageId === target.platformMessageId)
+      && evidenceSnapshotKey(session, ref) === evidenceSnapshotKey(session, current)).map(ref => ref.id)) : undefined;
+    const originals = currentIds ? sourcePassages!.filter(item => currentIds.has(item.referenceId)).map(item => item.quote) : savedQuote ? [savedQuote] : [];
+    return [...new Set(originals.flatMap(original => {
+      if (!claim) return [original];
+      if (wikiQuoteAsksOnlyForFeedback(original) && !wikiQuoteRange(original, claim)) return [];
+      const narrowed = narrowQuotePassages(claim, original);
+      return target && !narrowed.some(part => wikiQuoteRange(target.content, part)) && wikiQuoteRange(target.content, original) ? [original] : narrowed;
+    }))];
+  }, [claim, savedQuote, sourcePassages, references, current, target, session]);
+  const quote = quotes[0];
   const excerpt = quote || current.excerpt;
   const located = target && wikiQuoteRange(target.content, excerpt);
   const locatedStart=located?.start,locatedEnd=located?.end;
@@ -183,7 +196,7 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
   const originalLocated = Boolean(target && quoteFits && !loading && !stale && quotes.length && quotes.every(text=>wikiQuoteRange(target.content,text)));
   const asking = Boolean(point && onHolder && mode!=="view" && needsConfirmation(point));
   const explicitQuote=quoteFits?quote:undefined;
-  const [warningSources,setWarningSources]=useState<{key:string;messages:ConversationMessage[];complete:boolean}>();
+  const [warningSources,setWarningSources]=useState<{key:string;messages:ConversationMessage[]}>();
   const hasRoleWarnings = !point && sourceClaims.length > 0;
   const warningKey=useMemo(() => hasRoleWarnings ? JSON.stringify([session.id,sourceClaims,scopedReferences,session.sourceVersionIds,session.sourceSignatures,session.sourceRoles]) : "",
     [hasRoleWarnings, session.id, sourceClaims, scopedReferences, session.sourceVersionIds, session.sourceSignatures, session.sourceRoles]);
@@ -195,14 +208,12 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     void Promise.all(unique.map(async ref=>{
       const resolved=evidenceVersion(session,ref),key=JSON.stringify([session.id,ref.conversationId,resolved,evidenceSnapshotKey(session,ref),session.sourceSignatures?.[ref.conversationId],session.sourceRoles?.[ref.conversationId],session.sourceMessageOrder?.[ref.conversationId]]);
       try{const value=cache.current.get(key)??(ambiguousEvidenceVersion(session,ref)?[]:example?example.knowledge(session).messages.filter(message=>message.conversationId===ref.conversationId):await readSessionSource(session,ref.conversationId,ref.messageId,resolved));if(alive)cache.current.set(key,value);return value;}catch{return undefined;}
-    })).then(results=>{if(alive)setWarningSources({key:warningKey,messages:results.flatMap(value=>value??[]),complete:results.every(value=>value!==undefined)});});
+    })).then(results=>{if(alive)setWarningSources({key:warningKey,messages:results.flatMap(value=>value??[])});});
     return()=>{alive=false;};
   // The serialized key binds all original versions and claim identities.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[warningKey,example]);
-  const acceptedClaims=useMemo(()=>new Set(hasRoleWarnings ? projectKnowledgeView(session).facts.filter(fact=>fact.adoption==="accepted").map(fact=>JSON.stringify([fact.claim.text,fact.claim.quote])) : []),[hasRoleWarnings,session]);
   const roleMessages=warningSources?.key===warningKey?warningSources.messages:messages;
-  const roleSourcesComplete=warningSources?.key===warningKey&&warningSources.complete;
   // Point mode leads with the quoted passage; the whole message and conversation are opt-in.
   // Both ways in show the same thing: the whole question and reply, the cited words highlighted.
   const turn = useMemo(()=>target ? messageTurn(messages,target) : [],[messages,target]);
@@ -227,7 +238,8 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     if (tableTarget || !target || !quoteFits) return "[]";
     const refs=scopedReferences.filter(ref=>evidenceSnapshotKey(session,ref)===evidenceSnapshotKey(session,current)&&[target.id,target.platformMessageId].includes(ref.messageId));
     const selected=refs.some(ref=>ref.id===current.id)?current:refs[0];
-    const marks=selected?(quotes.length ? quotes : [undefined]).flatMap(quote=>originalEvidenceHighlights(session,selected,target,quote,{sectionId,references:scopedReferences,focus:claim||section?.title})):[];
+    const inputs = quotes.length ? quotes : claim ? wikiQuoteRange(target.content, claim) ? [claim] : [] : [undefined];
+    const marks=selected?inputs.flatMap(quote=>originalEvidenceHighlights(session,selected,target,quote,{sectionId,references:scopedReferences,focus:claim||section?.title})):[];
     return JSON.stringify([{id:target.id,marks}]);
   },[scopedReferences,session,current,quotes,quoteFits,sectionId,section,claim,target,tableTarget]);
   useEffect(()=>{
@@ -240,7 +252,7 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     return()=>{observer.disconnect();cancelAnimationFrame(frame);};
   },[loading,target,context]);
   useEffect(() => {
-    setHighlights([]);setConditionMissing(false);setNearOnly(false);if(loading||!targetBody.current||!target)return;
+    setHighlights([]);setConditionMissing(false);if(loading||!targetBody.current||!target)return;
     const root=targetBody.current,host=body.current;if(!host)return;
     if(tableTarget){
       if(loaded?.key!==revision||root.querySelector('.reader-long-text[aria-busy="true"]'))return;
@@ -271,6 +283,8 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
       return()=>{cancelAnimationFrame(frame);for(const event of events)host.removeEventListener(event,stop);table?.removeAttribute("data-atlas-table-active");};
     }
     const messageRoots=Array.from(contentRoot.current?.querySelectorAll<HTMLElement>("[data-source-content]")??[]);
+    const turnIds=new Set(turn.map(message=>message.id));
+    const neighbouringRoots=messageRoots.filter(element=>element!==root&&turnIds.has(element.dataset.sourceContent??""));
     const matchedProofs = (JSON.parse(proofKey) as Array<{id:string;marks:EvidenceHighlight[]}>).flatMap(proof=>{const messageRoot=messageRoots.find(item=>item.dataset.sourceContent===proof.id),message=shown.find(item=>item.id===proof.id);return messageRoot&&message?evidenceSourceRanges(messageRoot,message.content,proof.marks):[];});
     const required=evidenceConditions(claim??""),proofText=matchedProofs.filter(proof=>proof.highlight.kind==="quote").map(proof=>proof.range.toString()).join("\n");
     const proofComplete=!required.length||evidenceConditionsMatch(required,proofText)&&evidenceConditionDescriptionMatches(meaningTerms(evidenceConditionDescription(claim??"")),meaningTerms(proofText));
@@ -283,28 +297,28 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     const derivedFrom=quote?quoteFits?[claim,quote]:[claim]:claim?[claim]:[current.excerpt,...sourceClaims.flatMap(item=>[item.text,item.quote])];
     // A scope claim ("涵盖计时控制、后台运行…") marks each item where the original names it, in the cited message first.
     const items=claim?listItems(claim):[];
-    const itemMarks=items.flatMap(item=>listItemRanges(root,[item])[0]??(contentRoot.current?listItemRanges(contentRoot.current,[item])[0]:undefined)??[]);
+    const itemMarks=items.flatMap(item=>listItemRanges(root,[item])[0]??[]);
     // Items the original does not name word for word (a flow drawn across lines) still get their closest sentences.
-    const similar=proofs.length||items.length&&itemMarks.length===items.length?[]:(()=>{const limit=Math.max(2,items.length),own=derivedSentenceRanges(root,derivedFrom,limit);return own.length||!contentRoot.current?own:derivedSentenceRanges(contentRoot.current,derivedFrom,limit);})();
+    const similar=proofs.length||items.length&&itemMarks.length===items.length?[]:derivedSentenceRanges(root,derivedFrom,Math.max(2,items.length));
     // The rest of the turn can carry the claim too: a question quoted for "帮学生按番茄钟学习" leaves the reply's
     // "轻量、极简、无需注册" unmarked. Its sentences close to the claim are marked as close in wording.
-    const turnIds=new Set(turn.map(message=>message.id));
-    const support=claim?messageRoots.filter(element=>element.dataset.sourceContent!==target.id&&turnIds.has(element.dataset.sourceContent??"")).flatMap(element=>similarSentenceRanges(element,[claim],1,"strict",false)):[];
+    const directLocated=proofs.length||similar.length||itemMarks.length;
+    const support=claim?neighbouringRoots.flatMap(element=>similarSentenceRanges(element,[claim],directLocated ? 1 : 2,"strict",false)):[];
     // The words that raised a flag ("先不做", the item a plan lists as V2) are marked on their own.
     const cueText=mode==="view"?undefined:point?.attention?.subject??point?.attention?.cue;
     const cue=cueText&&contentRoot.current?evidenceTextLocator(contentRoot.current)(cueText):undefined;
-    setNearOnly(!proofs.length&&!itemMarks.length&&similar.length>0);
     const ranges=[...(cue?[cue]:[]),...proofs.map(proof=>proof.range),...itemMarks,...similar,...support];
-    setConditionMissing(!ranges.length&&evidenceConditions(claim??"").length>0);
+    setConditionMissing(!proofs.length&&!similar.length&&!itemMarks.length&&evidenceConditions(claim??"").length>0);
     const titles=new Map<HTMLElement,string>();
     for(const proof of proofs){const element=proof.range.startContainer.parentElement?.closest<HTMLElement>("[data-reader-source-start]");if(!element)continue;if(!titles.has(element))titles.set(element,element.title);const record=sourceClaims[proof.highlight.claimIndex??-1];element.title=proof.highlight.kind==="related"?(zh?"相关段落（未核对）":"Related passage (unverified)"):record?`${(proof.highlight.claimIndex??0)+1}. ${record.text}`:claim??"";}
     // A quote that does not state the claim is no place to scroll to.
-    const range=quoteFits?evidenceTextRange(root,excerpt):undefined;
+    const range=!claim&&quoteFits?evidenceTextRange(root,excerpt):undefined;
     // The topmost quoted words: several quotes of one original are read from the top, and landing on the claim's own
     // quote, last in the reply, left the marks above it unseen.
     const quoted=[...itemMarks,...proofs.filter(proof=>proof.highlight.kind==="quote"&&root.contains(proof.range.startContainer)).map(proof=>proof.range)];
     const topmost=quoted.reduce<Range|undefined>((first,item)=>!first||item.compareBoundaryPoints(Range.START_TO_START,first)<0?item:first,undefined);
-    const focusedRange=cue??topmost??ranges.find(item=>root.contains(item.startContainer))??ranges[0];
+    const focusedRange=cue??topmost??similar[0]??proofs[0]?.range??support[0];
+    host.toggleAttribute("data-related-focus", Boolean(!cue && !directLocated && support.length));
     let interrupted=manualPosition.current===positionKey,frame=0,settling=true;
     const settled=setTimeout(()=>{settling=false;},500);
     const geometry=()=>{
@@ -315,7 +329,7 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
       if(interrupted){geometry();return;}
       // The cited words land a quarter of the way down, with the question above them still in reach; the question
       // itself only when no words are marked. The tail spacer is only as tall as that landing needs.
-      const anchor=turnAnchor.current??root;
+      const anchor=claim?root:turnAnchor.current??root;
       const proofRect=focusedRange?.getBoundingClientRect?.(),marked=Boolean(proofRect&&proofRect.height>0);
       const rect=marked?proofRect!:range?.getBoundingClientRect?.()??anchor.getBoundingClientRect(),bounds=host.getBoundingClientRect(),lead=marked?Math.round(host.clientHeight*.25):24;
       if(endSpacer.current){const below=endSpacer.current.getBoundingClientRect().top-rect.top;endSpacer.current.style.height=`${Math.max(0,host.clientHeight-lead-below-16)}px`;}
@@ -335,7 +349,7 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
       const groups:Array<[string,Range[]]>=[["atlas-original-proof",[...proofs.filter(proof=>proof.highlight.kind==="quote").map(proof=>proof.range),...itemMarks]],["atlas-original-context",proofs.filter(proof=>proof.highlight.kind==="context").map(proof=>proof.range)],["atlas-original-related",proofs.filter(proof=>proof.highlight.kind==="related").map(proof=>proof.range)],["atlas-original-similar",similar],["atlas-original-support",support],["atlas-original-cue",cue?[cue]:[]]];
       for(const [name,selected] of groups){if(!selected.length)continue;const highlight=new Highlight(...selected);highlight.priority=HIGHLIGHT_PRIORITY[name]??0;CSS.highlights.set(name,highlight);registered.set(name,highlight);}
     }
-    return()=>{cancelAnimationFrame(frame);clearTimeout(settled);for(const event of ["wheel","touchstart","pointerdown","keydown"])host.removeEventListener(event,stop);observer?.disconnect();for(const [name,highlight] of registered)if(CSS.highlights.get(name)===highlight)CSS.highlights.delete(name);for(const [element,title] of titles)element.title=title;};
+    return()=>{host.removeAttribute("data-related-focus");cancelAnimationFrame(frame);clearTimeout(settled);for(const event of ["wheel","touchstart","pointerdown","keydown"])host.removeEventListener(event,stop);observer?.disconnect();for(const [name,highlight] of registered)if(CSS.highlights.get(name)===highlight)CSS.highlights.delete(name);for(const [element,title] of titles)element.title=title;};
   }, [loading, target, excerpt, quote, quoteFits, context, proofKey, shown, sourceClaims, zh, claim, point, current.excerpt, renderRevision, positionKey, mode, turn,tableTarget,loaded?.key,revision,locatedStart,locatedEnd]);
   const {groups,currentGroup}=useMemo(()=>{
     const originals=new Map<string,ConversationMessage[]>();
@@ -398,10 +412,8 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     {checkMode&&next&&!remaining?<button type="button" className="workspace-source-next-chapter" onClick={next.onNext}>{next.label}</button>:null}
     {point?.attention&&!checking?<p className="workspace-source-attention">{evidenceAttentionText(point.attention,zh)}</p>:null}
     {point?.source === "decision" && available.length > 1 ? <p className="workspace-source-point-note">{zh ? "包含 AI 的提议和你的确认，用“原话”箭头切换。" : "Includes the AI proposal and your confirmation; switch with the Original arrows."}</p> : null}
-    {!point&&!loading&&!stale&&target?sourceClaims.filter(item=>!explicitQuote||item.quote===explicitQuote).flatMap((item,index)=>evidenceRoleWarnings(item,roleMessages,scopedReferences,acceptedClaims.has(JSON.stringify([item.text,item.quote]))).filter(warning=>warning!=="assistant-decision"||roleSourcesComplete).map(warning=><p key={`${index}-${warning}`} className="workspace-source-notice">{item.text}: {warning==="assistant-decision"?zh?"引文来自助手消息，可能是建议而非用户决定":"The quotation comes from an assistant message; it may be advice rather than a user decision":warning==="pasted-ai"?zh?"引文是用户粘贴的 AI 内容，不能单独证明已采纳":"The user pasted AI content; this alone does not establish adoption":zh?"依据是计划或建议，不能证明已完成":"The evidence is a plan or suggestion; it does not establish completion"}</p>)):null}
+    {!point&&!loading&&!stale&&target?sourceClaims.filter(item=>!explicitQuote||item.quote===explicitQuote).flatMap((item,index)=>evidenceRoleWarnings(item,roleMessages,scopedReferences).filter(warning=>warning!=="assistant-decision").map(warning=><p key={`${index}-${warning}`} className="workspace-source-notice">{item.text}: {warning==="pasted-ai"?zh?"引文是用户粘贴的 AI 内容，不能单独证明已采纳":"The user pasted AI content; this alone does not establish adoption":zh?"依据是计划或建议，不能证明已完成":"The evidence is a plan or suggestion; it does not establish completion"}</p>)):null}
     {!point&&!loading&&(JSON.parse(proofKey) as Array<{marks:EvidenceHighlight[]}>).some(proof=>proof.marks.some(mark=>mark.kind==="related"))?<p className="workspace-source-related-label">{zh?"相关段落（未核对）":"Related passages (unverified)"}</p>:null}
-    
-    {nearOnly&&!loading&&!conditionMissing?<p className="workspace-source-related-label">{zh?"虚线标出措辞相近的原文。":"Dashed lines mark similar wording in the original."}</p>:null}
     {conditionMissing&&!loading?<p className="workspace-source-related-label">{zh?"未找到同时对应数字条件和描述的原文，请结合上下文核对。":"No passage matching both the numeric condition and description was found; check the surrounding context."}</p>:null}
     <div ref={body} className="workspace-source-body" tabIndex={0} aria-busy={loading}>{highlights.map(({kind,...rect},index)=><span key={index} className={`workspace-source-highlight is-${kind}`} aria-hidden="true" style={rect}/>)}
       <div ref={contentRoot} className="workspace-source-content">{readerError && !loading && !error ? <p className="workspace-source-notice" role="alert">{readerError}</p>:null}

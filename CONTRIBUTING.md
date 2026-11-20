@@ -2,7 +2,7 @@
 
 **简体中文** · [English](docs/en/CONTRIBUTING.md)
 
-提出产品或交互改动前，先阅读[产品准则](PRODUCT_PRINCIPLES.md)。对话文件导入支持 ChatGPT、Claude、Gemini（Google Takeout JSON）和 DeepSeek 的官方导出，以及其他 AI 的 Markdown／JSON 对话记录；批量标题扫描与正文同步、原生侧栏、消息定位和输入框插入仍限 ChatGPT；Claude、Gemini、DeepSeek 提供按站点开启的网页自动采集试用，仅保存当前已加载的消息，不保证完整历史。新增导入格式见 `src/sync/importers/`：实现 `PlatformImporter`、在 `index.ts` 按内容识别，并附带脱敏样例测试。BYOK 服务商与对话来源平台分别讨论。
+提出产品或交互改动前，先阅读[产品准则](PRODUCT_PRINCIPLES.md)。[使用指南](docs/GETTING_STARTED.md)说明当前支持的文件与网页来源。新增导入格式时，在 `src/sync/importers/` 实现 `PlatformImporter`，在 `index.ts` 注册内容识别，并附脱敏样例测试。BYOK 服务商与对话来源平台分别讨论。
 
 ## 开发
 
@@ -10,10 +10,11 @@
 
 | 目录 | 职责 |
 | --- | --- |
-| `src/content` / `src/background` | ChatGPT 页面与扩展集成 |
+| `src/content` / `src/background` | AI 网页与扩展集成 |
 | `src/sync` / `src/storage` | 导入与持久化 |
 | `src/ai` | 生成、复用、预算和验证 |
-| `src/context` | 本地上下文与可选精炼 |
+| `src/export` | 项目文件与来源定位 |
+| `src/context` | 兼容的上下文处理 |
 | `src/canvas` / `src/sidecar` | 工作台与侧栏 |
 | `src/search` | 检索 |
 | `evaluation/memory-search/cases.ts` | 自编回归夹具 |

@@ -69,12 +69,13 @@ it("checks the local source before previewing an update and leaves the Wiki alon
  expect(generateFocusSession).not.toHaveBeenCalled();
 });
 
-it("retries incomplete Wiki coverage through Update even when the original message is unchanged",async()=>{
+it.each(["coverage", "writing"] as const)("retries incomplete Wiki %s through Update even when the original message is unchanged",async(incomplete)=>{
  const db=await getDatabase(),canvas={id:"space",name:"Project",createdAt:1,updatedAt:1};
  const project:FocusSession={...session,mode:"work",status:"ready",canvasId:canvas.id,
   sourceSignatures:{c:{m1:sourceMessageSignature("Why poles?")}},
   scope:{kind:"goal",blocks:[{conversationId:"c",title:"Stability",messageIds:["m1"],messageSignatures:{m1:sourceMessageSignature("Why poles?")}}]},
-  wikiKnowledge:{version:1,status:"complete",generatedAt:1,materials:1,batches:[{sourceIds:["e:c:0:1"],units:[],rejected:{},status:"ok",uncovered:["e:c:0:1"]}]}};
+  wikiKnowledge:{version:1,status:"complete",generatedAt:1,materials:1,batches:[{sourceIds:["e:c:0:1"],units:[],rejected:{},status:"ok",...(incomplete==="coverage"?{uncovered:["e:c:0:1"]}:{})}],
+    ...(incomplete==="writing"?{draft:{version:1,status:"partial",generatedAt:1,chapters:[],report:{write_parts_lost:1}}}:{})}};
  await db.put("conversations",conversation);
  await db.put("canvases",canvas);
  await db.put("focusSessions",project);
@@ -96,6 +97,48 @@ it("retries incomplete Wiki coverage through Update even when the original messa
  expect(screen.queryByText("No source changes found.")).toBeNull();
 });
 
+it.each([true, false])("docks update progress before the first draft during writing confirmation (header available: %s)", async inHeader => {
+ const db = await getDatabase(), canvas = { id: "space", name: "Project", createdAt: 1, updatedAt: 1 };
+ const ledger = { version: 1 as const, status: "complete" as const, generatedAt: 1, materials: 1, batches: [], scopeAnswers: { chatatlas: "exclude" as const } };
+ const project: FocusSession = { ...session, mode: "work", status: "ready", canvasId: canvas.id,
+   sourceSignatures: { c: { m1: sourceMessageSignature("Why poles?") } }, wikiKnowledge: ledger };
+ await db.put("conversations", conversation);
+ await db.put("canvases", canvas);
+ await db.put("focusSessions", project);
+ let finish!: (value: FocusSession) => void;
+ const update = vi.spyOn(focusUpdates, "generateFocusUpdate").mockImplementation(async (...args) => {
+   const [onProgress, callbacks] = [args[6], args[7]];
+   onProgress?.(1, 1, "synthesis", { completed: 1, total: 1, stage: "synthesis", final: true, round: 1, completedSourceIds: ["c"], totalSources: 1,
+     processedSegments: 1, totalSegments: 1, elapsedMs: 98000, ledger: { stage: "group", done: 238, total: 238 } });
+   await callbacks?.onKeyDecisions?.(ledger);
+   onProgress?.(0, 2, "synthesis", { completed: 0, total: 2, stage: "synthesis", final: true, round: 1, completedSourceIds: ["c"], totalSources: 1,
+     processedSegments: 1, totalSegments: 1, elapsedMs: 98000, ledger: { stage: "write", done: 0, total: 2 } });
+   return new Promise(resolve => { finish = resolve; });
+ });
+ const { container: header } = render(<header/>);
+ const host = header.querySelector("header")!;
+ const workspace = render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[canvas]} settingsRevision={0}
+   headerProgressTarget={inHeader ? host : undefined} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+ fireEvent.click(screen.getByRole("button", { name: "Update" }));
+ const confirmation = await screen.findByRole("heading", { name: "The discussion also names these" });
+ expect(update).toHaveBeenCalledOnce();
+ const progressRoot = inHeader ? host : workspace.container.querySelector<HTMLElement>(".focus-progress-fallback")!;
+ const summary = within(progressRoot).getByLabelText("View generation progress");
+ expect(summary).toHaveTextContent("Awaiting confirmation");
+ expect(summary).not.toHaveTextContent("100%");
+ expect(workspace.container.querySelector(".focus-generation-panel")).toBeNull();
+ expect(screen.queryByRole("region", { name: "Chapter draft preview" })).toBeNull();
+ if (!inHeader) expect(progressRoot.compareDocumentPosition(confirmation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ fireEvent.click(summary);
+ expect(within(progressRoot).getByRole("button", { name: "Cancel" })).toBeVisible();
+ fireEvent.click(screen.getByRole("button", { name: "Start writing" }));
+ await waitFor(() => expect(summary).toHaveTextContent("Write chapters"));
+ expect(workspace.container.querySelector(".focus-generation-panel")).toBeNull();
+ await act(async () => finish({ ...project, id: "confirmed-update-preview" }));
+ expect(await screen.findByRole("button", { name: "Save and view" })).toBeVisible();
+ expect(screen.queryByLabelText("View generation progress")).toBeNull();
+});
+
 it("asks only for the affected scope before sending changed discussions into the update pipeline",async()=>{
  const db=await getDatabase(),canvas={id:"space",name:"Project",createdAt:1,updatedAt:1};
  const oldSignature=sourceMessageSignature("Why poles?"), newText="Why do poles matter?";
@@ -108,7 +151,10 @@ it("asks only for the affected scope before sending changed discussions into the
  await db.put("messages",{...message,content:newText,preview:newText,updatedAt:2});
  const update=vi.spyOn(focusUpdates,"generateFocusUpdate").mockResolvedValue({...project,id:"changed-preview"});
  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[canvas]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
- fireEvent.click(screen.getByRole("button",{name:"Update"}));
+ const start=await screen.findByRole("button",{name:"Start update"});
+ expect(start.closest("aside")!.compareDocumentPosition(screen.getByRole("article",{name:"Document overview"})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ expect(update).not.toHaveBeenCalled();
+ fireEvent.click(start);
  expect(await screen.findByRole("heading",{name:"Confirm update scope"})).toBeVisible();
  expect(screen.queryByRole("heading",{name:"What would you like to do?"})).toBeNull();
  const confirm=screen.getByRole("button",{name:"Update and preview"});
@@ -213,7 +259,31 @@ it("saves the whole-project name and keeps manual renaming aligned with exported
  await waitFor(async()=>expect((await db.get("focusSessions",project.id))?.title).toBe("My project name"));
  expect((await db.get("focusSessions",project.id))?.wikiSuggestedTitle).toBeUndefined();
  expect(await db.get("canvases",saved.canvasId!)).toMatchObject({name:"My project name",title:"My project name"});
+ expect(await within(screen.getByRole("navigation",{name:"Conversation chapters"})).findByRole("heading",{name:"My project name"})).toBeVisible();
  expect(generateFocusSession).not.toHaveBeenCalled();
+});
+
+it("keeps Rename project available before attaching a Wiki",async()=>{
+ const project={...session,mode:"work" as const,status:"ready" as const};
+ const onSaved=vi.fn();
+ render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={onSaved}/></PreferencesProvider>);
+ fireEvent.click(screen.getByRole("button",{name:"More"}));
+ fireEvent.click(screen.getByRole("button",{name:"Rename project"}));
+ expect(screen.getByRole("textbox",{name:"Project title"})).toHaveValue(project.title);
+ fireEvent.change(screen.getByRole("textbox",{name:"Project title"}),{target:{value:"Renamed draft"}});
+ fireEvent.click(screen.getByRole("button",{name:"Save"}));
+ await waitFor(()=>expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({title:"Renamed draft"})));
+ expect(screen.getByRole("button",{name:"Save project"})).toBeVisible();
+});
+
+it("shows the current project name when opening an older Wiki version",()=>{
+ const canvas={id:"project",name:"New project name",title:"New project name",type:"topic" as const,createdAt:1,updatedAt:2};
+ const older={...session,mode:"work" as const,status:"ready" as const,canvasId:canvas.id};
+ render(<PreferencesProvider><FocusWorkspace initialSession={older} conversations={[conversation]} canvases={[canvas]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+ expect(within(screen.getByRole("navigation",{name:"Conversation chapters"})).getByRole("heading",{name:canvas.title})).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"More"}));
+ fireEvent.click(screen.getByRole("button",{name:"Rename project"}));
+ expect(screen.getByRole("textbox",{name:"Project title"})).toHaveValue(canvas.title);
 });
 
 it("opens selected project file export directly from the toolbar without running a model",async()=>{

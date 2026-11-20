@@ -1,13 +1,18 @@
 import { createElement, type ReactNode } from "react";
 import type { Components } from "react-markdown";
 import type { Paragraph, PhrasingContent, Root, RootContent } from "mdast";
+import { WIKI_FLOW_CLAIM_MARKER, wikiFlowParagraph, wikiFlowProposal, wikiFlowSourceQuote } from "../shared/wiki-flow-block";
+import { WIKI_CLAIM_MARKER, type WikiClaimMarkerPoint } from "../shared/wiki-claim-markers";
+import { wikiSupplementRanges } from "../shared/wiki-source-supplements";
+import { wikiEvidenceHref, wikiEvidenceTarget } from "../shared/wiki-evidence-link";
+import type { FocusEvidence } from "../shared/focus-session";
+import { wikiFlowSteps } from "../shared/wiki-flow-steps";
 
 /** Presentation only, on the rendered tree: the saved text is unchanged and every character stays, so copying, claim
  * highlights and markers still find it.
  * - A run of three or more short steps joined by arrows ("找到相关消息 -> 用户确认 -> 生成上下文 -> 插入当前 AI") reads
  *   as a strip of steps.
  * - A long paragraph with no emphasis of its own leads with its first sentence, set apart, so it can be skimmed. */
-const ARROW = /\s*(?:→|->|—>|=>)\s*/u;
 const STEP = String.raw`(?:[^，,。；;：:（）()「」『』“”\n→>=—-]|-(?!>)|=(?!>)|—(?!>))+`;
 const FLOW = new RegExp(`${STEP}(?:\\s*(?:→|->|—>|=>)\\s*${STEP}){2,}`, "gu");
 /** A paragraph this long is skimmed by its first sentence. */
@@ -19,6 +24,10 @@ const text = (value: string): PhrasingContent => ({ type: "text", value });
 function withFlows(value: string): PhrasingContent[] | undefined {
   // A chain embedded in an explanatory sentence stays ordinary prose.
   if (/[「」“”『』…]|\.{3}|范围有分歧|版本未定/u.test(value)) return;
+  if (/\[|[（(【]/u.test(value)) {
+    const { steps, arrows } = wikiFlowSteps(value);
+    return arrows.length ? steps.flatMap((step, index) => [text(step), ...(arrows[index] ? [emphasis("atlas-flow-arrow", [text(arrows[index])])] : [])]) : undefined;
+  }
   if (/[，,。；;!?！？]/u.test(value.trim().replace(/[。.!?！？]$/u, ""))) {
     const parts:PhrasingContent[]=[];let last=0;
     for(const match of value.matchAll(/->|=>|—>|→/gu)){
@@ -35,7 +44,7 @@ function withFlows(value: string): PhrasingContent[] | undefined {
     let run = match[0].trim(), start = match.index! + match[0].indexOf(run);
     const intro=/^(?:.{0,18}?(?:流程|路径|主链|顺序|链路)(?:首选|优先|为|是)?\s*[:：]?\s*|(?:deployment\s+)?(?:path|workflow|pipeline)\s+(?:is\s+)?)/iu.exec(run)?.[0];
     if(intro){start+=intro.length;run=run.slice(intro.length);}
-    const steps = run.split(ARROW), arrows = run.match(new RegExp(ARROW.source, "gu")) ?? [];
+    const { steps, arrows } = wikiFlowSteps(run);
     // Match entire clauses first. A bounded regex used to cut identifiers in half ("Vali" + "dator").
     if (steps.length < 3 || steps.some(step => !step.trim() || step.trim().length > 60)) continue;
     if (start > last) result.push(text(value.slice(last, start)));
@@ -73,8 +82,42 @@ function blockCaption(paragraph: Paragraph, next: RootContent | undefined): Phra
   return [emphasis("atlas-caption", [emphasis("atlas-caption-kind", [text(parts[0])]), ...(tag === "atlas-caption-ai" ? [] : [emphasis(tag, [text(parts[at])])]), ...(note ? [emphasis("atlas-caption-note", [text(note)])] : [])])];
 }
 
-export function readerStructurePresentation() {
-  return (tree: Root) => {
+export function readerStructurePresentation({ cards = false, zh = true, flowSources, claimMarkers }: { cards?: boolean; zh?: boolean; flowSources?: readonly FocusEvidence[]; claimMarkers?: readonly WikiClaimMarkerPoint[] } = {}) {
+  return (tree: Root, file: { value: unknown }) => {
+    if (cards) {
+      const supplements = wikiSupplementRanges(String(file.value ?? ""));
+      const approximate = new Set(claimMarkers?.filter(point => point.approximate).map(point => WIKI_CLAIM_MARKER + encodeURIComponent(point.key)));
+      const available = flowSources && new Set(flowSources.map(ref => ref.id));
+      tree.children = tree.children.map(node => {
+        const start = node.position?.start.offset;
+        if (node.type !== "paragraph" || start === undefined || supplements.some(([from, to]) => start >= from && start < to)) return node;
+        const match = wikiFlowParagraph(node, zh);
+        if (!match) return node;
+        const { flow, links } = match;
+        const sources: PhrasingContent[] = [];
+        for (const link of links) {
+          if (link.type === "link") {
+            const direct = wikiEvidenceTarget(link.url);
+            if (approximate.has(link.url) || direct && available && !available.has(direct.id)) continue;
+            if (link.url.startsWith(WIKI_CLAIM_MARKER)) {
+              sources.push({ ...link, url: WIKI_FLOW_CLAIM_MARKER + link.url.slice(WIKI_CLAIM_MARKER.length) });
+              continue;
+            }
+          }
+          sources.push(link);
+        }
+        if (!sources.length && flowSources?.length) {
+          const sourceQuote = wikiFlowSourceQuote(flow.steps);
+          const source = flowSources.find(ref => sourceQuote(ref.excerpt));
+          if (source) sources.push({ type: "link", url: wikiEvidenceHref(source), children: [text(zh ? "来源" : "Source")] });
+        }
+        return { type: "blockquote", data: { hName: "atlas-wiki-flow" }, children: [
+          { type: "paragraph", children: [{ type: "strong", children: [text(flow.title)] }, ...(flow.status && !wikiFlowProposal(flow.status) ? [{ type: "emphasis" as const, children: [text(flow.status.slice(1, -1))] }] : [])] },
+          { type: "paragraph", children: sources.length || !flowSources ? sources : [text(zh ? "来源待核对" : "Source unverified")] },
+          { type: "list", ordered: true, children: flow.steps.map(step => ({ type: "listItem", children: [{ type: "paragraph", children: [text(step)] }] })) },
+        ] };
+      });
+    }
     const visit = (node: RootContent | Root) => {
       if (node.type === "code" || node.type === "inlineCode" || node.type === "link" || node.type === "table" || node.type === "blockquote") return;
       if (!("children" in node)) return;

@@ -11,6 +11,7 @@ import * as knowledge from "../../shared/project-knowledge-view";
 import { contextKnowledge } from "../../test/context-fixture";
 import { useWikiPageReading } from "../hooks/useWikiPageReading";
 import { projectWikiPages } from "../project-wiki-pages";
+import { wikiOverviewSignature } from "../../shared/wiki-overview";
 
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it("shares overview work between parent and intro and retains checked chapter results across navigation",()=>{
@@ -33,6 +34,8 @@ it("shares overview work between parent and intro and retains checked chapter re
 
 it("switches immediately during background loading and reuses one result for both pages",async()=>{
  const session=contextKnowledge().session;
+ const savedText="该工作区整理本地检索及其使用边界。";
+ session.wikiOverview={version:1,text:savedText,signature:wikiOverviewSignature(session),evidenceIds:[]};
  session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[{
   sourceIds:["e-db"],status:"ok",rejected:{},units:[{id:"db",subject:"索引",statement:"索引使用 Orama。",kind:"mechanism",
    details:[],adoption:{status:"proposal"},delivery:"unknown",evidence:{evidenceId:"e-db",role:"assistant",pasted:false,conversationId:"c",messageId:"m-db",messageIndex:0,quote:"索引使用 Orama。"}}],
@@ -55,7 +58,8 @@ it("switches immediately during background loading and reuses one result for bot
     :<DocumentOverview session={current} zh pageReading={reading} onRead={()=>{}} onLocate={()=>{}}/>}</>;
  }
  render(<Workspace/>);
- expect(screen.getByText("正在加载总览内容…")).toBeVisible();
+ expect(screen.getByText(savedText)).toBeVisible();
+ expect(screen.queryByText("正在加载总览内容…")).toBeNull();
  fireEvent.click(screen.getByText("查看账本"));
  expect(screen.getByText("正在加载知识点…")).toBeVisible();
  expect(workers).toHaveLength(1);

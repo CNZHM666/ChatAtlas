@@ -1,4 +1,4 @@
-import { ledgerCoverageRetryNeeded, ledgerRewriteNeeded } from "./wiki-draft-fit";
+import { ledgerCoverageRetryNeeded, ledgerGenerationRetryNeeded, ledgerRewriteNeeded } from "./wiki-draft-fit";
 import {savedWikiProjectBoundary} from "../shared/wiki-project-boundary";
 import type { Conversation, ConversationMessage } from "../shared/types";
 import type { FocusScope, FocusSession } from "../shared/focus-session";
@@ -16,8 +16,8 @@ import { ledgerPipelineEnabled } from "./wiki-ledger-document";
 import { datedSources, reextractSessionKnowledge } from "./wiki-knowledge-session";
 import { organizeLedger } from "./wiki-knowledge-organize";
 import { writeFocusWikiDraft, type FocusWikiDraftCallbacks } from "./focus-wiki-draft";
-import { startAIRun } from "./pipeline-timing";
-import { wikiLedgerUnits, type WikiProgress } from "../shared/wiki-knowledge";
+import { measureAILocalStep, startAIRun } from "./pipeline-timing";
+import { wikiLedgerUnits, wikiOrganizationIncomplete, type WikiProgress } from "../shared/wiki-knowledge";
 import { readingTitle } from "../shared/reading-title";
 import { mapSemanticEvidence } from "../shared/semantic-structure";
 import { reconcileWikiTopics } from "./wiki-topic-update";
@@ -250,8 +250,11 @@ export async function generateFocusUpdate(previous: FocusSession, sources: Conve
     // Nothing new in the sources, but verdicts the user gave since the draft, or chapters written for another layout (the
     // routing changed since): only the chapters they touch are rewritten.
     const sourceWork = plan.changed || retryCoverage || needsDraft || Boolean(callbacks?.scope);
-    if (sourceWork || ledgerRewriteNeeded(previous.wikiKnowledge)) {
-      return ledgerUpdate(previous, sources, messages, allMessages, plan, locale, signal, onState, runId, onProgress, !sourceWork, callbacks);
+    const organizationWork = wikiOrganizationIncomplete(previous.wikiKnowledge.organization) || previous.wikiKnowledge.lastFailure?.step === "organize";
+    if (sourceWork || ledgerGenerationRetryNeeded(previous.wikiKnowledge) || ledgerRewriteNeeded(previous.wikiKnowledge)) {
+      const id = runId ?? `focus-${crypto.randomUUID()}`;
+      return measureAILocalStep(id, "wiki", "wiki:generation", () =>
+        ledgerUpdate(previous, sources, messages, allMessages, plan, locale, signal, onState, id, onProgress, !(sourceWork || organizationWork), callbacks));
     }
     return { ...previous, id: crypto.randomUUID(), runId, createdAt: Date.now(), updatedAt: Date.now() };
   }
@@ -261,7 +264,7 @@ export async function generateFocusUpdate(previous: FocusSession, sources: Conve
     // never schedule paid work, and unchanged successful plans are reused.
     if(previous.mode!=="work")return next;
     const ai=createAtlasAI(effectiveAISettings(await getAISettings()),signal,runId,onState);
-    const organized=requireOrganizedWiki(await autoOrganizeWiki(next,ai,signal,false,"suggest",previousWikiDirectory(previous)));
+    const organized=requireOrganizedWiki(await autoOrganizeWiki(next,ai,signal,false,undefined,previousWikiDirectory(previous)));
     // A document saved before the current explanation semantics is upgraded here,
     // locally and only on this explicit update; reading and export never do it.
     return wikiSemanticsCurrent(organized)?organized:consolidateWikiExplanations(organized,ai,signal,messages);
@@ -286,7 +289,7 @@ export async function generateFocusUpdate(previous: FocusSession, sources: Conve
   merged.sourceVersionIds = await retainSourceVersions(allMessages);
   if(previous.mode==="work" && !patch.wikiKnowledge?.draft){
     const ai=createAtlasAI(effectiveAISettings(await getAISettings()),signal,patch.runId,onState);
-    merged=requireOrganizedWiki(await autoOrganizeWiki(merged,ai,signal,false,"suggest",anchor));
+    merged=requireOrganizedWiki(await autoOrganizeWiki(merged,ai,signal,false,undefined,anchor));
     // New prose can repeat or contradict explanations in unchanged chapters.
     merged=await consolidateWikiExplanations(merged,ai,signal,messages);
   }
