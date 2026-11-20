@@ -38,6 +38,20 @@ Already installed? Export a backup from **Settings → Capture & data**, replace
 2. **Check evidence.** Open the quoted messages alongside the chapter. Confirmed decisions, AI suggestions, and user-reported progress carry distinct labels. You can settle key conflicts yourself.
 3. **Export Markdown.** Select the overview and Wiki chapters in **Export**. Keep citation IDs or include original excerpts. [See the Markdown structure](docs/en/examples/project-context-template.md)
 
+<details>
+<summary>Import conversations</summary>
+
+![Import conversations in the workbench](docs/images/导入.gif)
+
+</details>
+
+<details>
+<summary>Show sources in the Wiki</summary>
+
+![Turn on source markers in the Wiki and inspect the cited message](docs/images/显示出处.gif)
+
+</details>
+
 <p align="center">
   <img src="docs/images/wiki-chapter-light.png" alt="A Wiki chapter with evidence review, source markers, and export controls" width="920">
   <br><sub>Wiki chapter and evidence controls · focus timer example</sub>

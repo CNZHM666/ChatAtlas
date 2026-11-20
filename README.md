@@ -38,6 +38,20 @@
 2. **核对依据**。打开章节的「核对依据」，对照原话和前后文。已确认决定、AI 建议与用户报告分别标记，关键冲突可以由你确认。
 3. **导出 Markdown**。在「导出」中选项目总览和所需 Wiki 章节，可保留引用编号或附原话。 [查看 Markdown 结构示例](docs/examples/project-context-template.md)
 
+<details>
+<summary>导入对话演示</summary>
+
+![在工作台导入对话](docs/images/导入.gif)
+
+</details>
+
+<details>
+<summary>在 Wiki 中显示出处</summary>
+
+![在 Wiki 中开启显示出处并查看对应来源](docs/images/显示出处.gif)
+
+</details>
+
 <p align="center">
   <img src="docs/images/wiki-chapter-light.png" alt="Wiki 章节，顶部可核对依据、显示出处和导出" width="920">
   <br><sub>Wiki 正文与核对入口 · 专注计时器示例</sub>
