@@ -8,7 +8,7 @@ import type {StructuredAIRequest} from "./provider";
 import {knowledgeFactText,projectKnowledgeView} from "../shared/project-knowledge-view";
 import {introductionPriority} from "../shared/project-introduction-text";
 import {WIKI_STATUS_DISCLAIMER,wikiSentenceCoverage,withoutProgressDisclaimer} from "../shared/wiki-cross-duplicates";
-import {wikiConfirmedScopeText,wikiOverviewSignature,wikiReadingRouteOverview} from "../shared/wiki-overview";
+import {WIKI_PROJECT_POSITIONING,wikiConfirmedScopeText,wikiOverviewSignature,wikiReadingRouteOverview} from "../shared/wiki-overview";
 import {qualifyWikiOverviewClaims} from "./wiki-claim-review";
 import {compactWritingRouting,wikiScopeWritingRouting} from "./wiki-project-scope";
 import {scopedWikiDraft,wikiLedgerUnits} from "../shared/wiki-knowledge";
@@ -39,8 +39,6 @@ function opening(body:string){
  * names only they use. The overview read "通过 CLI/TUI 及 Chrome 扩展" from a competitor's row (hstry), ranked as a
  * defining sentence: such a fact is no positioning, and an overview naming such a term describes the other product. */
 const PRODUCT_BONUS=4;
-/** A point saying what the project is ("AI Circuit Studio 定位为面向大学生和硬件初学者……"). */
-const POSITIONING=/^(?:本|该|这个)?(?:项目|产品|平台)(?:的)?定位(?:为|是)|^[^，。,]{0,40}定位为面向|^.{0,30}\b(?:is a|is an|is built for|is positioned as)\b/iu;
 /** The project calling itself by no name ("项目定位为……", "本产品是一款……") is the project. */
 const SELF=/^(?:本|该|这个|此)?(?:项目|产品|平台|工具)$/u;
 const OUTSIDE_ROLES=new Set(["competitor","reference","other_project"]);
@@ -56,7 +54,7 @@ export function outsideKnowledge(session:FocusSession):{unitIds:Set<string>;name
  * from purpose facts (the user's own words first, comparisons last), how it works
  * from the chapter openings, state only from user confirmations and reports; no
  * sentence may repeat a chapter sentence. Any failure keeps the local projection. */
-export async function generateWikiOverview(session:FocusSession,ai:OverviewAI,signal:AbortSignal,report:Record<string,number>={}):Promise<FocusSession> {
+export async function generateWikiOverview(session:FocusSession,ai:OverviewAI,signal:AbortSignal,report:Record<string,number>={},projection?:ReturnType<typeof resolveWikiReading>):Promise<FocusSession> {
  if(session.mode!=="work"||session.briefUserEdited||session.projectMaintenance?.overview!==undefined||!ai.generateStructured||ai.id==="atlas-demo")return session;
  const fallback=()=>{
   const route=wikiReadingRouteOverview(session);
@@ -68,9 +66,10 @@ export async function generateWikiOverview(session:FocusSession,ai:OverviewAI,si
   return route?{...session,wikiOverview:route}:session;
  };
  const zh=session.locale!=="en",outside=outsideKnowledge(session);
- const reading=session.wikiKnowledge?resolveWikiReading(session.wikiKnowledge):undefined;
+ const reading=projection??(session.wikiKnowledge?resolveWikiReading(session.wikiKnowledge):undefined);
  const scopeConditions=reading?.organization?wikiScopeConditions(reading.organization,reading.units):[];
- const ownFact=(fact:{claim:{unitIds?:string[]}})=>!fact.claim.unitIds?.length||!fact.claim.unitIds.every(id=>outside.unitIds.has(id));
+ const ownFact=(fact:{claim:{unitIds?:string[]}})=>!fact.claim.unitIds?.length
+  ||fact.claim.unitIds.some(id=>!outside.unitIds.has(id)&&reading?.statuses.get(id)!=="history");
  const all=projectKnowledgeView(session),view={...all,current:all.current.filter(ownFact)};
  const userWords=(fact:typeof view.current[number])=>fact.claim.sourceReading?.sources.some(source=>source.role==="user")?3:0;
  // A module's positioning ("对话库应定位为原始对话资产管理模块") is no answer to what the project is: one overview opened
@@ -88,8 +87,8 @@ export async function generateWikiOverview(session:FocusSession,ai:OverviewAI,si
  const allowed=new Set(reading?.organization?.subjects.flatMap(subject=>subject.unitIds));
  const draft=session.wikiKnowledge?scopedWikiDraft(session.wikiKnowledge):undefined;
  const written=new Set([...session.sections.flatMap(section=>section.claims?.flatMap(claim=>claim.unitIds??[])??[]),...draft?.chapters.flatMap(chapter=>[...chapter.openingUnitIds??[],...chapter.paragraphs.flatMap(paragraph=>paragraph.unitIds)])??[]]);
- const positioning=(reading?.units??[]).filter(unit=>allowed.has(unit.id)&&written.has(unit.id)&&!unit.about&&session.wikiKnowledge?.decisions?.[unit.id]?.verdict!=="rejected"
-   &&POSITIONING.test(unit.statement)&&aboutProduct(unit.statement)>=0&&!unscopedWikiDirections(unit.statement,scopeConditions).length)
+ const positioning=(reading?.units??[]).filter(unit=>allowed.has(unit.id)&&written.has(unit.id)&&!unit.about&&reading?.statuses.get(unit.id)!=="history"
+   &&WIKI_PROJECT_POSITIONING.test(unit.statement)&&aboutProduct(unit.statement)>=0&&!unscopedWikiDirections(unit.statement,scopeConditions).length)
   .map(unit=>({unit,score:introductionPriority(unit.statement)+aboutProduct(unit.statement)+(unit.evidence.role==="user"&&!unit.evidence.pasted?3:0),evidenceIds:session.evidence.filter(ref=>ref.conversationId===unit.evidence.conversationId&&ref.messageId===unit.evidence.messageId).map(ref=>ref.id)}))
   .filter(item=>item.evidenceIds.length)
   // The later wording first when they score alike: positioning is refined as the discussion goes.
@@ -156,7 +155,7 @@ export async function generateWikiOverview(session:FocusSession,ai:OverviewAI,si
   }
   const evidenceIds=[...new Set(result.factIds.flatMap(id=>facts.find(item=>item.id===id)!.evidenceIds))];
   report.accepted=1;
- return {...session,wikiOverview:{version:1,text:qualifyWikiOverviewClaims(result.overview,session),signature:wikiOverviewSignature(session),evidenceIds}};
+ return {...session,wikiOverview:{version:1,text:qualifyWikiOverviewClaims(result.overview,session,reading),signature:wikiOverviewSignature(session),evidenceIds}};
  }catch(error){signal.throwIfAborted();report[`rejected_${error instanceof OverviewRejected?error.reason:"request"}`]=1;return fallback();}
 }
 

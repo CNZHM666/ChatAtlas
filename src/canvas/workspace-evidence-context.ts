@@ -25,6 +25,8 @@ export interface WorkspaceEvidenceOptions { references?: FocusEvidence[]; quote?
   sourcePassages?: Array<{ referenceId: string; quote: string }>;
   /** Identity of the original Markdown table within the selected message. */
   tableTarget?:string;
+  /** The source action is for a whole structure in the Wiki. */
+  structuredBlock?: boolean;
   /** The original the panel shows now, so the document can highlight the claims that cite it. */
   shown?: FocusEvidence;
   /** Point-by-point checking: the panel steps through these instead of the whole chapter's sources. */

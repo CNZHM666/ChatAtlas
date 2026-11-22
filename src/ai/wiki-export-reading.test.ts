@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { wikiUnitStatuses } from "./wiki-knowledge-state";
 import { routeWikiUnits } from "./wiki-unit-routing";
+import { rehomedStrayParagraphs } from "./wiki-stray-paragraphs";
 import { wikiChapterLeads } from "./wiki-chapter-lead";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { ledgerDocument } from "./wiki-ledger-document";
@@ -35,6 +36,26 @@ it("gathers what is sold where most of it sits when no subtopic is about earning
   expect(grow.subtopics.map(topic => topic.title)).toEqual(["获客策略", "商业模式与定价", "竞品分析"]);
   const opened = routed.subjects.find(subject => subject.id === "grow:role:commerce")!;
   expect(opened.unitIds.sort()).toEqual(["f", "p", "s"]);
+});
+
+it("gathers independent report sentences in one usage topic under product positioning", () => {
+  const audience = unit("audience", "产品面向独立开发者。", {kind:"fact"});
+  const reports = [
+    unit("retention", "新增用户次日留存为25%。", {kind:"fact"}, "user"),
+    unit("active", "当前日活用户达到42人。", {kind:"report"}, "user"),
+  ];
+  const units = new Map([audience, ...reports].map(item=>[item.id,item]));
+  const source = organization([["people",[...units.keys()]]], [["product","产品定位",[["目标用户",["people"]]]]]);
+  const plan = routeWikiUnits(source, units);
+  const [, metrics] = plan.chapters[0].subtopics;
+  expect(plan.chapters[0].subtopics.map(topic=>topic.title)).toEqual(["目标用户","运营指标"]);
+  expect(plan.subjects.find(subject=>subject.id===metrics.subjectIds[0])?.unitIds).toEqual(reports.map(report=>report.id));
+  const paragraphs = [{ subtopic:"目标用户", text:[...units.values()].map(item=>item.statement).join(""),
+    unitIds:[...units.keys()],claims:[...units.values()].map(item=>({text:item.statement,unitIds:[item.id]})) }];
+  const chapter = { id:"product", title:"产品定位", question:"", group:"", body:`### 目标用户\n\n${paragraphs[0].text}`, paragraphs, problems:[] };
+  const home = new Map(plan.subjects.flatMap(subject=>subject.unitIds.map(id=>[id,subject.id] as const)));
+  expect(rehomedStrayParagraphs([chapter], plan, home, units)).toBe(2);
+  expect(chapter.body).toBe(`### 目标用户\n\n${audience.statement}\n\n### 运营指标\n\n${reports.map(report=>report.statement).join("\n\n")}`);
 });
 
 describe("a chapter's lead", () => {
@@ -87,6 +108,60 @@ it("tells a confirmation no cited point backs as proposed, and drops it where it
   expect(body).not.toContain("你已确认");
   expect(body).toContain(rest);
   expect(body).toContain("讨论中提出首页加入状态打卡。");
+});
+
+it("keeps design compounds intact and restores durations from their bound sources", () => {
+  const design = unit("design", "目前的设计稿可作为开发参考。", {kind:"fact"});
+  const review = unit("review", "每天晚上提供30秒复盘。", {kind:"fact"});
+  const experiment = unit("experiment", "若有20名参与者持续使用，则验证需求成立。", {subject:"增长验证"});
+  const points = [design,review,experiment];
+  const paragraphs = [design.statement,"每天晚上提供30（7月8日）秒复盘。","验证标准为："+experiment.statement]
+    .map((text,index)=>({subtopic:"设计与验证",text,unitIds:[points[index].id],claims:[{text,unitIds:[points[index].id]}]}));
+  const chapter = {id:"c",title:"产品设计",question:"",group:"",body:`### 设计与验证\n\n${paragraphs.map(item=>item.text).join("\n\n")}`,paragraphs,problems:[]};
+  const source: WikiKnowledgeLedger = {version:1,generatedAt:0,status:"complete",materials:3,
+    batches:[{sourceIds:[],status:"ok",rejected:{},units:points}],
+    organization:organization([["s",points.map(item=>item.id)]],[["c","产品设计",[["设计与验证",["s"]]]]]),
+    draft:{version:1,generatedAt:0,status:"complete",report:{},chapters:[chapter]}};
+  const [section]=ledgerDocument(source,{}).sections;
+  expect(section.body).toContain(design.statement);
+  expect(section.body).toContain(review.statement);
+  expect(section.body).toContain("验证提案：若有20名参与者持续使用，可作为线索，帮助判断需求成立。");
+  expect(section.claims?.find(claim=>claim.text===review.statement)?.unitIds).toEqual([review.id]);
+});
+
+it("moves project handoffs and confirmed standards out of reference prose without dropping comparisons", () => {
+  const tool: WikiKnowledgeUnit["about"]={name:"DesignBox",role:"reference"};
+  const handoff=unit("handoff","界面设计稿交给 DesignBox 生成下一版草稿。",{about:tool,kind:"decision"});
+  const reference=unit("reference","DesignBox 支持导出可编辑的界面设计稿。",{about:tool,kind:"fact"});
+  const layout=unit("layout","首页的导航栏保留工作台入口。");
+  const standard=unit("standard","无障碍规范对齐：严格遵循内部无障碍规范。",{kind:"decision"});
+  const comparison="各参考工具的公开资料未说明键盘操作范围。";
+  const paragraph=(subtopic:string,point:WikiKnowledgeUnit)=>({subtopic,text:point.statement,unitIds:[point.id],claims:[{text:point.statement,unitIds:[point.id]}]});
+  const chapter=(id:string,title:string,paragraphs: Array<ReturnType<typeof paragraph>>)=>({
+    id,title,group:"",question:"",problems:[],paragraphs,body:paragraphs.map(item=>`### ${item.subtopic}\n\n${item.text}`).join("\n\n"),
+  });
+  const externalDraft=chapter("compare","竞品参考",[paragraph("外部产品",reference),paragraph("工具交接",handoff),paragraph("使用规范",standard)]);
+  const policy=unit("policy","保存前应核对处理权限。");
+  const source: WikiKnowledgeLedger={version:1,generatedAt:0,status:"complete",materials:5,
+    batches:[{sourceIds:[],status:"ok",rejected:{},units:[handoff,reference,layout,standard,policy]}],
+    decisions:{handoff:{verdict:"confirmed",at:1},standard:{verdict:"confirmed",at:2}},
+    organization:organization([["external",["reference"]],["tools",["handoff"]],["ui",["layout"]],["standard",["standard"]],["policy",["policy"]]],[
+      ["compare","竞品参考",[["外部产品",["external"]],["工具交接",["tools"]],["使用规范",["standard"]]]],
+      ["screens","界面设计",[["导航",["ui"]]]],["policy","安全与合规",[["安全规则",["policy"]]]]]),
+    draft:{version:1,generatedAt:0,status:"complete",report:{},chapters:[
+      {...externalDraft,openingUnitIds:[standard.id],body:`项目发起人确认无障碍规范严格遵循内部无障碍规范，但${comparison}\n\n${externalDraft.body}`},
+      chapter("screens","界面设计",[paragraph("导航",layout)]),
+      chapter("policy","安全与合规",[paragraph("安全规则",policy)]),
+    ]}};
+  const result=ledgerDocument(source,{});
+  const external=result.sections.find(section=>section.id==="compare")!, ui=result.sections.find(section=>section.id==="screens")!;
+  expect(external.body).toContain(reference.statement);
+  expect(external.body).toContain(comparison);
+  expect(external.body).not.toContain(handoff.statement);
+  expect(external.body).not.toContain("严格遵循内部无障碍规范");
+  expect(ui.body).toContain(`### 设计交接\n\n${handoff.statement}`);
+  expect(ui.claims?.find(claim=>claim.unitIds?.includes(handoff.id))?.userDecided).toBe(true);
+  expect(result.sections.find(section=>section.id==="policy")?.body).toContain(standard.statement);
 });
 
 // The exported document of a frozen sample (evaluation/regression/exports, git-ignored): each of these read wrong in it.

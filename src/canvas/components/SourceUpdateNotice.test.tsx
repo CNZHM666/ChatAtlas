@@ -63,3 +63,15 @@ it("shows a saved decision and the affected Wiki section until the article catch
   view.rerender(<SourceUpdateNotice session={updated} zh changes={[]} conversations={[]} overview onUpdate={onUpdate}/>);
   expect(screen.queryByRole("status")).toBeNull();
 });
+
+it("leaves locally applied decisions out of the rewrite notice", () => {
+  const session = projectSession();
+  session.wikiKnowledge = { version: 1, generatedAt: 1, status: "complete", materials: 0, batches: [],
+    draft: { version: 1, generatedAt: 2, status: "complete", chapters: [], report: {} },
+    decisionsAt: 3, decisions: { pick: { at: 3, verdict: "confirmed" } },
+    decisionArbitrations: { local: { choice: "pick", mode: "choose", at: 3, chapterId: session.sections[0].id, unitIds: ["pick"], locallyApplied: true } } };
+  const onUpdate = vi.fn();
+  render(<SourceUpdateNotice session={session} zh changes={[]} conversations={[]} overview onUpdate={onUpdate}/>);
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(onUpdate).not.toHaveBeenCalled();
+});

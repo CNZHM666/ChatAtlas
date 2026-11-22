@@ -1,3 +1,5 @@
+import { WikiWritingModeOptions } from "./WikiWritingModePicker";
+import type { WikiWritingMode } from "../../shared/wiki-knowledge";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LARGE_SCOPE_CHARACTERS, focusScopeDefault } from "../focus-scope-default";
 import type { Conversation } from "../../shared/types";
@@ -5,8 +7,9 @@ import type { FocusMode, FocusScope } from "../../shared/focus-session";
 import { confirmedFocusScope, discoverFocusScope, type FocusScopeCandidate } from "../../ai/focus-scope";
 import { GoalComposer } from "./GoalComposer";
 
-export function FocusScopePicker({ goal, mode = "review", sources, zh, initialScope, returningToReading = false, updating = false, onConfirm, onBack, onConfigureAI }: { goal: string; mode?: FocusMode; sources: Conversation[]; zh: boolean; initialScope?: FocusScope; returningToReading?: boolean; updating?: boolean; onConfirm: (scope: FocusScope, goal: string, mode: FocusMode) => void; onBack: (goal: string, mode: FocusMode) => void; onConfigureAI?: () => void }) {
+export function FocusScopePicker({ goal, mode = "review", sources, zh, initialScope, returningToReading = false, updating = false, onConfirm, onBack, onConfigureAI }: { goal: string; mode?: FocusMode; sources: Conversation[]; zh: boolean; initialScope?: FocusScope; returningToReading?: boolean; updating?: boolean; onConfirm: (scope: FocusScope, goal: string, mode: FocusMode, writingMode?: WikiWritingMode) => void; onBack: (goal: string, mode: FocusMode) => void; onConfigureAI?: () => void }) {
   const [draftGoal, setDraftGoal] = useState(goal);
+  const [writingMode, setWritingMode] = useState<WikiWritingMode>("concise");
   const [draftMode, setDraftMode] = useState(mode);
   const [candidates, setCandidates] = useState<FocusScopeCandidate[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -52,7 +55,7 @@ export function FocusScopePicker({ goal, mode = "review", sources, zh, initialSc
   const missing = sources.some((source) => !readySources.has(source.id));
   const finding = loading || (!error && discoveredGoal !== draftGoal);
   const unavailable = finding || Boolean(error) || (kind === "goal" ? !chosen.length : missing || !candidates.length);
-  const confirm = (nextGoal: string, nextMode: FocusMode) => onConfirm({ ...(kind === "all" ? { kind: "all" as const } : confirmedFocusScope(candidates, selected)), sourceConversationIds: sources.map((source) => source.id) }, nextGoal, nextMode);
+  const confirm = (nextGoal: string, nextMode: FocusMode) => onConfirm({ ...(kind === "all" ? { kind: "all" as const } : confirmedFocusScope(candidates, selected)), sourceConversationIds: sources.map((source) => source.id) }, nextGoal, nextMode, !updating && nextMode === "work" ? writingMode : undefined);
   const scopeLabel = updating ? zh ? "确认更新范围" : "Confirm update scope" : zh ? "确认整理范围" : "Confirm discussion scope";
   const controls = (
     <div className="focus-scope-controls">
@@ -62,6 +65,7 @@ export function FocusScopePicker({ goal, mode = "review", sources, zh, initialSc
         <label><input className="sr-only" type="radio" name="focus-scope" checked={kind === "all"} onChange={() => setKind("all")} /><span>{zh ? "全部内容" : "All content"}</span></label>
       </div></fieldset>
       {finding ? <p className="focus-scope-status" role="status">{zh ? "正在匹配板块…" : "Finding discussions…"}</p> : error ? <p className="focus-scope-status" role="alert">{error}</p> : <div className="focus-scope-summary"><div>{kind === "goal" ? <><span className="focus-scope-selection-count">{zh ? `已选 ${chosen.length} 个板块` : `${chosen.length} discussions selected`}</span>{chosen.slice(0, 2).map((item) => <span className="focus-scope-topic" key={item.id} title={item.title}>{item.title}</span>)}{chosen.length > 2 ? <span className="focus-scope-selection-count">+{chosen.length - 2}</span> : null}</> : <span>{zh ? "整理所选材料的全部内容" : "All content from selected sources"}</span>}{totalCharacters > LARGE_SCOPE_CHARACTERS ? <small className="focus-scope-size">{zh ? `材料约 ${Math.round(totalCharacters / 10000)} 万字${kind === "all" ? "，全部整理会明显更慢" : "，默认只整理相关部分"}` : `About ${Math.round(totalCharacters / 1000)}k characters${kind === "all" ? "; organizing everything takes much longer" : "; only related parts by default"}`}</small> : null}</div>{kind === "goal" ? <button type="button" aria-expanded={expanded || !chosen.length} aria-controls="focus-scope-discussions" onClick={() => setExpanded(!expanded)}>{expanded ? zh ? "收起" : "Hide discussions" : zh ? "调整板块" : "Adjust discussions"}<span aria-hidden="true">{expanded ? "⌃" : "⌄"}</span></button> : null}</div>}
+      {!updating ? <div className="wiki-writing-mode focus-scope-writing-mode"><span className="focus-scope-label">{zh ? "写作模式" : "Writing mode"}</span><WikiWritingModeOptions mode={writingMode} zh={zh} onChange={setWritingMode}/></div> : null}
     </div>
   );
   return <main className="focus-scope-screen"><section className="focus-scope-card" aria-label={scopeLabel}>

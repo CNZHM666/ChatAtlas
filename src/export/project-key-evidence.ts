@@ -6,6 +6,8 @@ import {wikiSourceReading} from "../shared/wiki-source-reading";
 import {resolveWikiReading} from "../ai/wiki-knowledge-reading";
 import {wikiLocalAnswer} from "../ai/wiki-question-parse";
 import {knowledgeTerms,knowledgeVersion} from "../shared/knowledge-subject";
+import {asksForDiscussionArtifact} from "../shared/statement-evidence";
+import {wikiBlockedUnitIds} from "../shared/wiki-knowledge";
 import {unified} from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
@@ -38,6 +40,9 @@ function visibleText(node:Nodes):string{
 function relevantExcerpt(original:string,claim:string,answer?:string){
  const limit=260;
  const terms=new Set(evidenceTerms(claim));
+ const identifiers=[...new Set((claim.match(/\b(?:[A-Z][a-z][\w.-]+|[a-z]+[A-Z]\w*|[A-Z][A-Z0-9]*_[\w]+)\b/gu)??[])
+  .filter(id=>!claim.startsWith(id)||/[\p{Script=Han}]|[._-]/u.test(claim)||/[A-Z]/u.test(id.slice(1))))].map(id=>id.toLowerCase());
+ const givesIdentifiers=(text:string)=>!identifiers.length||identifiers.every(id=>text.toLowerCase().includes(id));
  const answerTerms=answer?evidenceTerms(answer).filter(term=>terms.has(term)):[];
  const hasAnswerContext=(words:readonly string[])=>answerTerms.length<3
   ||answerTerms.filter(term=>words.includes(term)).length>=Math.ceil(answerTerms.length*2/3);
@@ -71,7 +76,8 @@ function relevantExcerpt(original:string,claim:string,answer?:string){
   if(!/[：:]$/u.test(text))return [text];
   return next&&text.length+next.length<limit?[`${text} ${next}`]:[];
  });
- if(!passages.length&&example?.trim()&&(!layer||matchesLayer(example))&&hasAnswerContext(evidenceTerms(example))){
+ if(!passages.length&&example?.trim()&&(!layer||matchesLayer(example))&&hasAnswerContext(evidenceTerms(example))
+  && givesIdentifiers(example)){
   const preview=example.trimEnd().split("\n").slice(0,8).join("\n");
   const chars=Array.from(preview),truncated=preview.length<example.trimEnd().length||chars.length>limit;
   return {excerpt:chars.slice(0,limit).join("")+(truncated?"\n…":""),format:"code" as const};
@@ -83,7 +89,7 @@ function relevantExcerpt(original:string,claim:string,answer?:string){
   const matchingLayer=matchesLayer(value);
   if(layer&&!matchingLayer)continue;
   const words=evidenceTerms(value);
-  if(!hasAnswerContext(words))continue;
+  if(!hasAnswerContext(words)||!givesIdentifiers(value))continue;
   const shared=words.filter(word=>terms.has(word)).length;
   // Versions are excluded from ordinary knowledge terms. A matching version
   // strengthens a topical match, but does not make generic prose evidence.
@@ -100,6 +106,7 @@ export function projectKeyEvidence(session:FocusSession,pages:readonly FocusSect
  if(!pages.length)return [];
  reading??=session.wikiKnowledge&&session.wikiKnowledge.documentType!=="learning"?resolveWikiReading(session.wikiKnowledge):undefined;
  const units=new Map(reading?.units.map(unit=>[unit.id,unit]));
+ const blockedUnits=reading?wikiBlockedUnitIds(reading.ledger):undefined;
  const blockedKeys=new Set([...session.wikiScopeReview?.ignoredKeys??[],...session.wikiScopeReview?.excludeKeys??[]]);
  const blockedEvidence=new Set(session.wikiScopeReview?.materials.filter(material=>(material.keys??[material.key]).every(key=>blockedKeys.has(key))).flatMap(material=>material.evidenceIds));
  const refs=new Map(session.evidence.filter(ref=>{
@@ -138,7 +145,14 @@ export function projectKeyEvidence(session:FocusSession,pages:readonly FocusSect
   const rows=[...savedChoices,...page.claims??[]].flatMap(claim=>{
    if(claim.markOnly||claim.verification==="uncertain"||!claim.text.trim()||claim.text.length<8)return [];
    const ids=claim.unitIds??[];
-   const status:EvidenceStatus|undefined=claim.holder==="earlier"?"historical":claim.holder==="decided"||claim.userDecided?"confirmed":claim.holder==="open"?"open"
+   const current = ids.flatMap(id=>reading?.statuses.get(id)??[]);
+   const blocked=ids.some(id=>blockedUnits?.has(id));
+   if(blocked)return [];
+   const confirmed=current.length?current.length===ids.length&&current.every(status=>status==="confirmed"):claim.holder==="decided"||claim.userDecided;
+   const historical=current.length?current.every(status=>status==="history"):claim.holder==="earlier";
+   const open=current.length?current.some(status=>status==="open"||status==="contested"):claim.holder==="open";
+   const status:EvidenceStatus|undefined=historical?"historical"
+    :confirmed?"confirmed":open?"open"
     :["scope","constraint","stage"].includes(claim.overviewRole??"")||importantScope.test(claim.text)?"scope":undefined;
    if(!status)return [];
    const confirmedUnits=status==="confirmed"&&reading?ids.filter(id=>reading?.statuses.get(id)==="confirmed"):[];
@@ -147,7 +161,8 @@ export function projectKeyEvidence(session:FocusSession,pages:readonly FocusSect
    const proofIds=[...new Set([...claim.evidenceIds,...verified?.sources.map(source=>source.id)??[]])];
    // An in-conversation approval may be bound by the ledger even on older saved pages.
    const boundUnits=ids.flatMap(id=>units.get(id)??[]);
-   const approvals=boundUnits.flatMap(unit=>unit.adoption.status==="user_adopted"&&unit.adoption.approval?[{unit,approval:unit.adoption.approval}]:[]);
+   const approvals=boundUnits.flatMap(unit=>confirmedUnits.includes(unit.id)&&unit.adoption.status==="user_adopted"&&unit.adoption.approval
+    &&!asksForDiscussionArtifact(unit.adoption.approval.quote)?[{unit,approval:unit.adoption.approval}]:[]);
    for(const {unit,approval} of approvals){
     const ref=originalRefs(unit.evidence.conversationId,approval.messageId).find(source=>wikiQuoteRange(source.excerpt,approval.quote));
     if(ref&&!proofIds.includes(ref.id))proofIds.push(ref.id);
@@ -156,16 +171,18 @@ export function projectKeyEvidence(session:FocusSession,pages:readonly FocusSect
     const ref=refs.get(id);
     if(!ref||!ref.excerpt.trim())return [];
     const receipt=verified?.sources.find(source=>source.id===id);
-    const unit=boundUnits.find(unit=>unit.evidence.conversationId===ref.conversationId&&unit.evidence.messageId===ref.messageId);
+    const unit=boundUnits.find(unit=>unit.evidence.conversationId===ref.conversationId&&unit.evidence.messageId===ref.messageId
+      &&wikiQuoteRange(ref.excerpt,unit.evidence.quote));
     const approval=approvals.find(item=>item.unit.evidence.conversationId===ref.conversationId&&item.approval.messageId===ref.messageId)?.approval;
     const author=receipt?.role??session.sourceRoles?.[ref.conversationId]?.[ref.messageId]??unit?.evidence.role??(approval?"user":undefined);
     const confirmation=author==="user"&&(!claim.evidenceIds.includes(id)||Boolean(approval));
+    const bound=unit?.evidence.quote&&wikiQuoteRange(ref.excerpt,unit.evidence.quote)?unit.evidence.quote:undefined;
     const excerpt=confirmation?approval?.quote??(receipt&&session.scope?.kind!=="goal"?ref.excerpt:undefined)
-     :claim.quote&&(receipt||wikiQuoteRange(ref.excerpt,claim.quote))?claim.quote:undefined;
-    if(!excerpt)return [];
+     :bound??(claim.quote&&wikiQuoteRange(ref.excerpt,claim.quote)?claim.quote:undefined);
+    if(confirmation&&!excerpt)return [];
     // The approving reply can be a short “yes”, which is still a valid receipt.
-    const display=confirmation?{excerpt:bounded(excerpt,260),format:"prose" as const}:relevantExcerpt(excerpt,claim.text,answer?.answer);
-    return [{messageId:ref.messageId,conversationId:ref.conversationId,author,...display,confirmation,discussedAt:timestamp(receipt?.discussedAt)}];
+    const display=confirmation?{excerpt:bounded(excerpt!,260),format:"prose" as const}:relevantExcerpt(excerpt??"",claim.text,answer?.answer);
+    return [{messageId:ref.messageId,conversationId:ref.conversationId,refId:ref.id,author,...display,confirmation,discussedAt:timestamp(receipt?.discussedAt)}];
    });
    const original=sources.find(source=>!source.confirmation&&source.excerpt)||sources.find(source=>!source.confirmation);
    const approval=sources.find(source=>source.confirmation);
@@ -207,6 +224,7 @@ export function projectKeyEvidence(session:FocusSession,pages:readonly FocusSect
 export function keyEvidenceMarkdown(entries:ReturnType<typeof projectKeyEvidence>,zh:boolean,sourceLink?:(source:ReturnType<typeof projectKeyEvidence>[number]["sources"][number])=>string){
  const l=(cn:string,en:string)=>zh?cn:en;
  const escape=(value:string)=>value.replace(/[\\`*_[\]<>|]/gu,"\\$&");
+ const readable=(value:string)=>escape(visibleText(markdown.parse(value)) || value);
  const labels={confirmed:l("已确认","Confirmed"),open:l("待决","Open"),scope:l("范围记录","Scope"),historical:l("历史记录","Earlier record")};
  const shortDate=(at:string)=>`${at.slice(0,10)} ${at.slice(11,16)} UTC`;
  const messages=new Map<string,{number:number;id:string}>();
@@ -220,7 +238,7 @@ export function keyEvidenceMarkdown(entries:ReturnType<typeof projectKeyEvidence
    const key=JSON.stringify([source.conversationId,source.messageId]);
    const message=messages.get(key)??{number:messages.size+1,id:source.messageId};
    messages.set(key,message);
-   let quote=`> ${escape(source.excerpt)}`;
+   let quote=`> ${readable(source.excerpt)}`;
    if(source.format==="code"){
     const fence="~".repeat(Math.max(3,...[...source.excerpt.matchAll(/~+/gu)].map(match=>match[0].length+1)));
     quote=`> ${fence}text\n${source.excerpt.split("\n").map(line=>`> ${line}`).join("\n")}\n> ${fence}`;
@@ -233,7 +251,7 @@ export function keyEvidenceMarkdown(entries:ReturnType<typeof projectKeyEvidence
    return `${meta}\n\n${note}`;
   });
   const confirmation=entry.confirmation;
-  return [...heading,`**${labels[entry.status]}** · ${escape(entry.text)}`,...details,
+  return [...heading,`**${labels[entry.status]}** · ${readable(entry.text)}`,...details,
    ...confirmation?[`**${l("整理确认","Confirmed during organization")}**${confirmation.at?` · ${shortDate(confirmation.at)}`:""}${confirmation.question?`\n\n- ${l("问题","Question")} ${escape(confirmation.question)}\n- **${l("选择","Selection")}** ${escape(confirmation.answer??"")}`:""}`]:[],
    ...entry.replacedBy?[`${l("后续决定","Later decision")} · ${escape(entry.replacedBy)}`]:[]];
  });

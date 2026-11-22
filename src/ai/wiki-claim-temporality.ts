@@ -41,7 +41,16 @@ export function wikiTemporalClaim(text: string, units: WikiKnowledgeUnit[], rela
   if(!match&&!text.includes("\n")){
     const pieces=text.split(/(?<=[，,。；;])/u);
     if(pieces.length>1&&pieces.some(piece=>SNAPSHOT.test(piece.trimStart()))){
-      const revised=pieces.map(piece=>SNAPSHOT.test(piece.trimStart())?piece.match(/^\s*/u)![0]+(wikiTemporalClaim(piece.trimStart(),units,relations,zh)?.text??piece.trimStart()):piece).join("");
+      const revised=pieces.map((piece,index)=>{
+        const trimmed=piece.trimStart(), snapshot=trimmed.match(SNAPSHOT);
+        if(!snapshot)return piece;
+        const previous=pieces[index-1]??"";
+        // An inline report keeps the original subject and attribution in sentence order.
+        const content=zh&&/[，,；;]$/u.test(previous)
+          ? trimmed.replace(SNAPSHOT,(_,subject?:string)=>`${subject?.trim()??""}当时`)
+          : wikiTemporalClaim(trimmed,units,relations,zh)?.text??trimmed;
+        return piece.slice(0,piece.length-trimmed.length)+content;
+      }).join("");
       if(revised!==text)return {text:revised};
     }
   }

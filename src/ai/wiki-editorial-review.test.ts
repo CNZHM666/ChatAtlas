@@ -1,5 +1,5 @@
 import {expect,it} from "vitest";
-import {retainWikiDecisions,reviewWikiEditorial} from "./wiki-editorial-review";
+import {cleanWikiDraftDisplay,compactWikiDecisionHeadings,retainWikiDecisions,reviewWikiEditorial} from "./wiki-editorial-review";
 import {withAnsweredChoices,withAnswerScope} from "./wiki-question-parse";
 import {wikiDecisionRestatement,wikiLayerDeferral} from "./wiki-confirmation-scope";
 import {placeWikiChoices} from "./wiki-choice-placement";
@@ -103,6 +103,21 @@ it("retains unrouted confirmed decisions and ignores history-only coverage",()=>
  expect(result[0].paragraphs.at(-1)?.subtopic).toBe("已确认的决定补记");
  expect(result[0].paragraphs.at(-1)?.text).toBe(decision.statement);
  expect(retainWikiDecisions(result,l,new Set(["u"]),true)).toEqual(result);
+});
+it("restores the planned topic for a missing confirmed decision ahead of history",()=>{
+ const decision=unit("u","允许管理员停用访问令牌。"),l=ledger([decision]);
+ l.organization={subjects:[{id:"s",unitIds:["u"]}],chapters:[{id:"c",subtopics:[{title:"访问权限",subjectIds:["s"]}]}]} as WikiKnowledgeLedger["organization"];
+ const input=chapter("已有说明。\n\n### 早先版本\n\n最初设想由用户自行停用。",[]);
+ const [result]=retainWikiDecisions([input],l,new Set(["u"]),true);
+ expect(result.body).toContain(`### 访问权限\n\n${decision.statement}\n\n### 早先版本`);
+ expect(result.paragraphs.at(-1)?.claims).toEqual([{text:decision.statement,unitIds:["u"]}]);
+});
+it("projects the legacy recovery labels as one chapter section and preserves literals",()=>{
+ const literal="```md\n### 已确认的取舍\n```";
+ const body=`### 访问权限\n\n${literal}\n\n### 已确认的取舍\n\n选择单点登录。\n\n### 已确认的决定补记\n\n管理员可撤销会话。\n\n### 早先版本\n\n保留早期讨论。`;
+ const projected=compactWikiDecisionHeadings(body);
+ expect(projected).toBe(`### 访问权限\n\n${literal}\n\n### 其他已定决定\n\n选择单点登录。\n\n管理员可撤销会话。\n\n### 早先版本\n\n保留早期讨论。`);
+ expect(compactWikiDecisionHeadings(projected)).toBe(projected);
 });
 it("keeps a proposed expansion count separate from the confirmed initial count",()=>{
  const source=unit("u","先做稳6个基础元件，再逐步扩展至约15个。"),l=ledger([source]);
@@ -228,4 +243,10 @@ it("keeps a confirmed MCP integration choice separate from the broader product s
  expect(scoped.decisions?.["answer:q:dynamic"]?.verdict).toBe("confirmed");
  expect(scoped.batches[0].units.find(unit=>unit.id==="answer:q:dynamic")?.statement).toBe(`MCP接入策略：${choice}。`);
  expect(l.decisions[strategy.id].verdict).toBe("confirmed");
+});
+
+it("removes internal preview labels while preserving the underlying text and literal examples", () => {
+  const code = ["~~~md", "### 用户补记", "用户补记：引用示例", "~~~"].join("\n");
+  const draft = ["### 库存", "### 用户补记", "**用户补记：** 确认后写入库存。", "Editorial note", code].join("\n\n");
+  expect(cleanWikiDraftDisplay(draft)).toBe(["### 库存", "确认后写入库存。", code].join("\n\n"));
 });

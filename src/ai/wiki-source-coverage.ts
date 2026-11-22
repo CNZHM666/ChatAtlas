@@ -3,18 +3,58 @@ import type { WikiDraftChapter, WikiKnowledgeLedger, WikiKnowledgeUnit, WikiUnit
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
 import { wikiExampleDisplayKey, wikiExampleKey, wikiExampleStage, wikiExampleStanding } from "../shared/wiki-example-identity";
 import { wikiOverviewSignature } from "../shared/wiki-overview";
-import { isRequiredWikiSourceBlock, sourceBlockSupportsRows, wikiSourceBlockCaption, wikiSourceBlockMarkdown, wikiSourceExampleScope } from "../shared/wiki-source-code";
+import { isRequiredWikiSourceBlock, sourceBlockSupportsRows, wikiSourceBlockCaption, wikiSourceBlockMarkdown, wikiSourceExampleScope, wikiSourceTableRole } from "../shared/wiki-source-code";
 import type { resolveWikiReading } from "./wiki-knowledge-reading";
+import { wikiUnitChapterHomes } from "../shared/wiki-chapter-links";
+import { wikiSourceBackedStageOrder } from "./wiki-unit-fidelity";
+import { currentWikiEvidence, wikiEvidenceKey } from "../shared/wiki-evidence-link";
+
+export function recordedWikiOrderUnits(reading:Pick<ReturnType<typeof resolveWikiReading>,"organization"|"units"|"statuses">) {
+  const homes=wikiUnitChapterHomes(reading.organization);
+  return reading.units.flatMap(unit=>{
+    const chapterId=homes.get(unit.id),status=reading.statuses.get(unit.id);
+    return chapterId&&status&&status!=="history"&&!unit.about&&!unit.evidence.pasted&&wikiSourceBackedStageOrder(unit)
+      ?[{chapterId,unit,confirmed:status==="confirmed"}]:[];
+  });
+}
+
+export function projectRecordedWikiOrders(session:FocusSession, reading:ReturnType<typeof resolveWikiReading>, selected:readonly string[]) {
+  const chapters=new Set(session.sections.filter(section=>selected.includes(section.id)
+    &&!section.origin&&!section.userEdited).map(section=>section.id));
+  const excluded=new Set([...session.wikiScopeReview?.ignoredKeys??[],...session.wikiScopeReview?.excludeKeys??[]]);
+  const ignored=session.wikiScopeReview?.materials.filter(item=>(item.keys??[item.key]).every(key=>excluded.has(key)))??[];
+  const refs=new Map(currentWikiEvidence(session).map(ref=>[wikiEvidenceKey(ref),ref]));
+  const savedRefs=new Set(session.evidence.map(wikiEvidenceKey));
+  const orders=new Map<string,Array<{unit:WikiKnowledgeUnit;evidence:FocusEvidence;confirmed:boolean}>>();
+  for(const {chapterId,unit,confirmed} of recordedWikiOrderUnits(reading)){
+    if(!chapters.has(chapterId))continue;
+    const {conversationId,messageId,quote,evidenceId}=unit.evidence;
+    if(!session.sourceConversationIds.includes(conversationId)||ignored.some(item=>item.evidenceIds.includes(evidenceId)
+      || item.quote.trim().length>=12&&quote.includes(item.quote.trim()))
+      ||session.scope?.kind==="goal"&&!session.scope.blocks?.some(block=>block.conversationId===conversationId&&block.messageIds.includes(messageId)))continue;
+    const versions=session.sourceSignatures?.[conversationId];
+    if(versions&&!versions[messageId])continue;
+    const role=session.sourceRoles?.[conversationId]?.[messageId];
+    if(role&&role!==unit.evidence.role)continue;
+    const key=wikiEvidenceKey({conversationId,messageId,excerpt:quote});
+    const original=refs.get(key);
+    if(!original&&savedRefs.has(key))continue;
+    const evidence=original??{id:`wiki-source-order:${unit.id}`,conversationId,messageId,excerpt:quote,title:reading.ledger.sources?.[conversationId]?.title??"",
+      sourceVersionId:session.sourceVersionIds?.[conversationId],sourceSignature:versions?.[messageId]};
+    orders.set(chapterId,[...orders.get(chapterId)??[],{unit,evidence,confirmed}]);
+  }
+  return orders;
+}
 
 interface Home { chapterId: string; subtopic: string }
 interface SourceCandidate { unit: WikiKnowledgeUnit; status: WikiUnitStatus; homes: Home[] }
-interface RequiredBlock { markdown: string; stage: string; standing: string; candidates: SourceCandidate[] }
+interface RequiredBlock { markdown: string; stage: string; standing: string; candidates: SourceCandidate[]; optional: boolean }
 interface SourceBlockScope { stage: string; standing: string }
 export interface WikiSourceBlockBinding extends SourceBlockScope { unit: WikiKnowledgeUnit; markdown: string; evidence: FocusEvidence }
 export const SOURCE_BLOCK_PROBLEM = /required source block is missing/u;
 
 /** Planned, in-scope originals are checked independently of what the writer cited. */
-export function planRequiredWikiSourceBlocks(ledger: WikiKnowledgeLedger, units: WikiKnowledgeUnit[], statuses: ReadonlyMap<string, WikiUnitStatus>): RequiredBlock[] {
+export function planRequiredWikiSourceBlocks(ledger: WikiKnowledgeLedger, units: WikiKnowledgeUnit[], statuses: ReadonlyMap<string, WikiUnitStatus>, includeComparisons = false): RequiredBlock[] {
   const organization = ledger.organization;
   if (!organization || ledger.documentType === "learning") return [];
   const homes = new Map<string, Home[]>();
@@ -26,13 +66,15 @@ export function planRequiredWikiSourceBlocks(ledger: WikiKnowledgeLedger, units:
   }
   const requirements = new Map<string, RequiredBlock>();
   for (const unit of units) {
-    const locations = homes.get(unit.id), status = statuses.get(unit.id);
-    if (!locations?.length || !status || status === "history" || unit.adoption.status === "rejected" || !isRequiredWikiSourceBlock(unit)) continue;
-    const code = unit.evidence.code!;
+    const code = unit.evidence.code, locations = homes.get(unit.id), status = statuses.get(unit.id);
+    if (!code || !locations?.length || !status || status === "history" || unit.adoption.status === "rejected") continue;
+    const role = wikiSourceTableRole(code), optional = includeComparisons && role === "comparison";
+    if (!optional && !isRequiredWikiSourceBlock(unit)) continue;
+    if (ledger.writingMode === "concise" && !optional && status !== "confirmed" && (unit.kind !== "constraint" || status !== "stated")) continue;
     const { stage, standing } = wikiSourceExampleScope(unit, status);
     const markdown = wikiSourceBlockMarkdown(code), identity = wikiExampleDisplayKey(code, stage, standing), prior = requirements.get(identity);
     const candidate = { unit, status, homes: locations };
-    if (!prior) requirements.set(identity, { markdown, stage, standing, candidates: [candidate] });
+    if (!prior) requirements.set(identity, { markdown, stage, standing, candidates: [candidate], optional });
     else if (status === "confirmed" && prior.candidates[0].status !== "confirmed") prior.candidates.unshift(candidate);
     else prior.candidates.push(candidate);
   }
@@ -81,7 +123,7 @@ export function reconcileRequiredWikiSourceBlocks<T extends CoverageChapter>(cha
     const format = codeKey(requirement.markdown) ?? requirement.markdown;
     formatCounts.set(format, (formatCounts.get(format) ?? 0) + 1);
   }
-  for (const { markdown, stage, standing, candidates } of requirements) {
+  for (const { markdown, stage, standing, candidates, optional } of requirements) {
     const sharedPayload = (formatCounts.get(codeKey(markdown) ?? markdown) ?? 0) > 1;
     const planned = candidates.find(candidate => candidate.homes.some(home => include(home.chapterId)));
     if (!planned) continue;
@@ -105,6 +147,7 @@ export function reconcileRequiredWikiSourceBlocks<T extends CoverageChapter>(cha
     const home = existing?.home ?? (planned.homes.length === 1 ? homes[0] : undefined);
     const chapter = home && documents.get(home.chapterId);
     if (!home || !chapter?.body.trim() || !canUse(unit, chapter)) {
+      if (optional) continue;
       const chapterId = homes[0].chapterId;
       issues.set(chapterId, [...issues.get(chapterId) ?? [], `"${unit.subject}" required source block is missing`]);
       continue;
@@ -143,7 +186,7 @@ export function reconcileRequiredWikiSourceBlocks<T extends CoverageChapter>(cha
 
 /** Re-export an older saved draft from its own source snapshot, without asking
  * the model or editing saved prose. Source changes and user edits are respected. */
-export function projectRequiredWikiSourceBlocks(session: FocusSession, chapterIds: string[], zh: boolean, resolved: ReturnType<typeof resolveWikiReading> | undefined) {
+export function projectRequiredWikiSourceBlocks(session: FocusSession, chapterIds: string[], zh: boolean, resolved: ReturnType<typeof resolveWikiReading> | undefined, includeComparisons = false) {
   const bindings = new Map<string, WikiSourceBlockBinding[]>(), issues = new Map<string, string[]>();
   if (!resolved?.ledger.draft || !chapterIds.length) return { session, bindings, issues };
   const selected = new Set(chapterIds);
@@ -158,7 +201,7 @@ export function projectRequiredWikiSourceBlocks(session: FocusSession, chapterId
       && !excluded.some(item => item.quote.trim().length >= 12 && quote.includes(item.quote.trim()))
       && (session.scope?.kind !== "goal" || session.scope.blocks?.some(block => block.conversationId === conversationId && block.messageIds.includes(messageId)));
   };
-  const requirements = planRequiredWikiSourceBlocks(resolved.ledger, resolved.units.filter(inScope), resolved.statuses);
+  const requirements = planRequiredWikiSourceBlocks(resolved.ledger, resolved.units.filter(inScope), resolved.statuses, includeComparisons);
   const refFor = (unit: WikiKnowledgeUnit): FocusEvidence | undefined => {
     const { conversationId, messageId, quote } = unit.evidence, versions = session.sourceSignatures?.[conversationId];
     if (!quote.trim() || versions && !versions[messageId]) return;

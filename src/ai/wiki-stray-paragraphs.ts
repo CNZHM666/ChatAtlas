@@ -2,8 +2,11 @@ import { personalDirection, statesCore, type WikiDraftChapter, type WikiDraftCla
 import { replaceParagraph } from "../shared/wiki-body-text";
 import { wikiHistoricalHeading } from "../shared/wiki-history-layout";
 import { knowledgeOverlap } from "../shared/knowledge-subject";
-import { wikiUnitLane } from "./wiki-unit-routing";
+import { wikiPurposeReadingLane, wikiUnitLane } from "./wiki-unit-routing";
+import { wikiProjectUsesStandard, wikiProjectStandardText } from "./wiki-reference-ownership";
+import { wikiDecisionRestatement } from "./wiki-confirmation-scope";
 import { recognitionImplementation, RECOGNITION_TOPIC, SIMULATION_UI, WORKSPACE_PANEL } from "../shared/wiki-feature-reading";
+import { joinSentence } from "../shared/wiki-sentences";
 
 /** A paragraph none of whose units belongs to its chapter, most of them to another: one run wrote the light and dark
  * palettes and the type scale under 核心工作流 / 库存管理与采购辅助 while their subjects sat in the UI chapter, which then
@@ -40,10 +43,14 @@ export function rehomedStrayParagraphs(chapters: WikiDraftChapter[], organizatio
       const solePlace = places.length === 1 && paragraph.unitIds.length === 1 && ownScope ? places[0] : undefined;
       const target = solePlace && solePlace.chapter !== chapter.id ? solePlace.chapter : destination(places, chapter.id, follow);
       follow = target;
+      const readingLane = places.length > 0 && paragraph.unitIds.every(id => {
+        const cited = units?.get(id);
+        return cited && wikiPurposeReadingLane(cited)?.title.some(title => title === places[0].subtopic);
+      });
       const local = places[0]?.chapter === chapter.id && places[0].subtopic !== paragraph.subtopic
         && (places.length >= MIN_UNITS || solePlace) && places.length === paragraph.unitIds.length
         && places.every(place => place.chapter === chapter.id && place.subtopic === places[0].subtopic)
-        && (Boolean(solePlace && unit && ["security","procurement","interface"].includes(wikiUnitLane(unit) ?? ""))
+        && (Boolean(solePlace && unit && ["security","procurement","interface"].includes(wikiUnitLane(unit) ?? "")) || readingLane
           || chapter.paragraphs.some(other => other !== paragraph && other.subtopic === places[0].subtopic));
       const into = local ? chapter : target ? chapters.find(other => other.id === target) : undefined;
       if (!into) { follow = undefined; continue; }
@@ -69,11 +76,105 @@ export function rehomedStrayParagraphs(chapters: WikiDraftChapter[], organizatio
       moved++;
     }
   }
-  return moved + rehomedListItems(chapters, placeOfUnit) + (units
-    ? rehomePersonalAdvice(chapters, organization, units) + rehomeFeatureDetails(chapters, organization) : 0);
+  moved += rehomedListItems(chapters, placeOfUnit);
+  if (units) {
+    moved += rehomeReadingClaims(chapters, placeOfUnit, units)
+      + rehomePersonalAdvice(chapters, organization, units) + rehomeFeatureDetails(chapters, organization);
+  }
+  return moved;
 }
 
 type Place = { chapter: string; subtopic: string };
+const REFERENCE_CHAPTER = /竞品|外部参考|参考项目|competitor|reference/iu;
+const STANDARD_TOPIC = /^(?:适用标准|Applicable standards)$/iu;
+
+/** Lift independently sourced sentences out of mixed positioning or reference prose. */
+function rehomeReadingClaims(chapters: WikiDraftChapter[], placeOfUnit: (id: string) => Place | undefined,
+  units: ReadonlyMap<string, WikiKnowledgeUnit>) {
+  let moved = 0;
+  for (const chapter of chapters) for (const paragraph of [...chapter.paragraphs]) {
+    if (wikiHistoricalHeading(paragraph.subtopic) || /^[|>#`~*-]|\n/u.test(paragraph.text)) continue;
+    for (const claim of [...paragraph.claims ?? []]) {
+      const place = placeOfUnit(claim.unitIds[0]);
+      const policy = place && place.chapter !== chapter.id && REFERENCE_CHAPTER.test(chapter.title)
+        && STANDARD_TOPIC.test(place.subtopic) && claim.unitIds.length === 1 && units.get(claim.unitIds[0]);
+      const ownStandard = policy && wikiProjectUsesStandard(policy) ? policy : undefined;
+      if (!place || (!ownStandard && place.chapter !== chapter.id) || place.chapter === chapter.id && place.subtopic === paragraph.subtopic
+        || !claim.unitIds.every(id => {
+          const unit = units.get(id), target = placeOfUnit(id);
+          return unit && target?.chapter === place.chapter && target.subtopic === place.subtopic
+            && (ownStandard || wikiPurposeReadingLane(unit)?.title.some(title => title === place.subtopic));
+        })) continue;
+      const into = ownStandard ? chapters.find(item=>item.id===place.chapter) : chapter;
+      if (!into) continue;
+      const at = paragraph.text.indexOf(claim.text);
+      if (at < 0 || at !== paragraph.text.lastIndexOf(claim.text) || !/[。！？.!?]$/u.test(claim.text)
+        || paragraph.claims?.some(other => other !== claim && (other.text.includes(claim.text) || claim.text.includes(other.text)))) continue;
+      const before = paragraph.text.slice(0,at).trimEnd(), after = paragraph.text.slice(at + claim.text.length).trimStart();
+      if (before && !/[。！？.!?]$/u.test(before) || /^(?:因此|由此|这些|该|上述|同时|这说明|\b(?:this|these|therefore|thus)\b)/iu.test(after)) continue;
+      const remaining = before && after ? joinSentence(before,after) : before || after;
+      const claims = paragraph.claims?.filter(other => other !== claim) ?? [];
+      const unitIds = paragraph.unitIds.filter(id => !claim.unitIds.includes(id) || claims.some(other => other.unitIds.includes(id)));
+      if (!remaining || !claims.length && !unitIds.some(id => {
+        const unit = units.get(id);
+        return unit && statesCore(unit.statement, remaining);
+      }) || !chapter.body.includes(paragraph.text)
+        || chapter.body.indexOf(paragraph.text) !== chapter.body.lastIndexOf(paragraph.text)) continue;
+      chapter.body = replaceParagraph(chapter.body,paragraph.text,remaining);
+      paragraph.text = remaining;
+      paragraph.claims = claims;
+      paragraph.unitIds = unitIds;
+      const withoutTransition = ownStandard ? claim.text.replace(/^(?:基于此|因此|由此)[，,]\s*/u,"") : claim.text;
+      const text = ownStandard && wikiDecisionRestatement(withoutTransition,ownStandard.statement)
+        ? ownStandard.statement : withoutTransition;
+      const placed = {text,subtopic:place.subtopic,unitIds:claim.unitIds,claims:[{...claim,text}]};
+      const peer = [...into.paragraphs].reverse().find(item => item.subtopic === place.subtopic && into.body.includes(item.text));
+      if (peer) {
+        if (peer.text !== text) {
+          into.body = replaceParagraph(into.body,peer.text,`${peer.text}\n\n${text}`);
+          into.paragraphs.splice(into.paragraphs.indexOf(peer) + 1,0,placed);
+        }
+      } else {
+        into.body = `${into.body.trimEnd()}\n\n### ${place.subtopic}\n\n${text}`;
+        into.paragraphs.push(placed);
+      }
+      moved++;
+    }
+  }
+  return moved;
+}
+
+/** Remove the duplicate opening clause after a bound rule has landed in its own chapter. */
+export function trimRehomedStandardsFromReferenceOpenings(chapters: WikiDraftChapter[],
+  units: ReadonlyMap<string, WikiKnowledgeUnit>) {
+  for (const chapter of chapters) {
+    if (!REFERENCE_CHAPTER.test(chapter.title) || chapter.body.startsWith("### ")) continue;
+    const opening = chapter.body.split(/\n### /u)[0];
+    let text = opening;
+    const removed = new Set<string>();
+    for (const id of chapter.openingUnitIds ?? []) {
+      const unit = units.get(id);
+      if (!unit || !wikiProjectUsesStandard(unit)
+        || !chapters.some(other=>other !== chapter && !REFERENCE_CHAPTER.test(other.title)
+          && other.paragraphs.some(paragraph=>paragraph.unitIds.includes(id)))) continue;
+      const [, rule] = unit.statement.split(/[：:]/u, 2);
+      const core = rule?.replace(/[。.!?]$/u, "");
+      if (!core) continue;
+      const next = text.split(/(?<=[。！？])/u).map(sentence => {
+        const clauses = sentence.split(/[，,]\s*(?:但(?:是)?|不过|然而)/u);
+        const lead = clauses[0].trim().replace(/[。！？]$/u,"");
+        const standard = wikiProjectStandardText.exec(lead);
+        if (!standard || !lead.endsWith(core)
+          || !/^(?:(?:本项目|项目发起人|发起人|用户)(?:已)?确认)?$/u.test(lead.slice(0, standard.index))) return sentence;
+        return clauses.slice(1).join("，但");
+      }).join("");
+      if (next !== text) { text = next; removed.add(id); }
+    }
+    if (!removed.size) continue;
+    chapter.body = (text.trim() + (text.trim() ? "\n\n" : "") + chapter.body.slice(opening.length).trimStart()).trimEnd();
+    chapter.openingUnitIds = chapter.openingUnitIds?.filter(id=>!removed.has(id));
+  }
+}
 
 function rehomeFeatureDetails(chapters: WikiDraftChapter[], organization: Pick<WikiKnowledgeOrganization, "chapters">) {
   const candidates = organization.chapters.flatMap(chapter => chapter.subtopics.map(topic => ({chapter:chapter.id,subtopic:topic.title})));

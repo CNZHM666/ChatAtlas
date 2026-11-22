@@ -1,4 +1,4 @@
-import { Languages, Moon, Plus, Redo2, Settings, Sun, Undo2 } from "lucide-react";
+import { History, Languages, Moon, Plus, Redo2, Settings, Sun, Undo2 } from "lucide-react";
 import { ReaderToolbarSlot } from "./ReaderToolbar";
 import type { CanvasMode } from "../views/ConversationCanvas";
 import { usePreferences } from "../preferences";
@@ -11,6 +11,8 @@ interface TopBarProps {
   syncStatus?: ReactNode;
   generationProgressRef?: (element: HTMLDivElement | null) => void;
   onHome?: () => void;
+  onWorkbenchHistory?: () => void;
+  workbenchHistoryActive?: boolean;
   structureView?: boolean;
   onStructureChange?: (value: boolean) => void;
   view: PrimaryView;
@@ -52,6 +54,8 @@ export function TopBar(props: TopBarProps) {
         {props.allowEdit !== false && props.mode === "edit" ? <button className="icon-button primary" onClick={props.onNewCard} title={t("newCard")}><Plus size={18} /></button> : null}
         </> : null}
         <div className="topbar-generation-slot" ref={props.generationProgressRef} />
+        {props.onWorkbenchHistory ? <button type="button" className="icon-button topbar-workbench-history" aria-current={props.workbenchHistoryActive ? "page" : undefined}
+          aria-label={t("workbenchHistory")} title={t("workbenchHistory")} onClick={props.onWorkbenchHistory}><History size={17} aria-hidden="true"/></button> : null}
         <button className="icon-button" onClick={props.onSettings} title={t("settings")} aria-label={t("settings")}><Settings size={17} /></button>
         <button className="icon-button" onClick={() => setLocale(locale === "en" ? "zh-CN" : "en")} title={locale === "en" ? t("switchChinese") : t("switchEnglish")}><Languages size={17} /></button>
         <button className="icon-button" onClick={() => setTheme(theme === "light" ? "dark" : "light")} title={theme === "light" ? t("darkMode") : t("lightMode")}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>

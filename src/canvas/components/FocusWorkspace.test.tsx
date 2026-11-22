@@ -13,6 +13,7 @@ import type { Conversation } from "../../shared/types";
 import { StrictMode } from "react";
 import * as focusStorage from "../../storage/focus-sessions";
 import type { FocusScope } from "../../shared/focus-session";
+import type { WikiKnowledgeUnit } from "../../shared/wiki-knowledge";
 import { projectSession } from "../../test/project-fixture";
 import { contextKnowledge } from "../../test/context-fixture";
 import * as wikiRewriteAI from "../../ai/wiki-section-rewrite";
@@ -27,6 +28,54 @@ const session: FocusSession = { id: "s", goal: "Review poles", mode: "answer", t
 beforeEach(async () => { vi.clearAllMocks(); localStorage.setItem("atlas-locale", "en"); localStorage.removeItem("atlas-wiki-categories:s"); const db = await getDatabase(); await db.clear("canvases"); await db.clear("projectQueryThreads"); await db.clear("focusGenerationTasks"); await db.clear("focusSessions"); await db.clear("conversations"); await db.clear("aiSettings"); await db.put("aiSettings", { id: "ai-settings", mode: "byok", provider: "openai", baseUrl: "https://api.example/v1", apiKey: "fixture", model: "fixture", updatedAt: 1 }); await db.clear("messages"); await db.put("messages", { id: "m1", conversationId: "c", messageIndex: 0, role: "user", content: "Why poles?", preview: "Why poles?", contentHash: "hash", createdAt: 1, updatedAt: 1 }); });
 
 async function confirmDiscussionScope() { const button = await screen.findByRole("button", { name: "Generate preview" }); await waitFor(() => expect(screen.queryByText("Finding discussions…")).not.toBeInTheDocument()); if ((button as HTMLButtonElement).disabled) { fireEvent.click(screen.getByRole("button", { name: "Browse other discussions" })); fireEvent.click(screen.getAllByRole("checkbox")[0]); } fireEvent.click(button); }
+
+it("waits for a choice before writing and starts in the selected mode", async () => {
+ const book = { version: 1, generatedAt: 1, status: "complete", materials: 1, batches: [] } as const;
+ const wrote = vi.fn();
+ vi.mocked(generateFocusSession).mockImplementationOnce(async (...args) => {
+  const onMode = args[9]?.onWritingMode;
+  expect(onMode).toBeDefined();
+  const mode = await onMode!("concise");
+  wrote(mode);
+  return { ...session, mode: "work", wikiKnowledge: { ...book, batches: [], writingMode: mode } };
+ });
+ const scope: FocusScope = { kind: "all", sourceConversationIds: ["c"], documentType: "project" };
+ render(<PreferencesProvider><FocusWorkspace request={{ id: "writing-mode", goal: "Write a project Wiki", mode: "work", sourceIds: ["c"], scope }}
+  conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+ expect(await screen.findByRole("radio", { name: /Concise Wiki/ })).toBeChecked();
+ expect(screen.getByRole("radio", { name: /Full audit/ })).toBeVisible();
+ expect(wrote).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole("radio", { name: /Development spec/ }));
+ fireEvent.click(screen.getByRole("button", { name: "Start writing" }));
+ await waitFor(() => expect(wrote).toHaveBeenCalledWith("handoff"));
+});
+
+it("lets a saved project choose a new writing mode from More and shows a preview", async () => {
+ const project:FocusSession = { ...session, mode:"work", status:"ready", locale:"en",
+  wikiKnowledge:{version:1,generatedAt:1,status:"complete",materials:1,batches:[],writingMode:"concise",
+    organization:{version:1,generatedAt:1,status:"complete",subjects:[],relations:[],merged:[],chapters:[],report:{}},
+    draft:{version:1,generatedAt:1,status:"complete",chapters:[],report:{},writingMode:"concise"}} };
+ const load = vi.spyOn(focusUpdates,"generateFocusUpdate").mockResolvedValueOnce({...project,id:"spec-preview"});
+ await (await getDatabase()).put("focusSessions",project);
+ const dialog = HTMLDialogElement.prototype;
+ const original = { showModal: dialog.showModal, close: dialog.close };
+ Object.assign(dialog, {
+  showModal(this: HTMLDialogElement) { this.open = true; },
+  close(this: HTMLDialogElement) { this.open = false; },
+ });
+ try {
+  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0}
+   onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+  fireEvent.click(screen.getByText("More",{exact:true}));
+  fireEvent.click(screen.getByRole("button",{name:"Change writing mode"}));
+  expect(screen.getByRole("radio",{name:/Concise Wiki/})).toBeChecked();
+  fireEvent.click(screen.getByRole("radio",{name:/Development spec/}));
+  fireEvent.click(screen.getByRole("button",{name:"Generate preview"}));
+  expect(await screen.findByRole("button",{name:"Save and view"})).toBeVisible();
+  expect(load.mock.calls[0].at(-1)).toMatchObject({writingMode:"handoff"});
+  expect(generateFocusSession).not.toHaveBeenCalled();
+ } finally { cleanup(); Object.assign(dialog, original); }
+});
 
 it("reviews unlabelled and default AI points individually, decrementing the count before leaving the chapter",async()=>{
  const db=await getDatabase();
@@ -95,6 +144,74 @@ it.each(["coverage", "writing"] as const)("retries incomplete Wiki %s through Up
  expect(await screen.findByRole("button",{name:"Save and view"})).toBeVisible();
  await waitFor(async()=>expect((await db.get("focusSessions","retry-preview"))?.scope).toEqual(project.scope));
  expect(screen.queryByText("No source changes found.")).toBeNull();
+});
+
+it("reviews a question inline and uses the sidebar only for its source", async () => {
+  const db = await getDatabase();
+  const choice = "Enable Markdown export.";
+  const unit: WikiKnowledgeUnit = { id:"markdown", subject:"Export", statement:choice, kind:"plan", details:[],
+    adoption:{status:"proposal"}, delivery:"planned",
+    evidence:{evidenceId:"option-source",conversationId:"c",messageId:"export-source",messageIndex:1,role:"assistant",pasted:false,quote:choice} };
+  const section={...session.sections[0],title:"Export chapter",body:choice,evidenceIds:[unit.evidence.evidenceId]};
+  const chapter={id:section.id,title:section.title,question:"What can be exported?",group:"",subtopics:[{title:"Export",subjectIds:["s-export"]}]};
+  const ask="Should the first release enable Markdown export?";
+  const project:FocusSession={...session,mode:"work",status:"ready",sections:[section],evidence:[{
+    id:unit.evidence.evidenceId,conversationId:"c",messageId:unit.evidence.messageId,title:conversation.title,excerpt:choice,
+  }],wikiKnowledge:{version:1,status:"complete",generatedAt:1,materials:1,documentType:"project",
+    batches:[{sourceIds:[unit.evidence.evidenceId],units:[unit],rejected:{},status:"ok"}],
+    organization:{version:1,generatedAt:1,status:"complete",chapters:[chapter],subjects:[{id:"s-export",name:"Export",aliases:[],unitIds:[unit.id]}],merged:[],relations:[],report:{}},
+    draft:{version:1,generatedAt:1,status:"complete",report:{},chapters:[{...chapter,body:choice,problems:[],paragraphs:[{text:choice,subtopic:"Export",unitIds:[unit.id]}]}]},
+    writingQuestions:[{id:"export",about:"Markdown export",ask,unitIds:[unit.id],organization:1,options:[
+      {id:"enable",label:choice,actions:[{do:"confirm",units:[unit.id]}]},
+      {id:"defer",label:"Not yet decided",actions:[{do:"open",units:[unit.id]}]},
+    ]}],
+  }};
+  await db.put("conversations",conversation);
+  await db.put("messages",{id:unit.evidence.messageId,conversationId:"c",messageIndex:1,role:"assistant",content:choice,preview:choice,contentHash:"export",createdAt:2,updatedAt:2});
+  await db.put("focusSessions",project);
+  const update=vi.spyOn(focusUpdates,"generateFocusUpdate");
+  vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockReturnValue(new DOMRect(0,0,1280,840));
+  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+  fireEvent.click(screen.getByRole("button",{name:"Document overview"}));
+  fireEvent.click((await screen.findByText(ask)).closest("summary")!);
+  const overview=within(screen.getByRole("region",{name:"Open questions"}));
+  expect(overview.getByRole("radio",{name:choice})).toBeVisible();
+  expect(screen.queryByRole("complementary",{name:"Original evidence"})).toBeNull();
+  fireEvent.click(overview.getByRole("button",{name:"Source 1"}));
+  const pane=screen.getByRole("complementary",{name:"Original evidence"});
+  expect(within(pane).queryByRole("radio")).toBeNull();
+  expect(screen.getByRole("button",{name:"Document overview"})).toHaveAttribute("aria-current","page");
+  fireEvent.click(overview.getByRole("radio",{name:choice}));
+  fireEvent.click(overview.getByRole("button",{name:"Confirm choice"}));
+  await waitFor(async()=>expect((await db.get("focusSessions",project.id))?.wikiKnowledge?.decisions?.[unit.id]?.verdict).toBe("confirmed"));
+  expect(update).not.toHaveBeenCalled();
+  fireEvent.click(await overview.findByRole("button",{name:"Undo"}));
+  await waitFor(async()=>expect((await db.get("focusSessions",project.id))?.wikiKnowledge?.decisions?.[unit.id]).toBeUndefined());
+});
+
+it("previews a saved decision from its chapter and returns there after applying", async () => {
+  const db = await getDatabase();
+  const chapter = { ...session.sections[0], title: "Decision chapter" };
+  const project: FocusSession = { ...session, mode: "work", status: "ready", sections: [chapter],
+    sourceSignatures: { c: { m1: sourceMessageSignature("Why poles?") } },
+    wikiKnowledge: { version: 1, status: "partial", generatedAt: 1, materials: 1,
+      batches: [{ sourceIds: ["pending"], units: [], rejected: {}, status: "ok", uncovered: ["pending"] }],
+      organization: { version: 1, generatedAt: 1, status: "complete", chapters: [], subjects: [], merged: [], relations: [], report: {} },
+      draft: { version: 1, status: "complete", generatedAt: 1, chapters: [], report: {} },
+      decisionsAt: 2, decisionArbitrations: { scope: { choice: "custom", mode: "custom", at: 2, chapterId: chapter.id, text: "Keep the new scope." } } } };
+  await db.put("conversations", conversation);
+  await db.put("focusSessions", project);
+  const savedDraft = { ...project.wikiKnowledge!, draft: { ...project.wikiKnowledge!.draft!, generatedAt: 3 } };
+  const update = vi.spyOn(focusUpdates, "generateFocusUpdate").mockResolvedValue({ ...project, id: "decision-preview", activeSectionId: chapter.id, wikiKnowledge: savedDraft });
+  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: /Decision chapter/ }));
+  const apply = await screen.findByRole("button", { name: "Preview article update" });
+  expect(update).not.toHaveBeenCalled();
+  fireEvent.click(apply);
+  fireEvent.click(await screen.findByRole("button", { name: "Save and view" }));
+  await waitFor(() => expect(screen.getByRole("heading", { name: chapter.title })).toBeVisible());
+  expect(update.mock.calls[0][7]).toMatchObject({ applyDecisions: true });
+  expect(screen.queryByRole("button", { name: "Preview article update" })).toBeNull();
 });
 
 it.each([true, false])("docks update progress before the first draft during writing confirmation (header available: %s)", async inHeader => {

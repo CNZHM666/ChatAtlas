@@ -23,7 +23,8 @@ export function projectReferenceGroups(body:string,includeSingle:boolean){
   if(!raw.trimEnd().endsWith("</details>"))return [];
   const roadmap=/<summary>(?:原始规划表|Original planning tables)<\/summary>/u.test(raw);
   const assessment=/<summary>(?:讨论中的方案评估|Design assessments from the discussion)<\/summary>/u.test(raw);
-  if(!roadmap&&!assessment&&!COLLECTION.test(raw)){
+  const comparison=/<summary>(?:竞品原文对照表|Original competitor comparison)<\/summary>/u.test(raw);
+  if(!roadmap&&!assessment&&!comparison&&!COLLECTION.test(raw)){
    if(!includeSingle) return [];
    const contents=blocks.filter(block=>block.start>start&&block.end<end);
    if(contents.filter(block=>block.kind==="code").length!==1||contents.some(block=>block.kind!=="code"&&!(block.kind==="paragraph"

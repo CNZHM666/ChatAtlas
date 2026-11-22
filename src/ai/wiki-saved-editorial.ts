@@ -3,13 +3,12 @@ import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
 import {wikiSupplementRanges} from "../shared/wiki-source-supplements";
 import {statesCore,wikiLedgerUnits,type WikiDraftChapter,type WikiKnowledgeLedger,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 import type {WikiClaim} from "../shared/wiki-claims";
-import {reviewWikiEditorial} from "./wiki-editorial-review";
+import {compactWikiDecisionHeadings,putUnderWikiDecisionTopic,reviewWikiEditorial} from "./wiki-editorial-review";
 import {claimSupported} from "./wiki-claim-support";
 import {wikiDecisionRestatement} from "./wiki-confirmation-scope";
 import {answerLeavesDetailsOpen,wikiChoiceQuestionText,wikiLocalAnswer,wikiScopedIntegration} from "./wiki-question-parse";
 import {wikiUnconfirmedWorkflowFeedback} from "./wiki-workflow-scope";
 import {placeWikiChoices} from "./wiki-choice-placement";
-import {wikiHistoricalHeading} from "../shared/wiki-history-layout";
 import {wikiBoundClosedListChoices} from "./wiki-number-diagnostics";
 import {wikiStatesClosedList} from "../shared/wiki-closed-list";
 import {withStop} from "../shared/wiki-sentences";
@@ -170,8 +169,9 @@ export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowled
   if(home&&home.id!==section.id&&home.id!==section.wikiOwnerId)continue;
   const text=paragraph.text;
   if(!body.includes(text)){
-   const heading=!wikiHistoricalHeading(paragraph.subtopic)&&wikiDocumentBlocks(body).find(block=>block.kind==="heading"&&block.text.replace(/^#+\s+/u,"")===paragraph.subtopic);
-   if(heading)body=body.slice(0,heading.end)+`\n\n${text}`+body.slice(heading.end);
+   const topic=home?.subtopics.find(subtopic=>subtopic.subjectIds.some(id=>subjectIds.has(id)));
+   const placed=putUnderWikiDecisionTopic(body,topic?.title??paragraph.subtopic,text,Boolean(topic&&!feedback));
+   if(placed)body=placed;
    else if(!feedback)additions.push(text);
    else continue;
   }
@@ -204,5 +204,6 @@ export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowled
    }
   }
  }
+ body=compactWikiDecisionHeadings(body);
  return body===section.body&&claims.length===(section.claims?.length??0)?section:{...section,body,claims:claims.filter(claim=>claim.text)};
 }

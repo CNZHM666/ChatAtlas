@@ -1,4 +1,4 @@
-import { Check, Circle, CircleDot, Pencil, Sparkles, Trash2, RotateCcw, X } from "lucide-react";
+import { Check, Circle, CircleDot, History, House, Pencil, Sparkles, Trash2, RotateCcw, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { AtlasCanvas, OrganizationRun } from "../../shared/types";
 import type { FocusSession } from "../../shared/focus-session";
@@ -24,10 +24,11 @@ interface MapSidebarProps {
   tasks?: OrganizationRun[];
   activeTaskId?: string | null;
   onSelectTask?: (id: string) => void;
-  onTaskHistory?: () => void;
+  workbenchHistoryActive?: boolean;
+  onWorkbenchHistory?: () => void;
 }
 
-export function MapSidebar({ canvases, activeId, onSelect, onRename, onDelete, deletedProjects = [], onRestore, deletedVersions = [], onRestoreVersion, onEmptyTrash, previewIds = new Set(), tasks = [], activeTaskId = null, onSelectTask }: MapSidebarProps) {
+export function MapSidebar({ canvases, activeId, onSelect, onRename, onDelete, deletedProjects = [], onRestore, deletedVersions = [], onRestoreVersion, onEmptyTrash, previewIds = new Set(), tasks = [], activeTaskId = null, onSelectTask, workbenchHistoryActive, onWorkbenchHistory }: MapSidebarProps) {
   const { locale, t } = usePreferences();
   const versionLabels = projectVersionLabels(deletedVersions, locale === "zh-CN", true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -56,7 +57,13 @@ export function MapSidebar({ canvases, activeId, onSelect, onRename, onDelete, d
   return (
     <aside className="map-sidebar" aria-label={locale === "zh-CN" ? "工作区导航" : "Workspace navigation"} style={{ "--map-sidebar-width": `${width}px` } as CSSProperties}>
       <div className="map-sidebar-brand" aria-label="ChatAtlas"><BrandMark className="map-sidebar-brand-mark" /><strong>ChatAtlas</strong></div>
-      {canvases.filter((canvas) => canvas.type === "overview").map((canvas) => <div key={canvas.id} className={`map-item sidebar-home ${canvas.id === activeId ? "active" : ""}`}><button className="map-select" aria-current={canvas.id === activeId ? "page" : undefined} onClick={() => onSelect(canvas.id)}><CircleDot className="overview-orb-icon" size={13} /><span>{locale === "zh-CN" ? "工作台首页" : "Workbench home"}</span></button></div>)}
+      {canvases.filter((canvas) => canvas.type === "overview").map((canvas) => {
+        const active = canvas.id === activeId && !workbenchHistoryActive;
+        return <div key={canvas.id} className={`map-item sidebar-home${active ? " active" : ""}`}><button className="map-select" aria-current={active ? "page" : undefined} onClick={() => onSelect(canvas.id)}><House size={15} aria-hidden="true"/><span>{t("workbenchHome")}</span></button></div>;
+      })}
+      {onWorkbenchHistory ? <div className={`map-item sidebar-history${workbenchHistoryActive ? " active" : ""}`}>
+        <button type="button" className="map-select" aria-current={workbenchHistoryActive ? "page" : undefined} onClick={onWorkbenchHistory}><History size={15} aria-hidden="true"/><span>{t("workbenchHistory")}</span></button>
+      </div> : null}
       <div className="map-sidebar-heading"><span>{locale === "zh-CN" ? "我的项目" : "My projects"}</span></div>
       <div className="map-list">
         {canvases.filter((canvas) => canvas.type !== "overview").map((canvas, index) => editingId === canvas.id ? (

@@ -26,6 +26,9 @@ export function implementationRequest(content:string,quote=content):boolean {
 
 const approvalTerms=(text:string)=>{const clean=text.normalize("NFKC").toLowerCase().replace(/p(\d+)\s*[-–—]\s*p?(\d+)/giu,"p$1 p$2").replace(/确认|决定|采用|使用|建议|同意|这个|那个|方案|我们|现在|进行|需要|就按|可以|帮我|给我|优化|修复|改进|执行|实施|实现|直接|开始|请|了|吧|的|\b(?:confirm(?:ed)?|adopt|use|suggest|the|this|that|plan|approach|we|to|i|you|my|our|it|please|implement|execute|apply)\b/giu," ");const words=clean.match(/[a-z][a-z\d_+-]*|[\p{Script=Han}]+/gu)??[];return new Set(words.flatMap(word=>/\p{Script=Han}/u.test(word)?Array.from({length:Math.max(0,word.length-1)},(_,index)=>word.slice(index,index+2)):[word]));};
 
+/** Asking for a deliverable about a discussion does not approve its contents. */
+export const asksForDiscussionArtifact = (text: string) => /^(?:可以|能否|能不能|请|麻烦|好[，,。\s]+)?\s*(?:给我|发我|帮我(?:写|整理|生成|起草)|写|生成|整理|起草)[^。；;！？\n]{0,28}(?:提示词|总结|摘要|说明稿|草稿)(?=$|了|吧|[，,。！!？?；;\s])|^(?:could you |can you |please )?(?:give me|write|draft|generate|summari[sz]e)\b[^.!?\n]{0,45}\b(?:prompt|summary|draft)\b/iu.test(text.trim());
+
 /** Conservative local rejection checks, not a semantic verifier. Always inspect
  * the surrounding original sentence: a clipped quote can hide a question,
  * negation, attribution or hypothetical. Unknown is never approval. */
@@ -106,7 +109,7 @@ export function confirmsProposal(approval:{content:string;conversationId?:string
  const sameConversation=approval.conversationId===proposal.conversationId;
  const adjacent=sameConversation&&(Boolean(proposal.id&&approval.replyToMessageId===proposal.id)||approval.messageIndex!==undefined&&proposal.messageIndex!==undefined&&approval.messageIndex===proposal.messageIndex+1);
  const intent=statementEvidence(approval.content,quote);
- if(!sameConversation||intent.preference||intent.reference||!wikiQuoteRange(approval.content,quote))return false;
+ if(!sameConversation||intent.preference||intent.reference||!intent.explicitDecision&&asksForDiscussionArtifact(approval.content)||!wikiQuoteRange(approval.content,quote))return false;
  // Resolve only explicit, bounded enumerations. A clipped proposal quote cannot hide alternatives.
  const optionHeads=[...proposal.content.matchAll(OPTION_HEAD)];
  const explicitOptions=optionHeads.filter(option=>option[1]).length>1;

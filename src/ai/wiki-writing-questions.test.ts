@@ -3,8 +3,9 @@ import { pendingWriterQuestions, pendingWritingQuestions, wikiNamedProjects, wit
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { reviseForAnswers, writeWikiDraft } from "./wiki-knowledge-write";
 import type { StructuredAIRequest } from "./provider";
-import type { WikiKnowledgeLedger, WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import type { WikiKnowledgeLedger, WikiKnowledgeUnit, WikiWritingQuestion } from "../shared/wiki-knowledge";
 import { readQuestions, wikiLocalAnswer } from "./wiki-question-parse";
+import { wikiRoadmapScope } from "../shared/wiki-roadmap-scope";
 
 const signal = new AbortController().signal;
 const unit = (index: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${index}`, subject: "密钥", statement, kind: "constraint", details: [], evidence: { evidenceId: `e${index}`, conversationId: "c", messageId: `m${index}`, messageIndex: index, role: "assistant", pasted: false, quote: statement }, adoption: { status: "proposal" }, delivery: "unknown", ...extra });
@@ -22,6 +23,53 @@ function asking(answer: (prompt: { chapters: Array<{ subtopics: Array<{ units: A
 }
 const idOf = (prompt: Parameters<Parameters<typeof asking>[0]>[0], statement: string) => prompt.chapters.flatMap(chapter => chapter.subtopics.flatMap(topic => topic.units)).find(item => item.statement === statement)!.id;
 
+it("projects the selected release without rejecting a different release or confirming extras", () => {
+  const first = unit(5, "V0 阶段不包含拖拽画布，仅提供“一句话需求 -> AI分析 -> 输出推荐方案/BOM/接线/代码”的静态结果页，用于验证核心价值。", { subject: "V0 MVP" });
+  const follow = unit(6, "在 V0 验证通过后引入画布，支持 Hardware IR 和实时规则检查。", { subject: "画布规划", kind: "plan" });
+  const ledger = book();
+  ledger.batches[0].units.push(first, follow);
+  ledger.organization!.subjects[0].unitIds.push(first.id, follow.id);
+  const question: WikiWritingQuestion = { id: "canvas-scope", organization: 7, about: "V1画布", ask: "V1版本是否包含交互式画布，还是仅保留V0的静态结果页？",
+    unitIds: [first.id, follow.id], options: [
+      { id: "include", label: "V1包含画布", actions: [{ do: "confirm", units: [follow.id] }, { do: "reject", units: [first.id] }] },
+      { id: "static", label: "V1仅静态页", actions: [{ do: "confirm", units: [first.id] }] },
+    ] };
+  const selected = withWritingAnswer(ledger, question, "include", undefined, 8);
+  expect(selected.decisions?.[first.id]).toBeUndefined();
+  expect(selected.decisions?.[follow.id]).toBeUndefined();
+  const legacy = { ...selected, decisions: { [first.id]: { verdict: "rejected" as const, at: 8 }, [follow.id]: { verdict: "confirmed" as const, at: 8 } } };
+  const reading = resolveWikiReading(legacy);
+  const answer = reading.units.find(item => item.id === "answer:canvas-scope:include")!;
+  expect(answer.statement).toBe("V1包含画布。");
+  expect(reading.statuses.get(answer.id)).toBe("confirmed");
+  expect(wikiLocalAnswer(reading.ledger, answer.id)?.answer).toBe("V1包含画布");
+  expect(reading.statuses.get(first.id)).not.toBe("history");
+  expect(reading.statuses.get(follow.id)).not.toBe("confirmed");
+  expect(wikiRoadmapScope(answer).rawLabels).toEqual(["V1"]);
+  const restorable = reading.ledger.writingQuestions?.find(item => item.id === question.id);
+  if (!restorable) throw new Error("Missing saved choice");
+  expect(restorable.options.map(option => option.id)).toEqual(["include", "static"]);
+  const changed = withWritingAnswer(legacy, restorable, "static", undefined, 9);
+  const updated = resolveWikiReading(changed);
+  expect(updated.units.find(item => item.id === "answer:canvas-scope:static")?.statement).toBe("V1仅静态页。");
+  expect(updated.statuses.get("answer:canvas-scope:static")).toBe("confirmed");
+  expect(updated.units.some(item => item.id === answer.id)).toBe(false);
+  expect(updated.statuses.get(first.id)).toBe("proposal");
+  expect(updated.statuses.get(follow.id)).toBe("proposal");
+  expect(changed.userAnswers?.[0].previousChoices?.[0].answer).toBe("V1包含画布");
+  expect(legacy.decisions[first.id].verdict).toBe("rejected");
+});
+
+it("derives stage, priority and exclusion without assigning an unsupported current release", () => {
+  const staged = unit(8, "M3.2 暂不做拍照识别，Phase B / GitHub Alpha 讨论开放。");
+  expect(wikiRoadmapScope(staged)).toMatchObject({
+    rawLabels: ["M3.2", "Phase B", "GitHub Alpha"], priorities: [], bucket: "out_of_scope", exclusionType: "phase_only", exclusionLabels: ["M3.2"],
+  });
+  const priority = unit(9, "Phase A 优先级为 P0。");
+  expect(wikiRoadmapScope(priority)).toMatchObject({ rawLabels: ["Phase A"], priorities: ["P0"], bucket: undefined });
+  const boundary = unit(10, "永久禁止向第三方写入密钥。");
+  expect(wikiRoadmapScope(boundary)).toMatchObject({ exclusionType: "permanent", bucket: "out_of_scope" });
+});
 it("keeps the answered question across rewrites and recovers a legacy positional collision", () => {
   const version = unit(5, "首个公开标签定为 v0.1.0-alpha，或仅公开 main 分支。"), bench = unit(6, "优先搭建硬件基准测试集。");
   const real = new Map([["k1", version.id], ["k2", bench.id]]);
@@ -48,6 +96,28 @@ it("keeps the answered question across rewrites and recovers a legacy positional
   expect(restored.statuses.get(bench.id)).toBe("proposal");
 });
 
+it("does not ask a paraphrased choice with new source IDs after the user answered it", () => {
+  const old = unit(5, "检索结果使用 Compact Rows/List。"), next = unit(6, "结果列表可采用 Compact Rows/List。");
+  const alternative = unit(7, "搜索结果按已归档和未归档两组显示。");
+  const ledger = book();
+  ledger.batches[0].units.push(old, next, alternative);
+  ledger.organization!.subjects[0].unitIds.push(old.id, next.id, alternative.id);
+  const options = (id: string): WikiWritingQuestion["options"] => [
+    { id: "rows", label: "Compact Rows/List", actions: [{ do: "confirm", units: [id] }] },
+    { id: "groups", label: "分为已归档和未归档两组", actions: [{ do: "confirm", units: [alternative.id] }] },
+  ];
+  const asked: WikiWritingQuestion = { id: "original", about: "检索结果", organization: 7, ask: "检索结果的样式是 Compact Rows/List，还是分为已归档和未归档两组？",
+    unitIds: [old.id, alternative.id], options: options(old.id) };
+  const repeated: WikiWritingQuestion = { ...asked, id: "rewritten", ask: "检索结果最终采用 Compact Rows/List 还是分为已归档和未归档两组？", unitIds: [next.id, alternative.id], options: options(next.id) };
+  const version = { ...repeated, id: "version", ask: "V2 " + repeated.ask };
+  const change = { ...repeated, id: "change", ask: repeated.ask.replace("已归档和未归档", "当前项目和其他项目") };
+  const answered = withWritingAnswer(ledger, asked, "rows", undefined, 8);
+  const queue = { ...answered, writingQuestions: [...answered.writingQuestions ?? [], repeated, version, change] };
+  expect(pendingWritingQuestions(queue).map(question => question.id)).toEqual([version.id, change.id]);
+  const reading = resolveWikiReading(queue);
+  expect(pendingWritingQuestions(reading.ledger, reading.statuses).map(question => question.id)).toEqual([version.id, change.id]);
+});
+
 it("asks in the model's words what it cannot write without the user, with answers that act on the ledger", async () => {
   const { ai, prompts } = asking(prompt => ({ questions: [
     { about: "API Key 存储", ask: "允许“在此设备记住”存 localStorage，还是一律禁止？", unitIds: [idOf(prompt, earlier.statement), idOf(prompt, later.statement)],
@@ -63,8 +133,11 @@ it("asks in the model's words what it cannot write without the user, with answer
   expect(questions[0].unitIds).toEqual([earlier.id, later.id]);
   // The exception a rule carries goes with it.
   expect(JSON.stringify(prompts[0])).toContain("除非用户正在进行需要 Provider 的任务");
-  // Asked once per organization.
+  // Reorganizing identical material does not repeat the same model request.
   expect(await withWritingQuestions(asked, { ai, signal, locale: "zh-CN" })).toBe(asked);
+  const refreshed = await withWritingQuestions({ ...asked, organization: { ...asked.organization!, generatedAt: 40 } }, { ai, signal, locale: "zh-CN" });
+  expect(pendingWritingQuestions(refreshed).map(question => question.id)).toEqual(questions.map(question => question.id));
+  expect(prompts).toHaveLength(1);
 
   const chosen = withWritingAnswer(asked, questions[0], "o1");
   expect(chosen.decisions).toMatchObject({ [later.id]: { verdict: "confirmed" }, [earlier.id]: { verdict: "rejected" } });

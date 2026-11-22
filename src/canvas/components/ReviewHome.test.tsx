@@ -17,7 +17,7 @@ const ready: Conversation = { ...pending, messageCount: 2, importState: "complet
 const job: ImportJob = { id: "chatgpt-history", sessionId: "test", status: "inventory_ready", phase: "discovering", retryScope: "titles", discovered: 1, offset: 1, persisted: 1, persistedIds: [], hydrated: 0, completed: 0, failed: 0, pendingIds: ["one"], failedIds: [], startedAt: 1, updatedAt: 1, checkpoint: { sessionId: "test", discoveredIds: ["one"], persistedIds: [], failedIds: [], pendingIds: ["one"], lastCursor: "1", startedAt: 1, updatedAt: 1 } };
 
 const base = (overrides: Partial<ComponentProps<typeof ReviewHome>> = {}): ComponentProps<typeof ReviewHome> => ({
-  canvases: [], sessions: [], conversations: [], importJob: null, importSource: "web", selectedIds: new Set(), onSelectedIds: vi.fn(), onPrioritize: vi.fn(), recentReading: [], onStart: vi.fn(), onSession: vi.fn(), onResume: vi.fn(), onSpace: vi.fn(), onScan: vi.fn(), onHydrate: vi.fn(), onZip: vi.fn(), onPause: vi.fn(), onConnect: vi.fn(), onDiscover: vi.fn(), ...overrides,
+  canvases: [], sessions: [], conversations: [], importJob: null, importSource: "web", selectedIds: new Set(), onSelectedIds: vi.fn(), onPrioritize: vi.fn(), recentReading: [], onStart: vi.fn(), onSession: vi.fn(), onResume: vi.fn(), onSpace: vi.fn(), onScan: vi.fn(), onHydrate: vi.fn(), onZip: vi.fn(), onPause: vi.fn(), onConnect: vi.fn(), onDiscover: vi.fn(), onHistoryChange: vi.fn(), ...overrides,
 });
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); localStorage.removeItem("atlas-workbench-onboarding-v1"); });
@@ -26,11 +26,11 @@ const openMaterials = () => { if (!screen.queryByRole("group", { name: "选择�
 it("keeps diagnostic-only Wiki records and completed runs out of Continue while preserving History",()=>{
  localStorage.setItem("atlas-locale","en");
  const run:OrganizationRun={id:"analysis",title:"Overview and Wiki analysis",diagnosticOnly:true,targetType:"conversation",targetIds:[ready.id],startedAt:1,updatedAt:2,status:"failed",stage:"preparing",progress:100,events:[]};
- render(<PreferencesProvider><ReviewHome {...base({conversations:[ready],organizationRuns:[run,{...run,id:"running",status:"running"},{...run,id:"completed",diagnosticOnly:false,status:"completed"}],onTask:vi.fn(),onTaskHistory:vi.fn()})}/></PreferencesProvider>);
+ render(<PreferencesProvider><ReviewHome {...base({conversations:[ready],organizationRuns:[run,{...run,id:"running",status:"running"},{...run,id:"completed",diagnosticOnly:false,status:"completed"}],onTask:vi.fn()})}/></PreferencesProvider>);
  expect(screen.queryByRole("heading",{name:"Continue where you left off"})).toBeNull();
  expect(screen.queryByText("Overview and Wiki analysis")).toBeNull();
  expect(screen.queryByRole("button",{name:/organization history/i})).toBeNull();
- expect(screen.getByRole("button",{name:"History"})).toBeVisible();
+ expect(screen.queryByRole("button",{name:"History"})).toBeNull();
 });
 
 it("retains genuine failed jobs and routes only those jobs to continuation",()=>{
@@ -101,13 +101,13 @@ describe("workbench sync", () => {
     expect(props.onSession).toHaveBeenCalledWith(project.id);
     expect(project.projectState?.actions).toHaveLength(1);
   });
-  it("exposes history and layout example without demo generation", () => {
+  it("keeps the homepage free of the old utility row", () => {
     localStorage.setItem("atlas-locale", "zh-CN");
     const props = base({ selectedIds: new Set([ready.id]), conversations: [ready] });
     render(<PreferencesProvider><ReviewHome {...props} /></PreferencesProvider>);
     expect(screen.queryByRole("button", { name: "体验示例" })).toBeNull();
-    expect(screen.getByRole("button", { name: "历史记录" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "示例项目" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "历史记录" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "示例项目" })).toBeNull();
     expect(props.onStart).not.toHaveBeenCalled();
     expect(props.onSelectedIds).not.toHaveBeenCalled();
   });
@@ -123,19 +123,6 @@ describe("workbench sync", () => {
     fireEvent.click(screen.getByRole("button", { name: "同步所选 1 条" }));
     expect(props.onHydrate).toHaveBeenCalledWith(["pending"]);
     expect(props.onSelectedIds).not.toHaveBeenCalled();
-  });
-  it("opens the isolated layout example from home without changing the current view", () => {
-    localStorage.setItem("atlas-locale", "zh-CN");
-    const props = base({ conversations: [ready], selectedIds: new Set([ready.id]), draft: { goal: "继续验证检索", mode: "work" } });
-    render(<PreferencesProvider><ReviewHome {...props} /></PreferencesProvider>);
-    fireEvent.click(screen.getByRole("button", { name: "示例项目" }));
-    expect(screen.getByRole("region", { name: "示例项目工作区" })).toBeVisible();
-    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox", { name: "搜索或整理历史对话" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "退出示例" }));
-    expect(screen.getByRole("textbox", { name: "搜索或整理历史对话" })).toHaveValue("继续验证检索");
-    expect(screen.queryByRole("main", { name: "新手指引" })).toBeNull();
-    expect(props.onStart).not.toHaveBeenCalled(); expect(props.onSelectedIds).not.toHaveBeenCalled(); expect(props.onHydrate).not.toHaveBeenCalled();
   });
   it("keeps a natural task in its workspace until AI is connected, then proceeds without another selection", async () => {
     localStorage.setItem("atlas-locale", "en");
@@ -185,7 +172,8 @@ describe("workbench sync", () => {
     expect(await screen.findByRole("heading", { name: "找回历史对话" })).toBeVisible();
     expect(props.onStart).not.toHaveBeenCalled(); expect(props.onSelectedIds).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(screen.queryByRole("button", { name: "返回" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "调整材料" }));
     expect(screen.getByRole("textbox", { name: "搜索或整理历史对话" })).toHaveValue("Hardware");
   });
   it("shows one project after four modifications, with earlier versions available on demand", () => {
@@ -218,12 +206,10 @@ describe("workbench sync", () => {
   });
   it("uses the single History entry instead of the retired organization-history shortcut", () => {
     localStorage.setItem("atlas-locale", "en");
-    const props = base({ organizationRuns: [{ id: "old-run" } as OrganizationRun], onTaskHistory: vi.fn() });
-    render(<PreferencesProvider><ReviewHome {...props} /></PreferencesProvider>);
+    const props = base({ organizationRuns: [{ id: "old-run" } as OrganizationRun] });
+    render(<PreferencesProvider><ReviewHome {...props} historyOpen /></PreferencesProvider>);
     expect(screen.queryByRole("button", { name: "View organization history (1)" })).toBeNull();
-    fireEvent.click(screen.getByRole("button",{name:"History"}));
     expect(screen.getByRole("heading",{name:"History"})).toBeVisible();
-    expect(props.onTaskHistory).not.toHaveBeenCalled();
   });
 
   it("prioritizes first import, distinguishes title discovery from messages, and preserves a hidden draft", () => {
@@ -236,7 +222,7 @@ describe("workbench sync", () => {
     expect(screen.queryByRole("button",{name:"配置模型"})).toBeNull();
     expect(screen.queryByText(/ChatGPT/)).toBeNull();
     expect(screen.getByRole("button",{name:"导入对话文件"})).toHaveTextContent("ZIP / JSON / Markdown / TXT");
-    fireEvent.click(screen.getByRole("button",{name:"导入"})); expect(props.onScan).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button",{name:"同步"})); expect(props.onScan).toHaveBeenCalledOnce();
     rerender(<PreferencesProvider><ReviewHome {...props} conversations={[pending]} importJob={{...job,status:"inventory_ready",retryScope:"titles"}} /></PreferencesProvider>);
     expect(screen.getByText(/同步正文后即可全文搜索/)).toBeVisible();
     rerender(<PreferencesProvider><ReviewHome {...props} conversations={[pending]} importJob={{...job,status:"syncing",phase:"syncing",retryScope:"selected",activeIds:[pending.id]}} /></PreferencesProvider>);
@@ -266,16 +252,18 @@ describe("workbench sync", () => {
     expect(onSelectedIds).toHaveBeenLastCalledWith(new Set(["item-9"]));
   });
 
-  it("keeps the home composer and material filter mounted while previewing the example", () => {
+  it("keeps the composer and material filter mounted when navigating through history", () => {
     localStorage.setItem("atlas-locale", "zh-CN");
     const props = base({ conversations: [ready, { ...pending, id: "other", title: "另一条材料" }], selectedIds: new Set(["one"]) });
-    render(<PreferencesProvider><ReviewHome {...props} /></PreferencesProvider>);
+    const { rerender } = render(<PreferencesProvider><ReviewHome {...props} /></PreferencesProvider>);
     fireEvent.change(screen.getByRole("textbox", { name: "搜索或整理历史对话" }), { target: { value: "复习系统极点" } });
     openMaterials();
     fireEvent.change(screen.getByRole("textbox", { name: "搜索对话标题" }), { target: { value: "系统" } });
     const composer = screen.getByRole("textbox", { name: "搜索或整理历史对话" });
-    fireEvent.click(screen.getByRole("button", { name: "示例项目" }));
-    fireEvent.click(screen.getByRole("button", { name: "退出示例" }));
+    rerender(<PreferencesProvider><ReviewHome {...props} historyOpen /></PreferencesProvider>);
+    expect(screen.getByRole("heading", { name: "历史记录" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
+    rerender(<PreferencesProvider><ReviewHome {...props} /></PreferencesProvider>);
     expect(screen.getByRole("textbox", { name: "搜索或整理历史对话" })).toBe(composer);
     expect(composer).toHaveValue("复习系统极点");
     expect(screen.getByRole("textbox", { name: "搜索对话标题" })).toHaveValue("系统");

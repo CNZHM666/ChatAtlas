@@ -5,10 +5,13 @@ import principles from "../../PRODUCT_PRINCIPLES.md?raw";
 import {version} from "../../package.json";
 
 it("leads with source-checkable Markdown and states the key-free search option",()=>{
- expect(zh.split("## 安装到")[0]).toContain("基础搜索不需要 AI Key");
- expect(en.split("## Install on")[0]).toContain("Basic search needs no AI key");
- expect(zh.split("## 安装到")[0]).toMatch(/可核对、可导出的 Markdown/u);
- expect(en.split("## Install on")[0]).toMatch(/Markdown project Wiki you can verify and share/u);
+ const zhIntro = zh.split("## 安装到")[0], enIntro = en.split("## Install on")[0];
+ expect(zhIntro).toMatch(/(?:基础|关键词)搜索[^。\n]*(?:无需|不需要) AI Key/u);
+ expect(enIntro).toMatch(/(?:basic|keyword) search[^.\n]*(?:needs?|requires?) no AI key/iu);
+ expect(zhIntro).toMatch(/可核对原话/u);
+ expect(zhIntro).toMatch(/导出 Markdown/u);
+ expect(enIntro).toMatch(/verifiable citations/iu);
+ expect(enIntro).toMatch(/export[^.\n]*Markdown/iu);
  for(const text of [zh,en]){
   expect(text).toContain("docs/images/wiki-chapter-light.png");
   expect(text).toContain("https://linux.do");
@@ -34,9 +37,9 @@ it("retains the product principles' import and native-integration boundaries in 
   expect(zh).toContain(platform);
   expect(en).toContain(platform);
  }
- expect(zh).toContain("浏览器授予网站权限后默认自动运行");
- expect(en).toContain("run automatically after browser website permission");
- expect(zh).toContain("仅保存当前已加载的消息，不保证完整历史");
- expect(en).toContain("saves currently loaded messages, not guaranteed full history");
+ expect(zh).toMatch(/浏览器授予(?:对应)?网站权限后[^。\n]*默认(?:自动运行|启用)/u);
+ expect(en).toMatch(/by default once the browser grants access/iu);
+ expect(zh).toMatch(/仅保存当前已加载的消息[^。\n]*(?:不保证完整历史|更早的历史可能尚未加载)/u);
+ expect(en).toMatch(/only saves messages currently loaded[^.\n]*older history may be incomplete/iu);
  for(const text of [zh,en])for(const platform of ["Kimi","Qwen"])expect(text).toContain(platform);
 });

@@ -1,10 +1,11 @@
 import { UNDECIDED } from "../shared/open-words";
 import { wikiMeasure } from "../shared/wiki-section-status";
-import { knowledgeScopesAgree, knowledgeTerms, knowledgeVersion } from "../shared/knowledge-subject";
-import type { WikiAnswerAction, WikiKnowledgeLedger, WikiKnowledgeUnit, WikiScopeAnswer, WikiUserAnswer, WikiWritingQuestion } from "../shared/wiki-knowledge";
+import { knowledgeOverlap, knowledgeScopesAgree, knowledgeTerms, knowledgeVersion } from "../shared/knowledge-subject";
+import type { WikiAnswerAction, WikiKnowledgeLedger, WikiKnowledgeUnit, WikiScopeAnswer, WikiUnitStatus, WikiUserAnswer, WikiWritingQuestion } from "../shared/wiki-knowledge";
 import { sourceMessageSignature } from "../shared/source-signature";
 import { wikiChoiceTrigger, wikiConfirmationCovers, wikiLayerDeferral, wikiReleaseChecklistStatement, wikiReleaseDeferral, wikiUnitConfirmationDetails } from "./wiki-confirmation-scope";
 import { wikiWorkflowScopes } from "./wiki-workflow-scope";
+import { distinctWikiStageScopes, wikiStageLabels } from "../shared/wiki-roadmap-scope";
 
 /** Questions a model asks the user about the material, read from its answer: ids it was sent, answers from the actions
  * the ledger keeps, at least two answers each, nothing asked twice. Never throws: no questions is a valid answer.
@@ -63,6 +64,36 @@ export function labelContradicts(label: string, statement: string): boolean {
   const held = marks(statement);
   return [...marks(label)].some(([kind, values]) => { const other = held.get(kind); return Boolean(other) && ![...values].some(value => other!.has(value)); });
 }
+const AFTER_PRIOR_RELEASE = /(?:^|[，,；;。]\s*)(?:在|待)\s*V\d+(?:\.\d+)*[^，,；;。\n]{0,24}?(?:以后|之后|后)(?=\s*\S)|\bafter\s+v\d+(?:\.\d+)*(?:\s+(?:passes validation|ships|is validated))?\b/iu;
+
+function confirmsAfterPrerequisite(label: string, statement: string) {
+  const prerequisite = statement.match(AFTER_PRIOR_RELEASE);
+  if (!prerequisite || !wikiStageLabels(label).length || labelContradicts(label, statement.replace(prerequisite[0], ""))) return false;
+  const capability = knowledgeTerms(label.replace(/包含|纳入|引入|\b(?:includes?|adds?)\b/giu, " "));
+  const after = knowledgeTerms(statement.replace(prerequisite[0], ""));
+  return capability.size > 0 && [...capability].every(term => after.has(term));
+}
+/** In a release comparison, an earlier design can be the model for an
+ * alternative in the release being decided. The answer records that release
+ * choice separately, with the older design kept as context. */
+function carriesReleaseAlternative(question: string, label: string, statement: string) {
+  const [asked, ...alternatives] = question.split(/还是|或者|\b(?:or|versus)\b/iu);
+  const target = knowledgeVersion(label), earlier = knowledgeVersion(statement);
+  if (!target || !earlier || target === earlier || knowledgeVersion(asked) !== target) return false;
+  const held = marks(statement);
+  if ([...marks(label)].some(([kind, values]) => kind !== "version" && held.has(kind)
+    && ![...values].some(value => held.get(kind)!.has(value)))) return false;
+  const describe = (text: string) => knowledgeTerms(text.replace(/\b(?:v|version\s*)\d+(?:\.\d+)*|仅|只|\bonly\b/giu, " "));
+  const words = [...describe(label)], source = describe(statement);
+  const suffix = label.match(/\p{Script=Han}(?=[\s。.!?！？]*$)/u)?.[0];
+  return words.length > 0 && alternatives.some(alternative => {
+    if (knowledgeVersion(alternative) !== earlier) return false;
+    const offered = describe(alternative);
+    const shared = words.filter(word => source.has(word) && offered.has(word)).length;
+    return shared === words.length || Boolean(suffix && statement.includes(suffix)
+      && alternative.includes(suffix) && shared >= Math.ceil(words.length / 2));
+  });
+}
 const confirmedBy = (option: WikiWritingQuestion["options"][number]) => option.actions.flatMap(action => action.do === "confirm" || action.do === "both" ? action.units : []);
 
 const answerKey = (value: string) => value.normalize("NFKC").toLowerCase().replace(/[\s。.!?！？]+/gu, "");
@@ -118,6 +149,42 @@ export function wikiLocalAnswer(reading: WikiKnowledgeLedger, unitId: string) {
       && (unitId === `answer:${answer.questionId}:${option.id}` || confirmedBy(option).includes(unitId));
   });
 }
+
+/** Both a scoped synthetic decision and a verdict on an existing unit can
+ * settle a question. A later replacement of that verdict reopens the check. */
+export function wikiConfirmedQuestionTexts(ledger: WikiKnowledgeLedger, statuses: ReadonlyMap<string, WikiUnitStatus>): string[] {
+  return effectiveWikiAnswers(ledger, statuses).map(answer => `${answer.question} ${answer.answer}`);
+}
+
+export function effectiveWikiAnswers(ledger: WikiKnowledgeLedger, statuses?: ReadonlyMap<string, WikiUnitStatus>) {
+  return (ledger.userAnswers ?? []).filter(answer => [`answer:${answer.questionId}:${answer.optionId}`, ...answer.unitIds]
+    .some(id => (!statuses || statuses.get(id) === "confirmed") && wikiLocalAnswer(ledger, id) === answer));
+}
+
+/** Rewriting a question can give it new unit IDs. Match the same two
+ * alternatives without carrying a choice to a different scope or condition. */
+export function wikiQuestionAlreadyAnswered(text: string, answers: readonly WikiUserAnswer[]) {
+  const normalized = (value: string) => value.normalize("NFKC").toLowerCase().replace(/[\s*_`“”‘’「」'".。!?？！，,:：]+/gu, "");
+  const scopeTerms = (value: string) => [...new Set(value.toLowerCase().match(/\bv\d+(?:\.\d+)*|\b(?:phase|milestone|stage)\s+[a-z\d.]+|第[一二三四五六七八九十\d]+(?:版|阶段)|本(?:轮|期|阶段)|首版|首发|默认|仅(?:限|在|当|对)|除非|(?:发布|上线)(?:前|后)|\b(?:only|unless|by default|before release|after release)\b/gu) ?? [])].map(normalized).sort().join("|");
+  const alternatives = (value: string) => value.split(/还是|或者|\s+(?:or|vs\.?|versus)\s+/iu);
+  return answers.some(answer => {
+    if (!knowledgeScopesAgree(text, answer.question) || distinctWikiStageScopes(text, answer.question) || scopeTerms(text) !== scopeTerms(answer.question)) return false;
+    if (normalized(text) === normalized(answer.question)) return true;
+    const [first, second, extra] = alternatives(text), [priorFirst, priorSecond, priorExtra] = alternatives(answer.question);
+    if (!second || !priorSecond || extra || priorExtra) return false;
+    const choice = normalized(answer.answer).replace(/^(?:选用|采用|选择|use|choose|adopt)/u, "");
+    if (choice.length < 6 || !normalized(first).endsWith(choice) || !normalized(priorFirst).endsWith(choice)) return false;
+    const subject = (value: string) => normalized(value).slice(0, -choice.length).replace(/(?:最终|具体|是|为|选用|采用|选择|如何|should|use|choose|adopt)+$/u, "");
+    const before = subject(priorFirst), after = subject(first);
+    const shared = knowledgeOverlap(before, after).length;
+    const exactTerms = /[a-z].*[/_-].*[a-z]/u.test(choice);
+    if (!shared && (!exactTerms || new Set([...after].filter(ch => /\p{Script=Han}/u.test(ch) && before.includes(ch))).size < 2)) return false;
+    // The other option must still be the same, even if the question's subject
+    // was paraphrased. Short generic choices need an exact question match.
+    const alternate = normalized(second), priorAlternate = normalized(priorSecond);
+    return alternate.length >= 8 && alternate === priorAlternate;
+  });
+}
 /** A later answer on a broader question cannot turn an earlier selected
  * option's unconfirmed details into an inferred rejection. */
 function selectedAnswerUnits(ledger: WikiKnowledgeLedger): Set<string> {
@@ -132,18 +199,22 @@ const ownerKey = (name: string) => name.normalize("NFKC").toLocaleLowerCase().re
 /** A question as it can be put to the user: an owner answer naming the project itself does nothing (the project is
  * not another project), an answer contradicting the point it confirms goes, and a question left with one answer is
  * not asked: both its points said the same. undefined: not a question. */
-export function soundQuestion(question: WikiWritingQuestion, statementOf: (id: string) => string | undefined, project?: string, unitOf?: (id: string) => WikiKnowledgeUnit | undefined): WikiWritingQuestion | undefined {
+export function soundQuestion(question: WikiWritingQuestion, statementOf: (id: string) => string | undefined, project?: string, unitOf?: (id: string) => WikiKnowledgeUnit | undefined, selectedId?: string): WikiWritingQuestion | undefined {
   // Figures of the project said on different days ("日活只有25", "每天稳定在22人", "日活卡在40了") are its history, not two
   // versions to choose from: asked "当前日活是25人、30人还是40人？", the answer turned one figure into a decision 〔已定〕 and
   // rejected the others, which the chapters still told with their dates.
   if (unitOf && question.unitIds.length >= 2 && question.unitIds.every(id => { const unit = unitOf(id); return Boolean(unit && wikiMeasure(unit)); })) return undefined;
   const own = project ? ownerKey(project) : "";
   const options = question.options.flatMap(option => {
-    if (confirmedBy(option).some(id => { const statement = statementOf(id); return statement !== undefined && labelContradicts(option.label, statement); })) return [];
+    if (confirmedBy(option).some(id => {
+      const statement = statementOf(id);
+      return statement !== undefined && labelContradicts(option.label, statement)
+        && !confirmsAfterPrerequisite(option.label, statement) && !carriesReleaseAlternative(question.ask, option.label, statement);
+    })) return [];
     const actions = option.actions.filter(action => !(action.do === "owner" && own && ownerKey(action.name) === own));
     return [actions.length === option.actions.length ? option : { ...option, actions }];
   });
-  if (options.length < 2) return undefined;
+  if (options.length < 2 && !options.some(option => option.id === selectedId)) return undefined;
   return options.length === question.options.length && options.every((option, index) => option === question.options[index]) ? question : { ...question, options };
 }
 
@@ -154,8 +225,12 @@ export function withSoundAnswers(ledger: WikiKnowledgeLedger): WikiKnowledgeLedg
   if (!ledger.writingQuestions?.length) return ledger;
   const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
   const project = ledger.organization?.projectName, sound = new Map<string, WikiWritingQuestion | undefined>();
-  for (const question of ledger.writingQuestions) sound.set(question.id, restoredQuestion(question) && ledger.userAnswers?.some(answer => answer.questionId === question.id)
-    ? question : soundQuestion(question, id => units.get(id)?.statement, project, id => units.get(id)));
+  const answers = new Map(ledger.userAnswers?.map(answer => [answer.questionId, answer]));
+  for (const question of ledger.writingQuestions) {
+    const answer = answers.get(question.id);
+    sound.set(question.id, restoredQuestion(question) && answer
+      ? question : soundQuestion(question, id => units.get(id)?.statement, project, id => units.get(id), answer?.optionId));
+  }
   if ([...sound].every(([id, question]) => question === ledger.writingQuestions!.find(item => item.id === id))) return ledger;
   const decisions = { ...ledger.decisions };
   const userAnswers = (ledger.userAnswers ?? []).filter(answer => {
@@ -308,7 +383,7 @@ export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeL
       && (!words && label.length <= 16 || answerTargetsAnotherClaim(anchor, question, label));
     const defer = wikiReleaseDeferral(question.ask, label);
     const said = wikiReleaseChecklistStatement(answer.question, label, anchor) ?? wikiScopedIntegration(question.ask, label) ?? wikiLayerDeferral(question.ask, label) ?? (defer ? /\p{Script=Han}/u.test(question.ask) ? `${defer.stage} 暂缓${/^[A-Za-z]/u.test(defer.feature) ? " " : ""}${defer.feature}` : `${defer.stage} defers ${defer.feature}`
-      : bare ? `${about}${/\p{Script=Han}/u.test(about!) ? "：" : ": "}${label}` : label);
+      : bare && !wikiStageLabels(label).length ? `${about}${/\p{Script=Han}/u.test(about!) ? "：" : ": "}${label}` : label);
     const han = /\p{Script=Han}/u.test(said);
     const statement = /[.!?。！？]$/u.test(said) ? said : `${said}${han ? "。" : "."}`;
     added.set(anchor.id, { ...anchor, id: answerId, statement, kind: "decision", details: [], conditions: undefined, adoption: { status: "user_decision" }, delivery: "unknown", about: undefined, relation: undefined,
@@ -463,8 +538,20 @@ export function wikiChoiceQuestionText(statement:string, ask:string) {
     && /[？?]\s*$|还是|或者|是否|\b(?:whether|versus)\b/iu.test(ask);
 }
 
+/** A choice naming examples of a classification covers that classification. */
+function differentClassification(statement: string, question: string) {
+  const examples = /(?:分为|划分为|归为)([^。？?\n]{4,90}?)等(?:[二三四五六七八九十\d]+类|分类)/u.exec(question)?.[1]
+    ?? /(?:categories|classification)\s+(?:such as|including)\s+([^?.]{5,100})/iu.exec(question)?.[1];
+  if (!examples || !/分类|分为|(?:[二三四五六七八九十\d]+)(?:种|类)|\bcategories\b/iu.test(statement)) return false;
+  const named = examples.split(/、|，|,|以及|\band\b/iu).map(item => item.trim()).filter(item => item.length >= 3);
+  const key = (value: string) => value.normalize("NFKC").toLowerCase().replace(/[\s*_"“”「」]/gu, "");
+  return named.length >= 2 && !named.every(item => key(statement).includes(key(item)));
+}
+
 export function answerLeavesDetailsOpen(unit: WikiKnowledgeUnit, question: WikiWritingQuestion, answer: string) {
+  if (distinctWikiStageScopes(answer, unit.statement)) return true;
   if (wikiChoiceQuestionText(unit.statement,question.ask)) return true;
+  if (differentClassification(unit.statement, question.ask)) return true;
   if (wikiScopedIntegration(question.ask, answer)) return true;
   if (wikiReleaseChecklistStatement(question.ask, answer, unit)) return true;
   // A timing answer only covers that timing, even when a compound plan has
@@ -499,6 +586,10 @@ export function answerLeavesDetailsOpen(unit: WikiKnowledgeUnit, question: WikiW
 /** Remove confirmation the answer assigned to an entire compound point when
  * its specific numbers were never offered. withAnsweredChoices then records
  * the user's actual choice if no narrower deciding unit represents it. */
+export function answerLeavesRejectionOpen(unit: WikiKnowledgeUnit, answer: string) {
+  return distinctWikiStageScopes(answer, unit.statement);
+}
+
 export function withAnswerScope(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
   if (!ledger.userAnswers?.length || !ledger.decisions) return ledger;
   const units = new Map(ledger.batches.flatMap(batch => batch.units.map(unit => [unit.id, unit] as const)));
@@ -507,12 +598,14 @@ export function withAnswerScope(ledger: WikiKnowledgeLedger): WikiKnowledgeLedge
   for (const answer of [...ledger.userAnswers].sort((a, b) => b.at - a.at)) {
     const question = ledger.writingQuestions?.find(item => item.id === answer.questionId), chosen = question?.options.find(option => option.id === answer.optionId);
     if (!question || !chosen) continue;
-    for (const id of chosen.actions.flatMap(action => action.do === "confirm" ? action.units : [])) {
+    for (const { id, verdict: kind } of chosen.actions.flatMap(action => action.do === "confirm" || action.do === "reject"
+      ? action.units.map(id => ({ id, verdict: action.do === "confirm" ? "confirmed" : "rejected" })) : [])) {
       if (reviewed.has(id)) continue;
       reviewed.add(id);
       const unit = units.get(id), verdict = ledger.decisions[id];
-      if (!unit || verdict?.verdict !== "confirmed" || verdict.wholeUnit && verdict.at >= answer.at
-        || !answerLeavesDetailsOpen(unit, question, answer.answer)) continue;
+      if (!unit || verdict?.verdict !== kind || verdict.wholeUnit && verdict.at >= answer.at
+        || (kind === "confirmed" ? !answerLeavesDetailsOpen(unit, question, answer.answer)
+          : verdict.at !== answer.at || !answerLeavesRejectionOpen(unit, answer.answer))) continue;
       decisions ??= { ...ledger.decisions };
       delete decisions[id];
     }

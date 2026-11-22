@@ -23,3 +23,16 @@ export function figuresIn(text: string, options: { percent?: boolean; counts?: b
     .filter(match => !options.counts || !SPAN_AFTER.test(bare.slice((match.index ?? 0) + match[0].length)))
     .map(match => match[0]);
 }
+
+const SPLIT_QUANTITY = /(\d+(?:\.\d+)?)[。．][ \t]*((?:个|名|位)(?=用户|参与者|成员|人|零件|阶段)|人(?=[，。、；）\s]|$)|毫秒|秒|分钟|小时|天|周|%)/gu;
+export const wikiHasSplitQuantity = (text: string) => text.search(SPLIT_QUANTITY) >= 0;
+
+/** Join a value and its unit only if the bound material actually uses that pair. */
+export function restoreSplitWikiQuantities(text: string, sources: readonly string[]): string {
+  const parts = text.split(/(\x60+[^\x60\n]+\x60+|\[[^\]\n]+\]\([^\n)]+\))/gu);
+  return parts.map((part, index) => index % 2 ? part : part.replace(SPLIT_QUANTITY,
+    (match, value: string, unit: string) => {
+      const pair = new RegExp(`(?<![\\d.])${value.replace(".", "\\.")}\\s*${unit}`, "u");
+      return sources.some(source => pair.test(source)) ? value + unit : match;
+    })).join("");
+}

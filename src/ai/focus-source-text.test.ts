@@ -9,17 +9,27 @@ import { loadFullReadingPassages } from "./focus-source-text";
 
 const source: Conversation = { id: "reading-source", platform: "chatgpt", title: "Long discussion", url: "", messageCount: 2, updatedAt: 1 };
 const messages: ConversationMessage[] = [
-  { id: "question", conversationId: source.id, messageIndex: 0, role: "user", content: "This needs earlier context", preview: "", contentHash: "q", createdAt: 1, updatedAt: 1 },
+  { id: "question", conversationId: source.id, messageIndex: 0, role: "user", content: "This needs earlier context", preview: "", contentHash: "q", createdAt: 1, updatedAt: 1, sourceCreatedAt:Date.UTC(2026,5,4,12) },
   { id: "answer", conversationId: source.id, messageIndex: 1, role: "assistant", content: "Earlier explanation🙂\n".repeat(700) + "Final correction: do not accept the earlier proposal.", preview: "", contentHash: "a", createdAt: 1, updatedAt: 1 },
 ];
 
 beforeEach(async () => { const db = await getDatabase(); await db.clear("messages"); await db.clear("conversations"); await db.clear("transcriptIndexes"); });
 describe("direct source loading for full reading", () => {
+  it("keeps a fenced contract intact near the generation chunk limit and covers every character", () => {
+    const contract = "\n\n### Validation result\n\n```ts\nfunction validateProject(project: Project) {\n"
+      + "  checkCandidate(project);\n".repeat(22) + "}\n```\n\n";
+    const content = "开头内容".repeat(950) + contract + "后续解释".repeat(1000);
+    const { materials } = coverageMaterials(transcriptPassages(source, [{ ...messages[1], content }]), [source]);
+    expect(materials.map(item => item.text.slice("assistant: ".length)).join("")).toBe(content);
+    expect(materials.some(item => item.text.includes(contract.trim()))).toBe(true);
+    expect(materials.every(item => item.text.length <= 4011)).toBe(true);
+  });
   it("preserves the same chronological material and evidence without building a search index", async () => {
     await saveConversationCapture({ conversation: source, messages: [...messages].reverse(), capturedAt: 1 }, { warmIndex: false });
     const loaded = await loadFullReadingPassages([source], new AbortController().signal);
     expect(loaded.missing).toBe(0);
     expect(loaded.passages).toHaveLength(2);
+    expect(loaded.passages.map(passage=>passage.discussedAt)).toEqual([messages[0].sourceCreatedAt, undefined]);
     expect(coverageMaterials(loaded.passages, [source])).toEqual(coverageMaterials(transcriptPassages(source, messages), [source]));
     expect(await (await getDatabase()).count("transcriptIndexes")).toBe(0);
   });

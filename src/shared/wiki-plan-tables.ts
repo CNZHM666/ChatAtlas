@@ -1,8 +1,9 @@
 import { wikiDocumentBlocks } from "./wiki-document-blocks";
 import { WIKI_SUPPLEMENT, wikiSupplementRanges } from "./wiki-source-supplements";
 import type { WikiKnowledgeUnit } from "./wiki-knowledge";
-import { wikiTableCells as cells, wikiTableKey as tableKey } from "./wiki-table-source";
+import { wikiTableCells as cells, wikiTableKey as tableKey, wikiTableRows } from "./wiki-table-source";
 import { WIKI_EVIDENCE_LINK } from "./wiki-evidence-link";
+import { wikiStageLabels } from "./wiki-roadmap-scope";
 
 const MILESTONE = /^(?:M\s*\d+|(?:milestone|phase|stage)\s+\d+|第[一二三四五六七八九十\d]+阶段|v\d+(?:\.\d+)+)$/iu;
 const PRIORITY = /^(?:P\s*\d+|暂缓|暂不做|暂不建议|以后|后续|deferred|later)$/iu;
@@ -118,7 +119,8 @@ function mergeComparisons(tables: ReadingTable[], zh: boolean) {
   return replacements;
 }
 
-type TableOptions = {units?: WikiKnowledgeUnit[]; citeTable?: (unit: WikiKnowledgeUnit) => string};
+type TableOptions = {units?: WikiKnowledgeUnit[]; citeTable?: (unit: WikiKnowledgeUnit) => string;
+  tableSources?: readonly { text: string; link: string }[] };
 export const isWikiTableIntroduction = (text:string) => /^(?:下表(?:按|说明|记录|列出|对照两份检索方案)|以下对照「|以下是(?:「[^」]+」|本节)讨论过的规划。|这里记录了「[^」]+」讨论中的范围取舍。|The table compares |This records the proposed scope for |These proposals cover different priorities and delivery sequences\.)/u.test(text.trim());
 
 function tableIntroduction(header: string[], caption: string | undefined, zh: boolean) {
@@ -202,13 +204,14 @@ function searchRoadmap(family: ReadingTable[]) {
 /** A reading projection. Keep original labels and rows together as sources.
  * Compare within a table before combining discussions: M2 in one table has
  * no ordering or equivalence relationship to M2 in another. */
-export function consolidateWikiPlanTables(body: string, zh: boolean, {units, citeTable}: TableOptions = {}): string {
+export function consolidateWikiPlanTables(body: string, zh: boolean, {units, citeTable, tableSources}: TableOptions = {}): string {
   const attachments = wikiSupplementRanges(body);
   const blocks = wikiDocumentBlocks(body);
   const edits: Array<{start:number;end:number;text:string}> = [];
   const tables: ReadingTable[] = [];
   const seen = new Map<string, ReadingTable>();
   const sourceTables = new Map<string, WikiKnowledgeUnit[]>();
+  const candidates = tableSources?.map(source => ({ ...source, ...wikiTableRows(source.text) })) ?? [];
   for (const unit of units ?? []) {
     if (unit.evidence.code?.language !== "table") continue;
     const key = tableKey(unit.evidence.code.text);
@@ -239,6 +242,16 @@ export function consolidateWikiPlanTables(body: string, zh: boolean, {units, cit
     const scope = caption?.[1] ?? header.find(value=>LOCAL_SCOPE.test(value))?.match(LOCAL_SCOPE)?.[0];
     const matched = sourceTables.get(tableKey(block.text)) ?? [];
     const origins = [...new Set(matched.map(unit=>citeTable?.(unit) ?? (Number.isFinite(unit.evidence.messageIndex) ? `#${unit.evidence.messageIndex!+1}` : "")).filter(Boolean))];
+    if (!origins.length && candidates.length) {
+      const shown = wikiTableRows(block.text);
+      const ordered = JSON.stringify([...shown.rows].sort());
+      const exact = candidates.filter(source => source.header === shown.header && source.rows.length === shown.rows.length
+        && JSON.stringify([...source.rows].sort()) === ordered);
+      const matches = exact.length ? exact : candidates.filter(source => shown.rows.length >= 2 && new Set(shown.rows).size === shown.rows.length
+        && source.header === shown.header && shown.rows.every(row => source.rows.includes(row)));
+      const links = [...new Set(matches.map(source => source.link))];
+      if (links.length === 1) origins.push(links[0]);
+    }
     const savedOrigin=reference?.text.replace(SOURCE, "");
     const locatedOrigin=origins.join(" ");
     const legacyLocator=savedOrigin&&/^(?:\[[\w:-]+\]\s*)+$/u.test(savedOrigin);
@@ -335,4 +348,18 @@ export function consolidateWikiPlanTables(body: string, zh: boolean, {units, cit
   }
   const appendix=originals.length ? `\n\n${supplement(zh?"原始规划表":"Original planning tables",originals.join("\n\n"))}` : "";
   return body.trimEnd()+appendix;
+}
+/** A table can describe a historical milestone and a current release side
+ * by side. Scope wording in an individual row must name that row's phase. */
+export function wikiHistoricalStageTable(table:string,zh:boolean) {
+ const lines=table.split("\n");
+ return lines.map((line,index)=>{
+  if(index<2||!/^\s*\|/u.test(line))return line;
+  const [label]=cells(line);
+  if(!/^(?:当时阶段|历史阶段|(?:Earlier|Historical) (?:phase|stage)\b)/iu.test(label??""))return line;
+  const stage=wikiStageLabels(label).join(" / ");
+  if(!stage)return line;
+  return line.replace(/(\|\s*)(?:当前阶段排除项|本阶段(?:暂缓|排除项)|Current stage exclusions?)(?=\s*\|)/giu,
+   (_,prefix:string)=>prefix+(zh?`历史阶段范围，仅适用 ${stage}`:`Historical scope for ${stage} only`));
+ }).join("\n");
 }

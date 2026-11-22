@@ -7,6 +7,7 @@ type AI = { id?: string; modelId?: string; generateStructured?: <T>(request: Str
 import { unitVectors, vectorSimilarity, type UnitVectors } from "./wiki-semantic-merge";
 import type { WikiCandidateIndex } from "./wiki-candidate-index";
 import { wikiByDiscussion } from "../shared/wiki-sources";
+import { wikiRoadmapTopicText } from "../shared/wiki-roadmap-scope";
 import { wikiLedgerUnits, type WikiKnowledgeLedger, type WikiKnowledgeOrganization, type WikiKnowledgeUnit, type WikiTopicChain, type WikiUnitStatus } from "../shared/wiki-knowledge";
 
 /** Units that can settle something: what is chosen, planned, limited or how something works. */
@@ -31,13 +32,14 @@ const pairsOf = (text: string) => { const han = text.replace(/[^\p{Script=Han}a-
  * Agent驾驶舱」 with 「首屏应改为“状态询问+动态主按钮+今日风险”结构」, filed under two subjects. Rare shared pairs weigh
  * more than common ones, so 首屏 ties two statements where 用户 does not. */
 export function topicCandidates(units: WikiKnowledgeUnit[], similar?: (a: string, b: string) => number): WikiKnowledgeUnit[][] {
-  const pairs = new Map(units.map(unit => [unit.id, pairsOf(unit.statement)]));
+  const statements = new Map(units.map(unit => [unit.id, wikiRoadmapTopicText(unit.statement)]));
+  const pairs = new Map(units.map(unit => [unit.id, pairsOf(statements.get(unit.id)!)]));
   const seen = new Map<string, number>();
   for (const own of pairs.values()) for (const pair of own) seen.set(pair, (seen.get(pair) ?? 0) + 1);
   const weight = (pair: string) => Math.log((units.length + 1) / (seen.get(pair) ?? 1));
   const size = new Map([...pairs].map(([id, own]) => [id, Math.sqrt([...own].reduce((sum, pair) => sum + weight(pair) ** 2, 0)) || 1]));
   const rare = (pair: string) => (seen.get(pair) ?? 0) <= Math.max(RARE_UNITS, units.length * RARE_SHARE);
-  const openings = new Map(units.map(unit => [unit.id, new Set([...pairsOf(unit.statement.replace(/^[\s\p{P}]+/u, "").slice(0, OPENING_CHARS))].filter(pair => !/^[a-z0-9]+$/u.test(pair) && rare(pair)))]));
+  const openings = new Map(units.map(unit => [unit.id, new Set([...pairsOf(statements.get(unit.id)!.replace(/^[\s\p{P}]+/u, "").slice(0, OPENING_CHARS))].filter(pair => !/^[a-z0-9]+$/u.test(pair) && rare(pair)))]));
   const alike = (a: WikiKnowledgeUnit, b: WikiKnowledgeUnit) => {
     const vector = similar?.(a.id, b.id) ?? 0;
     if (vector >= VECTOR_ALIKE) return vector;

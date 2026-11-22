@@ -1,6 +1,8 @@
 import type { RootContent } from "mdast";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import { GFM_OPTIONS } from "../shared/markdown-gfm";
 import {generatedProse} from "../shared/generated-structure-prose";
 import {wikiReadingLayout} from "../shared/wiki-reading-layout";
 import {readingEmphasisMarkdown} from "../shared/reading-emphasis";
@@ -8,7 +10,7 @@ import {isWikiTableIntroduction} from "../shared/wiki-plan-tables";
 import {WIKI_EVIDENCE_LINK} from "../shared/wiki-evidence-link";
 import { wikiFlowParagraph } from "../shared/wiki-flow-block";
 
-const parser = unified().use(remarkParse);
+const parser = unified().use(remarkParse).use(remarkGfm, GFM_OPTIONS);
 const nodeText = (node: RootContent): string => "value" in node ? node.value : "children" in node ? node.children.map(child => nodeText(child as RootContent)).join("") : "";
 
 export interface WikiHeading {

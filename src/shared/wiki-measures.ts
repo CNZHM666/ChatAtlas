@@ -3,7 +3,7 @@ import { wikiSaidWhen } from "./wiki-section-status";
 
 /** A count of daily users and its value: "日活稳定在22人", "DAU 约40", "每天稳定在22人". */
 /** Or the value first: "约30日活规模". */
-const DAILY = /(?:日活(?:用户数?)?|DAU|每天)[^，。；;,\d]{0,10}?(\d+(?:\.\d+)?)|(?<![\d.])(\d+(?:\.\d+)?)\s*(?:人\s*)?(?:左右\s*)?(?:的\s*)?(?:日活|DAU)(?!用户数?[^，。；;,]{0,4}\d)/giu;
+const DAILY = /(?:日活(?:用户数?)?|DAU|每天(?=[^，。；;,\d]{0,10}\d+(?:\.\d+)?\s*(?:人|个用户|名用户)))[^，。；;,\d]{0,10}?(\d+(?:\.\d+)?)(?![\d.]|\s*(?:毫秒|秒|分钟|小时|天|%))|(?<![\d.])(\d+(?:\.\d+)?)\s*(?:人\s*)?(?:左右\s*)?(?:的\s*)?(?:日活|DAU)(?!用户数?[^，。；;,]{0,4}\d)/giu;
 /** Words claiming the value holds today. */
 const NOW = /当前|目前|现在/u;
 /** A value said as a target or a condition, not measured: "目标DAU 50", "达到日活稳定超100". */
@@ -14,6 +14,11 @@ const MEASURED_KINDS: Array<WikiKnowledgeUnit["kind"]> = ["fact", "report", "his
 const counts = (text: string) => [...text.matchAll(DAILY)].filter(match => !NOT_MEASURED.test(`${text.slice(Math.max(0, (match.index ?? 0) - 6), match.index)}${match[0]}`));
 const valueOf = (match: RegExpMatchArray) => match[1] ?? match[2];
 const valuesOf = (text: string) => counts(text).map(valueOf);
+
+/** Repair saved prose where the daily-count formatter put a source date inside a duration. */
+export const restoreWikiMisdatedDuration = (text: string, sources: WikiKnowledgeUnit[]): string =>
+  text.replace(/(\d+(?:\.\d+)?)[（(]\d{1,2}月\d{1,2}日(?:[–—-]\d{1,2}月\d{1,2}日)?[）)](毫秒|秒|分钟|小时)/gu,
+    (match, value: string, unit: string) => sources.some(source => source.statement.includes(value + unit)) ? value + unit : match);
 /** A count told as today's in a point of another kind: "鉴于当前约30日活规模数据稀疏，第一版不训练……", a decision's reason. */
 const toldAsNow = (text: string) => counts(text).some(match => NOW.test(text.slice(Math.max(0, (match.index ?? 0) - 8), match.index)));
 const measured = (unit: WikiKnowledgeUnit | undefined): unit is WikiKnowledgeUnit => Boolean(unit) && !unit!.about && valuesOf(unit!.statement).length > 0 && (MEASURED_KINDS.includes(unit!.kind) || toldAsNow(unit!.statement));

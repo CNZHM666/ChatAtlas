@@ -3,6 +3,7 @@ import {projectSession} from "../test/project-fixture";
 import {generateWikiOverview,withoutUnreportedProgress} from "./wiki-overview";
 import {requestBudget} from "./request-policy";
 import {projectOverviewContent} from "../shared/project-overview";
+import {wikiOverviewSignature} from "../shared/wiki-overview";
 import {introductionPriority} from "../shared/project-introduction-text";
 import type {StructuredAIRequest} from "./provider";
 import type {FocusSession} from "../shared/focus-session";
@@ -178,6 +179,24 @@ it("keeps a source-backed product introduction when the model overview is refuse
  const result=await generateWikiOverview(current,model.ai,signal);
  expect(result.wikiOverview?.text).toContain(statement);
  expect(result.wikiOverview?.evidenceIds).toContain(source.id);
+});
+
+it("keeps a superseded positioning out of generation and previously saved overviews",async()=>{
+ const current=session(), source=current.evidence[0], statement="产品定位是面向团队的云端协作平台。";
+ source.excerpt=statement;
+ current.sections[0].claims!.push({text:statement,quote:statement,evidenceIds:[source.id],unitIds:["old"],overviewRole:"purpose"});
+ current.wikiKnowledge={version:1,generatedAt:0,status:"complete",materials:1,batches:[{sourceIds:[],status:"ok",rejected:{},units:[{
+  id:"old",subject:"产品定位",statement,kind:"decision",details:[],adoption:{status:"rejected"},delivery:"unknown",
+  evidence:{evidenceId:source.id,conversationId:source.conversationId,messageId:source.messageId,messageIndex:1,role:"assistant",pasted:false,quote:statement},
+ }]}],organization:{version:1,generatedAt:0,status:"complete",subjects:[{id:"s",name:"产品定位",aliases:[],unitIds:["old"]}],chapters:[],merged:[],relations:[],report:{}},
+ draft:{version:1,generatedAt:0,status:"complete",report:{},chapters:[]}};
+ const model=ai({overview:"格式错误",factIds:[]});
+ const generated=await generateWikiOverview(current,model.ai,signal);
+ expect(generated.wikiOverview?.text).not.toContain(statement);
+ expect(model.calls[0].prompt).not.toContain(statement);
+ current.wikiOverview={version:1,signature:wikiOverviewSignature(current),text:statement+" 可先读「产品定位」。",evidenceIds:[source.id]};
+ expect(projectOverviewContent(current).text).toBe("可先读「产品定位」。");
+ expect(projectOverviewContent({...current,projectMaintenance:{overview:statement}}).text).toBe(statement);
 });
 
 it("introduces the project by what the chapters say it is, though that sentence carries no claim", async()=>{

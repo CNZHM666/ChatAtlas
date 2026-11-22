@@ -1,15 +1,18 @@
 import { confirmedRoadmapText, confirmedRoadmaps, withPinnedRoadmapChapters } from "../shared/wiki-confirmed-roadmap";
 import { LEAVES_OUT } from "../shared/negation";
-import {retainWikiDecisions,reviewWikiEditorial} from "./wiki-editorial-review";
+import {cleanWikiDraftClaims,cleanWikiDraftDisplay,retainWikiDecisions,reviewWikiEditorial,wikiInternalDraftLabel} from "./wiki-editorial-review";
+import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
 import {placeWikiChoices} from "./wiki-choice-placement";
 import {wikiUnconfirmedWorkflowFeedback} from "./wiki-workflow-scope";
 import { retainCapabilityReports } from "./wiki-capability-state";
 import { wikiDecisionRestatement } from "./wiki-confirmation-scope";
-import { mergeWikiRelatedParagraphs } from "./wiki-paragraph-repeats";
-import { rehomedStrayParagraphs } from "./wiki-stray-paragraphs";
+import { mergeWikiRelatedParagraphs, wikiParagraphScope } from "./wiki-paragraph-repeats";
+import { wikiReadingClaimText, wikiReferenceOnlyUnits } from "./wiki-reading-voice";
+import { rehomedStrayParagraphs, trimRehomedStandardsFromReferenceOpenings } from "./wiki-stray-paragraphs";
 import {wikiProjectVoice} from "../shared/wiki-project-voice";
 import {restoreWikiChapterLiterals} from "../shared/wiki-block-presentation";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
+import { wikiStageLabels } from "../shared/wiki-roadmap-scope";
 import { FIRST_VERSION_ZH, ITERATION_ZH, PHASE } from "../shared/stage-words";
 import { claimSourceUnits, claimSupported, expandedWikiIdentifierClaim, unitClaimText } from "./wiki-claim-support";
 import { qualifiedDiscussionIdea, qualifyWikiDatedReport, qualifyWikiOpeningOffer, wikiUserIdea } from "./wiki-claim-review";
@@ -17,6 +20,7 @@ import type { FocusEvidence, FocusSection } from "../shared/focus-session";
 import type { WikiClaim } from "../shared/wiki-claims";
 import { conditionKept, DECIDING_KINDS, groupMemberConditions, statesCore, wikiLedgerUnits, type WikiDraftClaim, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
+import { wikiTechnicalContext } from "./wiki-knowledge-select";
 import { wikiHolderOf } from "../shared/wiki-holder";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { removeParagraph, replaceParagraph, tableCells, withoutTableRows } from "../shared/wiki-body-text";
@@ -30,6 +34,7 @@ import { currentCaptions } from "../shared/wiki-source-code";
 import { daysIn, figuresIn } from "../shared/wiki-figures";
 import { rowFields } from "../shared/wiki-row-sentence";
 import { wikiChapterIntegrity } from "./wiki-integrity";
+import { recordedWikiOrderUnits } from "./wiki-source-coverage";
 
 
 /** The flag that keeps new documents on the earlier pipeline, a fallback while the ledger replaces it. */
@@ -198,8 +203,10 @@ type WikiUnitDraftChapters = NonNullable<WikiKnowledgeLedger["draft"]>["chapters
 let ledgerPassProbe: LedgerPassProbe | undefined;
 export function setLedgerPassProbe(probe: LedgerPassProbe | undefined): void { ledgerPassProbe = probe; }
 
-export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: Record<string, string>): { sections: FocusSection[]; evidence: FocusEvidence[] } {
-  const { ledger: reading, organization, units: all, statuses } = resolveWikiReading(ledger);
+export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: Record<string, string>,
+  projection = resolveWikiReading(ledger)): { sections: FocusSection[]; evidence: FocusEvidence[] } {
+  const { ledger: reading, organization, units: all, statuses } = projection;
+  const technicalContext = (reading.draft?.writingMode ?? reading.writingMode) === "concise" ? wikiTechnicalContext(reading, statuses) : new Set<string>();
   const savedDraft = reading.draft;
   if (!savedDraft || !organization) return { sections: [], evidence: [] };
   const units = new Map(all.map(unit => [unit.id, unit]));
@@ -303,7 +310,7 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     const wrote = !roles || own.some(unit => unit.evidence.role === "user" && !unit.evidence.pasted && (roles[unit.id] === "exercise" || !ASKS.test(unit.evidence.quote)));
     const feedback = !roles && wikiUnconfirmedWorkflowFeedback(text);
     const holder = !roles ? feedback ? "ai" as const : settled : own.some(unit => roles[unit.id] === "mistake") ? "corrected" as const : (settled === "decided" || settled === "user") && wrote ? "user" as const : settled === "earlier" ? settled : undefined;
-    return { text: text.trim(), quote: own[0].evidence.quote, evidenceIds: own.map(cite), ...(feedback ? {workStatus:"proposed" as const} : status ? { workStatus: status } : {}), ...(decided && !reasonOnly && !feedback ? { userDecided: true } : {}), ...(holder ? { holder } : {}), unitIds: own.map(unit => unit.id), ...(markOnly ? { markOnly: true } : {}) };
+    return { text: text.trim(), quote: own[0].evidence.quote, evidenceIds: own.map(cite), ...(feedback ? {workStatus:"proposed" as const} : status ? { workStatus: status } : {}), ...(decided && !reasonOnly && !feedback ? { userDecided: true } : {}), ...(holder ? { holder } : {}), unitIds: own.map(unit => unit.id), ...(markOnly ? { markOnly: true } : {}), ...(holder === "ai" && own.some(unit => technicalContext.has(unit.id)) ? { technicalContext: true as const } : {}) };
   };
   // A sentence joining the user's decision with a point they never confirmed ("采用浅色极简首页……，并认可推开式分屏",
   // the second half only from a pasted summary) is not decided as a whole: its last clauses, said by an unconfirmed
@@ -844,7 +851,7 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
   };
   // Plans the discussion left differing, shown as open after the first paragraph telling one of them.
   const zhDraft = /\p{Script=Han}/u.test(draft.chapters.map(chapter => chapter.title).join(""));
-  const differing = [...differingPlans(all, id => statuses.get(id), zhDraft, wikiDecidedTopics(ledger.organization?.topics, ledger.decisions)), ...lengthAgainstDecided(all, id => statuses.get(id), zhDraft)], placedNotes = new Set<string>();
+  const differing = [...differingPlans(all, id => statuses.get(id), zhDraft, wikiDecidedTopics(organization.topics, reading.decisions)), ...lengthAgainstDecided(all, id => statuses.get(id), zhDraft)], placedNotes = new Set<string>();
   // A line telling only what a note tells (「- **中央入口**：用户提议……；另有建议称……」 above the note naming both, 「- **任务简化**：
   // 将“今日任务0/7”改为“今日重点0/1”……」 in another chapter) said it a second and third time: the note stands in its place.
   const noted = (claim: { unitIds: string[] }) => claim.unitIds.length > 0 && differing.some(item => claim.unitIds.every(id => item.unitIds.includes(id)));
@@ -1307,7 +1314,7 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     const adopted = claim.text.match(/^(\*\*)?(?=(?:采纳|确定|决定|确认)[^，,。]{4})/u);
     if (adopted && listed.every(unit => unit.evidence.role !== "user")) return { text: `${adopted[1] ?? ""}AI 建议${claim.text.slice(adopted[0].length)}` };
     // 「当前规划首页"守护"按钮应……」, 「当前建议改为强制引导……」: the same, in the writer's other words for it.
-    const held = claim.text.match(/^(\*\*)?(?:关于([^，,：:]{2,20})[，,]\s*)?(?:现行|当前|目前的?)(方案|做法|设计|规划|策略|建议)(?:为|是)?[：:，,]?\s*/u);
+    const held = claim.text.match(/^(\*\*)?(?:关于([^，,：:]{2,20})[，,]\s*)?(?:现行|当前|目前的?)(方案|做法|设计(?!稿|图|师|文档|规范|工具|流程|系统)|规划|策略|建议)(?:为|是)?[：:，,]?\s*/u);
     if (!held) return undefined;
     let rest = claim.text.slice(held[0].length);
     if (rest.replace(/[\s\p{P}]/gu, "").length < 6) return undefined;
@@ -1332,6 +1339,7 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     if (!lead || !paragraph.text.trimStart().startsWith(claim.text.trimStart()) || !listed.length || listed.some(unit => unit.evidence.role === "user")) return undefined;
     return { text: `${lead[1] ?? ""}AI 建议${claim.text.slice(lead[0].length)}` };
   });
+  const referenceOnly = wikiReferenceOnlyUnits(reading);
   const turnedDown = (chapter: (typeof draft.chapters)[number]) => !zhDraft ? chapter : rewritten(chapter, claim => {
     const listed = claim.unitIds.flatMap(id => units.get(id) ?? []), refused = listed.filter(unit => rejectedByYou(unit.id) && unit.evidence.role !== "user");
     // A sentence of turned-down points only is theirs whatever its words: 「此前采用系统自动分配同期小组」 read as adopted once.
@@ -2807,14 +2815,21 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
           if (!CONFIRMATION_SAID.test(sentence)) continue;
           const own = claims.filter(claim => claim.text && (sentence.includes(claim.text) || claim.text.includes(sentence.replace(/[。！？]$/u, ""))));
           const cited = (own.length ? own.flatMap(claim => claim.unitIds) : paragraph.unitIds).flatMap(id => units.get(id) ?? []);
-          if (!cited.length || cited.some(backs)) continue;
           const terms = knowledgeTerms(sentence);
+          const versions = wikiStageLabels(sentence).filter(label => /^v\d/iu.test(label)).map(label => label.toLowerCase());
+          const relevant = cited.filter(unit => saysMostOf(terms, unit.statement));
+          const scoped = relevant.filter(unit => {
+            const scopes = wikiStageLabels(unit.id.startsWith("answer:") ? unit.statement : unit.evidence.quote).map(label => label.toLowerCase());
+            return versions.every(version => scopes.includes(version));
+          });
+          if (scoped.some(backs)) continue;
           const repeat = toldElsewhere.some(unit => saysMostOf(terms, unit.statement));
-          const told = repeat ? "" : sentence.replace(CONFIRMATION_SAID, (_, bold = "") => `${bold}讨论中提出`);
+          const drop = repeat || !cited.length || versions.length > 0 && !scoped.length;
+          const told = drop ? "" : sentence.replace(CONFIRMATION_SAID, (_, bold = "") => `${bold}讨论中提出`);
           const at = text.indexOf(sentence);
           if (at < 0) continue;
           text = `${text.slice(0, at)}${told}${text.slice(at + sentence.length)}`.replace(/^\s+|\s+$/gu, "");
-          if (repeat) {
+          if (drop) {
             // Its points go on citing the sentence after it that no claim covers (「建议优先深耕单一垂直领域……」 told the proposal).
             claims = claims.filter(claim => !own.includes(claim));
             const next = text.slice(at).split(/(?<=[。！？])/u).map(item => item.trim()).find(item => item && !claims.some(claim => item.includes(claim.text)));
@@ -2842,20 +2857,31 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     .map(chapter => {
       const originalClaims=draft.chapters.find(original=>original.id===chapter.id)?.paragraphs.flatMap(paragraph=>paragraph.claims??[]);
       const checked = wikiChapterIntegrity(chapter, id => units.get(id), zhDraft, originalClaims);
-      return checked.repaired ? { ...chapter, body: checked.body, paragraphs: checked.paragraphs } : chapter;
+      const projected = checked.repaired ? { ...chapter, body: checked.body, paragraphs: checked.paragraphs } : chapter;
+      // The relocation passes edit chapter and paragraph records in place.
+      return { ...projected, paragraphs: projected.paragraphs.map(paragraph => ({ ...paragraph })) };
     });
   const editorialSubjects = new Map(organization.subjects.flatMap(subject => subject.unitIds.map(id => [id, subject.id] as const)));
   const editorialGroups = new Map(organization.groups?.flatMap(group => group.members.map(member => [member.unitId, group.id] as const)));
   if (ledger.documentType !== "learning") rehomedStrayParagraphs(chapters, organization, editorialSubjects, units);
   const reviewed = ledger.documentType === "learning" ? chapters : placeWikiChoices(retainWikiDecisions(reviewWikiEditorial(chapters, reading), reading, new Set(confirmed.map(unit => unit.id)), zhDraft), reading);
-  if (ledger.documentType !== "learning") retainCapabilityReports(reviewed, all, statuses);
+  if (ledger.documentType !== "learning") {
+    retainCapabilityReports(reviewed, all, statuses);
+    trimRehomedStandardsFromReferenceOpenings(reviewed, units);
+  }
   if (ledger.documentType !== "learning") for (const chapter of reviewed) {
     chapter.body = wikiProjectVoice(chapter.body);
     chapter.paragraphs = chapter.paragraphs.map(paragraph => ({ ...paragraph, text: wikiProjectVoice(paragraph.text), claims: paragraph.claims?.map(claim => ({ ...claim, text: wikiProjectVoice(claim.text) })) }));
   }
   const pinned = new Map(acceptedRoadmaps.map(({ plan }) => [confirmedRoadmapText(plan, zhDraft), plan.unitId]));
   const sections = withPinnedRoadmapChapters(reviewed, reading, zhDraft).filter(chapter => chapter.paragraphs.length).map((draftChapter): FocusSection => {
-    const chapter = ledger.documentType === "learning" ? draftChapter : mergeWikiRelatedParagraphs(draftChapter, editorialSubjects, statuses, editorialGroups);
+    const composed = ledger.documentType === "learning" ? draftChapter : mergeWikiRelatedParagraphs(draftChapter, editorialSubjects, statuses, editorialGroups, id => {
+      const unit = units.get(id);
+      return unit ? [JSON.stringify(wikiParagraphScope(unit))] : [];
+    });
+    const chapter = ledger.documentType === "learning" ? composed : rewritten(composed, claim => ({
+      text: wikiReadingClaimText(claim.text, claim.unitIds.flatMap(id => units.get(id) ?? []), statuses, referenceOnly, zhDraft),
+    }));
     const chapterUnits = [...new Set([...chapter.openingUnitIds ?? [], ...chapter.paragraphs.flatMap(paragraph => paragraph.unitIds)])].flatMap(id => units.get(id) ?? []);
     // The opening has no claims of its own: a decision it states ("优先实现复制上下文功能……") gets one on the sentence
     // saying it, so its mark shows there too.
@@ -2908,10 +2934,37 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
       }
       return [source, id];
     });
-    const subtopics = [...new Set(chapter.paragraphs.map(paragraph => paragraph.subtopic))];
-    return { id: chapter.id, title: chapter.title, body: chapter.body.replace(FOLDED_NOTE, "").replace(/\n{3,}/gu, "\n\n").trim(), transition: "", evidenceIds: [...new Set(cited)], kind: "finding",
-      ...(chapter.group ? { wikiGroup: chapter.group } : {}), wikiQuestion: chapter.question, wikiOwnerId: chapter.id, wikiSubtopics: subtopics.map(title => ({ title, question: "" })), claims };
+    const body = ledger.documentType === "learning" ? chapter.body : cleanWikiDraftDisplay(chapter.body);
+    const subtopics = [...new Set(body === chapter.body ? chapter.paragraphs.map(paragraph => paragraph.subtopic)
+      : wikiDocumentBlocks(body).flatMap(block => block.kind === "heading" && /^### /u.test(block.text) ? block.text.slice(4) : []))];
+    const title = wikiInternalDraftLabel(chapter.title)
+      ? subtopics.find(topic => !wikiInternalDraftLabel(topic)) ?? (zhDraft ? "项目说明" : "Project notes")
+      : chapter.title;
+    const displayClaims = body === chapter.body ? claims : cleanWikiDraftClaims(body, claims);
+    return { id: chapter.id, title, body: body.replace(FOLDED_NOTE, "").replace(/\n{3,}/gu, "\n\n").trim(), transition: "", evidenceIds: [...new Set(cited)], kind: "finding",
+      ...(chapter.group ? { wikiGroup: chapter.group } : {}), wikiQuestion: chapter.question, wikiOwnerId: chapter.id, wikiSubtopics: subtopics.filter(title => !wikiInternalDraftLabel(title)).map(title => ({ title, question: "" })), claims: displayClaims };
   });
+  if(reading.documentType!=="learning"&&!acceptedRoadmaps.length){
+    const orders=recordedWikiOrderUnits(projection);
+    for(const section of sections){
+      const present=section.body.normalize("NFKC");
+      const exact=new Map(orders.filter(order=>order.chapterId===section.id&&!present.includes(order.unit.statement.normalize("NFKC")))
+        .map(order=>[order.unit.statement,order]));
+      if(!exact.size)continue;
+      const heading=zhDraft?"原文中的开发顺序":"Development sequence from the source";
+      const entries=[...exact.values()].map(({unit,confirmed})=>{
+        const cue=confirmed?"":zhDraft?"讨论方案，未确认：":"Proposal from the discussion: ";
+        const text=cue+unit.statement,id=cite(unit);
+        const claim:WikiClaim={text,quote:unit.evidence.quote,evidenceIds:[id],unitIds:[unit.id],holder:confirmed?"decided":"ai",
+          holderMark:true,userDecided:confirmed||undefined,verification:"supported"};
+        return {claim,text,id};
+      });
+      section.body+=`\n\n### ${heading}\n\n`+entries.map(entry=>entry.text).join("\n\n");
+      section.claims=[...section.claims??[],...entries.map(entry=>entry.claim)];
+      section.evidenceIds=[...new Set([...section.evidenceIds,...entries.map(entry=>entry.id)])];
+      section.wikiSubtopics=[...section.wikiSubtopics??[],{title:heading,question:""}];
+    }
+  }
   return { sections, evidence };
 }
 

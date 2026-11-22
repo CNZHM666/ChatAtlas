@@ -67,6 +67,9 @@ input::placeholder, textarea::placeholder { color: var(--faint); opacity: 1; }
 .map-item.active .map-select { color: var(--text); font-weight: 650; }
 .map-select { height: 36px; font-size: var(--text-base); }
 .map-select .overview-orb-icon { color: var(--accent); }
+.is-canvas-view .map-sidebar .sidebar-home:has(+ .sidebar-history) { margin-bottom: 3px; }
+.is-canvas-view .map-sidebar .sidebar-history { margin-bottom: 14px; }
+.topbar .topbar-workbench-history { display: none; }
 
 .source-library-actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .source-library-actions > button, .source-project-link, .source-project-picker > summary { border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: transparent; color: var(--muted); font-size: var(--text-sm); cursor: pointer; }
@@ -92,6 +95,7 @@ input::placeholder, textarea::placeholder { color: var(--faint); opacity: 1; }
   .is-canvas-view .topbar > .brand { display: flex; }
   .is-canvas-view .topbar { grid-template-columns: auto auto minmax(0, 1fr) auto; }
   .is-canvas-view .map-sidebar { display: none; }
+  .is-canvas-view .topbar .topbar-workbench-history { display: inline-grid; }
 }
 
 .topbar {

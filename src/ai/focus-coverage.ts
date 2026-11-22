@@ -134,8 +134,58 @@ function planningProgress(error:unknown):string|undefined {
 
 function textParts(text: string): string[] {
   const parts: string[] = [];
+  if (text.length <= MATERIAL_CHARACTERS) return text ? [text] : [];
+  const sections = new Set<number>(), lines = new Set<number>(), code: Array<[number, number]> = [];
+  let fence: string | undefined;
+  let codeStart = 0;
+  let trailingHeading: number | undefined;
+  for (const line of text.matchAll(/[^\n]*\n|[^\n]+$/gu)) {
+    const from = line.index, to = from + line[0].length;
+    const mark = /^ {0,3}(`{3,}|~{3,})([^\n]*)/u.exec(line[0]);
+    if (fence) {
+      if (mark && mark[1][0] === fence[0] && mark[1].length >= fence.length && !mark[2].trim()) {
+        fence = undefined;
+        code.push([codeStart, to]);
+        sections.add(to);
+      } else if (!mark) lines.add(to);
+    } else if (mark) {
+      sections.add(from);
+      fence = mark[1];
+      codeStart = trailingHeading ?? from;
+      trailingHeading = undefined;
+    } else {
+      lines.add(to);
+      if (!line[0].trim()) sections.add(to);
+      else if (/^ {0,3}#{1,6}\s/u.test(line[0])) { sections.add(from); trailingHeading = from; }
+      else trailingHeading = undefined;
+    }
+  }
+  const boundaries = [...sections].sort((a, b) => a - b), lineEnds = [...lines].sort((a, b) => a - b);
+  let sectionIndex = 0, lineIndex = 0, codeIndex = 0;
   for (let start = 0; start < text.length;) {
     let end = Math.min(text.length, start + MATERIAL_CHARACTERS);
+    if (end < text.length) {
+      while (sectionIndex < boundaries.length && boundaries[sectionIndex] <= end) sectionIndex++;
+      while (lineIndex < lineEnds.length && lineEnds[lineIndex] <= end) lineIndex++;
+      while (code[codeIndex] && code[codeIndex][1] <= end) codeIndex++;
+      const section = boundaries[sectionIndex - 1], line = lineEnds[lineIndex - 1];
+      const closing = code[codeIndex];
+      // Keep whole blocks when possible. A block longer than the limit can be
+      // split on a line, then a sentence or word, without losing source text.
+      if (closing && closing[0] > start && closing[0] < end && closing[1] - closing[0] <= MATERIAL_CHARACTERS) end = closing[0];
+      else if (section > start && (section - start >= MATERIAL_CHARACTERS / 3 || !line || line <= section)) end = section;
+      else if (line > start && line - start >= MATERIAL_CHARACTERS / 3) end = line;
+      else {
+        const tail = text.slice(Math.max(start, end - 400), end);
+        const breakAt = [...tail.matchAll(/[。！？；;]|[，,](?=\s*(?:不要|不得|不应|但|除非|如果|仅限|(?:unless|except|do not)\b))/giu)].at(-1)
+          ?? [...tail.matchAll(/\s+/gu)].at(-1);
+        if (breakAt) end -= tail.length - breakAt.index - breakAt[0].length;
+        else if (/[\w$]/u.test(text[end] ?? "") && /[\w$]/u.test(text[end - 1] ?? "")) {
+          const identifier = /[\w$]+$/u.exec(text.slice(start, end));
+          if (identifier?.index) end = start + identifier.index;
+        }
+      }
+    }
     // Avoid breaking an emoji or other surrogate pair at a block boundary.
     if (end < text.length && /[\uD800-\uDBFF]/u.test(text[end - 1])) end--;
     parts.push(text.slice(start, end));

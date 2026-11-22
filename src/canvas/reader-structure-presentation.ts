@@ -95,7 +95,12 @@ export function readerStructurePresentation({ cards = false, zh = true, flowSour
         if (!match) return node;
         const { flow, links } = match;
         const sources: PhrasingContent[] = [];
-        for (const link of links) {
+        const hasFullSequence = wikiFlowSourceQuote(flow.steps);
+        const fullSources = flowSources?.filter(ref => hasFullSequence(ref.excerpt)) ?? [];
+        const directSource = fullSources.find(ref => links.some(link => link.type === "link" && wikiEvidenceTarget(link.url)?.id === ref.id))
+          ?? (new Set(fullSources.map(ref => JSON.stringify([ref.conversationId,ref.messageId]))).size === 1 ? fullSources[0] : undefined);
+        if (directSource) sources.push({ type: "link", url: wikiEvidenceHref(directSource), children: [text(zh ? "来源" : "Source")] });
+        for (const link of directSource ? [] : links) {
           if (link.type === "link") {
             const direct = wikiEvidenceTarget(link.url);
             if (approximate.has(link.url) || direct && available && !available.has(direct.id)) continue;
@@ -105,11 +110,6 @@ export function readerStructurePresentation({ cards = false, zh = true, flowSour
             }
           }
           sources.push(link);
-        }
-        if (!sources.length && flowSources?.length) {
-          const sourceQuote = wikiFlowSourceQuote(flow.steps);
-          const source = flowSources.find(ref => sourceQuote(ref.excerpt));
-          if (source) sources.push({ type: "link", url: wikiEvidenceHref(source), children: [text(zh ? "来源" : "Source")] });
         }
         return { type: "blockquote", data: { hName: "atlas-wiki-flow" }, children: [
           { type: "paragraph", children: [{ type: "strong", children: [text(flow.title)] }, ...(flow.status && !wikiFlowProposal(flow.status) ? [{ type: "emphasis" as const, children: [text(flow.status.slice(1, -1))] }] : [])] },

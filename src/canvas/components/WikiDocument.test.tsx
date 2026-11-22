@@ -9,8 +9,88 @@ import { wikiBlocks } from "../../shared/wiki-explanations";
 import type { WikiKnowledgeUnit } from "../../shared/wiki-knowledge";
 import { wikiTableSignature } from "../../shared/wiki-table-source";
 import { wikiEvidencePoints } from "../wiki-evidence";
+import { WikiDecisionCards } from "./WikiDecisionCards";
+import { projectOverviewWorkspace } from "../project-overview-workspace";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+it("keeps chapter material in its reading order without a discussion fold", () => {
+ const session=projectSession();
+ const first="新增记录先进入草稿。", second="同一草稿可以附上原始记录。", proposal="AI 建议在记录上添加颜色。";
+ const section={...session.sections[0],body:[first,second,proposal].join("\n\n"),
+  claims:[{text:second,quote:second,holder:"material" as const,evidenceIds:["e1"],holderMark:true}]};
+ session.sections=[section];
+ session.evidence=[{...session.evidence[0],excerpt:second}];
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[],
+  draft:{version:1,generatedAt:1,status:"complete",chapters:[],report:{},writingMode:"concise"}};
+ render(<WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/>);
+ const content=screen.getByRole("article",{name:"Wiki 文档"});
+ const text=content.textContent??"";
+ expect(text).toContain(first);
+ expect(text.indexOf(second)).toBeGreaterThan(text.indexOf(first));
+ expect(content).toHaveTextContent(/AI\s*建议在记录上添加颜色。/u);
+ expect(screen.queryByText("讨论与历史")).toBeNull();
+ const source = screen.getByText("来源与原始讨论");
+ expect(source).toBeVisible();
+ expect(source.closest(".wiki-chapter-content")).toBe(content.querySelector(".chapter-guide")?.closest(".wiki-chapter-content"));
+});
+
+it("keeps adoption in the decision footer and puts optional actions in the overflow menu", () => {
+ const question={id:"release",kind:"version" as const,text:"采用哪个发布范围？",basis:[],mergeable:true,
+  options:[{id:"first",label:"先发布基础版本",unitIds:["a"]},{id:"second",label:"与高级版本一并发布",unitIds:["b"]}]};
+ const save=vi.fn(async()=>undefined);
+ const {container}=render(<ProjectKnowledgeActions.Provider value={{save,read:vi.fn(),matter:vi.fn()}}>
+  <WikiDecisionCards questions={[question]} session={projectSession()} zh onLocate={vi.fn()}/>
+ </ProjectKnowledgeActions.Provider>);
+ fireEvent.click(screen.getByText(question.text));
+ const adopt=screen.getByRole("button",{name:"确认选择"});
+ const menu=container.querySelector(".knowledge-more")!;
+ expect(adopt).toBeDisabled();
+ expect(menu).not.toHaveAttribute("open");
+ fireEvent.click(screen.getByRole("radio",{name:"先发布基础版本"}));
+ expect(adopt).toBeEnabled();
+ fireEvent.click(menu.querySelector("summary")!);
+ expect(menu).toHaveAttribute("open");
+ expect(within(menu as HTMLElement).getByRole("button",{name:"暂缓"})).toBeVisible();
+ expect(screen.getByRole("button",{name:"合并方案"})).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"自定义决定"}));
+ expect(screen.getByRole("textbox",{name:"写下当前决定"})).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"取消"}));
+ expect(screen.getByRole("button",{name:"确认选择"})).toBeEnabled();
+});
+
+it("opens uncited decision options from the footer and groups excerpts of the same original message", () => {
+ const session = projectSession();
+ const source = session.sourceConversationIds[0];
+ const statements = ["缺件清单展示元件用途。", "缺件清单附上搜索关键词。", "缺件清单可以复制。"];
+ const units: WikiKnowledgeUnit[] = statements.map((statement, index) => ({
+   id: `u${index}`, subject: "缺件清单", statement, kind: "plan", details: [], adoption: { status: "proposal" }, delivery: "unknown",
+   evidence: { evidenceId: `e${index}`, conversationId: source, messageId: index === 2 ? "second" : "first", messageIndex: index === 2 ? 2 : 1,
+     role: "assistant", pasted: false, quote: statement },
+ }));
+ session.sourceVersionIds = { [source]: "snapshot" };
+ session.sourceSignatures = { [source]: { first: "first-signature", second: "second-signature" } };
+ session.evidence = [{ id: "quoted", conversationId: source, messageId: "second", title: "设计讨论", excerpt: statements[2], sourceVersionId: "snapshot" }];
+ session.wikiKnowledge = { version: 1, generatedAt: 1, materials: 2, status: "complete",
+   batches: [{ sourceIds: [], status: "ok", units, rejected: {} }] };
+ const data = projectOverviewWorkspace(session, true, undefined, [
+   { id: "options", question: "缺件清单怎么展示？", kind: "topic", options: units.map(unit => ({ id: unit.id, label: unit.statement, unitIds: [unit.id] })) },
+ ])!;
+ const locate = vi.fn();
+ const { container } = render(<ProjectKnowledgeActions.Provider value={{ save: vi.fn(async () => undefined), read: vi.fn(), matter: vi.fn() }}>
+   <WikiDecisionCards questions={data.questions} session={session} zh onLocate={locate} />
+ </ProjectKnowledgeActions.Provider>);
+ fireEvent.click(screen.getByText("缺件清单怎么展示？"));
+ const footer = within(container.querySelector<HTMLElement>(".wiki-decision-actions")!);
+ expect(footer.getAllByRole("button", { name: /^来源/u })).toHaveLength(2);
+ expect(footer.getByRole("button", { name: "确认选择" })).toBeInTheDocument();
+ expect(screen.queryByRole("button", { name: "原话" })).toBeNull();
+ fireEvent.click(footer.getByRole("button", { name: "来源 1" }));
+ expect(locate).toHaveBeenCalledWith(expect.objectContaining({ messageId: "first", sourceVersionId: "snapshot" }),
+   expect.objectContaining({ sourcePassages: statements.slice(0, 2).map(quote => ({ referenceId: "decision-source:u0", quote })) }));
+ fireEvent.click(footer.getByRole("button", { name: "来源 2" }));
+ expect(locate).toHaveBeenLastCalledWith(session.evidence[0], expect.objectContaining({ quote: statements[2] }));
+});
+
 it("opens a generated table citation in the sidebar at its exact evidence, including matching message numbers across conversations",()=>{
  const session=projectSession(),open=vi.fn();
  const table="| 组件 | 职责 |\n|---|---|\n| Orama | 本地全文检索 |";
@@ -28,6 +108,24 @@ it("opens a generated table citation in the sidebar at its exact evidence, inclu
  expect(screen.queryByText("原文来源")).toBeNull();
  fireEvent.click(source);
  expect(open).toHaveBeenCalledWith(ref,expect.objectContaining({tableTarget:wikiTableSignature(table),sectionId:section.id,mode:"view"}));
+});
+it("finds the full original of a reordered table even when the saved reference has no table metadata",()=>{
+ const session=projectSession(),open=vi.fn();
+ const table="| 模块 | 职责 |\n|---|---|\n| Orama | 本地全文检索 |\n| IndexedDB | 保存原文 |\n| Reader | 加载对话 |";
+ const reordered="| 模块 | 职责 |\n|---|---|\n| `IndexedDB` | 保存原文 |\n| Orama | 本地全文检索 |";
+ const ref={...session.evidence[0],excerpt:"原表如下。\n\n"+table};
+ const section={...session.sections[0],body:reordered,evidenceIds:[ref.id],claims:[]};
+ session.sections=[section];session.evidence=[ref];
+ const renderChapter=(active?: Parameters<typeof open>[1])=><WorkspaceEvidenceContext.Provider value={{open,active}}>
+   <WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/>
+ </WorkspaceEvidenceContext.Provider>;
+ const view=render(renderChapter());
+ fireEvent.click(screen.getByRole("link",{name:"来源"}));
+ expect(open).toHaveBeenCalledWith(ref,expect.objectContaining({tableTarget:wikiTableSignature(table),structuredBlock:true}));
+ view.rerender(renderChapter(open.mock.calls[0][1]));
+ expect(screen.getByRole("table")).toHaveAttribute("data-wiki-structure-active","true");
+ view.rerender(renderChapter());
+ expect(screen.getByRole("table")).not.toHaveAttribute("data-wiki-structure-active");
 });
 // Distinct explanations: a chapter's repeated sentences and paragraphs are dropped before reading.
 const TOPICS=[
@@ -100,10 +198,10 @@ it("opens the source from the dedicated workflow heading",()=>{
  session.evidence=[source];
  const section={...session.sections[0],body:text,evidenceIds:[source.id],claims:[{text:statement,quote:statement,evidenceIds:[source.id]}]};
  const {container}=render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
- const button=screen.getByText("来源",{selector:"button"});
+ const button=screen.getByRole("link",{name:"来源"});
  expect(container.querySelector("figure.wiki-flow figcaption")).toContainElement(button);
  fireEvent.click(button);
- expect(open).toHaveBeenCalledWith(source,expect.objectContaining({quote:statement,pointIndex:0,references:[source]}));
+ expect(open).toHaveBeenCalledWith(source,expect.objectContaining({quote:"记录事件 → 指派人员 → 核实影响 → 恢复服务",references:[source]}));
 });
 it("names a generic flow from its steps and locates an exact sequence without a claim marker",()=>{
  const session=projectSession(),open=vi.fn();

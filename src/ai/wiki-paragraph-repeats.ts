@@ -1,10 +1,11 @@
 import { knowledgeOwner, knowledgeScopesAgree, knowledgeStage, knowledgeTerms } from "../shared/knowledge-subject";
-import { replaceParagraph } from "../shared/wiki-body-text";
+import { removeParagraph, replaceParagraph } from "../shared/wiki-body-text";
 import { wikiUnitConditions, type WikiDraftChapter, type WikiKnowledgeOrganization, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import { joinSentence } from "../shared/wiki-sentences";
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
 import { wikiSupplementRanges } from "../shared/wiki-source-supplements";
 import type { FocusSection } from "../shared/focus-session";
+import { wikiDiscussionPrompt } from "./wiki-reading-voice";
 
 type Paragraph = WikiDraftChapter["paragraphs"][number];
 const bare = (text: string) => text.replace(/[\s*`“”"「」]/gu, "");
@@ -93,7 +94,14 @@ export function droppedRepeatedParagraphs(
     const own = signatures(left), other = signatures(right);
     return own.size > 0 && !own.has(undefined) && own.size === other.size && [...own].every(value => other.has(value));
   };
-  for (const chapter of chapters) {
+  const byText = new Map<string, Array<{ chapter: WikiDraftChapter; paragraph: Paragraph; index: number }>>();
+  if (scopeOf) chapters.forEach((chapter, index) => {
+    for (const paragraph of chapter.paragraphs) {
+      const key = bare(paragraph.text);
+      if (key.length >= 14) byText.set(key, [...byText.get(key) ?? [], { chapter, paragraph, index }]);
+    }
+  });
+  for (const [chapterIndex, chapter] of chapters.entries()) {
     for (let index = chapter.paragraphs.length - 1; index >= 0; index--) {
       const paragraph = chapter.paragraphs[index], text = paragraph.text.trim();
       // A decision written in its own words where nothing else carried its mark (ensureWikiDecisions).
@@ -120,7 +128,9 @@ export function droppedRepeatedParagraphs(
       // Another chapter saying it with every value, and nearly all its words: "Dashboard top bar is 48px tall; global corner
       // radius is 8px." stood under the roadmap's future plans, the interface chapter opening on both values.
       const folded = stems(text), strict = (other: string) => says(other) && shared(folded, stems(other)) / Math.max(1, folded.size) >= CROSS_COVER;
-      const elsewhere = !holder && mine.length >= 2 ? chapters.flatMap(other => other === chapter ? [] : [
+      const exactEarlier = !holder ? byText.get(bare(text))?.find(item => item.index < chapterIndex
+        && item.chapter.paragraphs.includes(item.paragraph) && equivalentScope(paragraph.unitIds, item.paragraph.unitIds)) : undefined;
+      const elsewhere = exactEarlier ?? (!holder && mine.length >= 2 ? chapters.flatMap(other => other === chapter ? [] : [
         ...other.body.startsWith("### ") ? [] : [{ chapter: other, text: other.body.split(/\n### /u)[0].trim(), paragraph: undefined as Paragraph | undefined }],
         ...other.paragraphs.filter(item => !/^\s*(?:\*[^*\n]+\*\n\n)?(?:`{3,}|~{3,}|\|)/u.test(item.text)).map(item => ({ chapter: other, text: item.text, paragraph: item as Paragraph | undefined })),
         // Or a subtopic of it, its prose together: "Dashboard top bar is 48px tall; global corner radius is 8px." stood in
@@ -130,10 +140,16 @@ export function droppedRepeatedParagraphs(
           return { chapter: other, text: own.map(item => item.text).join("\n"), paragraph: own.find(item => mine.some(value => item.text.toLowerCase().includes(value))) };
         }).filter(item => item.paragraph),
       ]).find(item => item.text && equivalentScope(paragraph.unitIds, item.paragraph?.unitIds ?? item.chapter.openingUnitIds ?? [])
-        && (!scopeOf || !item.paragraph || strict(item.paragraph.text)) && strict(item.text)) : undefined;
+        && (!scopeOf || !item.paragraph || strict(item.paragraph.text)) && strict(item.text)) : undefined);
       if (!holder && opening && paragraph.unitIds.length && paragraph.unitIds.every(id => cited.has(id)) && !opening.includes(text) && says(opening)) { /* the opening says it */ }
       else if (elsewhere) {
-        if (elsewhere.paragraph) elsewhere.paragraph.unitIds = [...new Set([...elsewhere.paragraph.unitIds, ...paragraph.unitIds])];
+        if (elsewhere.paragraph) {
+          elsewhere.paragraph.unitIds = [...new Set([...elsewhere.paragraph.unitIds, ...paragraph.unitIds])];
+          if (exactEarlier) for (const claim of paragraph.claims ?? []) {
+            const same = elsewhere.paragraph.claims?.find(candidate => bare(candidate.text) === bare(claim.text));
+            if (same) same.unitIds = [...new Set([...same.unitIds, ...claim.unitIds])];
+          }
+        }
         else elsewhere.chapter.openingUnitIds = [...new Set([...elsewhere.chapter.openingUnitIds ?? [], ...paragraph.unitIds])];
       }
       else if (!holder) continue;
@@ -201,7 +217,7 @@ function paragraphSubject(paragraph: Paragraph, subjectOf: ReadonlyMap<string, s
   return subjects.size === 1 ? subjects.values().next().value : undefined;
 }
 
-function coherentProse(first: string, second: string, sameGroup: boolean, sameSubject: boolean, qualifiedProposal = false) {
+function coherentProse(first: string, second: string, sameGroup: boolean, sameSubject: boolean, qualifiedProposal: boolean, adjacentShortClaims: boolean) {
   if ((!qualifiedProposal && EDITORIAL_STANDING.test(first)) || EDITORIAL_STANDING.test(second) || !knowledgeScopesAgree(first, second)) return false;
   const firstStage = knowledgeStage(first), secondStage = knowledgeStage(second);
   if (firstStage && secondStage && firstStage !== secondStage) return false;
@@ -211,6 +227,9 @@ function coherentProse(first: string, second: string, sameGroup: boolean, sameSu
   const intersection = shared(left, right);
   if (qualifiedProposal && sameSubject && intersection >= 1) return true;
   if (sameSubject && LEANS.test(second.trimStart()) && intersection >= 1) return true;
+  // Two short claims in the same organized subject may share only their topic
+  // terms. Details stay word for word and retain their individual evidence.
+  if (adjacentShortClaims && intersection >= 3 && intersection / Math.min(left.size, right.size) >= .1) return true;
   return intersection >= (sameSubject ? 3 : 5)
     && intersection / Math.min(left.size, right.size) >= (sameSubject ? .3 : .42);
 }
@@ -226,10 +245,24 @@ export function mergeWikiRelatedParagraphs(
 ): WikiDraftChapter {
   let body = chapter.body;
   const paragraphs: Paragraph[] = [];
-  const conditions = (paragraph: Paragraph) => [...new Set(paragraph.unitIds.flatMap(id => conditionsOf?.(id) ?? []))].sort().join("\n");
+  const unitScopes = new Map<string, readonly string[]>();
+  const conditions = (paragraph: Paragraph) => [...new Set(paragraph.unitIds.flatMap(id => {
+    const known = unitScopes.get(id);
+    if (known) return known;
+    const scope = conditionsOf?.(id) ?? [];
+    unitScopes.set(id, scope);
+    return scope;
+  }))].sort().join("\n");
   const standing = (paragraph: Paragraph) => new Set(paragraph.unitIds.map(id => statusOf.get(id)));
   const numberedOrDependent = /^(?:但|然而|因此|随后|接着|最后|以上|上述|该方案|\b(?:but|however|therefore|next|afterwards|the above)\b)/iu;
-  const compatible = (previous: Paragraph, current: Paragraph) => {
+  const shortClaim = (paragraph: Paragraph) => {
+    const [claim] = paragraph.claims ?? [];
+    return paragraph.text.length <= 100 && paragraph.claims?.length === 1 && claim.text.trim() === paragraph.text
+      && paragraph.unitIds.every(id => claim.unitIds.includes(id))
+      && paragraph.text.split(SENTENCES).filter(sentence => sentence.trim()).length === 1
+      && !CONDITIONAL_DETAIL.test(paragraph.text);
+  };
+  const compatible = (previous: Paragraph, current: Paragraph, adjacent = false) => {
     const before = standing(previous), after = standing(current);
     const sameStanding = before.size === 1 && after.size === 1 && before.values().next().value === after.values().next().value;
     const subject = paragraphSubject(current, subjectOf);
@@ -239,6 +272,7 @@ export function mergeWikiRelatedParagraphs(
     const sameSourcePoint = current.unitIds.some(id => previous.unitIds.includes(id));
     const qualifiedProposal = after.size === 1 && after.has("proposal") && (PROPOSAL_LEAD.test(current.text) || CONDITIONAL_DETAIL.test(current.text))
       && before.has("confirmed") && [...before].every(value => value === "confirmed" || value === "proposal") && (sameSubject || sameGroup);
+    const adjacentShortClaims = adjacent && sameSubject && sameStanding && shortClaim(previous) && shortClaim(current);
     if (current.subtopic !== previous.subtopic || !PLAIN_PROSE.test(previous.text) || !PLAIN_PROSE.test(current.text)
       || !/[。！？.!?]$/u.test(previous.text) || !/[。！？.!?]$/u.test(current.text)
       || previous.text.length + current.text.length > (sameGroup || sameSubject ? 280 : 235) || current.text.length > 165
@@ -247,7 +281,7 @@ export function mergeWikiRelatedParagraphs(
       || !sameGroup && !sameSubject && !sameSourcePoint && !(PROPOSAL_LEAD.test(previous.text) && PROPOSAL_LEAD.test(current.text))
       || !statusOf.get(current.unitIds[0]) || !sameStanding && !qualifiedProposal
       || conditions(previous) !== conditions(current)
-      || !coherentProse(previous.text, current.text, sameGroup || sameSourcePoint, sameSubject, qualifiedProposal)) return false;
+      || !coherentProse(previous.text, current.text, sameGroup || sameSourcePoint, sameSubject, qualifiedProposal, adjacentShortClaims)) return false;
     return true;
   };
   const ordered = [...chapter.paragraphs];
@@ -263,7 +297,7 @@ export function mergeWikiRelatedParagraphs(
         [previous, current] = [current, previous];
       }
     }
-    if (previous && !compatible(previous, current) && paragraphSubject(previous, subjectOf)) {
+    if (previous && !compatible(previous, current, true) && paragraphSubject(previous, subjectOf)) {
       for (let at = index + 1; at < Math.min(ordered.length, index + 4); at++) {
         const skipped = ordered[at - 1], candidate = ordered[at];
         if (skipped.subtopic !== previous.subtopic || !PLAIN_PROSE.test(skipped.text) || LEANS.test(skipped.text)
@@ -280,7 +314,7 @@ export function mergeWikiRelatedParagraphs(
         break;
       }
     }
-    if (!previous || !compatible(previous, current)) {
+    if (!previous || !compatible(previous, current, true)) {
       paragraphs.push(current);
       continue;
     }
@@ -318,22 +352,36 @@ export function composeSavedWikiParagraphs(section: FocusSection, organization: 
   const subjects = new Map(organization.subjects.flatMap(subject => subject.unitIds.map(id => [id, subject.id] as const)));
   const groups = new Map(organization.groups?.flatMap(group => group.members.map(member => [member.unitId, group.id] as const)));
   const supplements = wikiSupplementRanges(section.body);
+  const omitted = new Set<NonNullable<FocusSection["claims"]>[number]>();
+  let body = section.body;
   let subtopic = "";
-  const paragraphs = wikiDocumentBlocks(section.body, section.claims).map(block => {
+  const paragraphs = wikiDocumentBlocks(section.body, section.claims).flatMap(block => {
     if (block.kind === "heading") subtopic = block.text;
-    const claims = block.kind === "paragraph" && !supplements.some(([start,end]) => block.start >= start && block.end <= end)
+    const insideSupplement = supplements.some(([start,end]) => block.start >= start && block.end <= end);
+    if (block.kind === "paragraph" && !insideSupplement && block.claims.length === 1
+      && block.text.trim() === block.claims[0].text.trim()
+      && !block.claims[0].checked && block.claims[0].unitIds?.length
+      && block.claims[0].unitIds.every(id => {
+        const unit = units.get(id);
+        return unit && wikiDiscussionPrompt(unit) && !["confirmed", "open", "contested"].includes(status.get(id) ?? "");
+      })) {
+      omitted.add(block.claims[0]);
+      body = removeParagraph(body, block.text);
+      return [];
+    }
+    const claims = block.kind === "paragraph" && !insideSupplement
       ? block.claims.flatMap(claim => !claim.checked && !claim.markOnly && claim.unitIds?.length && claim.unitIds.every(id=>units.has(id)) && block.text.includes(claim.text)
         ? [{text:claim.text,unitIds:claim.unitIds}] : []) : [];
-    return {text:block.text,subtopic,claims,unitIds:[...new Set(claims.flatMap(claim=>claim.unitIds))]};
+    return [{text:block.text,subtopic,claims,unitIds:[...new Set(claims.flatMap(claim=>claim.unitIds))]}];
   });
-  const draft: WikiDraftChapter = {id:section.id,title:section.title,group:"",question:"",body:section.body,paragraphs,problems:[]};
+  const draft: WikiDraftChapter = {id:section.id,title:section.title,group:"",question:"",body,paragraphs,problems:[]};
   const combined = mergeWikiRelatedParagraphs(draft, subjects, status, groups, id => {
     const unit = units.get(id);
-    return unit ? [JSON.stringify(wikiParagraphScope(unit).slice(0,3))] : [];
+    return unit ? [JSON.stringify(wikiParagraphScope(unit))] : [];
   });
-  if (combined === draft) return section;
+  if (combined === draft && !omitted.size) return section;
   const revised = new Set(combined.paragraphs.flatMap(paragraph => (paragraph.claims ?? []).map(claim => claim.text)));
-  return {...section,body:combined.body,claims:section.claims.map(claim => {
+  return {...section,body:combined.body,claims:section.claims.filter(claim => !omitted.has(claim)).map(claim => {
     const shaved = claim.text.replace(PROPOSAL_LEAD, "");
     return shaved !== claim.text && revised.has(shaved) && !combined.body.includes(claim.text)
       ? {...claim,text:shaved,formulations:undefined} : claim;

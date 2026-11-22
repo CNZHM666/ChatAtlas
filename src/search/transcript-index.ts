@@ -2,6 +2,7 @@ import type { Conversation, ConversationMessage } from "../shared/types";
 import { getMessagesForConversation } from "../storage/messages";
 import type { SemanticDocument } from "./semantic-index";
 import { getDatabase } from "../storage/db";
+import { historyTime } from "../shared/history-order";
 
 export interface SourceEvidence {
   messageId: string;
@@ -41,6 +42,7 @@ function* iterateTranscriptPassages(conversation: Conversation, messages: Conver
         evidence: { messageId: message.id, messageIndex: message.messageIndex, excerpt: text.slice(0, 240) },
         text,
         start: offset, end: offset + text.length, before, after: afterText, role: message.role,
+        discussedAt: historyTime(message.sourceCreatedAt),
       };
       if (offset + 1000 >= message.content.length) break;
     }

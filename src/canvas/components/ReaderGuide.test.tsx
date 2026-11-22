@@ -11,6 +11,15 @@ it("renders long workflow labels once, in reading order, for responsive wrapping
  expect(Array.from(card?.querySelectorAll("ol > li") ?? [], step => step.textContent)).toEqual(steps);
  expect(screen.getAllByText(steps.at(-1)!)).toHaveLength(1);
 });
+it("keeps slash-separated labels and their explanations in their original flow steps", () => {
+ const label = "Canvas/BOM/Inspector，且错误候选 IR 自动回滚";
+ const content = `请求处理链路：Browser → Next.js → /api/generate → LLM\n\n硬件方案执行链路：用户指令 → 意图解析 → 候选IR → Schema → Validator → ${label}`;
+ const { container } = render(<ReaderGuide content={content} zh complete hideEvidenceMarkers />);
+ const [request, hardware] = container.querySelectorAll(".wiki-flow-card");
+ expect(request.querySelector("li:nth-child(3)")).toHaveTextContent("/api/generate");
+ expect(hardware.querySelector("li:last-child")).toHaveTextContent(label);
+ expect(hardware.querySelectorAll(".reader-token wbr")).toHaveLength(2);
+});
 it("does not give an observation list or a context-dependent chain a made-up flow title", () => {
  const lists = "Landing page views → Trial clicks → Retention → Return visits [Proposal]";
  const chain = "你的应用 → 加载文件 → 校验数据 → 打开结果〔建议〕";

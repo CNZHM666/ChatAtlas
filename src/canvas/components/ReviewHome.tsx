@@ -2,7 +2,7 @@ import {focusTaskResult} from "../../shared/focus-task-result";
 import {isPendingOrganizationTask} from "./task-sidebar-visibility";
 import {experimentalHomeGoal} from "../../shared/home-experiments";
 import { HomeRecentProjects } from "./HomeRecentProjects";
-import { ChevronDown, History, Search, FolderGit2, Copy, BookOpen, CircleAlert, RotateCw } from "lucide-react";
+import { ChevronDown, Search, FolderGit2, Copy, BookOpen, CircleAlert, RotateCw } from "lucide-react";
 import { relativeDay } from "../relative-day";
 import type { AtlasCanvas, Conversation, ImportJob, OrganizationRun } from "../../shared/types";
 import type { FocusMode, FocusScope, FocusSession } from "../../shared/focus-session";
@@ -22,21 +22,21 @@ import { resumeContext } from "../review-presentation";
 import { FocusVersions } from "./FocusVersions";
 import { useStableCallback } from "../hooks/useStableCallback";
 import type { FocusGenerationTask } from "../../storage/focus-generation-tasks";
-import { WorkspaceLayoutExample } from "./WorkspaceLayoutExample";
 import { platformName } from "../../shared/platforms";
 import "../workbench-home.css";
 
 /** How many rows 继续上次 shows before 查看全部. */
 const CONTINUE_SHOWN = 4;
 
-export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, experimentalActions = false, conversations, organizationRuns = [], focusTasks = [], onContinueTask, onTask, importJob, importSource, selectedIds, onSelectedIds, syncSelectedIds, onSyncSelectedIds, onPrioritize, draft, onDraft, recentReading, onStart, onContinueProject, resumeTask, onSession, onResume, onScan, onHydrate, onZip, onPause, onResumeImport, onConnect, onConfigureAI, onDiscover, onReadConversation, onProjectsChanged, sourcesRequest }: {
+export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, experimentalActions = false, conversations, organizationRuns = [], focusTasks = [], onContinueTask, onTask, importJob, importSource, selectedIds, onSelectedIds, syncSelectedIds, onSyncSelectedIds, onPrioritize, draft, onDraft, recentReading, onStart, onContinueProject, resumeTask, onSession, onResume, onScan, onHydrate, onZip, onPause, onResumeImport, onConnect, onConfigureAI, onDiscover, onReadConversation, onProjectsChanged, sourcesRequest, historyOpen = false, homeRequest, onHistoryChange }: {
   /** Changes whenever the conversation list is asked for: the source materials open and come into view. */
   sourcesRequest?: number;
   /** Called after selected conversations joined a project from the source list. */
   onProjectsChanged?: () => Promise<void> | void;
   projectsReady?: boolean; experimentalActions?:boolean;
   canvases: AtlasCanvas[]; sessions: FocusSession[]; conversations: Conversation[];
-  organizationRuns?: OrganizationRun[]; onTaskHistory?: () => void;
+  organizationRuns?: OrganizationRun[];
+  historyOpen?: boolean; homeRequest?: number; onHistoryChange: (open: boolean) => void;
   focusTasks?: FocusGenerationTask[]; onContinueTask?: (task: FocusGenerationTask) => void; onTask?: (id: string) => void;
   importJob: ImportJob | null; importSource: "web" | "zip";
   syncSelectedIds?: Set<string>; onSyncSelectedIds?: (ids: Set<string>) => void;
@@ -54,11 +54,10 @@ export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, expe
   const { locale } = usePreferences();
   const zh = locale === "zh-CN";
   const [task, setTask] = useState<{goal: string; poolIds: string[]; discovery?: boolean; action?: HomeTaskPlan["action"]; localSearch?: boolean; record?: HomeAnswerResult; activity?: HomeActivity; draft?: string; paused?: boolean}>();
-  const [historyOpen, setHistoryOpen] = useState(false);
+  useEffect(() => { setTask(undefined); }, [homeRequest]);
   const [allSessions, setAllSessions] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<{ goal: string; mode: FocusMode }>(() => draft ?? { goal: "", mode: "work" });
   useEffect(() => { if (draft) setCurrentDraft(draft); }, [draft]);
-  const [layoutExample, setLayoutExample] = useState(false);
   const [materialActions,setMaterialActions]=useState<HTMLElement|null>(null);
   const [materialStatus,setMaterialStatus]=useState<HTMLElement|null>(null);
   const [materialsOpen, setMaterialsOpen] = useState<boolean | null>(null);
@@ -68,6 +67,7 @@ export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, expe
   const continuedRef = useRef<HTMLElement>(null);
   const readyCount = conversations.filter(isCurrentHydrationComplete).length;
   const importFirst = readyCount === 0;
+  const pendingCount = conversations.length - readyCount;
   const initiallyOpenMaterials = useRef(conversations.some((source) => selectedIds.has(source.id) && !isCurrentHydrationComplete(source)));
   const updateDraft = (next: { goal: string; mode: FocusMode }) => { setCurrentDraft(next); onDraft?.(next); };
   const changeGoal = useStableCallback((goal: string) => updateDraft({ ...currentDraft, goal }));
@@ -82,17 +82,17 @@ export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, expe
   const showRequested = useStableCallback(showSources);
   useEffect(() => { if (sourcesRequest) showRequested(); }, [sourcesRequest, showRequested]);
   const requestTask = (goal: string, ids?: string[], action?: HomeTaskPlan["action"], localSearch?: boolean) => {
-    if (!experimentalActions && experimentalHomeGoal(goal) && action !== "project") return;
+    if (!experimentalActions && experimentalHomeGoal(goal) && action !== "project" && !localSearch) return;
     if (!ids && resumeTask && resumeTask.mode!=="review" && resumeTask.sourceIds.every(id => selectedIds.has(id)) && (!resumeTask.goal.trim() || resumeTask.goal.trim() === goal.trim())) {
       onStart(goal, resumeTask.mode, resumeTask.sourceIds, resumeTask.scope ?? { kind: "all", sourceConversationIds: resumeTask.sourceIds }, [...selectedIds]); return;
     }
     setTask({ goal, poolIds: ids ?? [...selectedIds], action, localSearch });
   };
-  if (historyOpen) return <HomeResultHistory sessions={sessions} zh={zh} onBack={() => setHistoryOpen(false)} onSession={onSession} onResult={record => { setHistoryOpen(false); setTask("answer" in record ? {goal:record.question,poolIds:record.poolIds,action:"answer",record} : {goal:record.question,poolIds:record.poolIds,discovery:record.kind==="discovery",localSearch:record.kind==="search",action:record.kind==="search"?"answer":undefined,activity:record}); }} />;
-  if(task?.discovery)return <HomeTopicWorkspace readOnly={!experimentalActions} initialActivity={task.activity} onHistory={activity=>{setTask({...task,activity});setHistoryOpen(true);}} goal={task.goal} poolIds={task.poolIds} conversations={conversations} zh={zh} onRead={onReadConversation} onConfigureAI={onConfigureAI} onSelectedIds={onSelectedIds} onRequest={requestTask} onBack={goal=>{changeGoal(goal);setTask(undefined);}}/>;
-  if (task) return <HomeTaskWorkspace readOnly={!experimentalActions&&Boolean(task.record)&&(experimentalHomeGoal(task.record!.topicGoal)||experimentalHomeGoal(task.record!.question))} localSearch={task.localSearch} initialRecord={task.record} initialActivity={task.activity} initialDraft={task.draft} initialPaused={task.paused} onHistory={(record, goal, draft, activity) => { setTask({ ...task, record, activity: activity ?? task.activity, goal: record?.question ?? goal ?? task.goal, draft, paused: !record }); setHistoryOpen(true); }} requestedAction={task.action} onRead={onReadConversation} goal={task.goal} poolIds={task.poolIds} conversations={conversations} sessions={sessions} projectsReady={projectsReady} zh={zh} onStart={(goal, mode, ids, scope) => onStart(goal, mode, ids, scope, task.poolIds)} onContinue={onContinueProject} onOpenChapter={onOpenChapter} onHydrate={onHydrate} onConfigureAI={onConfigureAI} onBack={goal => { changeGoal(goal); setTask(undefined); }} />;
-  return <><main className={`review-home${importFirst ? " is-import-first" : ""}`} hidden={layoutExample}><div className="review-home-inner">
-    <nav className="review-home-utility" aria-label={zh?"工作台辅助导航":"Workbench secondary navigation"}><div className="review-home-links"><button type="button" className="review-home-help" onClick={() => setHistoryOpen(true)}><History size={16} aria-hidden="true"/>{zh ? "历史记录" : "History"}</button><button type="button" className="review-home-help" onClick={() => setLayoutExample(true)}><FolderGit2 size={16} aria-hidden="true"/>{zh ? "示例项目" : "Example project"}</button></div></nav>
+  const history = historyOpen ? <HomeResultHistory sessions={sessions} zh={zh} onSession={onSession} onResult={record => { onHistoryChange(false); setTask("answer" in record ? {goal:record.question,poolIds:record.poolIds,action:"answer",record} : {goal:record.question,poolIds:record.poolIds,discovery:record.kind==="discovery",localSearch:record.kind==="search",action:record.kind==="search"?"answer":undefined,activity:record}); }} /> : null;
+  if (task && history) return history;
+  if(task?.discovery)return <HomeTopicWorkspace readOnly={!experimentalActions} initialActivity={task.activity} onHistory={activity=>{setTask({...task,activity});onHistoryChange(true);}} goal={task.goal} poolIds={task.poolIds} conversations={conversations} zh={zh} onRead={onReadConversation} onConfigureAI={onConfigureAI} onSelectedIds={onSelectedIds} onRequest={requestTask} onBack={goal=>{changeGoal(goal);setTask(undefined);}}/>;
+  if (task) return <HomeTaskWorkspace readOnly={!experimentalActions&&Boolean(task.record)&&(experimentalHomeGoal(task.record!.topicGoal)||experimentalHomeGoal(task.record!.question))} localSearch={task.localSearch} initialRecord={task.record} initialActivity={task.activity} initialDraft={task.draft} initialPaused={task.paused} onHistory={(record, goal, draft, activity) => { setTask({ ...task, record, activity: activity ?? task.activity, goal: record?.question ?? goal ?? task.goal, draft, paused: !record }); onHistoryChange(true); }} requestedAction={task.action} onRead={onReadConversation} goal={task.goal} poolIds={task.poolIds} conversations={conversations} sessions={sessions} projectsReady={projectsReady} zh={zh} onStart={(goal, mode, ids, scope) => onStart(goal, mode, ids, scope, task.poolIds)} onContinue={onContinueProject} onOpenChapter={onOpenChapter} onHydrate={onHydrate} onConfigureAI={onConfigureAI} onBack={goal => { changeGoal(goal); setTask(undefined); }} />;
+  return <><main className={`review-home${importFirst ? " is-import-first" : ""}`} hidden={historyOpen}><div className="review-home-inner">
     <div className="review-home-fixed">
       <header><div className="review-home-title"><h1>{importFirst ? zh ? "让过去的 AI 对话，重新发挥价值" : "Make past AI conversations useful again" : zh ? "今天想找回或继续什么？" : "What would you like to find or continue?"}</h1></div><p className="review-home-subtitle">{importFirst ? zh ? "先导入历史对话。" : "Import your past conversations first." : zh ? "" : ""}</p></header>
       <div ref={goalRef} hidden={importFirst}><HistoryWorkbench experimentalActions={experimentalActions} selectedIds={selectedIds} onSelectedIds={onSelectedIds} conversations={conversations} goal={currentDraft.goal} onGoal={changeGoal} onRequest={requestTask} onDiscoverGoal={(goal,poolIds)=>{if(experimentalActions)setTask({goal,poolIds,discovery:true});}} onSources={showSources} onRead={onReadConversation} onHydrate={onHydrate} onDiscover={onDiscover} onConfigureAI={onConfigureAI} /></div>
@@ -104,7 +104,11 @@ export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, expe
       <header><div className="home-materials-heading"><h2>{importFirst ? zh ? "导入你的第一批对话" : "Import your first conversations" : <button type="button" className="home-materials-toggle" aria-expanded={materialsExpanded} aria-controls="home-source-materials" onClick={() => { const opening = !materialsExpanded; setMaterialsOpen(opening);
         // Collapsing from inside the list would leave the reader below where the section now ends: bring its heading back.
         if (!opening) window.setTimeout(() => { const box = sourcesRef.current; if (box && box.getBoundingClientRect().top < 0) box.scrollIntoView({ block: "start" }); }, 0); }}><span>{zh ? "来源材料与同步" : "Source materials and sync"}</span><ChevronDown size={16} aria-hidden="true" /></button>}</h2>
-        {importFirst && conversations.length ? <p className="home-import-pending">{zh ? `已发现 ${conversations.length} 条对话，同步正文后即可全文搜索。` : `${conversations.length} conversations found. Sync messages to search the full text.`}</p> : !importFirst ? <p className="home-source-inventory">{zh ? `${conversations.length} 条对话${conversations.length>readyCount?` · ${conversations.length-readyCount} 条待同步`:""}${materialsExpanded?"":` · ${[...new Set(conversations.map(source=>platformName(source.platform,"zh-CN")))].join(" / ")}`}` : `${conversations.length} conversations`}</p> : null}
+        {importFirst && conversations.length ? <p className="home-import-pending">{zh ? `已发现 ${conversations.length} 条对话，同步正文后即可全文搜索。` : `${conversations.length} conversations found. Sync messages to search the full text.`}</p> : !importFirst ? <p className="home-source-inventory">
+          <span>{zh ? `${conversations.length} 条对话` : `${conversations.length} conversations`}</span>
+          {pendingCount > 0 ? <span className="workbench-pending-dot">{zh ? `${pendingCount} 条待同步` : `${pendingCount} pending`}</span> : null}
+          {!materialsExpanded && zh ? <span>{[...new Set(conversations.map(source => platformName(source.platform, "zh-CN")))].join(" / ")}</span> : null}
+        </p> : null}
       </div>{conversations.length?<span className="home-materials-actions" ref={setMaterialActions}/>:null}</header>
       {importFirst && conversations.length ? <div className="home-import-meta" ref={setMaterialStatus}/> : null}
       <div id="home-source-materials" className="workbench-materials"><WorkbenchSyncPanel controlsHost={conversations.length?materialActions:null} statusHost={importFirst&&conversations.length?materialStatus:null} initialImport={importFirst} expanded={materialsExpanded} compact conversations={conversations} importJob={importJob} importSource={importSource} selectedIds={syncSelectedIds ?? selectedIds} onSelectedIds={onSyncSelectedIds ?? onSelectedIds} onUseSources={ids => { onSelectedIds(new Set([...selectedIds, ...ids])); goalRef.current?.scrollIntoView?.({ block: "center" }); }} onPrioritize={onPrioritize} onScan={onScan} onHydrate={onHydrate} onZip={onZip} onPause={onPause} onResume={onResumeImport} onConnect={onConnect} sessions={sessions} onOpen={onReadConversation ? (id, message, sourceRange) => onReadConversation(id, message, sourceRange) : undefined} onOpenProject={onSession} onLinkProject={async (projectId, ids) => { await linkConversationsToProject(projectId, ids); await onProjectsChanged?.(); }} /></div>
@@ -135,5 +139,5 @@ export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, expe
     })() : null}
     </div>
     </div>
-  </div></main>{layoutExample ? <WorkspaceLayoutExample zh={zh} onClose={() => setLayoutExample(false)} /> : null}</>;
+  </div></main>{history}</>;
 }

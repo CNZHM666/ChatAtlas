@@ -16,7 +16,33 @@ function ledger(units: WikiKnowledgeUnit[], organization: Partial<WikiKnowledgeO
   return { version: 1, generatedAt: 0, status: "complete", materials: units.length, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }],
     organization: { version: 1, generatedAt: 0, status: "complete", subjects: [], merged: [], relations: [], report: {}, chapters: [], ...organization } };
 }
-const curate = (book: WikiKnowledgeLedger, budget?: number, length?: number) => curateWikiUnits(book, wikiUnitStatuses(book.batches.flatMap(batch => batch.units), book.organization!), budget, length);
+const curate = (book: WikiKnowledgeLedger, budget?: number, length?: number) => curateWikiUnits(book, wikiUnitStatuses(book.batches.flatMap(batch => batch.units), book.organization!, book.decisions), budget, length);
+
+it("uses the same ledger for a concise Wiki, a technical spec and an audit", () => {
+  const confirmed = unit(1, "提交", "只在用户确认后提交记录。", { adoption: "user_decision", role: "user", kind: "decision" });
+  const exact = unit(2, "提交", "从 intensity-select 路由传入 flowType 字段。", { kind: "mechanism" });
+  const exploration = unit(3, "提交", "可以在结束页加上庆祝动画。", { kind: "plan" });
+  const points = [confirmed, exact, exploration];
+  const book = { ...ledger(points, { subjects: [subject("s:submit", "提交", points)] }),
+    decisions: { [confirmed.id]: { verdict: "confirmed" as const, at: 1 } } };
+
+  expect(curate({ ...book, writingMode: "concise" }).selected).toEqual(new Set([confirmed.id]));
+  expect(curate({ ...book, writingMode: "handoff" }).selected).toEqual(new Set([confirmed.id, exact.id]));
+  expect(curate({ ...book, writingMode: "audit" }).selected).toEqual(new Set(points.map(point => point.id)));
+  expect(book.batches[0].units).toEqual(points);
+});
+
+it("caps optional technical proposals without dropping confirmed instructions", () => {
+  const confirmed = unit(1, "API 合约", "必须先校验签名再处理请求。", { adoption: "user_decision", role: "user", kind: "constraint" });
+  const options = ["读取 sessionId 字段。", "URL 使用 /workspaces/:id。", "使用 retryCount 重试。", "响应返回 nextCursor。"]
+    .map((text, index) => unit(index + 2, "API 合约", text));
+  const points = [confirmed, ...options];
+  const book = { ...ledger(points, { subjects: [subject("api", "API 合约", points)] }), writingMode: "handoff" as const };
+  const result = curate(book, 2);
+  expect(result.selected.size).toBe(2);
+  expect(result.selected.has(confirmed.id)).toBe(true);
+  expect(book.batches[0].units).toHaveLength(5);
+});
 
 it("explains a group at the subject its core speaks of, keeping an earlier home unless another fits clearly better", () => {
   const search = [unit(1, "检索", "侧边栏搜索只覆盖已导入的对话。"), unit(2, "检索", "全文索引使用 Orama。"), unit(3, "检索", "索引在后台增量更新。")];

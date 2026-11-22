@@ -1,9 +1,12 @@
-import { DECIDING_KINDS, aboutNameKey, wikiLedgerUnits, type WikiScopeAnswer, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus, type WikiUserDecision } from "../shared/wiki-knowledge";
+import { DECIDING_KINDS, aboutNameKey, wikiLedgerUnits, wikiUnitConditions, type WikiScopeAnswer, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus, type WikiUserDecision } from "../shared/wiki-knowledge";
 import { roadmaps, wikiUnitStatuses } from "./wiki-knowledge-write";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
 import { wikiByDiscussion } from "../shared/wiki-sources";
 import { differingPlans } from "../shared/wiki-differing-plans";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
+import { knowledgeScopesAgree } from "../shared/knowledge-subject";
+import { distinctWikiStageScopes } from "../shared/wiki-roadmap-scope";
+import { factTextKey } from "../shared/project-fact-state";
 
 /** A key point the user can confirm as a decision or set aside: one point however often it was restated. */
 export interface WikiDecisionCandidate {
@@ -34,6 +37,7 @@ function decisionClusters(ledger: WikiKnowledgeLedger): DecisionCluster[] {
   // Judged by what the conversation shows, before any verdict: a judged point stays listed so it can be undone.
   const open = units.filter(unit => !unit.about && DECIDING_KINDS.includes(unit.kind) && ["proposal", "relayed", "open"].includes(plain.get(unit.id)!)).sort((a, b) => wikiByDiscussion(b, a));
   const pairs = new Map(open.map(unit => [unit.id, bigramsOf(unit.statement)])), names = new Map(open.map(unit => [unit.id, namesOf(unit.statement)]));
+  const conditions = new Map(open.map(unit => [unit.id, JSON.stringify(wikiUnitConditions(unit).map(factTextKey).sort())]));
   // One restates the other: most of its character pairs are there, and every number or Latin name too.
   const restates = (a: WikiKnowledgeUnit, b: WikiKnowledgeUnit) => {
     const own = pairs.get(a.id)!, theirs = pairs.get(b.id)!;
@@ -44,7 +48,13 @@ function decisionClusters(ledger: WikiKnowledgeLedger): DecisionCluster[] {
     return true;
   };
   const groups: WikiKnowledgeUnit[][] = [];
-  for (const unit of open) { const home = groups.find(group => group.some(member => restates(unit, member) || restates(member, unit))); if (home) home.push(unit); else groups.push([unit]); }
+  for (const unit of open) {
+    const home = groups.find(group => group.some(member => restates(unit, member) || restates(member, unit))
+      && group.every(member => conditions.get(unit.id) === conditions.get(member.id)
+        && knowledgeScopesAgree(unit.statement, member.statement) && !distinctWikiStageScopes(unit.statement, member.statement)
+        && !exclusiveWikiVersions(unit, member) && !exclusiveWikiVersions(member, unit)));
+    if (home) home.push(unit); else groups.push([unit]);
+  }
   const weight = (group: WikiKnowledgeUnit[]) => group.length + (group.some(unit => unit.kind === "decision") ? 2 : 0) + (group.some(unit => plain.get(unit.id) === "open") ? 1 : 0);
   const clusters = groups.sort((a, b) => weight(b) - weight(a)).map(group => ({ units: group, weight: weight(group), status: plain.get(group[0].id)!, subject: subjectOf.get(group[0].id) ?? group[0].subject, ...(chapterOf.get(group[0].id) ? { chapter: chapterOf.get(group[0].id) } : {}) }));
   clusterCache.set(organization, clusters);
@@ -213,10 +223,17 @@ export function withVersionAnswer(ledger: WikiKnowledgeLedger, question: WikiVer
   // An older UI/cache can still hold a compound, compatible pair. Choosing one
   // confirms that point without silently rejecting the independent point in the other.
   const chosenOption = question.options.find(option => option.id === answer);
-  if (chosenOption && question.kind === "versions") {
+  if (chosenOption && question.kind !== "roadmap") {
     const units = new Map(wikiLedgerUnits(ledger).map(unit => [unit.id, unit]));
-    const pair = question.options.map(option => units.get(option.unitIds[0]));
-    if (pair.length === 2 && pair[0] && pair[1] && !exclusiveWikiVersions(pair[0], pair[1])) return withDecision(ledger, chosenOption.unitIds, "confirmed", undefined, [chosenOption.label]);
+    const chosen = chosenOption.unitIds.flatMap(id => units.get(id) ?? []);
+    const discarded = [...new Set(question.options.filter(option => option !== chosenOption).flatMap(option => option.unitIds))]
+      .filter(id => {
+        const alternative = units.get(id);
+        return alternative && !chosenOption.unitIds.includes(id)
+          && chosen.some(unit => exclusiveWikiVersions(alternative, unit) || exclusiveWikiVersions(unit, alternative));
+      });
+    const at = Date.now();
+    return withDecision(withDecision(ledger, chosenOption.unitIds, "confirmed", at, [chosenOption.label]), discarded, "rejected", at);
   }
   const ids = question.options.flatMap(option => option.unitIds);
   let next = withDecision(ledger, ids, undefined);

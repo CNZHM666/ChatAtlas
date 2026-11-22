@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <b>简体中文</b> · <a href="README.en.md">English</a> · <b>v0.1.6 Alpha</b>
+  <b>简体中文</b> · <a href="README.en.md">English</a> · <b>v0.1.7 Alpha</b>
 </p>
 
 <p align="center">
-  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip"><b>下载 v0.1.6 安装包</b></a>
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip"><b>下载 v0.1.7 安装包</b></a>
   · <a href="#效果预览">效果预览</a>
   · <a href="#安装到-chrome-或-edge">安装</a>
   · <a href="CHANGELOG.md">更新记录</a>
@@ -37,8 +37,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/wiki-chapter-light.png" alt="专注计时器的 Wiki 章节，包含核对依据、显示出处和导出入口" width="920">
-  <br><sub>专注计时器 Wiki 章节 · 顶部提供核对依据、显示出处与导出入口</sub>
+  <img src="docs/images/wiki-chapter-light.png" alt="项目 Wiki 章节和右侧核对依据面板" width="920">
+  <br><sub>在 Wiki 右侧核对结论，查看对应的原话和前后文</sub>
 </p>
 
 <details>
@@ -53,7 +53,7 @@
 |:---:|:---:|
 | ![项目总览与 Wiki 目录](docs/images/project-overview-light.png) | ![在暗色阅读器中查看原始对话](docs/images/reader-dark.png) |
 | **工作台** | **网页侧栏** |
-| ![工作台与来源材料](docs/images/home-zh-dark.png) | ![ChatGPT 旁的 ChatAtlas 侧栏](docs/images/sidecar-chatgpt-light.png) |
+| ![工作台与来源材料](docs/images/home-zh-light.png) | ![ChatGPT 旁的 ChatAtlas 侧栏](docs/images/sidecar-chatgpt-light.png) |
 
 </details>
 
@@ -97,7 +97,7 @@ flowchart LR
 
 ## 安装到 Chrome 或 Edge
 
-**[下载 v0.1.6 Alpha 安装包（ZIP）](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip)** · [查看发布说明](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.6)
+**[下载 v0.1.7 Alpha 安装包（ZIP）](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip)** · [查看发布说明](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.7)
 
 Chrome 和 Edge 共用同一个 ZIP。Alpha 测试版现阶段通过 GitHub 发布，需在浏览器中手动加载。
 
@@ -111,8 +111,8 @@ Chrome 和 Edge 共用同一个 ZIP。Alpha 测试版现阶段通过 GitHub 发�
 将下面这段提示词发给具备终端能力的 AI 助手，再按其返回的路径在浏览器中加载即可。
 
 ```text
-请从以下地址下载 ChatAtlas v0.1.6 Alpha 的扩展安装包。
-https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip
+请从以下地址下载 ChatAtlas v0.1.7 Alpha 的扩展安装包。
+https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip
 解压到一个长期保留的固定文件夹里，确认目录内直接包含 manifest.json，然后告诉我该文件夹的绝对路径并引导我在 Chrome 或 Edge 中加载。
 ```
 

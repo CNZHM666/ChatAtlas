@@ -27,6 +27,7 @@ it("updates a ledger document through its ledger, keeping a chapter the user edi
   await db.put("conversations", conversation);
   for (const item of [message(0, "assistant", "建议全文索引使用 Orama。"), message(1, "user", "我决定索引就用 Orama。")]) await db.put("messages", item);
   const first = await generateFocusSession("把全部已选对话整理成一个项目", "work", [conversation], "zh-CN", new AbortController().signal, undefined, undefined, undefined, undefined, { complete: true, skipProjectState: true });
+  expect(first.wikiKnowledge?.documentType).toBe("project");
   expect(first.sections.map(section => section.title)).toEqual(["检索"]);
   // The user rewrites the chapter; then the discussion goes on about export.
   const edited = { ...first, sections: first.sections.map(section => ({ ...section, body: "我自己整理的检索说明。", userEdited: true })) };

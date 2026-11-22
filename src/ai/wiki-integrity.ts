@@ -4,6 +4,7 @@ import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
 import { withStop } from "../shared/wiki-sentences";
 import { statesCore, wikiStatementWithConditions, type WikiDraftChapter, type WikiDraftClaim, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import { wikiSupplementRanges } from "../shared/wiki-source-supplements";
+import { restoreSplitWikiQuantities, wikiHasSplitQuantity } from "../shared/wiki-figures";
 
 const EDITOR_NOTE = /[（(](?:注[：:]\s*)?(?:此处)?(?:根据|按|按照)(?:上述)?(?:规则|校验(?:结果)?)(?:修正|改写|调整|删除)[^）)\n]*[）)]|[（(](?:note:\s*)?(?:rewritten|removed|omitted) (?:to satisfy|per) (?:the )?(?:validation|writing rules?)[^）)\n]*[）)]/iu;
 const CUT_FLOW = /(?:->|→|=>)\s*(?:[\w.]+\s*[-=])?(?:[。.!！]\s*)?$/u;
@@ -21,7 +22,7 @@ export const wikiIntegrityNote = (zh: boolean) => zh
   ? "此处的生成文字不完整，请查阅对应原文。"
   : "Generated text is incomplete here. Check the original source.";
 export const wikiIntegrityCandidate = (body: string) => EDITOR_NOTE.test(body) || BROKEN_FLOW.test(body)
-  || DANGLING_TERM.test(body) || DANGLING_POSSESSIVE.test(body) || body.includes("|") || /\d+\s*[~～–—-]\s*\d+/u.test(body);
+  || DANGLING_TERM.test(body) || DANGLING_POSSESSIVE.test(body) || wikiHasSplitQuantity(body) || body.includes("|") || /\d+\s*[~～–—-]\s*\d+/u.test(body);
 
 export function literalWikiProse(text: string, quote: string) {
   const wanted = text.trim();
@@ -112,6 +113,8 @@ function headingTarget(text: string, unit: WikiKnowledgeUnit): string | undefine
 
 function repairProse(text: string, units: WikiKnowledgeUnit[], zh: boolean): string | undefined {
   if (units.some(unit => literalWikiProse(text, unit.evidence.quote))) return;
+  const quantities = wikiHasSplitQuantity(text) && restoreSplitWikiQuantities(text, units.map(unit => unit.evidence.quote));
+  if (quantities && quantities !== text) return quantities;
   if (DANGLING_POSSESSIVE.test(text) && /^\s*的(?!确)/u.test(text) && units.length === 1) {
     const tail = normalize(text), unit = units[0];
     const matching = unit.statement.split(/(?<=[。！？])/u).map(sentence => sentence.trim()).find(sentence => {
@@ -189,6 +192,24 @@ export function wikiChapterIntegrity(chapter: WikiDraftChapter, unitOf: (id: str
       repaired++;
       return { ...claim, text: actual };
     });
+    // A full stop may sit just beyond a saved claim's boundary. Repair the
+    // paragraph against its bound quotes and update any overlapping claims.
+    if (!literal.length && !maybeTable && wikiHasSplitQuantity(text)) {
+      const quotes = sources.map(unit => unit.evidence.quote);
+      if (!quotes.some(quote => literalWikiProse(text, quote))) {
+        const next = restoreSplitWikiQuantities(text, quotes);
+        if (next !== text) {
+          claims = claims.map(claim => {
+            const originalClaim = claim.text;
+            if (!originalClaim || !text.includes(originalClaim) || !/\d[。．]$/u.test(originalClaim) || next.includes(originalClaim)) return claim;
+            const prefix = originalClaim.slice(0, -1);
+            return next.includes(prefix) ? { ...claim, text: prefix } : claim;
+          });
+          text = next;
+          repaired++;
+        }
+      }
+    }
     for (const block of (maybeTable ? wikiDocumentBlocks(text).filter(block => block.kind === "table").reverse() : [])) {
       if (sources.some(unit => unit.evidence.quote.includes(block.text))) continue;
       const lines = block.text.split("\n"), header = tableCells(lines[0]);

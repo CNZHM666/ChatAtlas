@@ -23,6 +23,8 @@ export interface WikiClaim {
   /** Presentation metadata on the same grounded Wiki claim, never separate dashboard facts. */
   overviewRole?: "purpose" | "stage" | "progress" | "next" | "decision" | "scope" | "workflow" | "constraint";
   workStatus?: "reported" | "planned" | "proposed";
+  /** Sourced technical context that helps explain the design in a concise Wiki. */
+  technicalContext?: true;
   /** Grouping hints, never proof of adoption or implementation. */
   subject?:string;
   scope?:string;

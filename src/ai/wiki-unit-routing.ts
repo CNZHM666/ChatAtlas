@@ -3,6 +3,7 @@ import { PHASE } from "../shared/stage-words";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { wikiMeasure } from "../shared/wiki-section-status";
 import { personalDirection, statesCore, type WikiKnowledgeOrganization, type WikiKnowledgeUnit, type WikiSubject } from "../shared/wiki-knowledge";
+import { wikiProjectToolHandoff, wikiProjectUsesStandard } from "./wiki-reference-ownership";
 
 type Lane = "purpose" | "interface" | "technical" | "security" | "documentation" | "progress" | "stage" | "roadmap" | "quality" | "example" | "commerce" | "procurement" | "algorithm";
 const TITLE: Record<Lane, RegExp> = {
@@ -42,16 +43,39 @@ const otherProducts = (unit: WikiKnowledgeUnit) => Boolean(unit.about && unit.ab
   || ["fact", "report", "history"].includes(unit.kind) && (Boolean(unit.about) || /竞品|外部参考|对标|competitor|outside reference/iu.test(`${unit.subject} ${unit.facet ?? ""}`));
 /** A subtopic telling how the product is used: its users, retention, daily actives or other figures. */
 const MEASURE_TOPIC = /留存|日活|DAU|活跃|用户数|数据指标|运营现状|增长现状|瓶颈|retention|active users|metrics/iu;
+const METRIC_INTENT = /目标|优先|门槛|达到|超过|target|priority|threshold|reach/iu;
+const INDUSTRY_MEASURE = /行业基准|跨品类|行业平均|平均转化率|\b(?:industry|market|cross-category) (?:average|benchmark|median)\b/iu;
+const RESEARCH_STANDARD = /荟萃分析|元分析|随机对照|临床分类|\b(?:ICD-\d+|meta-analysis|randomi[sz]ed controlled trials?)\b/iu;
+const DIRECTION_COMPARISON = /市场空间.{0,28}留存潜力|留存潜力.{0,28}市场空间|\bmarket (?:potential|size)\b.{0,35}\bretention potential\b/iu;
+const AUDIENCE = /^(?:目标用户|服务对象|用户画像|target (?:users|audience)|audience|user personas?)$/iu;
+const PRODUCT_PURPOSE_TOPICS = [
+  { id: "metrics", title: ["运营指标", "Usage metrics"], cue: MEASURE_TOPIC },
+  { id: "experiment", title: ["增长验证", "Growth experiments"], cue: /增长验证|增长实验|需求验证|验证实验|获客实验|growth experiment|market validation/iu },
+  { id: "messaging", title: ["对外推广", "External messaging"], cue: /对外推广|宣传文案|推广措辞|宣传口径|marketing copy|external messaging/iu },
+] as const;
+export function wikiPurposeReadingLane(unit: WikiKnowledgeUnit) {
+  if (unit.about) return;
+  if (wikiMeasure(unit) && (unit.evidence.role === "user" || MEASURE_TOPIC.test(unit.subject))) return PRODUCT_PURPOSE_TOPICS[0];
+  const topic = `${unit.subject} ${unit.facet ?? ""} ${unit.statement.slice(0, 90)}`;
+  if (MEASURE_TOPIC.test(topic) && METRIC_INTENT.test(unit.statement)
+    && ["decision", "constraint", "plan"].includes(unit.kind)) return PRODUCT_PURPOSE_TOPICS[0];
+  if (PRODUCT_PURPOSE_TOPICS[1].cue.test(topic) && /日活|留存|用户|转化|获客|retention|users|conversion|acquisition/iu.test(unit.statement)
+    && ["plan", "analysis", "decision"].includes(unit.kind)) return PRODUCT_PURPOSE_TOPICS[1];
+  if (PRODUCT_PURPOSE_TOPICS[2].cue.test(topic)) return PRODUCT_PURPOSE_TOPICS[2];
+}
 /** A screen of the product, named as one. */
 const SCREEN = /首页|落地页|欢迎页|Landing\s*Page|Welcome\s*Screen|Hero|页面布局|\bpage\b/iu;
 const VISUAL_SPEC = /视觉规范|配色|字体|字号|字重|行高|圆角|内边距|留白|尺寸规范|宽度|动效|动画时长|色板|\b(?:typography|palette|font size|border[ -]radius|corner radius|padding|spacing|max-width|animation duration|visual specs?|design tokens?)\b/iu;
 const VISUAL_CHAPTER = /视觉|界面(?:设计|布局|规范)|UI\s*(?:设计|规范)|\b(?:visual|interface design|UI design|styling)\b/iu;
 const JOURNEY = /旅程|工作流|业务流程|操作流程|使用流程|交互流程|\b(?:journey|workflow|interaction flow|user flow)\b/iu;
 const APPEARANCE_ONLY = /^[^。！？；;，,]{0,45}?(?:字号|圆角|行高|视觉动效|过渡动画时长|[\w-]*width|font size|line height|corner radius|animation duration)(?:\s*(?:为|是|[:：]|\d|\b(?:is|of)\b)|[^。！？；;，,]{0,12}\d+\s*(?:px|rem|ms)\b)/iu;
+const DIAGRAM_OUTPUT = /(?:接线图|原理图|电路图|硬件图|架构图|\b(?:wiring diagram|schematic|architecture diagram)\b)/iu;
+const WRITING_UI = /文案|无障碍|可访问性|微文案|\b(?:copywriting|microcopy|accessibility)\b/iu;
 export const wikiRoadmap = (text: string) => ROADMAP_COUNT.test(text) || (text.match(ROADMAP_STEP) ?? []).length >= 3;
 export function wikiUnitLane(unit: WikiKnowledgeUnit): Lane | undefined {
   if (unit.about) return undefined;
   const identity = `${unit.subject} ${unit.facet ?? ""}`, text = unit.statement;
+  if (DIAGRAM_OUTPUT.test(identity) && /绘制|生成|导出|渲染|\b(?:draw|generate|render|export)\w*\b/iu.test(identity + text)) return "technical";
   if (/示例|例子|\b(?:demo|example)\b/iu.test(identity) || /用户原始需求/u.test(unit.evidence.quote) && /结构化理解/u.test(unit.evidence.quote) && !/项目|产品|平台|界面|交互|字段|数据/u.test(text)) return "example";
   if (/文档|README|documentation/iu.test(identity) || /文档(?:重组|分层|结构)|PROJECT_OVERVIEW\.md/iu.test(text)) return "documentation";
   if (/进度|实现状态|已完成功能|completed features|project status/iu.test(identity) && /已完成|已实现|已通过|完成了|\b(?:implemented|completed|passed)\b/iu.test(text)) return "progress";
@@ -84,7 +108,7 @@ export function wikiUnitLane(unit: WikiKnowledgeUnit): Lane | undefined {
   if (SCREEN.test(identity) && /布局|视觉|极简|宽度|居中|Hero|输入框|按钮|留白|layout/iu.test(`${unit.facet ?? ""} ${text}`) && ["constraint", "decision", "mechanism"].includes(unit.kind)) return "interface";
   // The code's layout ("项目目录结构": Next.js App Router, app/api, components) is the architecture's.
   // A screen's structure ("首页架构": 首页设计为“AI Agent指挥台……”的混合模式) is the interface's, not the architecture's.
-  if (/数据模型|状态管理|密钥管理|存储|架构|目录结构|技术栈|tech stack|directory structure|schema|data model|key management|storage|architecture/iu.test(identity) && !SCREEN.test(identity)
+  if (/数据模型|数据结构|状态管理|密钥管理|存储|架构|目录结构|技术栈|tech stack|directory structure|schema|data model|key management|storage|architecture/iu.test(identity) && !SCREEN.test(identity)
     || unit.kind === "mechanism" && /\b(?:[a-z]+[A-Z]\w*|[A-Z]\w*(?:Adapter|Provider|Config|Store))\b/u.test(text)) return "technical";
   // A scoring formula or its rules ("个性化推荐算法 · 评分公式": 推荐分数由……加权计算) belongs with the algorithms: one run
   // put it, with its ActionEffectiveness structure, under 首页与导航设计.
@@ -114,6 +138,44 @@ function commerceHome(chapters: WikiKnowledgeOrganization["chapters"], subjects:
 
 /** Route individual points by their own role. A broad subject or explanation
  * group must not drag progress, documentation or a demo into product positioning. */
+const CREDENTIAL_TOPIC = /BYOK|API\s*Key|密钥|凭据|\bcredentials?\b/iu;
+const DEPLOYMENT_TOPIC = /部署|deploy(?:ment)?|hosting/iu;
+const TECHNICAL_ROLES = [
+  { id:"provider-security", cue:/\bSSRF\b|validateProviderBaseUrl\b|(?:服务商|Provider).{0,18}(?:URL|Base URL).{0,14}(?:校验|安全)/iu, home:/BYOK|Provider|代理安全|请求安全|proxy security|credentials?/iu, title:["Provider 安全","Provider security"] },
+  { id:"simulation", cue:/(?:集成|接入|运行|仿真|模拟|使用|通过|支持|放进)[^。！？\n]{0,34}\bWokwi\b|\b(?:simulation pass rate|integrate.{0,18}wokwi)\b/iu, home:/^(?:仿真(?:与验证|流程|机制|设计)?|仿真与验收|Simulation(?: workflow| and testing)?)$/iu, title:["仿真与验收","Simulation and testing"] },
+  { id:"catalog", cue:/Component Catalog.{0,65}(?:undefined|TODO|不编造|编造硬件参数|规格不确定)|内置.{0,18}(?:元件|组件).{0,12}(?:共有|包括|数量|\d+个)|\bcomponent catalog\b.{0,45}(?:unknown specifications|missing (?:fields|specifications))/iu, home:/元件(?:目录|库)|\bcomponent (?:catalog|library)\b/iu, title:["元件目录","Component catalog"] },
+  { id:"validation", cue:/unknown\s*[≠!]\s*=?\s*safe|LOAD_REQUIRES_DRIVER|COMMON_GROUND_UNCONFIRMED|Validator.{0,33}(?:不检查电压|不实际校验|检查规则)|禁止把.{0,18}当作可直接接线图/iu, home:/^(?:验证规则|硬件验证(?:逻辑|规则)?|电气(?:检查|验证|校验)|Validator(?: 规则| rules)?|Validation rules)$/iu, title:["验证规则","Validation rules"] },
+  { id:"procurement", cue:/比价(?:推荐|与购买|和购买)|提供(?:基础比价|购买链接)|\b(?:purchase links|price comparison recommendations)\b/iu, home:TITLE.procurement, title:["采购范围","Procurement scope"] },
+  { id:"inventory-safety", cue:/unsupportedOrUnsafe.{0,28}(?:Inventory|库存)|(?:不安全|高压).{0,60}(?:禁止|不得)加入\s*(?:Inventory|库存|元件库)/iu, home:/库存|零件盒|元件目录|\binventory\b/iu, title:["库存与识别","Inventory and recognition"] },
+] as const;
+type TechnicalRole = typeof TECHNICAL_ROLES[number];
+export function wikiMisplacedTechnicalRole(text:string, chapter:string, topic:string):TechnicalRole|undefined {
+  const credential=CREDENTIAL_TOPIC.test(topic), visual=VISUAL_CHAPTER.test(chapter) || WRITING_UI.test(topic);
+  return TECHNICAL_ROLES.find(role=>role.cue.test(text) && !role.home.test(topic)
+    && (role.id==="provider-security"||role.id==="simulation" ? visual
+      : credential || DEPLOYMENT_TOPIC.test(topic) || role.id==="procurement"&&/验证|校验|Validator|validation/iu.test(topic)));
+}
+
+export function wikiTechnicalReadingHome<T extends { title:string; subtopics: readonly {title:string}[] }>(role:TechnicalRole, chapters:readonly T[]) {
+  const live=chapters.filter(chapter=>!REFERENCE_CHAPTER.test(chapter.title));
+  const named=live.flatMap(chapter=>chapter.subtopics.filter(topic=>role.home.test(topic.title)
+    && !(role.id==="catalog" && /UI|界面|视觉|布局|样式/iu.test(topic.title))).map(topic=>({chapter,title:topic.title})));
+  if(named.length===1)return named[0];
+  const candidate=role.id==="procurement"?live.find(chapter=>TITLE.purpose.test(chapter.title))
+    :role.id==="simulation"?live.find(chapter=>/发布|测试|验收|release|quality/iu.test(chapter.title))
+    :live.find(chapter=>TITLE.technical.test(chapter.title))??live.find(chapter=>/实现|机制|implementation/iu.test(chapter.title));
+  if(!candidate)return;
+  const matching=named.filter(item=>item.chapter===candidate);
+  return matching.length===1?matching[0]:{chapter:candidate,title:role.title[/\p{Script=Han}/u.test(candidate.title)?0:1]};
+}
+const TECHNICAL_TOPICS = [
+  /电气(?:安全|约束)|高压|市电|\belectrical safety\b/iu,
+  /校验|验证|Validator|\bvalidation\b/iu,
+  /元件(?:目录|库|清单)|\bcomponent (?:catalog|library)\b/iu,
+  /库存|零件盒|\binventory\b/iu,
+  /画布|\bcanvas\b/iu,
+];
+
 export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: Map<string, WikiKnowledgeUnit>, report: Record<string, number> = {}): WikiKnowledgeOrganization {
   const chapters = organization.chapters.map(chapter => ({ ...chapter, subtopics: chapter.subtopics.map(topic => ({ ...topic, subjectIds: [...topic.subjectIds] })) }));
   const subjects = organization.subjects.map(subject => ({ ...subject, unitIds: [...subject.unitIds] }));
@@ -129,7 +191,58 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
       const target = into && subjects.find(other => other.id === into.subjectIds[0]);
       if (target) { subject.unitIds = subject.unitIds.filter(other => other !== id); target.unitIds.push(id); moved++; report.references_routed = (report.references_routed ?? 0) + 1; continue; }
     }
-    if (!unit || unit.about || !from || !lane && !wikiMeasure(unit) || /相关项目|外部参考|参考项目|related project|outside reference/iu.test(from.title)) continue;
+    if (!unit || unit.about || !from || /相关项目|外部参考|参考项目|related project|outside reference/iu.test(from.title)) continue;
+    const ownTopic = from.subtopics.find(topic => topic.subjectIds.includes(subject.id));
+    const role=wikiMisplacedTechnicalRole(unit.statement,from.title,ownTopic?.title??"");
+    const technical=role&&wikiTechnicalReadingHome(role,chapters);
+    if(role&&technical){
+      const {chapter:to,title}=technical;
+      const existing=to.subtopics.find(topic=>topic.title===title);
+      const target=subjects.find(item=>item.id===existing?.subjectIds[0]);
+      const idOfTopic=`${to.id}:role:${role.id}`;
+      const into=target??{id:idOfTopic,name:title,aliases:[],unitIds:[]};
+      if(into!==subject){
+        if(!target){subjects.push(into);home.set(into.id,to);to.subtopics.push({title,subjectIds:[into.id]});}
+        subject.unitIds=subject.unitIds.filter(other=>other!==id);
+        if(!into.unitIds.includes(id))into.unitIds.push(id);
+        moved++;
+        continue;
+      }
+    }
+    if (ownTopic && CREDENTIAL_TOPIC.test(ownTopic.title)
+      && !CREDENTIAL_TOPIC.test(`${unit.subject} ${unit.facet ?? ""} ${unit.statement}`)) {
+      const matching = TECHNICAL_TOPICS.filter(cue => cue.test(`${unit.subject} ${unit.facet ?? ""}`));
+      const destinations = matching.length === 1 ? chapters.filter(chapter => !REFERENCE_CHAPTER.test(chapter.title))
+        .flatMap(chapter => chapter.subtopics.filter(topic => topic !== ownTopic && matching[0].test(topic.title)
+          && !CREDENTIAL_TOPIC.test(topic.title) && topic.subjectIds.length)) : [];
+      const target = destinations.length === 1 ? subjects.find(item => item.id === destinations[0].subjectIds[0]) : undefined;
+      if (target && target !== subject) {
+        subject.unitIds = subject.unitIds.filter(other => other !== id);
+        target.unitIds.push(id);
+        moved++;
+        continue;
+      }
+    }
+    const purposeLane = ownTopic && AUDIENCE.test(ownTopic.title) ? wikiPurposeReadingLane(unit) : undefined;
+    if (purposeLane) {
+      const label = purposeLane.title[/\p{Script=Han}/u.test(from.title) ? 0 : 1];
+      let into = from.subtopics.find(topic => topic !== ownTopic && (topic.title === label || purposeLane.cue.test(topic.title)));
+      if (!into) {
+        const target: WikiSubject = { id: `${from.id}:reading:${purposeLane.id}`, name: label, aliases: [], unitIds: [] };
+        subjects.push(target);
+        home.set(target.id, from);
+        into = { title: label, subjectIds: [target.id] };
+        from.subtopics.push(into);
+      }
+      const target = subjects.find(candidate => candidate.id === into.subjectIds[0]);
+      if (target && target !== subject) {
+        subject.unitIds = subject.unitIds.filter(other => other !== id);
+        target.unitIds.push(id);
+        moved++;
+        continue;
+      }
+    }
+    if (!lane && !wikiMeasure(unit)) continue;
     // A test plan under the chapter's roadmap ("1. Phase 1…… 4. Benchmark 建设…… 6. E2E Benchmark……") joins the chapter's
     // testing subtopic: listed as roadmap steps, test suites read as stages of the product.
     if (lane === "quality" && TITLE.quality.test(from.title)) {
@@ -161,7 +274,6 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
       if (target && target !== subject) { subject.unitIds = subject.unitIds.filter(other => other !== id); target.unitIds.push(id); moved++; report.commerce_routed = (report.commerce_routed ?? 0) + 1; }
       continue;
     }
-    const ownTopic = from.subtopics.find(topic => topic.subjectIds.includes(subject.id));
     if ((lane === "security" || lane === "procurement") && !TITLE[lane].test(ownTopic?.title ?? "")) {
       const direct = chapters.flatMap(chapter => chapter.subtopics.filter(topic => topic !== ownTopic && TITLE[lane].test(topic.title)
         && !REFERENCE_CHAPTER.test(chapter.title))).filter(topic => topic.subjectIds.length);
@@ -176,7 +288,9 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
     const visualHome = lane === "interface" && (VISUAL_SPEC.test(`${unit.subject} ${unit.facet ?? ""}`) || APPEARANCE_ONLY.test(unit.statement))
       && !VISUAL_CHAPTER.test(from.title) && JOURNEY.test(`${from.title} ${ownTopic?.title ?? ""}`)
       ? chapters.find(chapter => chapter !== from && VISUAL_CHAPTER.test(chapter.title)) : undefined;
-    if (!visualHome && TITLE[lane].test(from.title) && !(lane === "technical" && TITLE.purpose.test(from.title))) continue;
+    const diagram = DIAGRAM_OUTPUT.test(unit.subject) && /绘制|生成|导出|渲染|\b(?:draw|generate|render|export)\w*\b/iu.test(unit.subject + unit.statement)
+      && WRITING_UI.test(ownTopic?.title ?? "");
+    if (!diagram && !visualHome && TITLE[lane].test(from.title) && !(lane === "technical" && TITLE.purpose.test(from.title))) continue;
     // A formula told under the architecture is where the reader of the technology looks already.
     if (lane === "algorithm" && TITLE.technical.test(from.title)) continue;
     // A stage told under a technical or validation chapter may be that part's own milestone (Milestone 3.1 · BYOK): only
@@ -190,14 +304,16 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
     const candidates = chapters.filter(chapter => chapter !== from && TITLE[lane].test(chapter.title) && !/相关项目|外部参考|参考项目|related project|outside reference/iu.test(chapter.title));
     const purchaseChapter = lane === "procurement" && !TITLE.procurement.test(ownTopic?.title ?? "")
       ? chapters.find(chapter => /采购|库存|物料|\b(?:inventory|purchasing|procurement|materials)\b/iu.test(chapter.title)) : undefined;
-    const to = visualHome ?? candidates[0] ?? purchaseChapter;
+    const to = diagram ? chapters.find(chapter => TITLE.technical.test(chapter.title)) ?? from : visualHome ?? candidates[0] ?? purchaseChapter;
     if (!to) continue;
-    const targetId = `${to.id}:role:${lane}`, label = LABEL[lane][/\p{Script=Han}/u.test(to.title) ? 0 : 1];
+    const targetId = `${to.id}:role:${diagram ? "diagrams" : lane}`, label = diagram
+      ? (/\p{Script=Han}/u.test(to.title) ? "图表与输出" : "Diagrams and outputs") : LABEL[lane][/\p{Script=Han}/u.test(to.title) ? 0 : 1];
     // A test item joins the chapter's own testing subtopic (工程规范与测试要求) rather than opening another beside it.
     const testing = lane === "quality" ? to.subtopics.find(topic => TESTS_TITLE.test(topic.title)) : undefined;
     // Otherwise the planned subtopic whose points share most of its words: a heading of the role's own ("### 产品定位" in
     // 产品定位与用户价值, "### 实现机制", "### 阶段安排") stood beside the planned ones, repeating the chapter or saying nothing.
-    const fitting = testing ?? (lane === "procurement"
+    const fitting = diagram ? to.subtopics.find(topic => topic !== ownTopic && DIAGRAM_OUTPUT.test(topic.title))
+      : testing ?? (lane === "procurement"
       ? to.subtopics.find(topic => TITLE.procurement.test(topic.title))
       : fittingTopic(to, unit, subjects, units));
     let target = fitting ? subjects.find(subject => subject.id === fitting.subjectIds[0]) : subjects.find(subject => subject.id === targetId);
@@ -283,7 +399,8 @@ export function retitleMisnamedChapters(organization: WikiKnowledgeOrganization,
  * chapter its role belongs in, or else to the subject elsewhere sharing most of its words. */
 const REFERENCE_CHAPTER = /竞品|参考项目|外部参考|开源参考|competitor|reference/iu, COMPARES = /竞品|竞争|对手|标杆|差异化|区别于|避开|借鉴|参考|开源|许可|license|competitor/iu, HOME_SHARED = 2;
 export function routeOutOfReferences(organization: WikiKnowledgeOrganization, units: Map<string, WikiKnowledgeUnit>, report: Record<string, number> = {}): WikiKnowledgeOrganization {
-  const from = organization.chapters.find(chapter => REFERENCE_CHAPTER.test(chapter.title));
+  const chapters = organization.chapters.map(chapter=>({...chapter,subtopics:[...chapter.subtopics]}));
+  const from = chapters.find(chapter => REFERENCE_CHAPTER.test(chapter.title));
   if (!from) return organization;
   // A chapter only partly about other products ("增长运营与竞品参考") gives up points only from its comparison subtopics:
   // read whole, its retention, community and roadmap sections were scattered over the interface and algorithm chapters.
@@ -293,16 +410,54 @@ export function routeOutOfReferences(organization: WikiKnowledgeOrganization, un
   if (!inFrom.size) return organization;
   const products = [...new Set([...units.values()].flatMap(unit => unit.about && unit.about.role !== "other_project" ? unit.about.name.split(/[,，、/]/u).map(name => name.trim()).filter(name => name.length >= 2) : []))];
   const subjects = organization.subjects.map(subject => ({ ...subject, unitIds: [...subject.unitIds] }));
-  const chapterOf = new Map(organization.chapters.flatMap(chapter => chapter.subtopics.flatMap(topic => topic.subjectIds.map(id => [id, chapter] as const))));
+  const chapterOf = new Map(chapters.flatMap(chapter => chapter.subtopics.flatMap(topic => topic.subjectIds.map(id => [id, chapter] as const))));
   const elsewhere = subjects.filter(subject => !inFrom.has(subject.id) && chapterOf.has(subject.id));
   const termsOf = new Map(elsewhere.map(subject => [subject.id, new Set(subject.unitIds.slice(0, 30).flatMap(id => [...knowledgeTerms(units.get(id)?.statement ?? "")]))]));
+  const projectChapters = chapters.filter(chapter=>!REFERENCE_CHAPTER.test(chapter.title));
+  const design = projectChapters.find(chapter => VISUAL_CHAPTER.test(chapter.title));
+  const delivery = projectChapters.find(chapter => /开发|工程|交付|实施|development|delivery|implementation/iu.test(chapter.title))
+    ?? projectChapters.find(chapter => TITLE.technical.test(chapter.title));
+  const policy = projectChapters.find(chapter => /合规|安全|风控|compliance|safety|risk controls/iu.test(chapter.title))
+    ?? projectChapters.find(chapter => chapter.subtopics.some(topic => /合规|安全|风控|compliance|safety|risk controls/iu.test(topic.title)));
+  const researchHome = projectChapters.find(chapter => chapter.subtopics.some(topic => /适用标准|研究依据|applicable standards|research evidence/iu.test(topic.title))) ?? policy;
+  const metricsHome = projectChapters.find(chapter => chapter.subtopics.some(topic => /运营指标|增长验证|usage metrics|growth experiments/iu.test(topic.title)))
+    ?? projectChapters.find(chapter => /增长|运营|growth|operations/iu.test(chapter.title))
+    ?? projectChapters.find(chapter => TITLE.purpose.test(chapter.title));
   let moved = 0;
   for (const subject of subjects.filter(item => inFrom.has(item.id))) for (const id of [...subject.unitIds]) {
     const unit = units.get(id);
+    const externalClaim = unit && unit.evidence.role === "assistant" && !unit.evidence.pasted && ["fact", "history", "report"].includes(unit.kind)
+      && !products.some(name => unit.statement.toLowerCase().includes(name.toLowerCase()));
+    const role = unit && (externalClaim && RESEARCH_STANDARD.test(unit.statement) ? "research"
+      : externalClaim && INDUSTRY_MEASURE.test(unit.statement) ? "benchmark"
+      : externalClaim && !unit.about && DIRECTION_COMPARISON.test(unit.statement) ? "direction-comparison"
+      : !unit.about && (wikiProjectToolHandoff(unit) || (wikiProjectUsesStandard(unit) ? "policy" : undefined)));
+    const projectHome = role === "design" ? design ?? delivery : role === "development" ? delivery ?? design : role === "policy" ? policy
+      : role === "research" ? researchHome : role === "benchmark" || role === "direction-comparison" ? metricsHome : undefined;
+    if (role && projectHome) {
+      const targetId = `${projectHome.id}:role:${role === "policy" ? "policy-standard" : role + "-handoff"}`;
+      let target = subjects.find(item=>item.id===targetId);
+      if (!target) {
+        const zh = /\p{Script=Han}/u.test(projectHome.title);
+        const title = role === "design" ? (zh ? "设计交接" : "Design handoff")
+          : role === "development" ? (zh ? "开发交接" : "Development handoff")
+          : role === "research" ? (zh ? "研究依据" : "Research evidence")
+          : role === "benchmark" ? (zh ? "行业基准" : "Industry benchmarks")
+          : role === "direction-comparison" ? (zh ? "方向探索" : "Product directions")
+          : (zh ? "适用标准" : "Applicable standards");
+        target = {id:targetId,name:title,aliases:[],unitIds:[]};
+        subjects.push(target);
+        projectHome.subtopics.push({title,subjectIds:[targetId]});
+      }
+      subject.unitIds = subject.unitIds.filter(other=>other!==id);
+      target.unitIds.push(id);
+      moved++;
+      continue;
+    }
     // A point opening on a product is about it ("灵犀造物已验证……"); one naming a library it uses is this project's ("……禁止
     // React Flow 背景残留白色").
     if (!unit || unit.about || COMPARES.test(unit.statement) || products.some(name => unit.statement.trim().toLocaleLowerCase().startsWith(name.toLocaleLowerCase()))) continue;
-    const lane = wikiUnitLane(unit), laneChapter = lane ? organization.chapters.find(chapter => chapter !== from && TITLE[lane].test(chapter.title)) : undefined;
+    const lane = wikiUnitLane(unit), laneChapter = lane ? chapters.find(chapter => chapter !== from && TITLE[lane].test(chapter.title)) : undefined;
     const own = knowledgeTerms(unit.statement), fit = (other: WikiSubject) => { let shared = 0; for (const term of own) if (termsOf.get(other.id)?.has(term)) shared++; return shared; };
     const among = laneChapter ? elsewhere.filter(other => chapterOf.get(other.id) === laneChapter) : elsewhere;
     const home = [...among].sort((a, b) => fit(b) - fit(a))[0];
@@ -312,5 +467,5 @@ export function routeOutOfReferences(organization: WikiKnowledgeOrganization, un
   if (!moved) return organization;
   report.references_routed_out = moved;
   const live = new Set(subjects.filter(subject => subject.unitIds.length).map(subject => subject.id));
-  return { ...organization, subjects: subjects.filter(subject => live.has(subject.id)), chapters: organization.chapters.map(chapter => ({ ...chapter, subtopics: chapter.subtopics.map(topic => ({ ...topic, subjectIds: topic.subjectIds.filter(id => live.has(id)) })).filter(topic => topic.subjectIds.length) })) };
+  return { ...organization, subjects: subjects.filter(subject => live.has(subject.id)), chapters: chapters.map(chapter => ({ ...chapter, subtopics: chapter.subtopics.map(topic => ({ ...topic, subjectIds: topic.subjectIds.filter(id => live.has(id)) })).filter(topic => topic.subjectIds.length) })) };
 }

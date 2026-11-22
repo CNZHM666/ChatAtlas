@@ -48,10 +48,10 @@ const WorkbenchSourceList = memo(function WorkbenchSourceList({ visible, selecte
   return <div className="workbench-sync-list" role="group" aria-label={zh ? "选择本次使用的对话" : "Choose conversations for this task"}>
     {visible.map((conversation) => {
       // A row selects; reading the original and opening a project it belongs to are small actions at its end.
-      const match = matches?.get(conversation.id), projects = related?.get(conversation.id) ?? [];
+      const match = matches?.get(conversation.id), projects = related?.get(conversation.id) ?? [], state = hydrationLabel(conversation);
       return <div key={conversation.id} className={`workbench-sync-item ${selectedIds.has(conversation.id) ? "is-selected" : ""}`}><label><input type="checkbox" checked={selectedIds.has(conversation.id)} disabled={disabled} onChange={() => toggle(conversation.id)} /><span className="workbench-sync-copy"><span title={conversation.title}>{conversation.title}</span>{match ? <span className="workbench-sync-match">{match.summary}</span> : null}</span></label>
         {projects.length ? <button type="button" className="workbench-source-projects" title={projects.map(project => project.title).join("、")} onClick={() => onOpenProject?.(projects[0].id)} disabled={!onOpenProject}>{zh ? `${projects.length} 个项目` : `${projects.length} ${projects.length > 1 ? "projects" : "project"}`}</button> : projectSlot ? <span className="workbench-source-projects" aria-hidden="true" /> : null}
-        <small className={`workbench-source-state ${readyIds.has(conversation.id) ? "is-ready" : "is-pending"}`}>{hydrationLabel(conversation)}</small>
+        <small className={`workbench-source-state ${readyIds.has(conversation.id) ? "is-ready" : "is-pending"}${state === (zh ? "待同步" : "Pending") ? " workbench-pending-dot" : ""}`}>{state}</small>
         <small className="workbench-source-platform">{platformName(conversation.platform,zh?"zh-CN":"en")}</small>
         {onOpen && conversation.messageCount != null ? <button type="button" className="workbench-source-read" aria-label={zh ? `阅读原文：${conversation.title}` : `Read: ${conversation.title}`} title={zh ? "阅读原文" : "Read original"} onClick={() => onOpen(conversation.id, match?.message, match?.sourceRange)}><BookOpen size={15} aria-hidden="true" /></button> : readSlot ? <span className="workbench-source-read" aria-hidden="true" /> : null}
       </div>;
@@ -208,7 +208,10 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
   const introductory=initialImport&&!conversations.length&&!active&&!error&&!paused&&!complete;
   const Header = heading ? "summary" : "div";
   const controls=<div className={`workbench-sync-controls${introductory?" is-import-choice":""}`} onClick={heading ? (event) => event.stopPropagation() : undefined}>
-        <button type="button" className={!introductory&&!conversations.length&&!needsConnection?"primary":undefined} onClick={onScan} disabled={Boolean(active) || submitting} aria-label={introductory?zh?"导入":"Import":undefined}><RefreshCw size={introductory?22:14} />{introductory?<><strong>{zh?"导入":"Import"}</strong><small>{zh?"自动检测 AI · 读取账号历史":"Detect AI · read account history"}</small></>:zh?"导入":"Import"}</button>
+        <button type="button" className={!introductory&&!conversations.length&&!needsConnection?"primary":undefined} onClick={onScan} disabled={Boolean(active) || submitting}
+          title={zh ? "从 AI 网页读取对话列表" : "Read the conversation list from an AI website"}
+          aria-label={introductory ? zh ? "同步" : "Sync" : undefined}><RefreshCw size={introductory?22:14} aria-hidden="true" />
+          {introductory ? <><strong>{zh ? "同步" : "Sync"}</strong><small>{zh ? "自动检测 AI · 读取对话列表" : "Detect AI · read the conversation list"}</small></> : zh ? "同步" : "Sync"}</button>
         <ChatGPTFileImport onImport={onZip} disabled={Boolean(active) || submitting} ariaLabel={introductory?zh?"导入对话文件":"Import conversation files":undefined}><Upload size={introductory?22:14} />{introductory?<><strong>{zh?"导入对话文件":"Import conversation files"}</strong><small>ZIP / JSON / Markdown / TXT</small></>:zh?"导入文件":"Import files"}</ChatGPTFileImport>
         {needsConnection && importSource === "web" ? <button type="button" className="primary" onClick={onConnect}>{importJob?.native ? zh ? "打开 AI 后重试" : "Retry after opening AI" : zh ? "打开 ChatGPT" : "Open ChatGPT"}</button> : null}
         {paused && onResume ? <button type="button" onClick={onResume}>{zh ? "继续同步" : "Resume sync"}</button> : null}

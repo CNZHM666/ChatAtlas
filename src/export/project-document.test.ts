@@ -7,8 +7,27 @@ import {withDecision} from "../ai/wiki-key-decisions";
 import type {WikiKnowledgeLedger,WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 import {wikiOverviewSignature} from "../shared/wiki-overview";
 import {numberedWikiReferences} from "./wiki-numbered-references";
+import {projectQuickBrief} from "./project-quick-brief";
 
 const selection:ProjectExportSelection={overview:false,wikiIds:["database"],matters:false,history:false,sources:false};
+
+it("bounds the quick brief without cutting any selected argument or dropping its locator",()=>{
+ const markdown=[
+  "# 项目", "文档状态：部分完成 · 实现未核验", "## 项目总览", "为团队提供本地检索和证据核对。",
+  "### 已定的关键决定", "- "+ "较长且独立的论述。".repeat(200), "- 仅在用户确认后更新库存。 [来源1](#source-S-1-one)",
+  "## 工作流", "提出需求 → 审核 → 提交", "## 待决事项", "- 何时开放团队试用？\n  - 方案一：完成测试后。\n  - 方案二：先在内部试用。",
+  "## 引用定位", '- **来源1**<a id="source-S-1-one"></a>记录一。\n- **来源2**<a id="source-S-2-two"></a>其他话题。',
+ ].join("\n\n");
+ const brief=projectQuickBrief(markdown,true);
+ expect(brief.length).toBeLessThanOrEqual(2000);
+ expect(brief).toContain("部分完成");
+ expect(brief).toContain("仅在用户确认后更新库存。 [来源1](#source-S-1-one)");
+ expect(brief).toContain('<a id="source-S-1-one"></a>');
+ expect(brief).toContain("提出需求 → 审核 → 提交");
+ expect(brief).toContain("方案二：先在内部试用。");
+ expect(brief).not.toContain("论述");
+ expect(brief).not.toContain("其他话题");
+});
 
 it("attaches table evidence to its own caption instead of leaving an orphan source line",()=>{
  const caption="下表说明正式版如何处理不同类型的内容。";
@@ -52,13 +71,16 @@ it("identifies a matching ledger and reports source-read failures separately fro
  const gap="e:c:1:1", retry="e:c:2:1", failed="e:c:3:1";
  session.wikiKnowledge={version:1,status:"partial",generatedAt:1,materials:3,batches:[
   {sourceIds:[gap,retry],units:[],status:"ok",uncovered:[gap,retry],rejected:{},
-   coverage:{[retry]:{version:1,sourceSignature:"s",status:"failed",attempts:1}}},
+   coverage:{
+    [gap]:{version:1,sourceSignature:"s",status:"pending",attempts:1,pendingClauses:["第一版只开放工作台搜索。"]},
+    [retry]:{version:1,sourceSignature:"s",status:"failed",attempts:1},
+   }},
   {sourceIds:[failed],units:[],status:"failed",rejected:{}},
  ]};
  const md=projectDocument(session,selection,"md").text;
  const snapshot=JSON.parse(projectLedgerFile(session).text);
  expect(md).toContain(snapshot.snapshotId);
- expect(md).toMatch(/待判定\*\* · #2/u);
+ expect(md).toMatch(/待判定\*\* · #2 · 「第一版只开放工作台搜索。」/u);
  expect(md).toMatch(/补读失败\*\* · #3/u);
  expect(md).toMatch(/读取批次失败\*\* · #4/u);
 });
@@ -131,6 +153,53 @@ it("includes short, selected claim quotes in the key evidence mode without the f
  expect(result.sources).toBeUndefined();
  session.sourceSignatures={[source.conversationId]:{other:"new"}};
  expect(JSON.parse(projectDocument(session,options,"json").text).keyEvidence).toEqual([]);
+});
+
+it("keeps an exact release matrix in handoff and moves an explicitly selected comparison table to the appendix",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const release="Alpha 公开首版提供本地搜索。";
+ const matrix="| 功能 | GitHub Alpha 是否开放 |\n| --- | --- |\n| 本地搜索 | 是 |\n| 云端分享 | 否 |";
+ const comparison="| 竞品 | 特点 |\n| --- | --- |\n| 案例站 | 提供公开预览 |";
+ const comparisonText="案例站提供公开预览。";
+ source.excerpt=`${release}\n\n${matrix}\n\n${comparisonText}\n\n${comparison}`;
+ session.sourceRoles={[source.conversationId]:{[source.messageId]:"assistant"}};
+ const original={evidenceId:source.id,conversationId:source.conversationId,messageId:source.messageId,messageIndex:0,role:"assistant" as const,pasted:false};
+ const tableUnit:WikiKnowledgeUnit={id:"release",subject:"公开发布范围",statement:release,kind:"plan",details:[],delivery:"planned",adoption:{status:"proposal"},
+  evidence:{...original,quote:release,code:{language:"table",text:matrix}}};
+ const comparisonUnit:WikiKnowledgeUnit={...tableUnit,id:"comparison",subject:"竞品对照",statement:comparisonText,
+  evidence:{...original,quote:comparisonText,code:{language:"table",text:comparison}}};
+ page.body="### 发布范围\n\nAlpha 公开首版提供本地搜索。\n\n### 竞品参考\n\n案例站提供公开预览。";
+ session.wikiKnowledge={version:1,status:"complete",documentType:"project",writingMode:"handoff",generatedAt:1,materials:1,
+  batches:[{sourceIds:[source.id],status:"ok",rejected:{},units:[tableUnit,comparisonUnit]}],
+  organization:{version:1,status:"complete",generatedAt:1,merged:[],relations:[],report:{},
+   subjects:[{id:"release",name:tableUnit.subject,aliases:[],unitIds:[tableUnit.id]},{id:"comparison",name:comparisonUnit.subject,aliases:[],unitIds:[comparisonUnit.id]}],
+   chapters:[{id:page.id,title:page.title,group:"",question:"",subtopics:[{title:"发布范围",subjectIds:["release"]},{title:"竞品参考",subjectIds:["comparison"]}]}]},
+  draft:{version:1,status:"complete",generatedAt:1,writingMode:"handoff",report:{},
+   chapters:[{id:page.id,title:page.title,group:"",question:"",problems:[],body:page.body,paragraphs:[]}]}};
+ const options={...selection,preset:"handoff" as const};
+ const clean=projectDocument(session,options,"md").text;
+ expect(clean).toContain(matrix);
+ expect(clean).toContain("AI 建议，未确认");
+ expect(clean).toMatch(/表格来源 \[来源\d+\]\(#source-S-/u);
+ expect(clean).not.toContain(comparison);
+ const [main,appendix]=projectDocument(session,{...options,referenceAppendix:true},"md").text.split("## 参考示例附录");
+ expect(main).not.toContain(comparison);
+ expect(appendix).toContain(comparison);
+});
+
+it("links key evidence to the exact excerpt when multiple receipts share a message",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],ref=session.evidence[0];
+ const claim="结构化 Schema 使用 Zod 验证。",unrelated="任意支持结构化输出的 LLM API 用于验证。";
+ ref.excerpt=unrelated;
+ session.evidence.push({...ref,id:"e-schema",excerpt:claim});
+ page.body=claim;
+ page.evidenceIds=[ref.id,"e-schema"];
+ page.claims=[{text:claim,quote:claim,evidenceIds:page.evidenceIds,holder:"decided"}];
+ const opts={...selection,sourceMode:"key" as const};
+ const keyEvidence=JSON.parse(projectDocument(session,opts,"json").text).keyEvidence;
+ expect(keyEvidence[0].sources).toMatchObject([{refId:"e-schema",excerpt:claim}]);
+ expect(projectDocument(session,opts,"md").text).toContain(`> ${claim}`);
+ expect(projectDocument(session,opts,"md").text).not.toContain(`> ${unrelated}`);
 });
 
 it("renders prose beside a mockup cleanly and indexes a repeated message once",()=>{

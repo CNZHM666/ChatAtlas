@@ -1,5 +1,6 @@
 import type { WikiKnowledgeUnit } from "./wiki-knowledge";
 import { wikiSaidInQuote } from "./wiki-said-in-quote";
+import { historyTime } from "./history-order";
 
 /** A value a reader may take for a spec: a size, a duration, a share or a colour. */
 const SPEC_UNIT = String.raw`(?:px|ms|rem|em|pt|%)(?![\w%])`;
@@ -43,7 +44,7 @@ const NOT_YET = /\b(?:not (?:yet )?(?:work|working|built|done|implemented|finish
 /** Built, in a report: "are built", 已完成. */
 const BUILT = /\b(?:built|implemented|done|finished|working|works|shipped)\b|已完成|已实现|做好了|可以用/iu;
 const NOT_YET_ALL = new RegExp(NOT_YET.source, "giu");
-export type ReportedStatus = "built" | "partial" | "not_yet" | "measured";
+export type ReportedStatus = "built" | "partial" | "not_yet" | "measured" | "reported";
 type ReportedRow = { text: string; done: boolean; status: ReportedStatus; unitId: string; when?: string; at?: number };
 /** A measure, not a piece of work: "小程序目前每天稳定在22人" read 已完成 in the status table. */
 const MEASURE = /日活|DAU|MAU|留存|活跃|用户数|付费率|转化率|收入|流水|\d+\s*(?:人|个用户|名用户|位用户)|\b(?:daily active|users|retention|revenue|conversion)\b/iu;
@@ -53,8 +54,10 @@ export const wikiMeasure = (unit: Pick<WikiKnowledgeUnit, "kind" | "statement">)
 /** When a point was said: the day of its conversation, or the days it ran over ("6月14日—7月7日"). */
 export function wikiSaidWhen(unit: WikiKnowledgeUnit, zh: boolean): string {
   const span = unit.evidence.conversationSpan;
-  if (!span?.start) return "";
   const day = (at: number) => { const date = new Date(at); return zh ? `${date.getMonth() + 1}月${date.getDate()}日` : date.toLocaleDateString("en", { month: "short", day: "numeric" }); };
+  const messageTime = historyTime(unit.evidence.discussedAt);
+  if (messageTime) return day(messageTime);
+  if (!span?.start) return "";
   const from = day(span.start), to = span.end ? day(span.end) : from;
   return from === to ? from : zh ? `${from}—${to}` : `${from}–${to}`;
 }
@@ -64,7 +67,7 @@ export function reportedStatusRows(units: WikiKnowledgeUnit[], cited: Set<string
   const seen = new Set<string>();
   // The user's figures, whatever kind the reading gave them: 「日活有32，累计用户1100」 and 「DAU 约40，活跃留存略高于40%」
   // were facts, and the table showed only the one report of 22 users, weeks older than the last figure. Oldest first.
-  const at = (unit: WikiKnowledgeUnit) => unit.evidence.conversationSpan?.start ?? 0;
+  const at = (unit: WikiKnowledgeUnit) => historyTime(unit.evidence.discussedAt) ?? unit.evidence.conversationSpan?.start ?? 0;
   const own = units.filter(unit => cited.has(unit.id) && unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about && (unit.kind === "report" || unit.kind === "fact" && wikiMeasure(unit)));
   // Figures go in the order they were said, in the places figures held; other reports keep theirs.
   const figures = own.filter(wikiMeasure).map((unit, index) => ({ unit, index })).sort((a, b) => at(a.unit) - at(b.unit) || a.index - b.index).map(item => item.unit);
@@ -75,21 +78,23 @@ export function reportedStatusRows(units: WikiKnowledgeUnit[], cited: Set<string
     wikiSaidInQuote(unit)).flatMap((unit): ReportedRow[] => {
     // 「用户反馈日活停留在32人左右」: the row is the user's own; who said it is the table's title.
     const text = unit.statement.trim().replace(/^用户(?:反馈|提到|报告|表示|称)称?/u, "");
-    const key = text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}%]+/gu, "");
+    const when = wikiSaidWhen(unit, zh);
+    const key = text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}%]+/gu, "")
+      + (wikiMeasure(unit) && historyTime(unit.evidence.discussedAt) ? `:${new Date(at(unit)).getFullYear()}:${when}` : "");
     if (seen.has(key)) return [];
     seen.add(key);
     // "Three core features are implemented, CSV export is unfinished": built and not, one row read Built for both.
     const notYet = NOT_YET.test(text), built = BUILT.test(text.replace(NOT_YET_ALL, " "));
     // A measure is data as of when it was said, never work done.
-    const when = wikiSaidWhen(unit, zh);
     const source = { unitId: unit.id, ...(when ? { when } : {}), ...(at(unit) ? { at: at(unit) } : {}) };
     if (!built && !notYet && MEASURE.test(text)) return [{ text: when ? text.replace(/^(?:当前|目前|现在)(?=\S{4})/u, "") : text, done: false, status: "measured", ...source }];
     if (unit.kind !== "report" || !built && !notYet && unit.delivery !== "user_reported") return [];
-    const status: ReportedStatus = !notYet ? "built" : built ? "partial" : "not_yet";
+    const status: ReportedStatus = built ? notYet ? "partial" : "built" : notYet ? "not_yet" : "reported";
     return [{ text, done: status === "built", status, ...source }];
   });
   return rows.filter((row, index) => row.status !== "measured" || !rows.some((other, at) => at !== index && other.status === "measured"
-    && other.when === row.when && figuresGivenBy(row.text, other.text) && (!figuresGivenBy(other.text, row.text) || at < index)));
+    && other.when === row.when && (!row.at || !other.at || new Date(row.at).getFullYear() === new Date(other.at).getFullYear())
+    && figuresGivenBy(row.text, other.text) && (!figuresGivenBy(other.text, row.text) || at < index)));
 }
 
 /** Each figure of a report with the word it measures: 「留存率仅为26.92%」 gives 26.92% for 留存. */

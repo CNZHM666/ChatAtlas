@@ -330,7 +330,7 @@ function promotePseudoHeadings(body:string):string {
  * chapter's evolution card shows them), restated paragraphs go, bare label lines
  * become sub-headings, long paragraphs split. Saved text and personal chapters
  * are unchanged. */
-export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin"|"claims">,options:{zh?:boolean;units?:WikiKnowledgeUnit[];citeTable?:(unit:WikiKnowledgeUnit)=>string}={}):string {
+export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin"|"claims">,options:{zh?:boolean;units?:WikiKnowledgeUnit[];citeTable?:(unit:WikiKnowledgeUnit)=>string;tableSources?:readonly {text:string;link:string}[]}={}):string {
  // Personal text stays as written; only block captions, which are labels and not its words, read like the rest.
  if(section.userEdited||section.origin)return readableSourceCaptions(body);
  // Narration cleanup runs here too, so exports read like the Reader ("AI发现了", not "AI建议发现了"; no "据讨论，" lead-ins).

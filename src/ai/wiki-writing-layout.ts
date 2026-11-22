@@ -132,12 +132,22 @@ export function readWikiWritingBlock(value:unknown,known:Set<string>):WritingBlo
   return {text,unitIds,claims:[{text,unitIds}]};
  };
  if(block.type==="paragraph"){
-  const unitIds=idsOf(block.unitIds);
-  if(typeof block.text!=="string"||!block.text.trim()||block.text.length>1600||!unitIds.length||unitIds.some(id=>!known.has(id)))throw Error("invalid_writing_paragraph");
+  let unitIds=idsOf(block.unitIds);
+  if(typeof block.text!=="string"||!block.text.trim())throw new WikiWritingParagraphError("empty_text",unitIds);
+  if(block.text.length>1600)throw new WikiWritingParagraphError("text_too_long",unitIds);
+  if(unitIds.some(id=>!known.has(id)))throw new WikiWritingParagraphError("unknown_unit",[]);
   const claims=Array.isArray(block.claims)?block.claims.flatMap(value=>{
    const claim=record(value),ids=idsOf(claim.unitIds),text=claimSentence(block.text as string,claim);
-   return text&&ids.length&&ids.every(id=>unitIds.includes(id))?[{text,unitIds:ids}]:[];
+   return text&&ids.length&&ids.every(id=>unitIds.length?unitIds.includes(id):known.has(id))?[{text,unitIds:ids}]:[];
   }):[];
+  if(!unitIds.length){
+   // Sentence bindings already specify the paragraph's IDs when they cover
+   // all its prose. The writer still validates the reconstructed paragraph.
+   let unbound=block.text;
+   for(const claim of claims)unbound=unbound.replace(claim.text,"");
+   if(!claims.length||/[\p{L}\p{N}]/u.test(unbound))throw new WikiWritingParagraphError("missing_units",[]);
+   unitIds=[...new Set(claims.flatMap(claim=>claim.unitIds))];
+  }
   return {text:block.text.trim(),unitIds,claims};
  }
  let rows:WritingBlock[],text:string;
@@ -208,6 +218,12 @@ export function readWikiWritingBlock(value:unknown,known:Set<string>):WritingBlo
  }else throw Error("invalid_writing_block_type");
  if(text.length>1600)throw Error("writing_block_too_large");
  return {text,unitIds:[...new Set(rows.flatMap(row=>row.unitIds))],claims:rows.flatMap(row=>row.claims)};
+}
+
+export class WikiWritingParagraphError extends Error {
+  constructor(readonly reason: "empty_text" | "text_too_long" | "missing_units" | "unknown_unit", readonly unitIds: string[]) {
+    super("invalid_writing_paragraph");
+  }
 }
 
 /** A long plan is presentation, not a reason to discard a chapter. Compile every

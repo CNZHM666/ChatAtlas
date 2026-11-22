@@ -8,14 +8,16 @@ import { explicitSwitches, gatherAcrossStages, gatherNamedItems, gatherPositioni
 import { scopedWishes, wikiUnitStatuses } from "./wiki-knowledge-state";
 import { laterSettings } from "./wiki-later-settings";
 import { chooseGroupHomes } from "./wiki-knowledge-groups";
-import { exclusiveWikiVersions, wikiExplicitContinuation } from "./wiki-version-conflict";
+import { exclusiveWikiVersions, wikiDifferentDecisionAxis, wikiExplicitContinuation } from "./wiki-version-conflict";
 import { wikiUserChooses } from "../shared/wiki-user-choice";
+import { asksForDiscussionArtifact } from "../shared/statement-evidence";
 import { withUnsaidPlansOut } from "../shared/wiki-unsaid-plan";
 import { wikiSaidLater } from "../shared/wiki-sources";
 import { answeredTogether, explicitExclusions, withUserQuestionsAsked } from "./wiki-user-questions";
 import { knowledgeOwner, knowledgeScopesAgree } from "../shared/knowledge-subject";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { withReferenceOwnership } from "./wiki-reference-ownership";
+import { wikiArbitrationStatuses, wikiDecisionConflicts } from "./wiki-decision-arbitration";
 
 /** One reversible interpretation for writing, reading and export. The source ledger and
  * the user's answers remain untouched; never store these deductions as user verdicts. */
@@ -33,13 +35,18 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
   // And a move the user's decision quotes, which extraction left out, is a decision of its own (withQuotedMoves).
   const report: Record<string, number> = {};
   const source = withQuotedMoves(withAnsweredOpenPoints(withSettledByAnswer(withSetAsideAlternatives(withSetAsideOffers(withTurnedDownRestatements(withDeclinedProposals(withAnsweredChoices(withAnswerScope(withoutOwnProjectAnswers(withSoundAnswers(withUserQuestionsAsked(withUnsaidPlansOut(stored), report))))))))))), report);
-  const attributed = withReferenceOwnership(withDiscussedProjects(source));
+  const attributed = withWikiLocalFidelity(withReferenceOwnership(withDiscussedProjects(source)));
   const answered = withUserAnswers(withUserRelations(attributed));
   const units = wikiLedgerUnits(answered), known = new Map(units.map(unit => [unit.id, unit]));
   const answeredIds = new Set((source.userAnswers ?? []).flatMap(answer => answer.unitIds));
   const checked = answered.organization ? { ...answered.organization, relations: answered.organization.relations.map(relation => {
     const older = known.get(relation.older), newer = known.get(relation.newer);
     const olderOwner = older && knowledgeOwner(older.statement), newerOwner = newer && knowledgeOwner(newer.statement);
+    if (older && newer && ["replaces", "rejects", "narrows"].includes(relation.kind)
+      && wikiDifferentDecisionAxis(older, newer)) {
+      report.compatible_relations = (report.compatible_relations ?? 0) + 1;
+      return { ...relation, kind: "coexists" as const, status: "resolved" as const };
+    }
     if (relation.kind === "replaces" && older && newer && !relation.evidence && !answeredIds.has(newer.id)
       && knowledgeScopesAgree(older.statement, newer.statement) && wikiExplicitContinuation(older, newer)) {
       report.continuation_relations = (report.continuation_relations ?? 0) + 1;
@@ -56,7 +63,9 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
     }
     if (!["replaces", "rejects"].includes(relation.kind) || relation.evidence || !older || !newer || exclusiveWikiVersions(older, newer)) return relation;
     const sameFacet = !older.facet || !newer.facet || older.facet === newer.facet;
-    if (relation.status === "resolved" && sameFacet && (newer.adoption.status === "user_adopted" || newer.adoption.status === "user_decision" && wikiUserChooses(newer.evidence.quote))) return relation;
+    const approval = newer.adoption.approval;
+    const adopted = newer.adoption.status === "user_adopted" && approval && !asksForDiscussionArtifact(approval.quote);
+    if (relation.status === "resolved" && sameFacet && (adopted || newer.adoption.status === "user_decision" && wikiUserChooses(newer.evidence.quote))) return relation;
     report.compatible_relations = (report.compatible_relations ?? 0) + 1;
     return { ...relation, kind: "coexists" as const, status: "resolved" as const };
   }) } : undefined;
@@ -79,7 +88,27 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
     organization = answeredTogether(unrouted, organization, source.userAnswers, report, source.decisions, known);
   }
   if (organization?.groups?.length) organization = { ...organization, groups: chooseGroupHomes(organization.groups, organization.subjects, units, organization.groups, report) };
+  if (organization?.topics?.some(topic => topic.open)) {
+    const questions = new Map(source.writingQuestions?.map(question => [question.id, question]));
+    const selected = source.userAnswers?.flatMap(answer => {
+      const id = "answer:" + answer.questionId + ":" + answer.optionId;
+      const decision = known.get(id);
+      const option = questions.get(answer.questionId)?.options.find(item => item.id === answer.optionId);
+      if (!decision || !option || source.decisions?.[id]?.verdict !== "confirmed") return [];
+      const projectedFrom = option.actions.flatMap(action => action.do === "confirm" ? action.units : [])
+        .filter(unitId => known.get(unitId)?.evidence.messageId === decision.evidence.messageId);
+      return [{ id, projectedFrom }];
+    }) ?? [];
+    organization = { ...organization, topics: organization.topics.map(topic => {
+      if (!topic.open) return topic;
+      const choices = selected.filter(choice => choice.projectedFrom.some(id => topic.current.includes(id)));
+      return choices.length === 1 ? { ...topic, current: [...topic.current, choices[0].id] } : topic;
+    }) };
+  }
   const statuses = wikiUnitStatuses(units, organization ?? { relations: [] }, source.decisions);
+  const conflicts = wikiDecisionConflicts(source, units, statuses);
+  const arbitrationStatuses = wikiArbitrationStatuses(conflicts);
+  for (const [id, status] of arbitrationStatuses) statuses.set(id, status);
   if (organization?.topics?.length) {
     const topics=wikiDecidedTopics(organization.topics,source.decisions).flatMap(topic=>{
       const earlier=topic.earlier.filter(id=>statuses.get(id)==="history");
@@ -89,5 +118,6 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
     organization={...organization,topics};
   }
   const ledger = { ...answered, ...(organization ? { organization } : {}), ...(source.draft ? { draft: scopedWikiDraft(attributed) } : {}) };
-  return { ledger, organization, units, statuses, report };
+  return { ledger, organization, units, statuses, report, conflicts, arbitrationStatuses };
 }
+import { withWikiLocalFidelity } from "./wiki-unit-fidelity";

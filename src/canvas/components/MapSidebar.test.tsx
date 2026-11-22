@@ -4,6 +4,21 @@ import { PreferencesProvider } from "../preferences";
 import { MapSidebar } from "./MapSidebar";
 afterEach(cleanup);
 
+it("places history directly after workbench home and marks only the current page", () => {
+  localStorage.setItem("atlas-locale", "zh-CN");
+  const open = vi.fn();
+  render(<PreferencesProvider><MapSidebar canvases={[{ id: "home", type: "overview", name: "Home", createdAt: 1, updatedAt: 1 }]}
+    activeId="home" workbenchHistoryActive onWorkbenchHistory={open} onSelect={vi.fn()} onRename={vi.fn()} /></PreferencesProvider>);
+  const home = screen.getByRole("button", { name: "工作台首页" });
+  const history = screen.getByRole("button", { name: "历史记录" });
+  expect(home.querySelector(".lucide-house")).toBeInTheDocument();
+  expect(home.closest(".map-item")?.nextElementSibling).toContainElement(history);
+  expect(home).not.toHaveAttribute("aria-current");
+  expect(history).toHaveAttribute("aria-current", "page");
+  fireEvent.click(history);
+  expect(open).toHaveBeenCalledOnce();
+});
+
 it("requires confirmation before emptying Trash and allows canceling without removing anything", async () => {
   localStorage.setItem("atlas-locale", "zh-CN");
   const empty = vi.fn().mockResolvedValue(undefined), restore = vi.fn();

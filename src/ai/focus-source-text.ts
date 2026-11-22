@@ -2,6 +2,7 @@ import type { Conversation, ConversationMessage } from "../shared/types";
 import type { TranscriptPassage } from "../search/transcript-index";
 import { getMessagesForConversation } from "../storage/messages";
 import { isInternalSearchQueryMessage } from "../shared/conversation-text";
+import { historyTime } from "../shared/history-order";
 
 /** Small goal-retrieval windows, built locally without another database/index pass. */
 export function sampleReadingPassages(full: TranscriptPassage[]): TranscriptPassage[] {
@@ -42,6 +43,7 @@ export async function loadFullReadingPassages(sources: Conversation[], signal: A
         document: { id: `reading:${source.id}:${message.id}`, conversationId: source.id, episodeId: "", title: source.title.slice(0, 140), body: `${message.role}: ${message.content}`, terms: "" },
         evidence: { messageId: message.id, messageIndex: message.messageIndex, excerpt: message.content.slice(0, 240) },
         text: message.content, role: message.role, start: 0, end: message.content.length,
+        discussedAt: historyTime(message.sourceCreatedAt),
       });
       included++;
       if (performance.now() - sliceStarted >= 6) {

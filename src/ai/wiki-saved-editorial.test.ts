@@ -19,8 +19,8 @@ function fixture(){
 it("separates a saved mixed historical claim from the explicit current answer without mutating the saved article",()=>{
  const {section,source,ledger}=fixture(),before=structuredClone(section);
  const result=reviewSavedWikiEditorial(section,withAnsweredChoices(ledger),()=>source);
- expect(result.body.split("### 已确认的取舍")[0]).not.toContain("支持完整画布编辑");
- expect(result.body).toContain("### 已确认的取舍\n\n手机第一阶段能力：支持完整画布编辑。");
+ expect(result.body.split("### 其他已定决定")[0]).not.toContain("支持完整画布编辑");
+ expect(result.body).toContain("### 其他已定决定\n\n手机第一阶段能力：支持完整画布编辑。");
  expect(result.claims?.at(-1)).toMatchObject({holder:"decided",unitIds:["answer:q:yes"],evidenceIds:[source.id]});
  expect(section).toEqual(before);expect(reviewSavedWikiEditorial(result,withAnsweredChoices(ledger),()=>source)).toEqual(result);
  expect(reviewSavedWikiEditorial({...section,userEdited:true},withAnsweredChoices(ledger),()=>source).body).toBe(section.body);

@@ -49,7 +49,7 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
     if (details && !details.open) details.open = true;
   }, [activeKey]);
   // Left the claim, right its origin: the claim being checked, or every claim citing the original shown, is highlighted.
-  const shown = active?.tableTarget || active?.overviewEntryId ? undefined : active?.shown;
+  const shown = active?.tableTarget || active?.structuredBlock || active?.overviewEntryId ? undefined : active?.shown;
   const selectedClaim = shown ? active?.claim : undefined;
   const highlighted = useMemo(() => activeKey ? [activeKey] : shown ? ordered.filter(point =>
     (!selectedClaim || point.claim === selectedClaim) && point.references.some(ref => ref.id === shown.id || ref.conversationId === shown.conversationId && ref.messageId === shown.messageId)).map(point => point.key) : [], [activeKey, shown, ordered, selectedClaim]);

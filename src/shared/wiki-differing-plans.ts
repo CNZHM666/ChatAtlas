@@ -45,10 +45,20 @@ export function differingPlans(units: WikiKnowledgeUnit[], statusOf: (id: string
     const name = list[0].statement.match(RENAME)![1].replace(/[\d/／]+$/u, "");
     found.push({ unitIds: chosen.map(unit => unit.id), note: `「${name}」有${chosen.length === 2 ? "两" : "几"}种改法：${chosen.map(unit => bare(unit.statement)).join("；")}。` });
   }
-  const yours = current.filter(unit => unit.evidence.role === "user" && !unit.evidence.pasted && CENTRAL.test(unit.statement));
-  const theirs = current.filter(unit => unit.evidence.role === "assistant" && CENTRAL.test(unit.statement.slice(0, 8)) && /“守护”|“[^”]{1,8}”/u.test(unit.statement));
+  const navigation = /跳转|打开|进入|改为[“「"]?[^”」"，,。；;\n]{2,20}[”」"]?入口|\b(?:opens?|navigates? to)\b/iu;
+  const yours = current.filter(unit => unit.evidence.role === "user" && !unit.evidence.pasted && unit.kind !== "report"
+    && !/^(?:目前|当前|现状|现在|已有)/u.test(unit.statement) && CENTRAL.test(unit.statement) && navigation.test(unit.statement));
+  const theirs = current.filter(unit => unit.evidence.role === "assistant" && CENTRAL.test(unit.statement.slice(0, 12))
+    && navigation.test(unit.statement) && !ADOPTS.test(unit.statement));
   for (const mine of yours) {
-    const against = theirs.filter(unit => [...unit.statement.matchAll(/“([^”+＋]{1,8})”/gu)].some(match => !mine.statement.includes(match[1])));
+    const destination = (text: string) => (text.match(/(?:跳转(?:到|至)?|打开|进入)\s*[“「"]?([^”」"，,。；;\n]{2,22})/u)?.[1]
+      ?? text.match(/改为[“「"]?([^”」"，,。；;\n]{2,20})[”」"]?入口/u)?.[1])?.trim();
+    const ownTarget = destination(mine.statement);
+    const against = theirs.filter(unit => {
+      const otherTarget = destination(unit.statement);
+      return ownTarget && otherTarget && ownTarget !== otherTarget && !ownTarget.includes(otherTarget) && !otherTarget.includes(ownTarget)
+        && knowledgeScopesAgree(mine.statement, unit.statement);
+    });
     if (!against.length) continue;
     // A later reply taking the user's idea up (「采纳中间按钮跳转AI及任务/复盘由AI主导的方向……」): the AI's name for the button
     // and the user's use of it hold together, no question left between them.
@@ -181,7 +191,18 @@ export function decidedAgainstDeclined(units: WikiKnowledgeUnit[], statusOf: (id
       if (UNDECIDED.test(clause) || /(?:^|[^以])待明确$/u.test(clause)) continue;
       const subject = conflictFeature(clause);
       const runs = Array.from({ length: Math.max(0, subject.length - SHARED_RUN + 1) }, (_, at) => subject.slice(at, at + SHARED_RUN)).filter(run => /^\p{Script=Han}+$/u.test(run) && !RUN_STOP.test(run) && declinedRun(run));
-      const against = turnedDown.filter(other => runs.some(run => conflictFeature(other.statement).includes(run)));
+      const against = turnedDown.filter(other => {
+        if (!knowledgeScopesAgree(clause, other.statement) || !runs.some(run => conflictFeature(other.statement).includes(run))) return false;
+        const rejected = other.statement.trim().replace(/[。.!?]$/u, "");
+        if (/[。；;\n]|(?:A\/B|试验|实验|experiment)/iu.test(rejected)) return false;
+        // A direct veto of the same operation is different from rejecting a
+        // compound plan that only mentioned the metric, button or feature.
+        const groupAction = /自动(?:分组|分配[^，,。]{0,12}组)/u;
+        if (groupAction.test(clause) && groupAction.test(rejected)) return true;
+        const a = knowledgeTerms(conflictFeature(clause)), b = knowledgeTerms(conflictFeature(rejected));
+        const shared = [...a].filter(term => b.has(term)).length;
+        return a.size >= 4 && b.size >= 4 && shared / a.size >= .8 && shared / b.size >= .8;
+      });
       if (!against.length) continue;
       found.push({ decidedId: unit.id, declinedIds: against.map(other => other.id), clause, note: `你确认的决定含「${clause}」，但你否定过「${bare(against[0].statement)}」${against.length > 1 ? `（另有 ${against.length - 1} 条类似）` : ""}，是否保留需要你确认。` });
       break;

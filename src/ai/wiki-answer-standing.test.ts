@@ -3,6 +3,7 @@ import { soundQuestion, wikiLocalAnswer, wikiRepairIntegrationChoice, withSetAsi
 import { withWritingAnswer } from "./wiki-writing-questions";
 import { withDecision } from "./wiki-key-decisions";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
+import { wikiDecisionConflicts } from "./wiki-decision-arbitration";
 import { answeredTogether } from "./wiki-user-questions";
 import { earlierVersionsLast } from "./wiki-fragments";
 import { ledgerDocument } from "./wiki-ledger-document";
@@ -19,11 +20,71 @@ import { withoutMadeRanges } from "../shared/wiki-made-range";
 import { decidedAgainstDeclined, differingPlans, lengthAgainstDecided, outgrownCentralBy, outgrownCentralNames } from "../shared/wiki-differing-plans";
 import { claimSourceUnits, claimSupported } from "./wiki-claim-support";
 import { reportedStatusRows } from "../shared/wiki-section-status";
+import { wikiReadingClaimText, wikiReferenceOnlyUnits } from "./wiki-reading-voice";
 import {reviewSavedWikiEditorial} from "./wiki-saved-editorial";
+import { qualifyWikiOverviewClaims } from "./wiki-claim-review";
+import { projectSession } from "../test/project-fixture";
 import type { WikiDraftChapter, WikiKnowledgeLedger, WikiKnowledgeOrganization, WikiKnowledgeUnit, WikiWritingQuestion } from "../shared/wiki-knowledge";
 
 const unit = (n: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${n}`, subject: "项目", statement, kind: "plan", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: `e${n}`, conversationId: "c", messageId: `m${n}`, messageIndex: n, role: "assistant", pasted: false, quote: statement }, ...extra });
 const ledgerOf = (units: WikiKnowledgeUnit[], extra: Partial<WikiKnowledgeLedger> = {}): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: 1, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], ...extra });
+
+it("puts two incompatible receipts for one limit in a single card and honors its resolution", () => {
+  const points = [unit(1, "每日最多1～2次主动提醒。"), unit(2, "每日最多1～2次自动提醒。"), unit(3, "每日最多3次主动提醒。")];
+  const questions: WikiWritingQuestion[] = points.map((point, index) => ({
+    id: "reminder:" + index, about: "提醒上限", ask: point.statement.slice(0, -1) + "是否统一适用于所有风险等级？",
+    unitIds: [point.id], organization: 1,
+    options: [{ id: "high", label: "仅高风险适用", actions: [{ do: "confirm", units: [point.id] }] },
+      { id: "all", label: "统一适用", actions: [{ do: "confirm", units: [point.id] }] }],
+  }));
+  const receipts = questions.map((question, index) => {
+    const option = question.options[index % 2];
+    return { questionId: question.id, optionId: option.id, question: question.ask, answer: option.label, unitIds: question.unitIds, at: index + 10 };
+  });
+  const ledger = ledgerOf(points, {
+    writingQuestions: questions, userAnswers: receipts,
+    decisions: Object.fromEntries(points.map((point, index) => [point.id, { verdict: "confirmed", at: index + 10 }])),
+  });
+  const statuses = new Map(points.map(point => [point.id, "confirmed" as const]));
+  const conflicts = wikiDecisionConflicts(ledger, points, statuses);
+  expect(conflicts).toHaveLength(1);
+  expect(conflicts[0].choices.map(choice => choice.receipt.answer)).toEqual(["统一适用", "仅高风险适用"]);
+  const resolved = wikiDecisionConflicts({
+    ...ledger, decisionArbitrations: { [conflicts[0].id]: { choice: questions[0].id, mode: "choose", at: 20 } },
+  }, points, statuses);
+  expect(resolved[0].selected).toBe("高风险");
+});
+
+it("confirms only the classification named in the selected question", () => {
+  const purposes = unit(1, "账户分为个人账户、家庭账户、团队账户、机构账户四类。", { kind: "decision" });
+  const permissions = unit(2, "账户权限分为查看、编辑、审核、发布四种。");
+  const question: WikiWritingQuestion = {
+    id: "ask:account-categories", about: "账户类别", ask: "是否采纳将账户分为个人账户、家庭账户等四类的提案？",
+    unitIds: [purposes.id, permissions.id], organization: 1,
+    options: [{ id: "accept", label: "采纳四类账户", actions: [{ do: "confirm", units: [purposes.id, permissions.id] }] },
+      { id: "wait", label: "暂不决定", actions: [{ do: "open", units: [purposes.id, permissions.id] }] }],
+  };
+  const accepted = withWritingAnswer(ledgerOf([purposes, permissions]), question, "accept", undefined, 10);
+  const { statuses } = resolveWikiReading(accepted);
+  expect(statuses.get(purposes.id)).toBe("confirmed");
+  expect(statuses.get(permissions.id)).toBe("proposal");
+});
+
+it("clears a stale overview review label only when both stages match the confirmed record", () => {
+  const target = unit(1, "近期目标是稳定做到50 DAU。", { kind: "decision" });
+  const sequence = unit(2, "DAU阶段路径：稳定50再到100。", { kind: "decision" });
+  const session = {
+    ...projectSession(), locale: "zh-CN" as const, sourceConversationIds: ["c"],
+    wikiKnowledge: ledgerOf([target, sequence], {
+      decisions: { [target.id]: { verdict: "confirmed", at: 1 }, [sequence.id]: { verdict: "confirmed", at: 2 } },
+      draft: { version: 1, generatedAt: 1, status: "complete", chapters: [], report: {} },
+    }),
+  };
+  const overview = "项目已上线。以下细节待核对：近期目标是稳定做到50 DAU，再逐步到100。";
+  expect(qualifyWikiOverviewClaims(overview, session)).toContain("项目已上线。近期目标");
+  const another = overview.replace("100", "110");
+  expect(qualifyWikiOverviewClaims(another, session)).toBe(another);
+});
 
 it.each(["confirm","open"] as const)("keeps an integration purpose and a later named choice on separate receipts (%s)",action=>{
  const point=unit(1,"建议集成在线预览，允许审核员查看交付结果。");
@@ -235,6 +296,19 @@ it("puts the day before a bracket telling a later change, and says it came after
   expect(chapters[0].paragraphs[0].text).toBe("日活约30人（6月14日；其后降至22人）。");
 });
 
+it("dates daily user counts without inserting dates into a daily duration", () => {
+  const at = (day: number) => new Date(2026,5,day,12).getTime();
+  const units = [unit(1,"每天晚上固定提供30秒复盘。",{kind:"fact"}),
+    unit(2,"目前每天稳定在22人。",{kind:"report"}), unit(3,"日活约40人。",{kind:"report"})];
+  for (const [index,point] of units.entries()) point.evidence={...point.evidence,conversationSpan:{start:at(index+1),end:at(index+1)}};
+  const paragraphs = units.map(point=>({subtopic:"运营",text:point.statement,unitIds:[point.id],claims:[{text:point.statement,unitIds:[point.id]}]}));
+  const chapter = {id:"c",title:"运营",question:"",group:"",body:paragraphs.map(item=>item.text).join("\n\n"),paragraphs,problems:[]};
+  expect(datedMeasures([chapter],id=>units.find(point=>point.id===id),true)).toBe(2);
+  expect(chapter.body).toContain(units[0].statement);
+  expect(chapter.body).toContain("22人（6月2日）");
+  expect(chapter.body).toContain("40人（6月3日）");
+});
+
 it("drops a sentence only naming a structure's fields once the structure stands below it", () => {
   const code = { language: "ts", text: "interface RescueSession {\n  id: string;\n  userId: string;\n  startedAt: number;\n  completedAt?: number;\n  triggerTags: string[];\n  outcome: string;\n}" };
   const fields = unit(1, "数据结构包含id、userId、startedAt/completedAt、triggerTags、outcome。", { kind: "mechanism", evidence: { ...unit(1, "").evidence, code } });
@@ -311,7 +385,7 @@ it("reads a user's dated report as theirs", () => {
   expect(claimSupported("小程序当时每天稳定在22人（6月14日—7月7日），其中15个为稳定用户。", [report])).toBe(true);
 });
 
-it("shows two renames of one item and the user's idea against the AI's for one control as not settled", () => {
+it("shows two renames as alternatives without pitting a label and color against navigation", () => {
   const units = [
     unit(1, "将“今日任务”升级为“今天只做这一件事”，由AI根据状态推荐1-3个具体行动。", { kind: "decision" }),
     unit(2, "将“今日任务0/7”改为“今日重点0/1”，仅展示一个核心必做任务。", { kind: "decision" }),
@@ -320,8 +394,7 @@ it("shows two renames of one item and the user's idea against the AI's for one c
     unit(5, "首页中间区域由连续天数改为风险值仪表盘，显示“今晚风险：中低”。", { kind: "decision" }),
   ];
   const found = differingPlans(units, id => id === "u3" ? "stated" : "proposal", true);
-  expect(found.map(item => item.unitIds)).toEqual([["u1", "u2"], ["u3", "u4"]]);
-  expect(found[1].note).toBe("首页中央按钮的用法：你提议将首页中间的加号按钮点击后直接跳转至AI界面；AI 建议中央按钮命名为“守护”，平时蓝色，高危时段变橙色。");
+  expect(found.map(item => item.unitIds)).toEqual([["u1", "u2"]]);
   // A decision chooses between them: nothing is left open.
   expect(differingPlans(units, id => id === "u2" ? "confirmed" : "proposal", true).some(item => item.unitIds.includes("u1"))).toBe(false);
 });
@@ -370,6 +443,33 @@ it("lists every figure the user gave, oldest first, without the 用户反馈 the
   const rows = reportedStatusRows(units, new Set(units.map(item => item.id)), true);
   expect(rows.map(row => row.text)).toEqual(["小程序目前每天稳定在22人。", "日活停留在32人左右。", "小程序日活（DAU）约40，付费率较低。"]);
   expect(rows.every(row => row.status === "measured")).toBe(true);
+});
+
+it("uses exact source message dates and keeps repeated figures reported on distinct days", () => {
+  const statement = "目前活跃用户为22人。";
+  const conversationSpan = {start:new Date(2026, 5, 1, 12).getTime(),end:new Date(2026, 5, 20, 12).getTime()};
+  const reports = [4, 12].map(day => {
+    const value = unit(day, statement, {kind:"fact"});
+    return { ...value, evidence:{...value.evidence,role:"user" as const,conversationSpan,discussedAt:new Date(2026,5,day,12).getTime()} };
+  });
+  expect(reportedStatusRows(reports, new Set(reports.map(item => item.id))).map(row => row.when)).toEqual(["6月4日", "6月12日"]);
+});
+
+it("limits a reference-only answer to adoption and keeps hypothetical counts as signals", () => {
+  const source = unit(1, "一份外部研究描述了这项技术原理。", {kind:"fact"});
+  const rejected = { ask:"是否纳入项目规范？", id:"q", about:"外部资料", unitIds:[source.id], organization:1,
+    options:[{id:"reference",label:"仅作参考不直接采用",actions:[{do:"reject" as const,units:[source.id]}]}] };
+  const ledger: WikiKnowledgeLedger = {version:1,generatedAt:0,status:"complete",materials:0,batches:[],
+    decisions:{[source.id]:{verdict:"rejected",at:2}},writingQuestions:[rejected],
+    userAnswers:[{questionId:"q",optionId:"reference",question:rejected.ask,answer:rejected.options[0].label,unitIds:[source.id],at:2}]};
+  const text = "你在回答中否定了「一份外部研究描述了这项技术原理」的方案。";
+  expect(wikiReadingClaimText(text, [source], new Map(), wikiReferenceOnlyUnits(ledger), true))
+    .toBe("本项目仅将这条资料作为参考：「一份外部研究描述了这项技术原理」。");
+  const hypothesis = unit(2, "若100位访客中有20位完成演示，则验证用户愿意尝试工具。", {kind:"plan"});
+  hypothesis.subject = "获客验证实验";
+  expect(wikiReadingClaimText(hypothesis.statement, [hypothesis], new Map([[hypothesis.id,"proposal"]]), new Set(), true))
+    .toBe("若100位访客中有20位完成演示，可作为线索，帮助判断用户愿意尝试工具。");
+  expect(wikiReadingClaimText(hypothesis.statement, [hypothesis], new Map([[hypothesis.id,"confirmed"]]), new Set(), true)).toBe(hypothesis.statement);
 });
 
 it("lists a report once when another of the same day gives each of its figures after the same word", () => {
@@ -509,7 +609,7 @@ it("leaves no length open that a confirmed version plan gives", () => {
   expect(differingPlans(units, id => id === "u3" ? "confirmed" : "proposal", true).some(item => item.note.includes("时长"))).toBe(false);
 });
 
-it("points the AI's side of a note up when the paragraph above tells it", () => {
+it("keeps a compatible visual proposal without adding a navigation conflict note", () => {
   const mine = unit(1, "用户提议将首页中间的加号按钮点击后直接跳转至AI界面。", { kind: "fact", evidence: { ...unit(1, "").evidence, role: "user" } });
   const theirs = unit(2, "中央按钮命名为“守护”，平时蓝色，高危时段变橙色。", { kind: "mechanism" });
   const text = "中央按钮命名为“守护”，平时蓝色，高危时段变橙色。";
@@ -518,7 +618,7 @@ it("points the AI's side of a note up when the paragraph above tells it", () => 
     draft: { version: 1, generatedAt: 0, status: "complete", report: {}, chapters: [{ id: "ch", title: "界面", question: "?", group: "", body: text, problems: [], paragraphs: [{ subtopic: "首页", text, unitIds: ["u2"], claims: [] }] }] },
   });
   const body = ledgerDocument(ledger, {}).sections[0].body;
-  expect(body).toContain("> 版本未定：首页中央按钮的用法：你提议将首页中间的加号按钮点击后直接跳转至AI界面；AI 的建议见上文。");
+  expect(body).not.toContain("> 版本未定：首页中央按钮");
   expect(body.split("中央按钮命名为").length).toBe(2);
 });
 
@@ -1228,6 +1328,6 @@ it("tells a plan turned down by an answer with what was chosen instead, however 
   });
   const body = ledgerDocument(ledger, {}).sections[0].body;
   expect(body).toContain("其他候选记录（不作为当前确认范围）：首年采用一次性买断授权，买断价¥999。");
-  expect(body).toContain("### 已确认的取舍\n\n计费方式：按月订阅。");
+  expect(body).toContain("### 其他已定决定\n\n计费方式：按月订阅。");
   expect(body).not.toContain("该方案已被否定");
 });

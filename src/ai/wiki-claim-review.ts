@@ -11,26 +11,36 @@ import { isSourceCodeParagraph, sourceBlockResolvedProblems, withoutSourceBlockR
 import { claimSupported, expandedWikiIdentifierClaim, wikiLabelledThresholdClaims } from "./wiki-claim-support";
 import { separateUnconfirmedWikiPlans } from "./wiki-draft-checks";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
-import { wikiLocalAnswer, wikiScopedIntegration, withAnswerScope } from "./wiki-question-parse";
+import { effectiveWikiAnswers, wikiConfirmedQuestionTexts, wikiLocalAnswer, wikiScopedIntegration, withAnswerScope } from "./wiki-question-parse";
 import { wikiDesignContrast, wikiIntegrationProposal, wikiWithoutUnsupportedExample } from "./wiki-prose-grounding";
 import { composeSavedWikiParagraphs } from "./wiki-paragraph-repeats";
+import { wikiReadingClaimText, wikiReferenceOnlyUnits } from "./wiki-reading-voice";
 import { wikiClosedListChoice, wikiClosedListStatement, wikiRestatesClosedList } from "../shared/wiki-closed-list";
 import { confirmedRoadmaps, confirmedRoadmapText } from "../shared/wiki-confirmed-roadmap";
-import { applyWikiConfirmationScope, wikiAddedDecisionList, wikiConfirmationDetails, wikiConfirmationScopes, wikiReleaseChecklistStatement, type WikiConfirmationScope } from "./wiki-confirmation-scope";
-import { measuredSourceScope, sourceScopeConflict } from "./wiki-source-scope";
+import { applyWikiConfirmationScope, wikiAddedDecisionList, wikiConfirmationDetails, wikiConfirmationScopes, wikiConfirmedGroupingText, wikiPurchaseScopeLead, wikiReleaseChecklistStatement, type WikiConfirmationScope } from "./wiki-confirmation-scope";
+import { measuredSourceScope, sourceScopeConflict, wikiReportFigures } from "./wiki-source-scope";
 import { wikiTemporalCandidate, wikiTemporalClaim, wikiUnsupportedRejection, wikiWithoutRejectionTail } from "./wiki-claim-temporality";
 import { wikiClaimStanding, wikiOpeningStanding, wikiStandingCandidate } from "./wiki-claim-standing";
 import { recheckWikiTableNegation } from "./wiki-negation-review";
 import { INCOMPLETE_WIKI_PROSE, literalWikiProse, restoreDetachedWikiScope, restoredConditionalNegation, wikiChapterIntegrity, wikiIncompleteProse, wikiIntegrityCandidate, wikiIntegrityNote } from "./wiki-integrity";
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
+import { wikiTableCells } from "../shared/wiki-table-source";
 import { availableWikiEvidence, wikiEvidenceKey } from "../shared/wiki-evidence-link";
+import { WIKI_PROJECT_POSITIONING, wikiReadingRouteOverview } from "../shared/wiki-overview";
+import { wikiProjectUsesStandard } from "./wiki-reference-ownership";
 import { wikiHolderOf } from "../shared/wiki-holder";
 import { reviewWikiHistory } from "./wiki-history-review";
-import { assertsWikiReplacement, wikiReplacementSupported } from "./wiki-version-conflict";
+import { assertsWikiReplacement, wikiCredentialStorageOpening, wikiCredentialStorageProse, wikiReplacementSupported } from "./wiki-version-conflict";
 import { withStop } from "../shared/wiki-sentences";
+import { wikiAppliedDecisions, wikiEditorialCleanup, wikiOpenDecisionProse, withoutSettledOpeningQuestions } from "../shared/wiki-editorial-cleanup";
+import { wikiProjectDecisionVoice, wikiProjectVoice } from "../shared/wiki-project-voice";
+import { applySavedWikiRoutes, savedWikiRoutes } from "./wiki-saved-routes";
+import { wikiHistoricalStageTable } from "../shared/wiki-plan-tables";
 
 const UNSUPPORTED_CLAIM = /^claim "(.+)…" has no supported source after final formatting$/u;
 const LOST_CONDITION = /^"(.+)…" drops a source condition/u;
+const DETAILS_REVIEW = /(^|[。！？.!?]\s*)(?:以下细节待核对[：:]\s*|(?:details requiring review|pending verification):\s*)([^。！？!?]+)(?=[。！？!?]|$)/giu;
+const UNBOUND_REPORT_FIGURES = /^"(.+)…" has numbers its units do not state:/u;
 const ASSERTED_ADOPTION = /已(?:经)?(?:确认执行|确认采用|决定执行|决定采用|落实)|\b(?:has been approved|was approved|confirmed for implementation)\b/iu;
 const NAMED_REJECTION = /^你在回答中否定了「([^」]+)」的方案。?$/u;
 const ASSERTED_PLAN = /(?:^|[；;]\s*)(?:现行|当前)(?:的)?(?:策略|方案|计划)(?:为|是|采用|[:：])\s*([^\n]+)$/u;
@@ -171,7 +181,10 @@ export function qualifyWikiArchitecture(text: string, units: WikiKnowledgeUnit[]
 
 export function wikiOverviewNeedsClaimReview(text: string, session: FocusSession) {
   return Boolean(session.wikiKnowledge?.draft && session.wikiKnowledge.documentType !== "learning"
-    && (NAMED_ARCHITECTURE.test(text) || wikiConfirmationDetails(text).length));
+    && (NAMED_ARCHITECTURE.test(text) || wikiConfirmationDetails(text).length
+      || Boolean(session.wikiKnowledge.decisionsAt && wikiOpenDecisionProse.test(text))
+      || /以下细节待核对|details requiring review|pending verification/iu.test(text)
+      || session.wikiOverview?.evidenceIds.length && WIKI_PROJECT_POSITIONING.test(text.trimStart())));
 }
 
 export function qualifyWikiOverviewClaims(text: string, session: FocusSession, reading?: ReturnType<typeof resolveWikiReading>) {
@@ -181,9 +194,44 @@ export function qualifyWikiOverviewClaims(text: string, session: FocusSession, r
     .flatMap(chapter => chapter.openingUnitIds ?? []));
   const scoped = units.filter(({ evidence }) => session.sourceConversationIds.includes(evidence.conversationId)
     && (session.scope?.kind !== "goal" || session.scope.blocks?.some(block => block.conversationId === evidence.conversationId && block.messageIds.includes(evidence.messageId))));
-  const qualified = qualifyWikiArchitecture(text, scoped, statuses, openings);
+  const saved = session.wikiOverview;
+  let reviewed = text;
+  if (saved?.text === text && saved.evidenceIds.length && WIKI_PROJECT_POSITIONING.test(text.trimStart())) {
+    const sourceIds = new Set(saved.evidenceIds);
+    const refs = new Set(session.evidence.filter(item => sourceIds.has(item.id)).map(wikiEvidenceKey));
+    const sentences = text.split(/(?<=[。！？])|(?<=[.!?])\s+/u);
+    const [lead] = sentences;
+    const linked = scoped.filter(unit => refs.has(wikiEvidenceKey({ ...unit.evidence, excerpt: unit.evidence.quote }))
+      && normalizeDetail(unit.statement) === normalizeDetail(lead));
+    if (linked.length && linked.every(unit => statuses.get(unit.id) === "history")
+      && !scoped.some(unit => statuses.get(unit.id) === "confirmed" && normalizeDetail(unit.statement) === normalizeDetail(lead))) {
+      reviewed = sentences.slice(1).join(session.locale === "en" ? " " : "").trim() || wikiReadingRouteOverview(session)?.text || "";
+    }
+  }
+  const confirmed = scoped.filter(unit => statuses.get(unit.id) === "confirmed");
+  reviewed = reviewed.replace(DETAILS_REVIEW, (whole: string, lead: string, detail: string) => {
+    const variants = detail.split(/[，,；;]/u);
+    const [first, next] = variants;
+    const target = variants.length === 2 && /^(?:再|然后)(?:逐步)?(?:到|达到|提高到)\s*(\d+(?:\.\d+)?)$/u.exec(next.trim());
+    const from = target && /(\d+(?:\.\d+)?)\s*([A-Z]{2,6})$/iu.exec(first);
+    if (target && from && confirmed.some(unit => normalizeDetail(unit.statement) === normalizeDetail(first))
+      && confirmed.some(unit => {
+        const chain = wikiConfirmationDetails(unit.statement);
+        return new RegExp("\\b" + from[2] + "\\b", "iu").test(unit.statement)
+          && chain.length === 2 && chain[0] === from[1] && chain[1] === target[1]
+          && normalizeDetail(unit.statement).includes(from[1] + "再到" + target[1]);
+      })) return lead + detail;
+    const supporting = confirmed.filter(unit => variants.some(part => statesCore(unit.statement, part)
+      || part.trim().length >= 6 && normalizeDetail(unit.statement).includes(normalizeDetail(part))));
+    if (!supporting.length || !claimSupported(detail, supporting)
+      || supporting.some(unit => droppedWikiConditions(unit, detail).length)) return whole;
+    const terms = knowledgeTerms(supporting.map(unit => unit.statement).join(" "));
+    return variants.every(part => [...knowledgeTerms(part)].filter(term => terms.has(term)).length >= 2) ? lead + detail : whole;
+  });
+  const qualified = qualifyWikiArchitecture(reviewed, scoped, statuses, openings);
   const byId = new Map(scoped.map(unit => [unit.id, unit]));
-  return applyWikiConfirmationScope(qualified, wikiConfirmationScopes(ledger, byId, statuses), scoped.filter(unit => statuses.get(unit.id) === "confirmed"), session.locale !== "en").text;
+  const current = applyWikiConfirmationScope(qualified, wikiConfirmationScopes(ledger, byId, statuses), confirmed, session.locale !== "en").text;
+  return withoutSettledOpeningQuestions(current, wikiConfirmedQuestionTexts(ledger, statuses));
 }
 
 function timedProposal(text: string, unit: WikiKnowledgeUnit, zh: boolean) {
@@ -324,8 +372,34 @@ export function wikiChapterReviewContext(session: FocusSession, projected?: Retu
   const units = wikiLedgerUnits(ledger);
   let reading = projected;
   let sources: Map<string, FocusSession["evidence"][number]> | undefined;
-  return { units, byId: new Map(units.map(unit => [unit.id, unit])), reading: () => ledger && (reading ??= resolveWikiReading(ledger)),
+  let routes: ReturnType<typeof savedWikiRoutes> | undefined;
+  const resolved=()=>ledger && (reading ??= resolveWikiReading(ledger));
+  return { units, byId: new Map(units.map(unit => [unit.id, unit])), reading: resolved,
+    routes:()=>routes??=(resolved()?savedWikiRoutes(session,resolved()!):[]),
     sources: () => sources ??= new Map(session.evidence.filter(ref => availableWikiEvidence(session, ref)).map(ref => [wikiEvidenceKey(ref), ref])) };
+}
+
+function keepScopedReportDates(body: string, section: FocusSection, retained: ReadonlySet<string>, units: ReadonlyMap<string, WikiKnowledgeUnit>) {
+  const shape = (table: string) => {
+    const [header, , ...rows] = table.split("\n").map(wikiTableCells);
+    return JSON.stringify([header.slice(1), rows.map(row => JSON.stringify(row.slice(1))).sort()]);
+  };
+  const dated = wikiDocumentBlocks(section.body, section.claims).filter(block => block.kind === "table"
+    && /^\|\s*(?:时间|Date)\s*\|/iu.test(block.text));
+  for (const block of wikiDocumentBlocks(body).reverse()) {
+    if (block.kind !== "table" || /^\|\s*(?:时间|Date)\s*\|/iu.test(block.text)) continue;
+    const candidates = dated.filter(table => shape(table.text) === shape(block.text));
+    if (candidates.length !== 1) continue;
+    const table = candidates[0];
+    const covered = table.text.split("\n").slice(2).map(wikiTableCells).every(([date, ...cells]) =>
+      table.claims.some(claim => claim.unitIds?.some(id => {
+        const unit = retained.has(id) && units.get(id);
+        return unit && wikiMeasure(unit) && wikiSaidWhen(unit, /^\d/u.test(date)) === date
+          && cells.some(cell => cell.includes(claim.text));
+      })));
+    if (covered) body = body.slice(0, block.start) + table.text + body.slice(block.end);
+  }
+  return body;
 }
 
 export function reviewWikiChapter(section: FocusSection, session: FocusSession, zh = session.locale !== "en", diagnostics?: { resolved: Set<string>; scopeProblems: Set<string> }, context = wikiChapterReviewContext(session)): FocusSection {
@@ -334,8 +408,13 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
   const ledger = session.wikiKnowledge;
   const chapter = ledger?.draft?.chapters.find(item => item.id === section.id);
   if (!ledger || !chapter) return restoreWikiSourceNegation(section, session);
-  if (Object.values(ledger.scopeAnswers ?? {}).includes("exclude")) {
-    const reading = context.reading();
+  const tidy = tidyGeneratedWikiMarkdown(section.body);
+  if (tidy !== section.body) section = { ...section, body: tidy, claims: section.claims?.map(claim => ({
+    ...claim, text: tidyGeneratedWikiMarkdown(claim.text), formulations: claim.formulations?.map(tidyGeneratedWikiMarkdown),
+  })) };
+  const readingProjection = context.reading();
+  if (readingProjection?.ledger.draft?.report.scope_filtered) {
+    const reading = readingProjection;
     const scoped = reading?.ledger.draft;
     const visible = scoped?.chapters.find(item => item.id === section.id);
     if (scoped?.report.scope_filtered && visible?.body !== chapter.body) {
@@ -352,11 +431,12 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
           return ref ? [{ ...claim, evidenceIds: [ref.id], quote: ref.excerpt, holder: unit.evidence.role === "user" && !unit.evidence.pasted ? "user" : "ai",
             holderMark: true, workStatus: "proposed", verification: "supported" }] : [];
         }) : [];
-      section = { ...section, body: plan?.body ?? visible?.body ?? "",
+      section = { ...section, body: keepScopedReportDates(plan?.body ?? visible?.body ?? "", section, retained, units),
         claims: inTable.length ? [...claims ?? [], ...inTable] : claims,
         evidenceIds: inTable.length ? [...new Set([...section.evidenceIds, ...inTable.flatMap(claim => claim.evidenceIds)])] : section.evidenceIds };
     }
   }
+  section=applySavedWikiRoutes(section,context.routes());
   const { units: storedUnits, byId: storedById } = context;
   const selected = new Set(section.evidenceIds), conversations = new Set(session.sourceConversationIds);
   const evidence = session.evidence.filter(ref => selected.has(ref.id) && conversations.has(ref.conversationId));
@@ -368,7 +448,13 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     if (refs) refs.push(ref);
     else evidenceByMessage.set(key, [ref]);
   }
-  const sourceOf = (unit: WikiKnowledgeUnit) => evidenceByMessage.get(messageKey(unit.evidence.conversationId, unit.evidence.messageId))?.find(ref => {
+  const referenceChapter = /竞品|外部参考|参考项目|competitor|reference/iu;
+  const standardsInProjectChapters = new Set(referenceChapter.test(section.title)
+    ? session.sections.filter(page => page !== section && !referenceChapter.test(page.title)).flatMap(page =>
+      page.claims?.filter(claim => claim.userDecided && page.body.includes(claim.text)).flatMap(claim => claim.unitIds ?? []) ?? [])
+    : []);
+  const sourceOf = (unit: WikiKnowledgeUnit) => standardsInProjectChapters.has(unit.id) && wikiProjectUsesStandard(unit)
+    ? undefined : evidenceByMessage.get(messageKey(unit.evidence.conversationId, unit.evidence.messageId))?.find(ref => {
     const version = session.sourceSignatures?.[ref.conversationId]?.[ref.messageId];
     return ref.excerpt.trim() === unit.evidence.quote.trim() && (!version || !ref.sourceSignature || version === ref.sourceSignature)
       && (session.scope?.kind !== "goal" || session.scope.blocks?.some(block => block.conversationId === ref.conversationId && block.messageIds.includes(ref.messageId)));
@@ -644,8 +730,91 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
         }
       }
     }
-    const checked = restoreWikiSourceNegation(reviewWikiHistory(current,chapter,reading.units,reading.statuses,unit=>Boolean(scopeSource(unit)),zh),session);
-    return composeSavedWikiParagraphs(checked,reading.organization,new Map(reading.units.filter(unit=>scopeSource(unit)).map(unit=>[unit.id,unit])),reading.statuses);
+    const confirmedQuestions = wikiConfirmedQuestionTexts(reading.ledger, reading.statuses);
+    const checked = wikiEditorialCleanup(wikiAppliedDecisions(
+      restoreWikiSourceNegation(reviewWikiHistory(current,chapter,reading.units,reading.statuses,unit=>Boolean(scopeSource(unit)),zh),session),
+      ledger,zh,new Set(reading.conflicts.filter(item=>!item.selected).map(item=>item.id))),
+      reading.statuses, reading.arbitrationStatuses, zh, confirmedQuestions);
+    const known = new Map(reading.units.filter(unit=>scopeSource(unit)).map(unit=>[unit.id,unit]));
+    const composed = composeSavedWikiParagraphs(checked, reading.organization, known, reading.statuses);
+    if (!composed.claims?.length) return composed;
+    const referenceOnly = wikiReferenceOnlyUnits(reading.ledger);
+    let body = composed.body;
+    const replacements = new Map<WikiClaim, WikiClaim>();
+    const scopedStorage: WikiClaim[] = [];
+    if(/当时阶段|历史阶段|Historical (?:phase|stage)|Earlier (?:phase|stage)/iu.test(body)){
+      const originalTables=new Set(reading.units.filter(unit=>unit.evidence.code?.language==="table").map(unit=>unit.evidence.code!.text.trim()));
+      for(const block of wikiDocumentBlocks(body,composed.claims).reverse()){
+        if(block.kind!=="table"||originalTables.has(block.text.trim())||block.claims.some(claim=>claim.checked))continue;
+        const next=wikiHistoricalStageTable(block.text,zh);
+        if(next!==block.text)body=body.slice(0,block.start)+next+body.slice(block.end);
+      }
+    }
+    const prose = wikiDocumentBlocks(body, composed.claims).filter(block => block.kind === "paragraph");
+    for (const block of prose.reverse()) {
+      let text = block.text;
+      for (const claim of block.claims) {
+        if (claim.checked || claim.markOnly || !claim.unitIds?.length || !claim.unitIds.every(id => known.has(id))) continue;
+        const at = text.indexOf(claim.text);
+        if (at < 0 || at !== text.lastIndexOf(claim.text) || replacements.has(claim)) continue;
+        const next = wikiReadingClaimText(claim.text, claim.unitIds.map(id => known.get(id)!), reading.statuses, referenceOnly, zh);
+        if (next === claim.text) continue;
+        text = text.slice(0, at) + next + text.slice(at + claim.text.length);
+        replacements.set(claim, { ...claim, text: next, formulations: undefined });
+      }
+      if (block.claims.length && !block.claims.some(claim => claim.checked)) {
+        const sentences = text.split(/(?<=[。！？])|(?<=[.!?])(?=\s)/u);
+        for (const sentence of sentences) {
+          const clean = sentence.trim();
+          if (!clean) continue;
+          const bound = block.claims.filter(claim => claim.text.includes(clean) || clean.includes(claim.text));
+          if (!bound.length) continue;
+          const units = [...new Set(bound.flatMap(claim => claim.unitIds?.flatMap(id => known.get(id) ?? []) ?? []))];
+          const rewritten = wikiCredentialStorageProse(clean, units, reading.statuses, zh);
+          if (!rewritten) continue;
+          text = text.replace(clean, () => rewritten.text);
+          if (rewritten.source) {
+            const ref = scopeSource(rewritten.source);
+            if (ref) scopedStorage.push({ text: rewritten.text, quote: rewritten.source.evidence.quote, evidenceIds: [ref.id],
+              unitIds: [rewritten.source.id], holder: "ai", holderMark: true, workStatus: "proposed", verification: "supported" });
+            continue;
+          }
+          for (const claim of bound) {
+            const previous = replacements.get(claim) ?? claim;
+            if (previous.text.includes(clean)) replacements.set(claim, { ...previous, text: previous.text.replace(clean, () => rewritten.text), formulations: undefined });
+          }
+        }
+      }
+      if (text !== block.text) body = body.slice(0, block.start) + text + body.slice(block.end);
+    }
+    const answers=effectiveWikiAnswers(reading.ledger,reading.statuses);
+    if(zh&&body.includes("确认后分为")&&!composed.claims.some(claim=>claim.checked&&wikiConfirmedGroupingText(claim.text,answers)!==claim.text)){
+      for(const block of wikiDocumentBlocks(body).reverse()){
+        if(block.kind!=="paragraph")continue;
+        const text=wikiConfirmedGroupingText(block.text,answers);
+        if(text!==block.text)body=body.slice(0,block.start)+text+body.slice(block.end);
+      }
+      for(const claim of composed.claims){
+        const previous=replacements.get(claim)??claim, text=wikiConfirmedGroupingText(previous.text,answers);
+        if(text!==previous.text)replacements.set(claim,{...previous,text,formulations:undefined});
+      }
+    }
+    const headingAt = body.search(/^#{1,6}\s+/mu);
+    if (headingAt > 0 && !composed.claims.some(claim => claim.checked && body.slice(0, headingAt).includes(claim.text))) {
+      const opening=wikiCredentialStorageOpening(body.slice(0, headingAt), body.slice(headingAt));
+      body = wikiPurchaseScopeLead(opening,answers,zh) + body.slice(headingAt);
+    }
+    if (body.includes("用户自己") && !composed.claims.some(claim=>claim.checked && wikiProjectDecisionVoice(claim.text)!==claim.text)) {
+      body=wikiProjectVoice(body);
+      for(const claim of composed.claims){
+        const previous=replacements.get(claim)??claim, text=wikiProjectDecisionVoice(previous.text);
+        if(text!==previous.text)replacements.set(claim,{...previous,text,formulations:undefined});
+      }
+    }
+    return body !== composed.body || replacements.size ? { ...composed, body, claims: [...composed.claims.flatMap(claim => {
+      const next = replacements.get(claim) ?? claim;
+      return body.includes(next.text) || !composed.body.includes(claim.text) ? [next] : [];
+    }), ...scopedStorage] } : composed;
   };
   if (ledger.documentType !== "learning" && wikiStandingCandidate(section.body)) {
     const reading = context.reading()!;
@@ -808,9 +977,11 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     const faults = wikiIncompleteProse(section.body).filter(fault => !evidence.some(ref => literalWikiProse(fault.text, ref.excerpt)));
     if (faults.length) {
       let body = section.body;
+      const mode = ledger.draft?.writingMode ?? ledger.writingMode;
+      const note = mode === "concise" || mode === "handoff" ? "" : `> ${wikiIntegrityNote(zh)}`;
       for (const fault of faults.reverse()) {
         diagnostics?.scopeProblems.add(fault.problem);
-        body = body.slice(0, fault.start) + [fault.preserved, `> ${wikiIntegrityNote(zh)}`].filter(Boolean).join("\n\n") + body.slice(fault.end);
+        body = body.slice(0, fault.start) + [fault.preserved, note].filter(Boolean).join("\n\n") + body.slice(fault.end);
       }
       section = { ...section, body, claims: section.claims?.filter(claim => body.includes(claim.text) || !section.body.includes(claim.text)) };
     } else {
@@ -828,6 +999,30 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
   }
   const checks = chapter.problems.flatMap(problem => {
     const prefix = (problem.match(UNSUPPORTED_CLAIM) ?? problem.match(LOST_CONDITION))?.[1];
+    if (prefix && LOST_CONDITION.test(problem)) {
+      // Older warnings named the first item of a list even when a later
+      // item owned the condition. Recheck each saved binding in its own text.
+      const parent = chapter.paragraphs.find(paragraph => paragraph.text.startsWith(prefix));
+      const conditional = parent?.unitIds.flatMap(id => {
+        const unit = storedById.get(id);
+        return unit && wikiUnitConditions(unit).length ? [unit] : [];
+      }) ?? [];
+      if (conditional.length && conditional.every(unit => {
+        if (!scopeSource(unit) || !parent) return false;
+        const bound = parent.claims?.filter(claim => claim.unitIds.includes(unit.id)) ?? [];
+        const keepsCondition = (text: string) => statesCore(unit.statement, text) && !missingWikiConditions(unit, text).length;
+        if (bound.length) return bound.some(claim => section.body.includes(claim.text) && keepsCondition(claim.text))
+          && bound.every(claim => !droppedWikiConditions(unit, claim.text).length);
+        const rows = parent.text.split("\n").flatMap(line => {
+          const item = /^\s*(?:\d+[.)]|[-*+]\s)\s*(.+)$/u.exec(line)?.[1];
+          return item && statesCore(unit.statement, item) ? [item] : [];
+        });
+        return rows.length === 1 && section.body.includes(rows[0]) && keepsCondition(rows[0]);
+      })) {
+        resolvedProblems?.add(problem);
+        return [];
+      }
+    }
     return prefix ? [{ problem, prefix }] : [];
   });
   const scopedDecisions = withAnswerScope(ledger).decisions;
@@ -860,8 +1055,19 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     if (/^\s*(?:```|~~~|>)/u.test(paragraph.text)) return [];
     return (paragraph.claims ?? []).filter(claim => !/[\n|]/u.test(claim.text) && section.body.includes(claim.text));
   });
+  const reportWarnings = zh ? chapter.problems.filter(problem => UNBOUND_REPORT_FIGURES.test(problem)) : [];
+  const comparableReport = (text: string) => normalizeDetail(text.replace(/当前|目前|现在|当时/gu, "当时"));
+  const unboundReports = reportWarnings.length ? reviewedDraftClaims.flatMap(claim => {
+    if (!wikiReportFigures(claim.text).length || !/(?:有报告|报告称|有表述)/u.test(claim.text)) return [];
+    const problem = reportWarnings.find(warning => claim.text.startsWith(UNBOUND_REPORT_FIGURES.exec(warning)![1]));
+    if (!problem) return [];
+    const variants = wikiDocumentBlocks(section.body).filter(block => block.kind === "paragraph")
+      .flatMap(block => block.text.split(/(?<=[。！？])/u).map(line => line.trim()))
+      .filter(sentence => comparableReport(sentence) === comparableReport(claim.text));
+    return variants.length === 1 ? [{ ...claim, text: variants[0], problem }] : [];
+  }) : [];
   const scopeChanges = new Set(reviewable.filter(claim => sourceScopeConflict(claim.text, claim.unitIds.flatMap(id => storedById.get(id) ?? []))).map(claim => claim.text));
-  if (!checks.length && !scopeChanges.size && !saved.length && !priced.length && !time && !offer && !ideaTopics.size && !recordedDecisions && !architecture && !workflow.length && !mightExtendConfirmation && !mightAddList) return finish(section);
+  if (!checks.length && !unboundReports.length && !scopeChanges.size && !saved.length && !priced.length && !time && !offer && !ideaTopics.size && !recordedDecisions && !architecture && !workflow.length && !mightExtendConfirmation && !mightAddList) return finish(section);
   const failed = reviewable.filter(claim => scopeChanges.has(claim.text) || checks.some(({ prefix }) => claim.text.startsWith(prefix)));
   const reading = context.reading()!;
   const units = new Map(reading?.units.map(unit => [unit.id, unit]));
@@ -880,6 +1086,22 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     if (offer) text = qualifyWikiOpeningOffer(text, chapter.paragraphs.flatMap(paragraph => paragraph.unitIds.flatMap(id => units.get(id) ?? [])), reading.statuses);
     if (architecture) text = qualifyWikiArchitecture(text, reading.units.filter(unit => sourceOf(unit)), reading.statuses, new Set(chapter.openingUnitIds));
     body = text + body.slice(opening.length);
+  }
+  for (const claim of unboundReports) {
+    const at = paragraphIndex(body, claim.text);
+    if (at < 0 || at !== body.lastIndexOf(claim.text) || claims?.some(point => point.checked && point.text === claim.text)) continue;
+    const cited = claim.unitIds.flatMap(id => units.get(id) ?? []);
+    if (cited.length !== 1) continue;
+    const [unit] = cited, source = scopeSource(unit);
+    if (!source || unit.evidence.role !== "user" || unit.evidence.pasted || unit.about || !wikiMeasure(unit)
+      || !wikiReportFigures(unit.statement).length || !claimSupported(unit.statement, [unit])) continue;
+    const when = wikiSaidWhen(unit, true), reported = unit.statement.replace(/(?:当前|现在|目前)/u, "当时").replace(/[。.]$/u, "");
+    const text = withStop(reported + (when && !daysIn(reported).length ? `（${when}）` : ""));
+    body = body.slice(0, at).trimEnd() + `\n\n${text}\n\n${excerptPending(claim.text, zh)}\n\n` + body.slice(at + claim.text.length).trimStart();
+    claims = [...claims?.filter(point => point.text !== claim.text && !point.formulations?.includes(claim.text)) ?? [],
+      { text, quote: unit.evidence.quote, evidenceIds: [source.id], unitIds: [unit.id], holder: "user", holderMark: true, workStatus: "reported", verification: "supported" }];
+    resolvedProblems?.add(claim.problem);
+    diagnostics?.scopeProblems.add(`claim "${claim.text.slice(0, 36)}…" has no supported source after final formatting`);
   }
   for (const claim of workflow) {
     const at = paragraphIndex(body, claim.text);
@@ -1085,3 +1307,4 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
   const reviewed=body === section.body && (!claims || claims.length === section.claims?.length && claims.every((claim, index) => claim === section.claims?.[index])) ? section : { ...section, body, claims };
   return finish(reviewed);
 }
+import { tidyGeneratedWikiMarkdown } from "./wiki-markdown-tidy";

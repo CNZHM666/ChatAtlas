@@ -8,6 +8,15 @@ const broadened = "若原来的内测用户中超过50%启用所有新功能且3
 const unit = (statement: string, original = quote): WikiKnowledgeUnit => ({ id: "u1", subject: "内测", statement, kind: "plan", details: [], delivery: "unknown", adoption: { status: "proposal" },
   evidence: { evidenceId: "e", conversationId: "c", messageId: "m", messageIndex: 1, role: "assistant", pasted: false, quote: original } });
 
+it("keeps a count attached to its own metric and report date",()=>{
+ const text="日活为25（6月6日），累计用户22人（6月6日）。";
+ const report={...unit(text,text),kind:"report" as const};
+ expect(sourceScopeConflict(text,[report])).toBe(false);
+ expect(sourceScopeConflict("日活为22人（6月6日）。",[report])).toBe(true);
+ expect(sourceScopeConflict("日活为25人（6月9日）。",[report])).toBe(true);
+ expect(sourceScopeConflict("目标日活为22人。",[report])).toBe(false);
+});
+
 it("restores the scope of a uniquely sourced experiment while retaining its evidence and proposal status", () => {
   const old = unit(broadened);
   const corrected = sourceScopedUnit(old);

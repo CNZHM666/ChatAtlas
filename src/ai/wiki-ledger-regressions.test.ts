@@ -12,15 +12,28 @@ import { curateWikiUnits } from "./wiki-knowledge-select";
 import { holderRunClaims, validateFinalClaims, writeLedgerDraft } from "./wiki-knowledge-write";
 import { ledgerDocument } from "./wiki-ledger-document";
 import { wikiVersionQuestions, withVersionAnswer } from "./wiki-key-decisions";
-import { exclusiveWikiVersions, wikiCredentialStorageCheck } from "./wiki-version-conflict";
+import { exclusiveWikiVersions, wikiCredentialStorageCheck, wikiCredentialStorageOpening, wikiCredentialStorageProse } from "./wiki-version-conflict";
 import { deduplicateWikiNumberProblems, recheckWikiNumberProblem, unsupportedWikiNumbers } from "./wiki-number-diagnostics";
 import { foreignDetail, ownSection, wikiUnitDetails, CRITICAL_PROBLEM, scopedWikiDraft, wikiDraftMarkdown, type WikiDraftChapter, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiDraftClaim } from "../shared/wiki-knowledge";
 import { contextKnowledge } from "../test/context-fixture";
+import { wikiHistoricalStageTable } from "../shared/wiki-plan-tables";
+import { wikiConfirmedGroupingText, wikiPurchaseScopeLead } from "./wiki-confirmation-scope";
 
 const unit = (n: number, statement: string, extra: Partial<WikiKnowledgeUnit> = {}): WikiKnowledgeUnit => ({ id: `u${n}`, subject: "项目", statement, kind: "plan", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: `e${n}`, conversationId: "c", messageId: `m${n}`, messageIndex: n, role: "assistant", pasted: false, quote: statement }, ...extra });
 const book = (units: WikiKnowledgeUnit[]): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: units.length, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }], organization: { version: 1, generatedAt: 0, status: "complete", subjects: [{ id: "s", name: "项目", aliases: [], unitIds: units.map(unit => unit.id) }], merged: [], relations: [], report: {}, chapters: [{ id: "ch", title: "项目", question: "如何继续？", group: "", subtopics: [{ title: "方案", subjectIds: ["s"] }] }] } });
 const chapter = (units: WikiKnowledgeUnit[], text: string, claims: WikiDraftClaim[] = [{ text, unitIds: units.map(unit => unit.id) }]): WikiDraftChapter => ({ id: "ch", title: "项目", question: "如何继续？", group: "", body: text, paragraphs: [{ subtopic: "方案", text, unitIds: units.map(unit => unit.id), claims }], problems: [] });
 const withDraft = (ledger: WikiKnowledgeLedger, chapters: WikiDraftChapter[]): WikiKnowledgeLedger => ({ ...ledger, draft: { version: 1, generatedAt: 5, status: "complete", chapters, report: {} } });
+
+it("keeps confirmations, alternatives, and historical exclusions scoped in the rendered prose",()=>{
+  const release={question:"前期是否只展示规格，不做实时全网比价？",answer:"需要基础比价和购买链接"};
+  const lead="V1 明确排除实时比价和商城 API。\n\n";
+  expect(wikiPurchaseScopeLead(lead,[release],true)).toContain("前期已确认提供基础比价和购买链接。");
+  expect(wikiPurchaseScopeLead(lead,[{...release,answer:"不包含基础比价和购买链接"}],true)).toBe(lead);
+  const choice={question:"清单采用紧凑行还是分为“已处理”和“待处理”？",answer:"紧凑行"};
+  expect(wikiConfirmedGroupingText("AI建议确认后分为“已处理”和“待处理”。",[choice])).toBe("另有讨论建议按“已处理”和“待处理”分组。");
+  const table="| 阶段 | 范围 |\n| --- | --- |\n| 当时阶段 (M2/M3) | 当前阶段排除项 |\n| Alpha | 当前阶段排除项 |";
+  expect(wikiHistoricalStageTable(table,true)).toBe(table.replace("当前阶段排除项","历史阶段范围，仅适用 M2 / M3"));
+});
 
 it("verifies an entire identifier without using its digits to support a count", () => {
   expect(unsupportedWikiNumbers("Library uses LGPLv3 and supports 3 devices.", "Library uses LGPLv3 and supports 8 devices.", new Set())).toEqual({ identifiers: [], numbers: ["3"], ranges: [] });
@@ -61,6 +74,22 @@ it("keeps platform and user keys separate and flags an unspecified owner", () =>
   const ledger = book([server, browser]);
   ledger.organization!.relations = [{ older: server.id, newer: browser.id, kind: "replaces", status: "resolved" }];
   expect(resolveWikiReading(ledger).organization?.relations[0].kind).toBe("coexists");
+});
+
+it("keeps a phase-only key storage proposal and an opt-in store distinct", () => {
+  const old = unit(1, "用户 API Key 默认保存在 sessionStorage，可选在此设备记住。");
+  old.evidence.quote = "内存或者 sessionStorage。\n\n可以加一个非默认选项。\n\n建议 V0.2 先只支持 sessionStorage。";
+  const current = unit(2, "用户 API Key 默认保存在运行时内存。仅当用户明确选择会话记住时才使用 sessionStorage。");
+  const status = new Map([[old.id, "proposal"], [current.id, "proposal"]]);
+  const scoped = wikiCredentialStorageProse(old.statement, [old, current], status, true);
+  expect(scoped).toEqual({ source: old, text: "密钥存储的讨论方案为 V0.2 先只支持 `sessionStorage`。" });
+  expect(wikiCredentialStorageProse(current.statement.split("。")[0] + "。", [current], status, true)?.text).toContain("讨论建议：用户 API Key 默认保存在运行时内存");
+  const opening = "采用 BYOK，API Key 仅存于运行时内存或 sessionStorage。其余功能保持独立。";
+  expect(wikiCredentialStorageOpening(opening, current.statement)).toBe("采用 BYOK。其余功能保持独立。");
+  expect(wikiCredentialStorageOpening(opening, old.statement)).toBe(opening);
+  status.set(current.id, "confirmed");
+  expect(wikiCredentialStorageProse(current.statement, [current], status, true)).toBeUndefined();
+  expect(wikiCredentialStorageProse(old.statement, [current], status, true)).toBeUndefined();
 });
 
 it("keeps a personal motivation as the user's view", () => {

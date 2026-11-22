@@ -32,6 +32,8 @@ it("fills a full-selection task on selection without starting until the user act
   // The chosen materials show as chips above the input; no separate count below it.
   expect(screen.getAllByRole("button", { name: /^移除材料/ })).toHaveLength(2);
   expect(screen.queryByRole("button", { name: /已选 \d+ 条/ })).toBeNull();
+  expect(screen.queryByText("学习（测试中）")).toBeNull();
+  expect(screen.queryByRole("radio", {name: "自动"})).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /开始整理|搜索历史/ }));
   expect(request).toHaveBeenCalledOnce(); expect(request).toHaveBeenCalledWith(projectGoal, undefined, "project");
   expect(screen.getByRole("checkbox", { name: sources[1].title })).toBeChecked();
@@ -45,11 +47,17 @@ it("does not add materials on input focus and clears explicitly attached materia
   fireEvent.focus(input());
   expect(screen.queryByRole("group", { name: "已选材料" })).toBeNull();
 });
-it("starts project or summary directly from selected materials without typing", () => {
+it("switches to project mode without submitting and still supports the summary shortcut", () => {
   const { request, input } = mount(["c0", "c1"]);
   fireEvent.click(screen.getByRole("button", { name: "总结历史讨论" }));
   expect(input()).toHaveValue(summaryGoal); expect(request).toHaveBeenLastCalledWith(summaryGoal, undefined, "answer");
-  fireEvent.click(screen.getByRole("button", { name: "整理成项目" }));
+  request.mockClear();
+  const mode = screen.getByRole("button", { name: "整理成项目" });
+  fireEvent.click(mode);
+  expect(mode).toHaveAttribute("aria-pressed", "true");
+  expect(request).not.toHaveBeenCalled();
+  expect(mode.compareDocumentPosition(input()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "开始整理" }));
   expect(request).toHaveBeenLastCalledWith(projectGoal, undefined, "project");
 });
 it("removes attached materials and clears only its automatic draft when the pool becomes empty", () => {
@@ -101,7 +109,7 @@ it("collapses large selections and can remove a previously hidden material", () 
   fireEvent.click(within(attachments).getByRole("button", { name: "+ 3 条" }));
   fireEvent.click(within(attachments).getByRole("button", { name: `移除材料：${sources[6].title}` }));
   expect(screen.getByRole("checkbox", { name: sources[6].title })).not.toBeChecked();
-  fireEvent.click(screen.getByRole("button", { name: "添加材料" })); expect(showSources).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "添加对话" })); expect(showSources).toHaveBeenCalledOnce();
 });
 it("supports English default tasks and Ctrl Enter without widening the selection", () => {
   const { request, input } = mount(["c0"], "", "en");

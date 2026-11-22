@@ -1,13 +1,10 @@
-import { useContext, useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { BookMarked, Search } from "lucide-react";
 import type { FocusEvidence, FocusSession } from "../../shared/focus-session";
 import type { WorkspaceEvidenceOptions } from "../workspace-evidence-context";
-import { type WikiKnowledgeUnit, type WikiUnitStatus, type WikiUserDecision } from "../../shared/wiki-knowledge";
-import { withDecision } from "../../ai/wiki-key-decisions";
-import { ProjectKnowledgeActions } from "../project-knowledge-actions";
+import { type WikiKnowledgeUnit, type WikiUnitStatus } from "../../shared/wiki-knowledge";
 import { projectLedgerPage, type ProjectWikiPages } from "../project-wiki-pages";
 import { useProjectReadingCache } from "../project-reading-cache";
-import { KeyDecisions } from "./KeyDecisions";
 
 const LABELS: Record<WikiUnitStatus, [string, string]> = {
   confirmed: ["你的决定", "Your decision"], reported: ["你报告的进展", "Your report"], relayed: ["你的资料", "Your material"], proposal: ["AI 建议", "AI proposal"],
@@ -20,11 +17,8 @@ const FILTERS: Array<{ id: string; statuses?: WikiUnitStatus[]; label: [string, 
 ];
 const PAGE = 40;
 
-/** Every knowledge point the document was written from, by chapter and subject: what it says, whose it is, and its
- * original one click away. The key decisions sit on top; a verdict here is kept in the ledger and the document is
- * rewritten around it on request. */
-export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions, pageReading }: { session: FocusSession; zh: boolean; onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void; onApplyDecisions?: () => void; pageReading?: Partial<ProjectWikiPages> | null }) {
-  const actions = useContext(ProjectKnowledgeActions);
+/** Browse the extracted points by chapter and by holder, with their original passages. */
+export function KnowledgeLedger({ session, zh, onLocate, pageReading }: { session: FocusSession; zh: boolean; onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void; pageReading?: Partial<ProjectWikiPages> | null }) {
   const cache = useProjectReadingCache();
   const ledger = session.wikiKnowledge;
   const [filter, setFilter] = useState("all"), [query, setQuery] = useState(""), [shown, setShown] = useState<Record<string, number>>({});
@@ -32,7 +26,7 @@ export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions, pageR
   // The point whose original is open beside the ledger stays marked, so the reader sees which one they are checking.
   const [checking, setChecking] = useState<string>();
   const data = pageReading === null ? undefined : pageReading?.ledger
-    ?? cache.get(session, `ledger-page:${zh}`, () => projectLedgerPage(session, zh));
+    ?? cache.get(session, "ledger-page", () => projectLedgerPage(session));
   const active = FILTERS.find(item => item.id === filter)!;
   const needle = useDeferredValue(query.trim().toLocaleLowerCase());
   const chapters = useMemo(() => {
@@ -53,13 +47,9 @@ export function KnowledgeLedger({ session, zh, onLocate, onApplyDecisions, pageR
     setChecking(unit.id);
     onLocate(ref, { references: [ref], quote: unit.evidence.quote, claim: unit.statement, mode: "view" });
   };
-  const decide = async (unitIds: string[], verdict: WikiUserDecision["verdict"] | undefined, statement: string) => { if (actions) await actions.save(current => current.wikiKnowledge ? { ...current, wikiKnowledge: withDecision(current.wikiKnowledge, unitIds, verdict, undefined, [statement]) } : current); };
   const count = (statuses: WikiUnitStatus[]) => statuses.reduce((sum, status) => sum + (data.counts.get(status) ?? 0), 0);
-  const { pending, misplaced } = data;
   return <section className="knowledge-ledger" aria-label={name}>
     <h2><BookMarked size={18} aria-hidden="true" />{zh ? "知识点账本" : "Knowledge ledger"}<small>{zh ? `${data.total} 个知识点 · 你的决定 ${count(["confirmed"])} · AI 建议 ${count(["proposal", "analysis"])}` : `${data.total} points · yours ${count(["confirmed"])} · AI ${count(["proposal", "analysis"])}`}</small></h2>
-    {actions ? <KeyDecisions ledger={ledger} prepared={data.questions} zh={zh} onDecide={decide} onLedger={change => actions.save(current => current.wikiKnowledge ? { ...current, wikiKnowledge: change(current.wikiKnowledge) } : current)} open={false}
-      footer={(pending || misplaced.length) && onApplyDecisions ? <div className="key-decisions-apply"><span>{pending ? zh ? "文档还没有按你的确认改写。" : "The document does not reflect your verdicts yet." : zh ? `「${misplaced.join("」「")}」里有内容不在它所属的章节，需要按当前目录重写。` : `Some points in ${misplaced.join(", ")} sit outside the chapter they belong to and need rewriting for the current layout.`}</span><button type="button" className="primary" onClick={onApplyDecisions}>{pending ? zh ? "按确认更新文档 · 先预览" : "Update the document · Preview" : zh ? "重写这些章节 · 先预览" : "Rewrite these chapters · Preview"}</button></div> : undefined}/> : null}
     <div className="knowledge-ledger-tools">
       <div role="tablist" aria-label={zh ? "按来源筛选" : "Filter by holder"}>{FILTERS.filter(item => !item.statuses || count(item.statuses) > 0 || filter === item.id).map(item => <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} title={item.title?.[zh ? 0 : 1]} onClick={() => { if (item.id !== filter) { setFilter(item.id); setExpanded({}); } }}>{item.label[zh ? 0 : 1]}{item.statuses ? <small>{count(item.statuses)}</small> : null}</button>)}</div>
       <label><Search size={14} aria-hidden="true" /><input type="search" value={query} placeholder={zh ? "搜索知识点" : "Search points"} aria-label={zh ? "搜索知识点" : "Search points"} onChange={event => { setQuery(event.target.value); setExpanded({}); }} /></label>

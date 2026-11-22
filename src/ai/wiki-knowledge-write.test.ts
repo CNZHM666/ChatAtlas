@@ -199,6 +199,28 @@ it("restores a recommendation's source condition locally before retrying the par
   expect(draft.chapters[0].problems.join(" ")).not.toContain("drops a source condition");
 });
 
+it("only resends the failing subtopic when the check can locate it", async () => {
+  const first = unit(1, "检索命中后可回到原始对话。", { kind: "mechanism" });
+  const second = unit(2, "离线缓存最多保留 30 天。", { kind: "constraint" });
+  const book = ledger([first, second], {
+    subjects: [first, second].map(unit => ({ id: unit.id, name: unit.subject, aliases: [], unitIds: [unit.id] })),
+    chapters: [{ id: "chapter:search", title: "检索", question: "检索怎样工作？", group: "",
+      subtopics: [{ title: "原文定位", subjectIds: [first.id] }, { title: "离线缓存", subjectIds: [second.id] }] }],
+  });
+  const { ai, calls } = model((data, system) => ({
+    opening: "检索支持核对原文与离线阅读。",
+    subtopics: data.subtopics.map(topic => ({ title: topic.title, paragraphs: topic.units.map(point => ({
+      text: system.includes("SECOND ATTEMPT") ? point.statement : point.statement.replace("30 天", "90 天"),
+      unitIds: [point.id],
+    })) })),
+  }));
+  const draft = await writeWikiDraft({ ledger: book, ai, locale: "zh-CN", signal });
+  expect(calls.find(call => call.system.includes("SCOPED REVISION"))?.data.subtopics.map(topic => topic.title)).toEqual(["离线缓存"]);
+  expect(draft.chapters[0].body).toContain(first.statement);
+  expect(draft.chapters[0].body).toContain(second.statement);
+  expect(draft.chapters[0].body).not.toContain("90 天");
+});
+
 it("restores a condition in the opening without rewriting the entire part", async () => {
   const point = unit(1, "使用离线快照恢复工作区。", { kind: "plan" });
   const condition = "如果备份校验通过";
@@ -213,7 +235,7 @@ it("restores a condition in the opening without rewriting the entire part", asyn
   expect(draft.report.write_opening_conditions_restored).toBe(1);
 });
 
-it("writes unaffected chapters while a decision is pending and reuses them after the answer", async () => {
+it.each([false, true])("writes unaffected chapters while a decision is pending and reuses them after the answer (placement: %s)", async placement => {
   const first = unit(1, "搜索采用倒排索引。"), second = unit(2, "备份使用离线快照。" );
   const subject = (id: string, name: string, point: WikiKnowledgeUnit) => ({ id, name, aliases: [], unitIds: [point.id] });
   const chapter = (id: string, title: string, subjectId: string) => ({ id, title, question: title, group: "", subtopics: [{ title, subjectIds: [subjectId] }] });
@@ -224,13 +246,14 @@ it("writes unaffected chapters while a decision is pending and reuses them after
   const ready = new Promise<WikiKnowledgeLedger>(resolve => { finish = resolve; });
   const preview = new Promise<void>(resolve => { previewReady = resolve; });
   const pending = writeLedgerDraft(original, { ai, locale: "zh-CN", signal, pendingDecisions: { units: new Set([second.id]), ready },
+    ...(placement ? { pendingPlacement: { stable: new Set(["a", "b"]), ready } } : {}),
     onChapters: chapters => { if (chapters.some(item => item.id === "a")) previewReady(); } });
   await preview;
   expect(calls.filter(call => call.data.presentation === "wiki_chapter_write").map(call => call.data.subtopics[0].title)).toEqual(["搜索"]);
   finish({ ...original, decisions: { [second.id]: { verdict: "confirmed", at: 2 } } });
   const final = await pending;
   expect(final.decisions?.[second.id]?.verdict).toBe("confirmed");
-  expect(final.draft?.report.chapters_written_while_reviewing).toBe(1);
+  expect(final.draft?.report[placement ? "chapters_written_during_placement" : "chapters_written_while_reviewing"]).toBe(1);
   expect(calls.filter(call => call.data.presentation === "wiki_chapter_write").map(call => call.data.subtopics[0].title)).toEqual(["搜索", "备份"]);
 });
 
@@ -1367,6 +1390,46 @@ it("accepts a structured comparison without flattening rows or borrowing evidenc
  const exported=projectDocument(session,selection,"md").text;
  expect(exported).toContain("| 关键词查找 | 无需密钥");expect(exported).toContain("需要用户配置");
  expect(projectDocument(session,selection,"html").text).toContain("<table>");
+});
+
+it("retries only the units missing from a rejected structured paragraph", async () => {
+  const points = [unit(1, "关键词检索可打开原始对话。"), unit(2, "标签筛选保留用户的选择。")];
+  const { ai, calls } = model((data, system) => ({
+    opening: "工作台可以找回历史对话。",
+    subtopics: data.subtopics.map(topic => ({
+      title: topic.title,
+      blocks: system.includes("SUPPLEMENT:") ? topic.units.map(item => ({
+        type: "paragraph", text: item.statement, unitIds: [item.id],
+      })) : [
+        { type: "paragraph", text: topic.units[0].statement, unitIds: [topic.units[0].id] },
+        { type: "paragraph", text: "这段含有无效引用。", unitIds: ["unknown"] },
+      ],
+    })),
+  }));
+  const draft = await writeWikiDraft({ ledger: ledger(points), ai, locale: "zh-CN", signal });
+  expect(calls).toHaveLength(2);
+  expect(calls[1].system).toContain("SUPPLEMENT:");
+  expect(calls[1].data.subtopics.flatMap(topic => topic.units.map(item => item.statement))).toEqual([points[1].statement]);
+  expect(draft.chapters[0].body).toContain(points[0].statement);
+  expect(draft.chapters[0].body).toContain(points[1].statement);
+  expect(draft.chapters[0].body).not.toContain("无效引用");
+  expect(draft.report["write_block:unknown_unit"]).toBe(1);
+  expect(draft.report.write_parts_lost).toBeUndefined();
+});
+
+it("joins a recovered explanation beside its related claim without widening either binding", async () => {
+  const points = [unit(1, "全文检索先返回命中消息的原始位置。"), unit(2, "全文检索可以按来源对话筛选命中结果。")];
+  const {ai,calls}=model((data,system)=>({opening:"工作台可以找回历史对话。",subtopics:data.subtopics.map(topic=>({
+    title:topic.title,blocks:system.includes("SUPPLEMENT:")?topic.units.map(item=>({type:"paragraph",text:item.statement,unitIds:[item.id],claims:[{text:item.statement,unitIds:[item.id]}]})):[
+      {type:"paragraph",text:topic.units[0].statement,unitIds:[topic.units[0].id],claims:[{text:topic.units[0].statement,unitIds:[topic.units[0].id]}]},
+      {type:"paragraph",text:"这段含有无效引用。",unitIds:["unknown"]},
+    ],
+  }))}));
+  const draft=await writeWikiDraft({ledger:ledger(points),ai,locale:"zh-CN",signal});
+  expect(calls).toHaveLength(2);
+  expect(draft.report.write_recovered_paragraphs_joined).toBe(1);
+  const paragraph=draft.chapters[0].paragraphs.find(item=>points.every(point=>item.text.includes(point.statement)));
+  expect(paragraph?.claims?.map(({text,unitIds})=>({text,unitIds}))).toEqual(points.map(point=>({text:point.statement,unitIds:[point.id]})));
 });
 
 

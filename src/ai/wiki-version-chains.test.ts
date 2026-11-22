@@ -11,6 +11,9 @@ import { differingPlans } from "../shared/wiki-differing-plans";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { withHolderMarks } from "../shared/wiki-holder";
 import { currentCaptions } from "../shared/wiki-source-code";
+import { wikiDifferentDecisionAxis } from "./wiki-version-conflict";
+import { resolveWikiReading } from "./wiki-knowledge-reading";
+import { routeWikiUnits } from "./wiki-unit-routing";
 
 const unit = (id: string, statement: string, options: { role?: "user" | "assistant"; kind?: string; subject?: string; adoption?: string; at?: number } = {}): WikiKnowledgeUnit => ({
   id, subject: options.subject ?? "首页", statement, kind: options.kind ?? "decision", details: [], adoption: { status: options.adoption ?? (options.role === "user" ? "unknown" : "proposal") }, delivery: "unknown",
@@ -19,6 +22,31 @@ const unit = (id: string, statement: string, options: { role?: "user" | "assista
 const ledgerOf = (units: WikiKnowledgeUnit[], organization: Partial<WikiKnowledgeOrganization>, decisions: WikiKnowledgeLedger["decisions"] = {}) => ({ version: 1, generatedAt: 1, status: "complete", materials: 1, batches: [{ status: "complete", units }], decisions,
   organization: { version: 1, generatedAt: 2, status: "complete", subjects: [], merged: [], relations: [], chapters: [], report: {}, ...organization } }) as unknown as WikiKnowledgeLedger;
 const fakeAI = (answer: (request: StructuredAIRequest<unknown>) => unknown) => ({ id: "fake", modelId: "fake", generateStructured: async <T,>(request: StructuredAIRequest<T>) => request.validate!(answer(request as StructuredAIRequest<unknown>)) as T });
+
+it("keeps release sequence and feature scope independent of a generated replacement", () => {
+  const feature = unit("a", "V1 包含提供购买链接的功能。", { subject: "版本范围" });
+  const shipping = unit("b", "先将基础功能发布，再支持购买链接。", { subject: "发布顺序", at: 2 });
+  const owner = unit("c", "API Key 由用户提供。", { subject: "API Key 提供方" });
+  const storage = unit("d", "API Key 仅保存在内存。", { subject: "API Key 存储" });
+  expect(wikiDifferentDecisionAxis(feature, shipping)).toBe(true);
+  expect(wikiDifferentDecisionAxis(owner, storage)).toBe(true);
+  const ledger = ledgerOf([feature, shipping], { relations: [{ older: "a", newer: "b", kind: "replaces", status: "resolved" }] });
+  expect(resolveWikiReading(ledger).organization?.relations).toContainEqual(expect.objectContaining({ older: "a", newer: "b", kind: "coexists" }));
+});
+
+it("moves a misplaced engineering rule to the uniquely matching topic and keeps credential rules in place", () => {
+  const key = unit("key", "API Key 仅保存在内存。", { subject: "API Key 存储", kind: "constraint" });
+  const check = unit("check", "Validator 确保引脚合法。", { subject: "电路校验", kind: "constraint" });
+  const ledger = ledgerOf([key, check], { subjects: [
+    { id: "key", name: "密钥管理", aliases: [], unitIds: ["key", "check"] },
+    { id: "check", name: "校验机制", aliases: [], unitIds: [] },
+  ], chapters: [{ id: "technical", title: "数据模型与架构", question: "", group: "", subtopics: [
+    { title: "BYOK Provider 层", subjectIds: ["key"] },
+    { title: "Validator 校验机制", subjectIds: ["check"] },
+  ] }] });
+  const result = routeWikiUnits(ledger.organization!, new Map([[key.id, key], [check.id, check]]));
+  expect(result.subjects.map(subject => subject.unitIds)).toEqual([["key"], ["check"]]);
+});
 
 it("splits a listed point into its parts and finds the part a chapter left out", () => {
   const plan = "分三版迭代：第一版保留原成长区并适配AI流程；第二版增加Agent动态状态、10分钟守护、60秒复盘、风险报告；第三版加入自动分组、小组任务。";
@@ -150,6 +178,30 @@ it("rechecks only the changed chapter and preserves placement doubts from an unc
   expect(fit.placementDoubts).toEqual(previous.placementDoubts);
 });
 
+it("reuses the checked units when a neighboring point in the same chapter changes", async () => {
+  const a = unit("a", "页面使用浅色背景。"), b = unit("b", "页面圆角设为8px。");
+  const c = unit("c", "记录次日留存率。");
+  const source = ledgerOf([a, b, c], {
+    subjects: [{ id: "a", name: "视觉", aliases: [], unitIds: ["a", "b"] }, { id: "c", name: "数据", aliases: [], unitIds: ["c"] }],
+    chapters: [{ id: "ui", title: "界面设计", question: "", group: "", subtopics: [{ title: "视觉", subjectIds: ["a"] }] },
+      { id: "data", title: "数据分析", question: "", group: "", subtopics: [{ title: "数据", subjectIds: ["c"] }] }],
+  });
+  const checked: string[][] = [];
+  const ai = fakeAI(request => {
+    checked.push((JSON.parse(request.prompt).units as Array<{ statement: string }>).map(item => item.statement));
+    return { moves: [] };
+  });
+  const input = { ai, locale: "zh-CN", signal: new AbortController().signal };
+  const previous = await checkedChapterFit(source.organization!, source, input, {});
+  checked.length = 0;
+  const changed = { ...b, statement: "页面圆角设为12px。" };
+  const next = ledgerOf([a, changed, c], source.organization!);
+  const report: Record<string, number> = {};
+  await checkedChapterFit(next.organization!, next, { ...input, previous }, report);
+  expect(checked).toEqual([[changed.statement]]);
+  expect(report.fit_units_reused).toBe(1);
+});
+
 it("reads the chains against the user's latest answers: a turned-down point leaves, a confirmed one holds", () => {
   const topics: WikiTopicChain[] = [
     { id: "t1", name: "首屏", current: ["b"], earlier: ["a", "c"], open: false },
@@ -198,8 +250,7 @@ it("finds a point never turned down told as turned down, keeps a rule beside a c
   const notes = [unit("mine", "将首页中间的加号按钮点击后直接跳转至AI界面。", { role: "user", kind: "plan" }), unit("theirs", "中央按钮命名为“守护”，高危时段变橙色。")];
   const ledger = ledgerOf(notes, { subjects: [{ id: "s", name: "首页", aliases: [], unitIds: ["mine", "theirs"] }], chapters: [{ id: "c", title: "界面", question: "", group: "", subtopics: [{ title: "首页", subjectIds: ["s"] }] }] as WikiKnowledgeOrganization["chapters"] });
   const asked = wikiDecisionQuestions(ledger, true).versions;
-  expect(asked.map(question => [question.kind, question.options.map(option => option.id)])).toEqual([["topic", ["mine", "theirs"]]]);
-  expect(asked[0].question).toContain("现在按哪一个");
+  expect(asked).toEqual([]);
 });
 
 it("marks a sentence where it is told, not in a table cell sharing its first words, and keeps a block current a current point speaks of", () => {

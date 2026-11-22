@@ -40,6 +40,14 @@ describe("organization usage analysis", () => {
     expect(rows[0]).toMatchObject({elapsedMs:2800,elapsedScope:"run",latestGenerationMs:800,firstReadableMs:2500,generationAttempts:2,recoveryRequests:1,recoveryReservedOutputTokens:2400,retries:1,requestQueueMs:25,maxSchedulingMs:500});
     const csv=organizationAnalysisCsv(rows);for(const header of ["latest_generation_ms","generation_attempts","recovery_requests","recovery_reserved_output_tokens","first_readable_scope","request_metrics_scope"])expect(csv).toContain(header);
   });
+  it("does not use a previous ready timestamp as the elapsed time of a newer generation", () => {
+    const task = { ...run, executionStartedAt: 1000, readyAt: 1116, firstReadableAt: 1104, pipelineSpans: [
+      { id: "generation", feature: "wiki" as const, phase: "wiki:generation", status: "completed" as const, startedAt: 2000, durationMs: 5000 },
+    ] };
+    const [row] = analyzeOrganizationRuns([task], [], []);
+    expect(row).toMatchObject({ elapsedMs: 5000, latestGenerationMs: 5000 });
+    expect(row.firstReadableMs).toBeUndefined();
+  });
   it("does not report a failed writing batch as completed when an unrelated in-flight batch finishes later",()=>{
     const failed=event("failed-write",{taskType:"focus_session",stage:"synthesis:final",operationId:"failed-batch",status:"failed",createdAt:2000});
     const sibling=event("sibling-write",{taskType:"focus_session",stage:"synthesis:final",operationId:"sibling-batch",status:"completed",createdAt:3000});

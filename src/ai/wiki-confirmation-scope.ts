@@ -18,6 +18,13 @@ const TENTATIVE = /(?:^|[：:；;，,]\s*)(?:AI[^。！？\n]{0,18}建议|AI\s+(
 const CONFIRMED_CELL = /^(?:已定|已确认|已通过|confirmed|approved|decided)$/iu;
 const SENTENCE = /(?<=[。！？])|(?<=[.!?])(?=\s+\D)/u;
 const CLAUSE = /[：:；;，]|,(?!\d{3}\b)|\s+[—–]\s+/gu;
+const CONDITIONAL_FOLLOWUP = /^(?:\*\*)?(?:该功能|这项功能|这一能力|该方案|这项改动|this (?:feature|capability|change|plan))(?=.{0,65}(?:完成|通过|验证|发布|上线|评审|批准|确认|测试)(?:后|前)|.{0,65}\b(?:only after|after|unless|only if)\b)/iu;
+const FOLLOWUP_TRIGGER = /(?:将在|仅在|只有在|要等|需要等|在)\s*([^，,。；;！\n]{2,42}?(?:后|前))|\b(?:only )?(?:after|unless|only if)\b[^,.;!?\n]{3,70}/iu;
+const FOLLOWUP_SUBJECT = /^(?:\*\*)?(?:该功能|这项功能|这一能力|该方案|这项改动|this (?:feature|capability|change|plan))\s*/iu;
+const followupTrigger = (text: string) => {
+  const match = FOLLOWUP_TRIGGER.exec(text);
+  return match ? compact(match[1] ?? match[0]) : undefined;
+};
 
 /** Compare the value with its unit and keep triggers as phrases. A bare 30
  * cannot authorize 30 days, a price, or a differently timed action. */
@@ -80,6 +87,33 @@ export function wikiDecisionRestatement(text: string, choice: string) {
   const releaseChoice = exact.match(/^发布(v\d+(?:\.\d+)+(?:-[\w.-]+)?)标签$/iu)?.[1];
   const releaseRestatement = key(text).match(/^(?:首个公开版本|首发版本|发布标签)(?:已)?确认为(v\d+(?:\.\d+)+(?:-[\w.-]+)?)标签$/iu)?.[1];
   return Boolean(exact && (key(text) === exact || key(framed) === exact || named === exact || releaseChoice && releaseChoice === releaseRestatement));
+}
+
+/** Reconcile already-scoped purchase text with the narrower recorded choice.
+ * The release limit and the scope of the user's approval stay independent. */
+export function wikiPurchaseScopeLead(text: string, answers: readonly { question: string; answer: string }[], zh: boolean) {
+  if (!/(?:实时(?:全网|商品)?比价|\breal[- ]time price comparison\b)/iu.test(text)
+    || !/(?:商城\s*API|\b(?:marketplace|merchant) APIs?\b)/iu.test(text)
+    || /(?:基础比价|basic price comparison)/iu.test(text)) return text;
+  const decision = answers.find(({ question, answer }) => /比价|price comparison/iu.test(question)
+    && /(?:基础比价|basic price comparison)/iu.test(answer)
+    && /购买链接|purchase links?/iu.test(answer)
+    && /前期|早期|初期|\b(?:initial|early|first)\b/iu.test(`${question} ${answer}`)
+    && !/不(?:做|提供|支持|包含)基础比价|\b(?:without|exclude) basic price comparison\b/iu.test(answer));
+  if (!decision) return text;
+  return text.trimEnd() + (zh ? " 前期已确认提供基础比价和购买链接。" : " Basic price comparison and purchase links are confirmed for the initial scope.") + (text.endsWith("\n\n") ? "\n\n" : "");
+}
+
+/** A grouping suggested as the other option stays attributed as a proposal
+ * after the selected display shape has been recorded. */
+export function wikiConfirmedGroupingText(text:string, answers:readonly {question:string;answer:string}[]) {
+  return text.replace(/(?:AI\s*建议\s*)?确认后分为\s*[“「]([^”」]{1,24})[”」]\s*(?:和|与)\s*[“「]([^”」]{1,24})[”」]/gu,(whole,left:string,right:string)=>{
+    const chosen=answers.some(({question,answer})=>/还是分为|或者分为/u.test(question)
+      &&question.includes(left)&&question.includes(right)&&answer.trim().length>=3
+      &&question.slice(0,question.search(/还是分为|或者分为/u)).includes(answer.trim())
+      &&!answer.includes(left)&&!answer.includes(right));
+    return chosen?`另有讨论建议按“${left}”和“${right}”分组`:whole;
+  });
 }
 
 /** A closed list added after a confirmed rule needs its own evidence. */
@@ -188,7 +222,8 @@ function splitReleaseChecklist(row: string, header: string[], scopes: WikiConfir
  * terms from an unadopted proposal. Repair only the generated assertion. */
 export function reviewWikiScopedClaims(text: string, scopes: WikiConfirmationScope[], confirmed: WikiKnowledgeUnit[], zh: boolean, table = false): WikiScopedClaim[] {
   if (!scopes.length) return [];
-  return (table ? text.split("\n").slice(2) : text.split(SENTENCE)).flatMap(raw => {
+  const lines = table ? text.split("\n").slice(2) : text.split(SENTENCE);
+  return lines.flatMap((raw, index) => {
     const before = raw.trim();
     if (!before || (table ? before.split("|").some(cell => TENTATIVE.test(cell.trim())) : TENTATIVE.test(before))) return [];
     // A list item keeps its marker ahead of what is said of it: the label went before 「- 」 and the item read as prose.
@@ -196,6 +231,22 @@ export function reviewWikiScopedClaims(text: string, scopes: WikiConfirmationSco
     const content = table ? before.split("|").map(cell => cell.trim()).filter(cell => cell && !CONFIRMED_CELL.test(cell)).join("，") : before.slice(marker.length);
     const clauses = table ? [] : [...content.matchAll(CLAUSE)];
     for (const scope of scopes) {
+      const preceding = lines[index - 1]?.trim();
+      if (!table && preceding && ADOPTION.test(preceding) && CONDITIONAL_FOLLOWUP.test(before)
+        && (wikiDecisionRestatement(preceding, scope.decision.statement) || sharesCore(preceding, scope.choice))) {
+        const trigger = followupTrigger(before);
+        const anchors = wikiConfirmationDetails(before);
+        const predicate = compact(before.replace(FOLLOWUP_SUBJECT, "")).replace(/[。.!?！？]$/u, "");
+        const scopedText = (unit: WikiKnowledgeUnit) => `${unit.statement} ${wikiUnitConditions(unit).join("；")}`;
+        const supports = (unit: WikiKnowledgeUnit) => wikiConfirmationCovers(scopedText(unit), anchors)
+          && (!trigger || compact(scopedText(unit)).includes(trigger))
+          && (claimSupported(before, [unit]) || predicate.length >= 8 && compact(unit.evidence.quote).includes(predicate));
+        if ((trigger || anchors.length) && !confirmed.some(supports)) {
+          const supported = supports(scope.proposal);
+          const label = supported ? (zh ? "AI 建议：" : "AI proposal: ") : (zh ? "待核对：" : "Needs review: ");
+          return [{ before, parts: [{ text: label + before, ...(supported ? { unit: scope.proposal } : {}) }] }];
+        }
+      }
       const boundary = clauses.find(mark => {
         const head = content.slice(0, mark.index);
         return (ADOPTION.test(head) || CHOSEN_DIRECTION.test(head)) && NEGATED_CHOICE.test(head) === NEGATED_CHOICE.test(scope.choice) && sharesCore(head, scope.choice);

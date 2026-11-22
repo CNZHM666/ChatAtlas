@@ -4,7 +4,7 @@ import type {FocusSession} from "../../shared/focus-session";
 import {wikiSections} from "../../shared/wiki-navigation";
 import {projectMatters} from "../../shared/project-matters";
 import {evolutionRecords} from "../../shared/product-evolution";
-import {projectAnalysisFilename,projectDocument,projectLedgerFile,type ProjectExportFormat,type ProjectExportSelection,type ProjectSourceMode} from "../../export/project-document";
+import {projectAnalysisFilename,projectDocument,projectLedgerFile,type ProjectExportFormat,type ProjectExportSelection,type ProjectSourceMode,type ProjectExportPreset} from "../../export/project-document";
 import {projectKeyEvidence} from "../../export/project-key-evidence";
 import {projectReferenceGroups} from "../../export/project-reference-examples";
 import {wikiReadingFormat} from "../../shared/wiki-reading-format";
@@ -14,7 +14,8 @@ import {projectAnalysisInBackground} from "../project-analysis-background";
 export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;zh:boolean;onClose:()=>void}){
  const l=(cn:string,en:string)=>zh?cn:en,root=useRef<HTMLDivElement>(null),wikiCheckbox=useRef<HTMLInputElement>(null);
  const pages=useMemo(()=>wikiSections(session).filter(page=>page.body.trim()),[session]);
- const [selection,setSelection]=useState<ProjectExportSelection>({overview:true,wikiIds:pages.map(page=>page.id),matters:false,history:false,sources:false,sourceMode:"locators",holderMarks:true});
+ const projectPreset=Boolean(session.wikiKnowledge?.draft)&&!session.wikiKnowledge?.draft?.writingMode&&session.wikiKnowledge?.documentType!=="learning";
+ const [selection,setSelection]=useState<ProjectExportSelection>({overview:true,wikiIds:pages.map(page=>page.id),matters:false,history:false,sources:false,sourceMode:"locators",holderMarks:true,preset:projectPreset?"handoff":undefined});
  const evidenceCount=useMemo(()=>selection.sourceMode==="key"?projectKeyEvidence(session,pages.filter(page=>selection.wikiIds.includes(page.id))).length:0,[session,pages,selection.sourceMode,selection.wikiIds]);
  const sourceDescription={
   locators:l("保留引用编号，方便回到原对话查找。","Keep reference numbers for looking up the original conversation."),
@@ -25,6 +26,12 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
  }[selection.sourceMode??"locators"];
  const [format,setFormat]=useState<ProjectExportFormat>("md"),[status,setStatus]=useState(""),[error,setError]=useState("");
  const [references,setReferences]=useState(false);
+ const applyPreset=(preset:ProjectExportPreset)=>{
+  const workflow=pages.find(page=>/核心.*(?:工作流|流程)|用户旅程|core workflow|user journey/iu.test(page.title));
+  setSelection(current=>({...current,preset,overview:true,wikiIds:preset==="brief"?(workflow?[workflow.id]:[]):pages.map(page=>page.id),
+   sourceMode:preset==="archive"?"excerpts":"locators",matters:preset==="archive"&&current.matters,history:preset==="archive"&&current.history}));
+  setReferences(preset==="archive");
+ };
  const hasReferences=useMemo(()=>session.wikiKnowledge?.documentType!=="learning"&&pages.some(page=>!page.userEdited&&!page.origin
   &&projectReferenceGroups(wikiReadingFormat(page.body,page,{zh}),true).length>0),[session.wikiKnowledge?.documentType,pages,zh]);
  const legacyMatters=projectMatters(session).length,legacyHistory=evolutionRecords(session).filter(record=>!record.hidden).length;
@@ -48,7 +55,7 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
    if(file)save(file.text,file.filename,file.mime);
    if(ledger&&session.wikiKnowledge){const file=projectLedgerFile(session);save(file.text,file.filename,file.mime);}
    let missing=false;
-   if(analysis&&hasRun){const fullMd=file&&format==="md"&&zh&&allWiki&&selection.sourceMode==="locators"&&selection.holderMarks!==false&&!selection.matters&&!selection.history;const quality=fullMd?{sessionId:session.id,updatedAt:session.updatedAt,metrics:wikiQualityCsvMetrics(file.text)}:undefined;const csv=await projectAnalysisInBackground({runId:session.runId,sourceConversationIds:session.sourceConversationIds,quality});if(csv)save(csv,projectAnalysisFilename(session),"text/csv;charset=utf-8");else missing=true;}
+   if(analysis&&hasRun){const fullMd=file&&format==="md"&&zh&&allWiki&&(!selection.preset||selection.preset==="archive")&&selection.sourceMode==="locators"&&selection.holderMarks!==false&&!selection.matters&&!selection.history;const quality=fullMd?{sessionId:session.id,updatedAt:session.updatedAt,metrics:wikiQualityCsvMetrics(file.text)}:undefined;const csv=await projectAnalysisInBackground({runId:session.runId,sourceConversationIds:session.sourceConversationIds,quality});if(csv)save(csv,projectAnalysisFilename(session),"text/csv;charset=utf-8");else missing=true;}
    const done=[file?l("文件","Files"):"",ledger&&hasLedger?l("账本","ledger"):"",analysis&&hasRun&&!missing?l("生成记录","generation record"):""].filter(Boolean);
    setStatus(missing&&!done.length?l("这个项目没有可导出的生成记录","This project has no generation record to export"):`${done.join(l("和"," and "))}${l("已导出"," exported")}${missing?l("；这个项目没有可导出的生成记录","; this project has no generation record"):""}`);
   }
@@ -61,6 +68,13 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
  }}>
   <header><div><h2 id="project-export-title">{l("导出项目文件","Export project files")}</h2><p title={session.title}>{session.title}</p></div><button type="button" aria-label={l("关闭导出","Close export")} onClick={onClose}><X size={20}/></button></header>
   <div className="project-export-body">
+   {projectPreset?<label className="project-export-format">{l("导出预设","Export preset")}<span className="project-export-select">
+    <select value={selection.preset} onChange={event=>applyPreset(event.target.value as ProjectExportPreset)}>
+     <option value="brief">{l("速读","Quick brief")}</option>
+     <option value="handoff">{l("开发交接","Development handoff")}</option>
+     <option value="archive">{l("完整归档","Full archive")}</option>
+    </select><ChevronDown size={14} aria-hidden="true"/>
+   </span></label>:null}
    <fieldset><legend>{l("导出内容","Content")}</legend>
     <div className="project-export-selection">
     <div className="project-export-chapters">
@@ -74,7 +88,7 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
       {pages.map(page=><label key={page.id}>
       <input type="checkbox" checked={selection.wikiIds.includes(page.id)} onChange={event=>setSelection({...selection,wikiIds:event.target.checked?[...selection.wikiIds,page.id]:selection.wikiIds.filter(id=>id!==page.id)})}/><span>{page.wikiDisplayTitle||page.title}</span>
      </label>)}
-      {hasReferences?<label><input type="checkbox" checked={references} disabled={!selection.wikiIds.length} onChange={event=>setReferences(event.target.checked)}/><span>{l("在同一文件附参考示例","Include examples in the document")}</span></label>:null}
+      {hasReferences&&(!selection.preset||selection.preset==="archive")?<label><input type="checkbox" checked={references} disabled={!selection.wikiIds.length} onChange={event=>setReferences(event.target.checked)}/><span>{l("在同一文件附参考示例","Include examples in the document")}</span></label>:null}
      </div>:null}
     </div>
     </div>

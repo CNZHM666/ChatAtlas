@@ -4,6 +4,7 @@ import type { FocusSession } from "../../shared/focus-session";
 import { ProjectKnowledgeActions } from "../project-knowledge-actions";
 import { afterEach, expect, it, vi } from "vitest";
 import { DocumentOverview } from "./DocumentOverview";
+import { KnowledgeLedger } from "./KnowledgeLedger";
 import { contextKnowledge } from "../../test/context-fixture";
 import { WorkspaceEvidenceContext } from "../workspace-evidence-context";
 import type { WikiKnowledgeUnit } from "../../shared/wiki-knowledge";
@@ -223,12 +224,12 @@ it("saves a sourced overview choice, defers another, and updates the displayed q
    ],
  };
  let stored = session;
- const onLocate = vi.fn();
+ const onLocate = vi.fn(), onRead = vi.fn();
  function Harness() {
    const [value, setValue] = useState(session);
    return <ProjectKnowledgeActions.Provider value={{ read: vi.fn(), matter: vi.fn(), save: async (change: (current: FocusSession) => FocusSession) => {
      stored = change(stored); setValue(stored);
-   } }}><DocumentOverview session={value} zh onRead={vi.fn()} onLocate={onLocate}/></ProjectKnowledgeActions.Provider>;
+   } }}><DocumentOverview session={value} zh onRead={onRead} onLocate={onLocate}/></ProjectKnowledgeActions.Provider>;
  }
  render(<Harness/>);
  const open = () => within(screen.getByRole("region", { name: "待决问题" }));
@@ -237,17 +238,18 @@ it("saves a sourced overview choice, defers another, and updates the displayed q
  expect(await open().findByText("是否确定发布前需要运行测试？")).toBeVisible();
  fireEvent.click(open().getByText("查看全部待决问题"));
  const question = open().getByText("第一版采用全文搜索还是也支持向量搜索？").closest("summary")!;
- const search = within(question.closest("li")!);
- expect(question.querySelector(":scope > .wiki-supplement-chevron")).toBeInTheDocument();
- expect(search.queryByRole("group", {name:"备选方案"})).toBeNull();
+ const search = within(question.closest("details")!);
+ expect(question.querySelector("svg")).toBeInTheDocument();
+ expect(question.closest("details")).not.toHaveAttribute("open");
  fireEvent.click(question);
  const options = await search.findByRole("group", {name:"备选方案"});
  expect(within(options).getAllByRole("radio")).toHaveLength(2);
  expect(within(options).queryByRole("button")).toBeNull();
- fireEvent.click(search.getByRole("button", {name:"依据"}));
- expect(onLocate).toHaveBeenCalledWith(session.evidence.at(-3), expect.objectContaining({ mode: "view", overviewEntryId: "search", references: session.evidence.slice(-3, -1) }));
+ expect(onLocate).not.toHaveBeenCalled();
+ fireEvent.click(search.getByRole("button", {name:"来源 1"}));
+ expect(onLocate).toHaveBeenCalledWith(session.evidence.at(-3), expect.objectContaining({ mode: "view", overviewEntryId: "search", references: [session.evidence.at(-3)] }));
  fireEvent.click(question);
- await waitFor(() => expect(search.queryByRole("group", {name:"备选方案"})).toBeNull());
+ expect(question.closest("details")).not.toHaveAttribute("open");
  fireEvent.click(question);
  const confirm = await search.findByRole("button", {name:"确认选择"});
  expect(confirm).toBeDisabled();
@@ -261,7 +263,11 @@ it("saves a sourced overview choice, defers another, and updates the displayed q
  fireEvent.click(plan.getByText("后续计划与验收"));
  expect(await plan.findByText(choices[0])).toBeVisible();
  expect(plan.getByRole("heading", {name:"已确认"})).toBeVisible();
- fireEvent.click(await plan.findByRole("button", {name:"修改选择"}));
+ const row = within(plan.getByText(choices[0]).closest(".overview-plan-line") as HTMLElement);
+ fireEvent.click(row.getByRole("button", {name:"查看章节"}));
+ expect(onRead).toHaveBeenCalledWith(session.sections[0].id, undefined);
+ fireEvent.click(await row.findByRole("button", {name:"修改选择"}));
+ expect(row.getAllByRole("button", {name:"依据"})).toHaveLength(1);
  expect(plan.getByRole("radio", {name:choices[0]})).toBeChecked();
  const confirmEdit = plan.getByRole("button", {name:"确认选择"});
  expect(confirmEdit).toBeDisabled();
@@ -270,7 +276,9 @@ it("saves a sourced overview choice, defers another, and updates the displayed q
  await waitFor(() => expect(stored.wikiKnowledge?.userAnswers?.[0].previousChoices?.[0].answer).toBe(choices[0]));
  expect(stored.wikiKnowledge?.userAnswers?.[0].answer).toBe(choices[1]);
  expect(stored.wikiKnowledge?.decisions?.u0?.verdict).toBe("rejected");
+ expect(stored.wikiKnowledge?.decisionArbitrations?.search).toMatchObject({ choice: "hybrid", text: choices[1] });
  fireEvent.click(open().getByText("是否确定发布前需要运行测试？"));
+ fireEvent.click(open().getByText("是否确定发布前需要运行测试？").closest("details")!.querySelector(".knowledge-more > summary")!);
  const defer = await open().findByRole("button", {name:"暂缓"});
  expect(open().queryByRole("radio", {name:"暂不决定"})).toBeNull();
  fireEvent.click(defer);
@@ -280,4 +288,66 @@ it("saves a sourced overview choice, defers another, and updates the displayed q
  fireEvent.click(await open().findByText("是否确定发布前需要运行测试？"));
  fireEvent.click(await open().findByRole("button", {name:"继续处理"}));
  await waitFor(() => expect(stored.projectMaintenance?.deferredOverviewQuestions).toEqual([]));
+ expect(open().getByText("是否确定发布前需要运行测试？").closest("details")).toHaveAttribute("data-decision-id", "tests");
+ const draft = { ...stored, wikiKnowledge: { ...stored.wikiKnowledge!, draft: {
+   version: 1 as const, generatedAt: 1, status: "complete" as const, chapters: [], report: {},
+ } } };
+ cleanup();
+ onRead.mockClear();
+ onLocate.mockClear();
+ render(<DocumentOverview session={draft} zh onRead={onRead} onLocate={onLocate}/>);
+ const linked = within(screen.getByRole("region", { name: "待决问题" }));
+ fireEvent.click(linked.getByText("是否确定发布前需要运行测试？").closest("summary")!);
+ expect(onRead).not.toHaveBeenCalled();
+ expect(onLocate).not.toHaveBeenCalled();
+ expect(linked.getByRole("radio",{name:choices[2]})).toBeDisabled();
+});
+
+it("handles a repeated ledger suggestion only in the overview and confirms only matching sources", async () => {
+ const session = contextKnowledge().session;
+ const text = "第一版仅允许管理员导出完整项目档案。";
+ const statements = [text, text, "第二版仅允许管理员导出完整项目档案。"];
+ const units: WikiKnowledgeUnit[] = statements.map((statement, index) => ({
+   id: `export-${index}`, subject: "导出权限", statement, kind: "constraint", details: [], delivery: "planned", adoption: { status: "proposal" },
+   evidence: { conversationId: "c", messageId: `export-source-${index}`, evidenceId: `export-ref-${index}`, messageIndex: index,
+      quote: statement, role: "assistant", pasted: false },
+ }));
+ session.evidence.push(...units.map(unit => ({ id:unit.evidence.evidenceId, conversationId:"c", messageId:unit.evidence.messageId,
+   title:"导出讨论", excerpt:unit.statement })));
+ session.wikiKnowledge = { version:1, generatedAt:1, status:"complete", materials:3,
+   batches:[{ sourceIds:[], units, rejected:{}, status:"ok" }],
+   organization:{ version:1, generatedAt:1, status:"complete", report:{}, relations:[], merged:[],
+     chapters:[{ id:session.sections[0].id, title:session.sections[0].title, group:"", question:"", subtopics:[{ title:"导出权限", subjectIds:["export"] }] }],
+     subjects:[{ id:"export", name:"导出权限", aliases:[], unitIds:units.map(unit=>unit.id) }] },
+   draft:{ version:1, generatedAt:1, status:"complete", chapters:[], report:{} },
+ };
+ let stored = session;
+ const onLocate = vi.fn(), onUpdateDecisions = vi.fn();
+ function Harness() {
+   const [value, setValue] = useState(session);
+   return <ProjectKnowledgeActions.Provider value={{ read:vi.fn(), matter:vi.fn(), save:async change=>{stored=change(stored);setValue(stored);} }}>
+     <KnowledgeLedger session={value} zh onLocate={onLocate}/>
+     <DocumentOverview session={value} zh onLocate={onLocate} onRead={vi.fn()} onUpdateDecisions={onUpdateDecisions}/>
+   </ProjectKnowledgeActions.Provider>;
+ }
+ render(<Harness/>);
+ const ledger = within(screen.getByRole("region", { name:"知识点账本" }));
+ expect(ledger.queryByText("可调整的建议")).toBeNull();
+ expect(ledger.queryByText("可选建议")).toBeNull();
+ const queue = () => within(screen.getByRole("region", { name:"待决问题" }));
+ fireEvent.click(queue().getByText("可选建议"));
+ fireEvent.click((await queue().findByText(text)).closest("summary")!);
+ expect(queue().getAllByRole("button", { name:/^来源 \d$/u })).toHaveLength(2);
+ fireEvent.click(queue().getByRole("button", { name:"采纳建议" }));
+ await waitFor(() => expect(stored.wikiKnowledge?.decisions?.[units[0].id]?.verdict).toBe("confirmed"));
+ expect(stored.wikiKnowledge?.decisions?.[units[1].id]?.verdict).toBe("confirmed");
+ expect(stored.wikiKnowledge?.decisions?.[units[2].id]).toBeUndefined();
+ expect(queue().queryByText(text)).toBeNull();
+ const plan = within(screen.getByRole("region", { name:"后续计划与验收" }));
+ fireEvent.click(plan.getByText("后续计划与验收"));
+ expect(await plan.findByText(text)).toBeVisible();
+ fireEvent.click(queue().getByRole("button", { name:"预览正文更新" }));
+ expect(onUpdateDecisions).toHaveBeenCalledOnce();
+ fireEvent.click(queue().getByRole("button", { name:"撤销" }));
+ await waitFor(() => expect(stored.wikiKnowledge?.decisions?.[units[0].id]).toBeUndefined());
 });

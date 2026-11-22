@@ -32,7 +32,17 @@ export async function checkedChapterFit(organization: WikiKnowledgeOrganization,
   const plannedHomes = wikiUnitChapterHomes(organization);
   const fitScore = (terms: ReadonlySet<string>, heading: ReadonlySet<string>) => [...terms].filter(term => heading.has(term)).length;
   const fitSignatures: Record<string, string> = {}, reused = new Set<string>(), failed = new Set<string>();
-  const directorySignature = sourceMessageSignature(JSON.stringify([FIT_SYSTEM, input.ai.id, input.ai.modelId, input.locale, directory]));
+  const fitUnitChecks: NonNullable<WikiKnowledgeOrganization["fitUnitChecks"]> = {};
+  const keyOf = (chapter: string, id: string) => JSON.stringify([chapter,id]);
+  const signatures = new Map<string, string>(), scopedSignatures = new Map<string, string>(), totals = new Map<string, number>();
+  const moves: Array<{ unitId: string; from: WikiKnowledgeOrganization["chapters"][number]; to: WikiKnowledgeOrganization["chapters"][number]; subtopic?: string; sure: boolean }> = [];
+  let reusedUnits = 0;
+  const stableDirectory = organization.chapters.map(chapter => [chapter.id, chapter.title, chapter.question,
+    chapter.subtopics.map(topic => topic.title).sort()] as const).sort(([a], [b]) => a.localeCompare(b));
+  const fitContext = [FIT_SYSTEM, input.ai.id, input.ai.modelId, input.locale];
+  const directorySignature = sourceMessageSignature(JSON.stringify([...fitContext, stableDirectory]));
+  const descriptions = new Map(stableDirectory.map(item => [item[0], item]));
+  const getTerms = input.candidates?.terms ?? knowledgeTerms;
   const jobs = organization.chapters.flatMap((chapter, index) => {
     const all = [...new Set(chapter.subtopics.flatMap(topic => topic.subjectIds.flatMap(id => subjectById.get(id)?.unitIds ?? [])))].filter(id => units.has(id) && !units.get(id)!.about);
     const ids = all.filter(id => {
@@ -40,7 +50,6 @@ export async function checkedChapterFit(organization: WikiKnowledgeOrganization,
       if (plannedHomes.get(id) !== chapter.id || compared.has(id) || !["mechanism", "fact"].includes(unit.kind)
         || !["proposal", "unknown"].includes(unit.adoption.status) || unit.evidence.role !== "assistant" || unit.evidence.pasted || unit.evidence.code
         || ledger.decisions?.[id] || wikiUnitConditions(unit).length || /\d|否定|禁止|不(?:得|做|支持)|\b(?:not|never|without)\b/iu.test(unit.statement)) return true;
-      const getTerms = input.candidates?.terms ?? knowledgeTerms;
       const terms = new Set([...getTerms(unit.subject), ...getTerms(unit.statement)]), own = fitScore(terms, headingTerms[index]);
       const subject = unit.subject.normalize("NFKC").trim().toLowerCase();
       const explicitlyNamed = directory[index].subtopics.some(title => title.normalize("NFKC").trim().toLowerCase() === subject);
@@ -53,23 +62,66 @@ export async function checkedChapterFit(organization: WikiKnowledgeOrganization,
       return own < 3 || headingTerms.some((heading, at) => at !== index && fitScore(terms, heading) >= own - 1);
     });
     report.fit_locally_placed = (report.fit_locally_placed ?? 0) + all.length - ids.length;
-    const signature = sourceMessageSignature(JSON.stringify([directorySignature, chapter.id, all.length,
-      ids.map(id => [id, units.get(id)!.kind, units.get(id)!.statement.slice(0, STATEMENT)])]));
+    totals.set(chapter.id, all.length);
+    const points = ids.map(id => {
+      const unit = units.get(id)!;
+      const key = keyOf(chapter.id,id);
+      const point = [chapter.id, unit.kind, unit.subject, unit.statement, unit.adoption, unit.evidence.role,
+        unit.evidence.pasted, wikiUnitConditions(unit), ledger.decisions?.[id], plannedHomes.get(id)];
+      const signature = sourceMessageSignature(JSON.stringify([directorySignature, ...point]));
+      const terms = getTerms(unit.subject);
+      const own = fitScore(terms, headingTerms[index]);
+      const literalHome = directory[index].subtopics.some(title => title.normalize("NFKC").trim().toLowerCase()
+        === unit.subject.normalize("NFKC").trim().toLowerCase());
+      if (own >= 2 || literalHome && terms.size > 0) {
+        // An unchanged home with a clear subject match can retain a prior stay verdict when edits are
+        // confined to unrelated headings. Previous moves still require the exact directory.
+        const boundTerms = literalHome ? new Set([...terms, ...getTerms(unit.statement)]) : terms;
+        const relevant = organization.chapters.filter((other, at) => other.id === chapter.id || fitScore(boundTerms, headingTerms[at]) > 0)
+          .map(other => descriptions.get(other.id)).sort((a, b) => a![0].localeCompare(b![0]));
+        scopedSignatures.set(key, sourceMessageSignature(JSON.stringify([fitContext, relevant, point])));
+      }
+      signatures.set(key, signature);
+      return [key,signature];
+    });
+    const signature = sourceMessageSignature(JSON.stringify([chapter.id, directorySignature, all.length, [...points].sort(([a], [b]) => a.localeCompare(b))]));
     fitSignatures[chapter.id] = signature;
     if (input.previous?.fitSignatures?.[chapter.id] === signature) {
       reused.add(chapter.id);
+      for (const [key, signature] of points) {
+        const prior = input.previous.fitUnitChecks?.[key];
+        if (prior?.signature !== signature) continue;
+        fitUnitChecks[key] = prior;
+        const to = prior.move && organization.chapters.find(candidate => candidate.id === prior.move!.chapterId);
+        if (prior.move && to && prior.move.sure) {
+          const id = ids.find(id => keyOf(chapter.id, id) === key)!;
+          moves.push({ unitId: id, from: chapter, to, subtopic: prior.move.subtopic, sure: true });
+        }
+      }
       return [];
     }
+    const unchecked = ids.filter(id => {
+      const key = keyOf(chapter.id,id), prior = input.previous?.fitUnitChecks?.[key];
+      if (!prior) return true;
+      const scopedSignature = scopedSignatures.get(key);
+      const exact = prior.signature === signatures.get(key);
+      if (!exact && (prior.move || !scopedSignature || prior.scopedSignature !== scopedSignature)) return true;
+      if (!exact) report.fit_reused_unchanged_scope = (report.fit_reused_unchanged_scope ?? 0) + 1;
+      const to = prior.move && organization.chapters.find(candidate => candidate.id === prior.move!.chapterId);
+      if (prior.move && !to) return true;
+      if (prior.move && to) moves.push({unitId:id,from:chapter,to,subtopic:prior.move.subtopic,sure:prior.move.sure});
+      reusedUnits++;
+      fitUnitChecks[key] = { ...prior, signature: signatures.get(key)!, scopedSignature };
+      return false;
+    });
     const parts: string[][] = [];
-    for (let start = 0; start < ids.length; start += REQUEST_UNITS) parts.push(ids.slice(start, start + REQUEST_UNITS));
-    return parts.map(part => ({ chapter, key: `c${index + 1}`, ids: part, total: all.length }));
+    for (let start = 0; start < unchecked.length; start += REQUEST_UNITS) parts.push(unchecked.slice(start, start + REQUEST_UNITS));
+    return parts.map(part => ({ chapter, key: `c${index + 1}`, ids: part }));
   });
   if (jobs.length && input.onStable) {
-    const pending = new Set(jobs.map(job => job.chapter.id));
+    const pending = new Set([...jobs.map(job => job.chapter.id), ...moves.flatMap(move => [move.from.id, move.to.id])]);
     input.onStable(new Set(organization.chapters.filter(chapter => !pending.has(chapter.id)).map(chapter => chapter.id)));
   }
-  const moves: Array<{ unitId: string; from: WikiKnowledgeOrganization["chapters"][number]; to: WikiKnowledgeOrganization["chapters"][number]; subtopic?: string; sure: boolean }> = [];
-  const totals = new Map(jobs.map(job => [job.chapter.id, job.total]));
   type FitRecovery = { request: StructuredAIRequest<typeof moves>; reason: WikiRecoveryReason };
   const check = async (job: typeof jobs[number], recovery?: FitRecovery, depth = 0): Promise<void> => {
     input.signal.throwIfAborted();
@@ -105,7 +157,15 @@ export async function checkedChapterFit(organization: WikiKnowledgeOrganization,
     }
     report.fit_requests = (report.fit_requests ?? 0) + 1;
     try {
-      moves.push(...await input.ai.generateStructured!(request));
+      const result = await input.ai.generateStructured!(request);
+      moves.push(...result);
+      const byUnit = new Map(result.map(move => [move.unitId,move]));
+      for (const id of job.ids) {
+        const key = keyOf(job.chapter.id,id), move = byUnit.get(id);
+        fitUnitChecks[key] = { signature: signatures.get(key)!, scopedSignature: scopedSignatures.get(key), ...(move ? {
+          move: {chapterId:move.to.id,subtopic:move.subtopic,sure:move.sure},
+        } : {}) };
+      }
     } catch (error) {
       input.signal.throwIfAborted();
       if (job.ids.length > 1 && depth < 3 && wikiCannotFit(error)) {
@@ -141,8 +201,8 @@ export async function checkedChapterFit(organization: WikiKnowledgeOrganization,
     failed.add(move.to.id);
   }
   for (const id of failed) delete fitSignatures[id];
-  Object.assign(report, { fit_requests: report.fit_requests ?? 0, fit_chapters_reused: reused.size, ...(moved ? { fit_moved: moved } : {}), ...(doubts.length ? { fit_doubts: doubts.length } : {}) });
-  const checked = { ...organization, fitSignatures, placementDoubts: doubts };
+  Object.assign(report, { fit_requests: report.fit_requests ?? 0, fit_chapters_reused: reused.size, fit_units_reused:reusedUnits, ...(moved ? { fit_moved: moved } : {}), ...(doubts.length ? { fit_doubts: doubts.length } : {}) });
+  const checked = { ...organization, fitSignatures, fitUnitChecks, placementDoubts: doubts };
   if (!moved) return checked;
   // A subject left empty by the moves goes, and with it a subtopic or chapter that held nothing else.
   const live = new Set(subjects.filter(subject => subject.unitIds.length).map(subject => subject.id));

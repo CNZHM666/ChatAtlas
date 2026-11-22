@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { droppedContainedRepeats, mergeWikiRelatedParagraphs, splitUnrelatedSentences } from "./wiki-paragraph-repeats";
+import { droppedContainedRepeats, droppedRepeatedParagraphs, mergeWikiRelatedParagraphs, splitUnrelatedSentences } from "./wiki-paragraph-repeats";
 import { claimSupported, wikiLabelledThresholdClaims } from "./wiki-claim-support";
 import { pastCapabilityWords, plannedCapabilityWords } from "./wiki-capability-state";
 import { mergeOverlappingRows } from "./wiki-draft-checks";
@@ -9,6 +9,17 @@ import type { WikiDraftChapter, WikiKnowledgeUnit, WikiUnitStatus } from "../sha
 
 const unit = (id: string, statement: string, index = 1, role: "user" | "assistant" = "assistant"): WikiKnowledgeUnit => ({ id, statement, subject: "界面", kind: "constraint", details: [], adoption: { status: "proposal" }, delivery: "unknown", evidence: { evidenceId: id, messageId: id, conversationId: "c", messageIndex: index, role, pasted: false, quote: statement } });
 const chapterOf = (text: string, claims: Array<{ text: string; unitIds: string[] }>, body = text): WikiDraftChapter => ({ id: "ch", title: "界面", question: "", group: "", body, paragraphs: [{ subtopic: "界面", text, unitIds: [...new Set(claims.flatMap(claim => claim.unitIds))], claims }], problems: [] });
+
+it("folds a repeated unnumbered rule across chapters without losing its sources or widening scope", () => {
+  const text = "导入操作保留所有原始记录，并可随时查看其来源。";
+  const first = chapterOf(text, [{ text, unitIds: ["a"] }]);
+  const second = chapterOf(text, [{ text, unitIds: ["b"] }]);
+  const otherScope = chapterOf(text, [{ text, unitIds: ["c"] }]);
+  expect(droppedRepeatedParagraphs([first, second, otherScope], new Set(), id => id === "c" ? "proposal" : "confirmed")).toBe(1);
+  expect(first.paragraphs[0].claims?.[0].unitIds).toEqual(["a", "b"]);
+  expect(second.body).toBe("");
+  expect(otherScope.body).toBe(text);
+});
 
 it("drops a sentence its paragraph already says in full, and a condition the next clause repeats", () => {
   const first = "界面标签统一为中文，保留 ESP32、GPIO、I²C、BOM、MOSFET 等标准技术词的英文写法。", second = "标准技术词如 ESP32、I²C、GPIO、BOM 在中文界面中继续保留英文。";
@@ -71,6 +82,27 @@ it("attributes related suggestions once and keeps release-specific alternatives 
   expect(merged.paragraphs[0].text).toBe(texts[0]+"V1 附件下载需要核对授权。");
   expect(merged.paragraphs[0].claims?.[1]).toEqual({text:"V1 附件下载需要核对授权。",unitIds:["b"]});
   expect(merged.paragraphs[1].text).toBe(texts[2]);
+});
+
+it("joins neighboring short claims with a shared subject while keeping each source and a separate hypothesis", () => {
+  const texts = [
+    "导出文件保留每条结论的原始引文，便于核对不同阶段的取舍。",
+    "导出文件包含本次选中的章节和表格，便于发给其他项目成员。",
+    "若导出文件用于外部审阅，可先用十份样例观察哪些引文需要隐藏。",
+  ];
+  const chapter = chapterOf(texts[0], [{ text: texts[0], unitIds: ["a"] }], texts.join("\n\n"));
+  chapter.paragraphs.push(...texts.slice(1).map((text, index) => ({
+    subtopic: "界面", text, unitIds: [String(index)], claims: [{ text, unitIds: [String(index)] }],
+  })));
+  const subjects = new Map([["a", "export"], ["0", "export"], ["1", "export"]]);
+  const statuses = new Map([["a", "proposal"], ["0", "proposal"], ["1", "proposal"]]);
+  const result = mergeWikiRelatedParagraphs(chapter, subjects, statuses);
+  expect(result.body).toBe(texts[0] + texts[1] + "\n\n" + texts[2]);
+  expect(result.paragraphs[0].claims).toEqual(chapter.paragraphs.slice(0, 2).flatMap(paragraph => paragraph.claims ?? []));
+  const conditional = mergeWikiRelatedParagraphs(chapter, subjects, statuses, new Map(), id => id === "0" ? ["仅限团队共享"] : []);
+  expect(conditional).toBe(chapter);
+  subjects.set("0", "sharing");
+  expect(mergeWikiRelatedParagraphs(chapter, subjects, statuses)).toBe(chapter);
 });
 
 it("puts a confirmed rule and a qualified suggestion together without moving the intervening claim into the paragraph", () => {

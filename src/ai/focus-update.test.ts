@@ -1,13 +1,20 @@
 import "fake-indexeddb/auto";
 import { expect, it, vi } from "vitest";
 import { mergeFocusUpdate, planFocusUpdate, planWikiEditionUpdate, generateFocusUpdate } from "./focus-update";
-import { generateFocusSession } from "./focus-session";
+import { generateFocusSession, ledgerDocumentSession } from "./focus-session";
+import { writeFocusWikiDraft } from "./focus-wiki-draft";
+import { reextractSessionKnowledge } from "./wiki-knowledge-session";
 import { sourceMessageSignature } from "../shared/source-signature";
 import type { FocusSession } from "../shared/focus-session";
 import type { ConversationMessage } from "../shared/types";
 import { getDatabase } from "../storage/db";
 import { readWikiSources, wikiSourceReading } from "../shared/wiki-source-reading";
-vi.mock("./focus-session", () => ({ generateFocusSession: vi.fn() }));
+vi.mock("./focus-session", () => ({ generateFocusSession: vi.fn(), ledgerDocumentSession: vi.fn(), requireLedgerDirectory: vi.fn() }));
+vi.mock("./focus-wiki-draft", () => ({ writeFocusWikiDraft: vi.fn() }));
+vi.mock("./atlas-ai", async importOriginal => ({ ...await importOriginal<typeof import("./atlas-ai")>(), createAtlasAI: vi.fn(() => ({})) }));
+vi.mock("./wiki-knowledge-session", async importOriginal => ({
+  ...await importOriginal<typeof import("./wiki-knowledge-session")>(), reextractSessionKnowledge: vi.fn(),
+}));
 const messages: ConversationMessage[] = ["Initial question", "First answer", "New question", "Second answer"].map((content, index) => ({ id: `m${index}`, conversationId: "source", messageIndex: index, role: index % 2 ? "assistant" : "user", content, contentHash: "", preview: "", createdAt: 1, updatedAt: 1 }));
 const previous: FocusSession = { id: "old", goal: "Review", mode: "review", title: "Project", scope: { kind: "all" }, coverage: { method: "full_batched", sourceCount: 1, processedSegments: 4, totalSegments: 4 }, sourceConversationIds: ["source"], sourceSignatures: { source: Object.fromEntries(messages.map(item => [item.id, sourceMessageSignature(item.content)])) }, sourceMessageOrder: { source: messages.map(item => item.id) }, sourceRoles: { source: Object.fromEntries(messages.map(item => [item.id, item.role])) }, sourceOutlines: [{ conversationId: "source", chapters: [{ id: "first", title: "First", summary: "First answer", messageIds: ["m0", "m1"] }, { id: "second", title: "Second", summary: "Second answer", messageIds: ["m2", "m3"] }] }], evidence: [0, 2].map(index => ({ id: `e${index}`, conversationId: "source", messageId: `m${index}`, title: "Source", excerpt: "Original" })), sections: [0, 2].map(index => ({ id: `s${index}`, title: `Stage ${index}`, body: `Body ${index}`, kind: "review", transition: "", evidenceIds: [`e${index}`] })), activeSectionId: "s0", completedSectionIds: ["s0", "s2"], visitedSectionIds: ["s0"], notes: "Keep project notes", sectionNotes: { s2: { text: "Keep chapter note", evidenceIds: ["e2"], updatedAt: 1 } }, createdAt: 1, updatedAt: 1 };
 const appended = [...messages, { ...messages[0], id: "m4", messageIndex: 4, content: "Additional correction" }];
@@ -88,6 +95,36 @@ it("calls generation only for selected changed material and avoids AI completely
   await db.put("messages", appended.at(-1)!);
   await generateFocusUpdate(previous, sources, "en", new AbortController().signal);
   expect(generateFocusSession).toHaveBeenCalledWith(previous.goal, previous.mode, sources, "en", expect.any(AbortSignal), undefined, undefined, undefined, undefined, expect.objectContaining({ scope: expect.objectContaining({ kind: "goal", blocks: [expect.objectContaining({ messageIds: ["m2", "m3", "m4"] })] }) }));
+});
+
+it.each(["writing mode", "saved decisions"] as const)("reuses the ledger for %s and keeps personal text", async operation => {
+  const db = await getDatabase(); await db.clear("messages"); for (const message of messages) await db.put("messages", message);
+  const sources = [{ id: "source", title: "Source", platform: "chatgpt" as const, url: "", messageCount: 4, updatedAt: 1 }];
+  const old: FocusSession = { ...previous, mode: "work", wikiEdition: "current-v2", wikiMainlineVersion: 1,
+    sections: [{ ...previous.sections[0], userEdited: true, body: "My personal explanation" }, previous.sections[1]],
+    wikiKnowledge: { version: 1, writingMode: "concise", generatedAt: 1, status: "partial", materials: 4,
+      batches: [{ sourceIds: ["m0"], status: "ok", units: [], rejected: {} }],
+      organization: { version: 1, generatedAt: 1, status: "complete", chapters: [], subjects: [], merged: [], relations: [], report: {} },
+      draft: { version: 1, writingMode: "concise", generatedAt: 1, status: "complete", chapters: [], report: {} } } };
+  vi.mocked(generateFocusSession).mockClear();
+  vi.mocked(reextractSessionKnowledge).mockClear();
+  vi.mocked(writeFocusWikiDraft).mockImplementationOnce(async ledger => ({
+    ledger: { ...ledger, draft: { ...old.wikiKnowledge!.draft!, writingMode: ledger.writingMode } }, title: old.title,
+  }));
+  vi.mocked(ledgerDocumentSession).mockResolvedValueOnce({ ...patch, mode: "work", sections: [
+    { ...old.sections[0], userEdited: false, body: "Generated alternative" }, patch.sections[0],
+  ] });
+  const switching = operation === "writing mode";
+  const next = await generateFocusUpdate(old, sources, "en", new AbortController().signal, undefined, undefined, undefined,
+    switching ? { writingMode: "handoff" } : { applyDecisions: true, onKeyDecisions: vi.fn() });
+  expect(reextractSessionKnowledge).not.toHaveBeenCalled();
+  expect(generateFocusSession).not.toHaveBeenCalled();
+  const mode = switching ? "handoff" : "concise";
+  expect(writeFocusWikiDraft).toHaveBeenCalledWith(expect.objectContaining({ batches: old.wikiKnowledge!.batches, writingMode: mode }), expect.anything());
+  if (!switching) expect(vi.mocked(writeFocusWikiDraft).mock.calls.at(-1)?.[1]).toMatchObject({ onKeyDecisions: undefined });
+  expect(next.wikiKnowledge?.draft?.writingMode).toBe(mode);
+  expect(next.sections.find(section => section.id === "s0")?.body).toBe("My personal explanation");
+  expect(next.wikiSuggestions?.s0?.body).toBe("Generated alternative");
 });
 
 it("plans an explicit one-time current-edition rebuild within the existing source scope",()=>{

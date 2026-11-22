@@ -313,7 +313,9 @@ function mappingRow(line: string): string | undefined {
 function literalSourceRows(code: WikiSourceCode): { header?: string; rows: Set<string> } | undefined {
   const lines = code.text.trim().split("\n").filter(line => line.trim());
   if (code.language === TABLE && lines.length >= 3 && lines.every(line => TABLE_ROW.test(line)) && TABLE_DIVIDER.test(lines[1])) {
-    return { header: literalKey(cellsOf(lines[0])), rows: new Set(lines.slice(2).map(row => literalKey(cellsOf(row)))) };
+    const [header, divider, ...rows] = lines.map(cellsOf);
+    if (header.length < 2 || divider.length !== header.length || rows.some(row => row.length !== header.length)) return;
+    return { header: literalKey(header), rows: new Set(rows.map(literalKey)) };
   }
   if (!PLAIN_BLOCK.test(code.language) || lines.length < 2) return;
   const rows = lines.map(mappingRow);
@@ -324,6 +326,18 @@ function numericSourceMapping(code: WikiSourceCode): boolean {
   return PLAIN_BLOCK.test(code.language) && /\d/u.test(code.text) && Boolean(literalSourceRows(code));
 }
 
+export function wikiSourceTableRole(code: WikiSourceCode): "delivery" | "comparison" | undefined {
+  if (code.language !== TABLE || !literalSourceRows(code)) return;
+  const columns = cellsOf(code.text.trim().split("\n")[0]);
+  if (columns.some(column => /功能|能力|模块|\b(?:features?|capabilit(?:y|ies)|modules?)\b/iu.test(column))
+    && columns.some(column => /开放|可用|上线|交付|首发|纳入|\b(?:availability|release|shipping|included|enabled)\b/iu.test(column))) return "delivery";
+  if (columns.some(column => /^(?:竞品(?:名称)?|对标产品|产品(?:名称)?|工具(?:名称)?|competitor|product|tool)$/iu.test(column))
+    && columns.some(column => /对比|对照|定位|优势|劣势|特点|能力|\b(?:comparison|strengths?|weaknesses?|features?|positioning)\b/iu.test(column))
+    || columns.some(column => /^(?:项目(?:名称)?|project)$/iu.test(column))
+    && columns.some(column => /对比|对照|相似度|和.{0,12}相似|\b(?:comparison|similarity)\b/iu.test(column))
+    && columns.some(column => /做什么|借鉴|学什么|\b(?:what it does|lessons?|takeaways?)\b/iu.test(column))) return "comparison";
+}
+
 /** Structured rules whose usable details live in the original, rather than in
  * the unit's summary. Examples, drawings, and general snippets are optional. */
 export function isRequiredWikiSourceBlock(unit: WikiKnowledgeUnit): boolean {
@@ -332,7 +346,9 @@ export function isRequiredWikiSourceBlock(unit: WikiKnowledgeUnit): boolean {
     || /示例|示意|演示|\b(?:example|sample|demo)\b/iu.test(`${unit.subject} ${unit.facet ?? ""} ${unit.evidence.section ?? ""}`)) return false;
   if (code.language === TABLE) {
     const rows = literalSourceRows(code);
-    return Boolean(rows && /版本|范围|限制|适用|兼容|阈值|\b(?:version|scope|limits?|compatibility|thresholds?)\b/iu.test(`${code.text.split("\n")[0]} ${unit.subject}`));
+    const role = wikiSourceTableRole(code);
+    return Boolean(rows && role !== "comparison" && (role === "delivery"
+      || /版本|范围|限制|适用|兼容|阈值|\b(?:version|scope|limits?|compatibility|thresholds?)\b/iu.test(`${code.text.split("\n")[0]} ${unit.subject}`)));
   }
   if (numericSourceMapping(code)) return true;
   if (PLAIN_BLOCK.test(code.language) && blockKind(code, false) === "rules" && ["constraint", "decision", "mechanism", "plan"].includes(unit.kind)) return true;

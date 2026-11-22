@@ -2,6 +2,15 @@ import {expect,it} from "vitest";
 import {claimSentence,proseLayoutBreaks,readWikiWritingBlock,readWikiWritingBlocks,wikiWritingLayout} from "./wiki-writing-layout";
 import type {WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 
+it("recovers omitted paragraph IDs only when every sentence is explicitly bound",()=>{
+ const first="导航栏保留搜索入口。",second="结果显示来源。";
+ const known=new Set(["u1","u2"]);
+ const block={type:"paragraph",text:first+second,claims:[{text:first,unitIds:["u1"]},{text:second,unitIds:["u2"]}]};
+ expect(readWikiWritingBlock(block,known).unitIds).toEqual(["u1","u2"]);
+ expect(()=>readWikiWritingBlock({...block,claims:block.claims.slice(0,1)},known)).toThrow("invalid_writing_paragraph");
+ expect(()=>readWikiWritingBlock(block,new Set(["u1"]))).toThrow("invalid_writing_paragraph");
+});
+
 it("does not infer parallelism from knowledge kind or a shared project name",()=>{
  const units=["输入处理","传输协议","运行环境","错误处理"].map((subject,index)=>({id:`k${index}`,subject,about:{name:"Example",role:"other_project"},kind:"constraint",statement:subject+"仅在授权后启用。",details:[],evidence:{evidenceId:"e",conversationId:"c",messageId:"m",messageIndex:index,role:"assistant",pasted:false,quote:subject},adoption:{status:"proposal"},delivery:"unknown"}) as WikiKnowledgeUnit);
  expect(wikiWritingLayout(units).preferred).toBe("explanation");

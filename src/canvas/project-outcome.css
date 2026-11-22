@@ -1196,33 +1196,49 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
    related knowledge and sources share the prose width, so the right edge lines up.
    About 45 Chinese characters per line at 16px. The content wrapper stays wide
    for diagrams; its prose is limited by .chapter-guide. */
-.wiki-document > :not(div), .wiki-document > .wiki-knowledge-links { max-width: var(--wiki-reading-width); }
+.wiki-document > :not(div), .wiki-document > :is(.wiki-knowledge-links,.wiki-chapter-content) { max-width: var(--wiki-reading-width); }
+.wiki-chapter-content { box-sizing:border-box;width:100%;min-width:0; }
+.wiki-chapter-end { box-sizing:border-box;width:100%;min-width:0;margin-block:24px 8px; }
+.wiki-chapter-end:empty { display:none; }
+.wiki-chapter-end .wiki-chapter-supplement { box-sizing:border-box;width:100%;min-width:0;margin:0;padding:0;border:0;border-block-start:1px solid var(--border); }
+:is(.focus-workspace,.focus-preview) .wiki-chapter-supplement > summary.workspace-disclosure-title { box-sizing:border-box;min-height:38px;padding:6px 8px;gap:8px;color:var(--text);border-radius:6px;font-size:13px; }
+.wiki-chapter-supplement > summary:hover { background:var(--surface-muted); }
+.wiki-chapter-supplement > summary > .disclosure-icon { display:flex;flex:none;align-items:center;justify-content:center;color:var(--muted); }
+.wiki-chapter-supplement > summary > small { padding:0 4px;background:transparent;font-variant-numeric:tabular-nums; }
+.wiki-chapter-supplement .wiki-supplement-content { padding:0 8px 10px;min-width:0; }
+.wiki-chapter-content > .wiki-chapter-end,
+.wiki-chapter-end .wiki-sources-unified,
+.wiki-chapter-end .wiki-sources-unified > :is(summary,.wiki-supplement-content) {
+  box-sizing: border-box; width: 100%; max-width: none; min-width: 0;
+}
+.wiki-chapter-end .wiki-sources-unified > .wiki-supplement-content,
+.wiki-chapter-end .wiki-sources-unified .chapter-source-conversations > section { padding-inline: 0; }
+.wiki-chapter-end .chapter-source-links { gap:1px;margin:0; }
+.focus-workspace .wiki-chapter-end .chapter-source-links > button { grid-template-columns:minmax(0,1fr) 14px;gap:10px;min-height:32px;padding:5px 8px;font-size:13px; }
+.wiki-chapter-end .chapter-source-links > button > small { display:none; }
+.wiki-chapter-end .chapter-source-links > button > svg { color:var(--muted); }
+.wiki-decision-options { margin:0;padding:0; }
+.wiki-decision-option { display:flex;flex-wrap:wrap;align-items:center;column-gap:8px;row-gap:0;min-width:0;border-radius:6px; }
+.wiki-decision-option:has(input:checked) { background:var(--accent-soft); }
+.wiki-decision-option > label { flex:1 1 190px;min-width:0;padding:6px 8px; }
+.wiki-decision-option > time { color:var(--muted);font-size:11.5px;white-space:nowrap; }
+.wiki-decision-actions,.wiki-decision-notice { display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-block:5px 0; }
+.wiki-decision-actions { flex-wrap:wrap; }
+.wiki-decision-sources { display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px;min-width:0;margin-inline-end:auto; }
+.wiki-decision-controls { display:flex;flex:none;align-items:center;gap:6px;margin-inline-start:auto; }
+.wiki-decision-notice { justify-content:flex-start;color:var(--muted);font-size:12px; }
+.document-overview .overview-pending .wiki-decision-adopt { min-height:28px;padding:3px 10px;border:1px solid transparent;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;line-height:1.4; }
+.document-overview .overview-pending .wiki-decision-adopt:enabled:hover { filter:brightness(1.08); }
+.document-overview .overview-pending .wiki-decision-adopt:disabled { background:var(--surface-muted);color:var(--muted);cursor:default; }
+.document-overview .overview-pending .wiki-decision-source { display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:28px;padding:2px 5px;border:0;border-radius:5px;background:transparent;color:var(--muted);font-size:12px;white-space:nowrap; }
+.document-overview .overview-pending .wiki-decision-source:hover { background:var(--surface-muted);color:var(--text); }
+.document-overview .overview-pending .wiki-decision-actions .knowledge-more > summary { min-height:28px;height:28px;width:28px; }
+.document-overview .overview-pending .wiki-decision-actions .knowledge-more > div > button { display:flex;align-items:center;gap:7px;min-height:30px;padding:4px 8px;border:0;background:transparent;font-size:13px; }
+.document-overview .overview-pending .wiki-decision-actions .knowledge-more > div > button:hover { background:var(--surface-muted); }
+.wiki-decision-edit input { flex:1 1 180px;min-width:0;max-width:100%;height:30px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface-solid);color:var(--text);font:inherit;font-size:13px; }
 /* Editing keeps the reading column, so the page does not widen and the save button stays over the editor's right edge. */
 .wiki-document .focus-editor { max-width: var(--wiki-reading-width); }
 
-/* Key decisions on the overview: the points awaiting the user's verdict, each with confirm and set aside. */
-.key-decisions { margin: 18px 0 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid); }
-.key-decisions > summary { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; list-style: none; }
-.key-decisions > summary::-webkit-details-marker { display: none; }
-.key-decisions > summary strong { font-size: 14px; }
-.key-decisions > summary small { color: var(--muted); font-size: 12.5px; }
-.key-decisions-intro { margin: 0 16px 8px; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
-.key-decisions > ol { display: grid; margin: 0; padding: 0 16px 8px; list-style: none; }
-.key-decisions > ol > li { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
-.key-decisions > ol > li > div { flex: 1; min-width: 0; }
-.key-decisions > ol > li p { margin: 0; font-size: 13.5px; line-height: 1.65; }
-.key-decisions > ol > li small { color: var(--muted); font-size: 12px; }
-.key-decisions > ol > li.is-confirmed p { color: var(--accent); }
-.key-decisions > ol > li.is-rejected p { color: var(--muted); text-decoration: line-through; }
-.key-decisions-actions, .key-decisions-verdict { display: inline-flex; flex: none; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
-.key-decisions button { display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
-.key-decisions button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
-.key-decisions-verdict button { min-height: 26px; padding: 2px 6px; border-color: transparent; background: transparent; color: var(--muted); }
-.key-decisions-apply { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 0 16px 14px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); font-size: 13px; }
-.key-decisions-error { margin: 0 16px 12px; color: #b34d4d; font-size: 12.5px; }
-.key-decisions-more { display: block; margin: 0 16px 12px; padding: 4px 0; border: 0; background: none; color: var(--muted, #6b6b6b); font-size: 12.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
-.key-decisions-more:hover { color: inherit; }
-@media (max-width: 620px) { .key-decisions > ol > li { flex-direction: column; } }
 
 /* A chapter's changes against its earlier version, like a code review diff. */
 .chapter-diff { margin: 8px 0 16px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 13.5px; line-height: 1.7; }
@@ -1244,8 +1260,6 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 /* The pause before writing: the key decisions, over the progress, until the user goes on. */
 /* A reading-width card centred over the preview, not stretched across it. */
 .focus-decision-gate { box-sizing: border-box; width: min(860px, 100%); margin: 0 auto 28px; }
-.focus-decision-gate .key-decisions { margin: 0; }
-.focus-decision-gate .key-decisions-apply { justify-content: flex-end; }
 
 /* The knowledge ledger under the overview: key decisions, then every point by chapter and subject. */
 .knowledge-ledger { margin-top: 32px; }
@@ -1278,17 +1292,6 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .focus-reading-body .knowledge-ledger > h2 { font-size: 22px; margin-bottom: 14px; }
 /* The ledger opened as a page reads at the size of the other pages (body 15–16px), not as a side box. */
 .focus-reading-body .knowledge-ledger > h2 small { font-size: 14px; }
-.focus-reading-body .knowledge-ledger .key-decisions > summary { padding: 14px 18px; }
-.focus-reading-body .knowledge-ledger .key-decisions > summary strong { font-size: 16px; }
-.focus-reading-body .knowledge-ledger .key-decisions > summary small, .focus-reading-body .knowledge-ledger .key-decisions-intro { font-size: 14px; }
-.focus-reading-body .knowledge-ledger .key-decisions-intro, .focus-reading-body .knowledge-ledger .key-decisions-error { margin-inline: 18px; }
-.focus-reading-body .knowledge-ledger .key-decisions > ol { padding-inline: 18px; }
-.focus-reading-body .knowledge-ledger .key-decisions > ol > li { padding: 14px 0; }
-.focus-reading-body .knowledge-ledger .key-decisions > ol > li p { font-size: 15px; line-height: 1.7; }
-.focus-reading-body .knowledge-ledger .key-decisions > ol > li small, .focus-reading-body .knowledge-ledger .key-decisions-actions, .focus-reading-body .knowledge-ledger .key-decisions-verdict { font-size: 13px; }
-.focus-reading-body .knowledge-ledger .key-decisions button { min-height: 34px; padding: 5px 12px; font-size: 14px; }
-.focus-reading-body .knowledge-ledger .key-decisions-options [role="radio"] em { font-size: 12.5px; }
-.focus-reading-body .knowledge-ledger .key-decisions-apply { margin-inline: 18px; font-size: 14px; }
 .focus-reading-body .knowledge-ledger-tools [role="tab"] { padding: 5px 12px; font-size: 14px; }
 .focus-reading-body .knowledge-ledger-tools [role="tab"] small { font-size: 12.5px; }
 .focus-reading-body .knowledge-ledger-tools label { height: 36px; }
@@ -1309,19 +1312,30 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .focus-workspace .holder-marks-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; font-size: 13px; }
 .focus-workspace .holder-marks-toggle[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 /* Which version holds now, in the ledger: the same option rows as the step before writing. */
-.key-decisions > ol.key-decisions-versions > li { flex-direction: column; gap: 8px; }
-.key-decisions-options { display: grid; gap: 6px; width: 100%; }
-.key-decisions .key-decisions-options [role="radio"] { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-height: 0; padding: 8px 12px; border-radius: 10px; line-height: 1.55; text-align: left; white-space: normal; }
-.key-decisions .key-decisions-options [role="radio"]:hover { background: var(--surface-muted); }
-.key-decisions .key-decisions-options [role="radio"][aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
-.key-decisions .key-decisions-options [role="radio"].is-quiet { padding-block: 6px; color: var(--muted); }
-.key-decisions-options [role="radio"] em { flex: none; padding: 0 6px; border-radius: 4px; background: var(--surface-muted); color: var(--muted); font-size: 11.5px; font-style: normal; line-height: 1.9; }
-.key-decisions-options .decision-steps-dot { flex: none; width: 14px; height: 14px; margin-top: 4px; border: 1.5px solid var(--border-strong, var(--border)); border-radius: 50%; }
-.key-decisions-options [aria-checked="true"] .decision-steps-dot { border: 4px solid var(--accent); }
 /* Before writing: one question at a time, options as full-width rows; an answer moves on. */
 /* Before writing: one question at a time. What is asked about comes first and largest, the question under it,
    then how the discussion said it; main answers are rows, quiet ones ("还没定", "不写进 Wiki") plain links. */
 .decision-steps { display: grid; gap: 0; padding: 14px 18px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-solid); }
+.wiki-writing-mode-dialog { width:min(500px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;border:0;border-radius:14px;background:var(--surface-solid);color:var(--text); }
+.wiki-writing-mode-dialog::backdrop { background:rgb(12 18 16 / 34%); }
+.wiki-writing-mode { padding:18px; }
+.focus-scope-writing-mode { padding:0; }
+.focus-scope-writing-mode fieldset { margin-top:8px; }
+.overview-question-link { display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:10px 0;background:none;border:0;color:inherit;text-align:left;cursor:pointer; }
+.overview-question-link svg { flex:none;color:var(--muted); }
+.overview-question-link:hover { color:var(--accent); }
+.wiki-writing-mode > h3 { margin:0; }
+.wiki-writing-mode fieldset { display:grid;gap:7px;min-width:0;padding:0;margin:14px 0 0;border:0; }
+.wiki-writing-mode label { display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:start;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;cursor:pointer; }
+.wiki-writing-mode label:hover { background:var(--surface-muted); }
+.wiki-writing-mode label:has(input:checked) { border-color:var(--accent);background:var(--accent-soft); }
+.wiki-writing-mode label:has(input:focus-visible) { outline:2px solid var(--accent);outline-offset:2px; }
+.wiki-writing-mode label > :is(input,svg) { margin:2px 0 0;accent-color:var(--accent); }
+.wiki-writing-mode label strong,.wiki-writing-mode label small { display:block;line-height:1.55; }
+.wiki-writing-mode label strong { font-size:13.5px; }
+.wiki-writing-mode label small { margin-top:1px;color:var(--muted);font-size:12px; }
+.decision-steps.wiki-writing-mode > footer { justify-content:flex-end;gap:8px; }
+.decision-steps.wiki-writing-mode > footer .primary:disabled { opacity:.45;cursor:default; }
 .decision-steps > header { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .decision-steps > header small { flex: none; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .decision-steps-progress { display: flex; flex: 1 1 auto; gap: 3px; margin: 0 0 0 4px; padding: 0; list-style: none; }
@@ -1394,6 +1408,13 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .wiki-document.hides-holder-marks .wiki-claim-marker.is-holder-mark:is(.is-holder-decided, .is-holder-open, .is-holder-earlier) {
   display: inline-flex; opacity: 1; visibility: visible;
 }
+.wiki-document[data-reading-edition="compact"] .wiki-claim-marker.is-holder-mark:is(.is-holder-decided,.is-holder-open,.is-holder-earlier) {
+  min-width:16px; height:16px; padding:0; vertical-align:.12em; border-color:transparent;
+}
+.wiki-document[data-reading-edition="compact"] .wiki-claim-marker.is-holder-mark:is(.is-holder-decided,.is-holder-open,.is-holder-earlier) span { display:none; }
+.wiki-document[data-reading-edition="compact"] .wiki-claim-marker.is-holder-mark.is-holder-decided::before { content:"✓"; }
+.wiki-document[data-reading-edition="compact"] .wiki-claim-marker.is-holder-mark.is-holder-open::before { content:"?"; }
+.wiki-document[data-reading-edition="compact"] .wiki-claim-marker.is-holder-mark.is-holder-earlier::before { content:"·"; }
 
 /* A learning record's mistake with its fix: teal mark and tint. */
 :is(.wiki-document,.document-overview) button.wiki-claim-marker.is-holder-corrected { --holder: color-mix(in srgb, #0f766e 85%, var(--text)); }

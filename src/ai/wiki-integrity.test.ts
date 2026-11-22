@@ -11,6 +11,15 @@ const check = (body: string, claims: NonNullable<WikiDraftChapter["paragraphs"][
   wikiChapterIntegrity({ id: "c", title: "设计", group: "", question: "", body, problems: [],
     paragraphs: [{ text: body, subtopic: "规则", unitIds: units.map(unit => unit.id), claims }] }, id => units.find(unit => unit.id === id), true);
 
+it("repairs a quantity split by a full stop only with a bound source for the pair",()=>{
+ const unit=point("audience","记录时共有1100人。");
+ const text="记录时共有1100。人。";
+ const repaired=check(text,[{text,unitIds:[unit.id]}],[unit]);
+ expect(repaired.body).toBe(unit.statement);
+ expect(repaired.paragraphs[0].claims).toEqual([{text:unit.statement,unitIds:[unit.id]}]);
+ expect(check("记录时共1120。人。",[],[unit]).body).toBe("记录时共1120。人。");
+});
+
 it("restores a detached release scope from the stored complete sentence only", () => {
   const tail = "的核心约束是以确定性规则验证结果。";
   expect(restoreDetachedWikiScope(tail, ["第一版" + tail])).toBe("第一版" + tail);

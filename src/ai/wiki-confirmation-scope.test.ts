@@ -35,6 +35,18 @@ it("keeps an unchosen trigger separate and labels an unsupported extension for r
   expect(unsupported.edits[0].parts[1].unit).toBeUndefined();
 });
 
+it("does not extend release confirmation to a trigger in the next sentence", () => {
+  const decision = unit("scope", "V1 包含画布。");
+  const proposal = unit("schedule", "V1 画布将在 V0 验证通过后引入。");
+  const scope = { decision, proposal, choice: decision.statement };
+  const text = "V1 版本已确认包含交互式画布功能。该功能将在 V0 验证通过后引入。";
+  const result = applyWikiConfirmationScope(text, [scope], [decision], true);
+  expect(result.text).toContain("AI 建议：该功能将在 V0 验证通过后引入。");
+  expect(result.edits[0]?.parts[0]?.unit?.id).toBe(proposal.id);
+  const unsupported = applyWikiConfirmationScope(text.replace("V0", "V2"), [scope], [decision], true);
+  expect(unsupported.text).toContain("待核对：该功能将在 V2 验证通过后引入。");
+});
+
 it("splits a release checklist by the recorded choice and keeps each group bound to its own evidence", () => {
   const decision = unit("choice", "同步校验：实施检查。");
   const value = "至少检查文件名是否合法、内容是否为空、文件大小是否超限以及重复文件";

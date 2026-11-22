@@ -41,10 +41,11 @@ describe("scope confirmation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Browse other discussions" }));
     fireEvent.click(screen.getAllByRole("checkbox")[1]);
     fireEvent.click(button);
-    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "goal", blocks: [expect.objectContaining({ messageIds: ["picker-2", "picker-3"] })] }), "Review stability", "work");
+    expect(confirm).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "goal", blocks: [expect.objectContaining({ messageIds: ["picker-2", "picker-3"] })] }), "Review stability", "work", "concise");
     fireEvent.click(screen.getByRole("radio", { name: "All content" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Development spec/ }));
     fireEvent.click(button);
-    expect(confirm).toHaveBeenLastCalledWith({ kind: "all", sourceConversationIds: [source.id] }, "Review stability", "work");
+    expect(confirm).toHaveBeenLastCalledWith({ kind: "all", sourceConversationIds: [source.id] }, "Review stability", "work", "handoff");
   });
   it("requires manual selection when the goal has no match and never falls back to all", async () => {
     const confirm = vi.fn();
@@ -76,6 +77,6 @@ describe("scope confirmation", () => {
     expect(confirm).not.toHaveBeenCalled();
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ kind: "goal", blocks: [expect.objectContaining({ messageIds: ["picker-2", "picker-3"] })] }), "Review NumPy", "work");
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ kind: "goal", blocks: [expect.objectContaining({ messageIds: ["picker-2", "picker-3"] })] }), "Review NumPy", "work", "concise");
   });
 });

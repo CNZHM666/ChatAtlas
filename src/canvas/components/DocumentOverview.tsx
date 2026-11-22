@@ -8,7 +8,6 @@ import { wikiSections, localizedWikiTitle } from "../../shared/wiki-navigation";
 import { EvidenceReviewButton } from "./EvidenceReviewButton";
 import { ProjectOverviewIntro } from "./ProjectOverviewIntro";
 import { DocumentOverviewDetails } from "./DocumentOverviewDetails";
-import { LearningStanding } from "./LearningStanding";
 import {wikiTitleReviewIncomplete} from "../../shared/wiki-title-review";
 import { wikiProjectTitleSuggestion } from "../../shared/wiki-project-boundary";
 import { useEvidencePoints } from "../use-evidence-points";
@@ -20,13 +19,15 @@ import type { WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import "../document-overview.css";
 
 /** Saved prose and its reading order; opening this view never schedules AI work. */
-export function DocumentOverview({ session, reviewSession = session, zh, title, preview = false, onRead, onLocate, onMaintain, onRename, scope, onReview, pageReading, toolsHost, onBeginEdit }: {
+export function DocumentOverview({ session, reviewSession = session, zh, title, preview = false, onRead, onLocate, onMaintain, onRename, scope, onReview, pageReading, toolsHost, onBeginEdit, onUpdateDecisions, updateDisabled }: {
   session: FocusSession; zh: boolean; title?: string; preview?: boolean;
   reviewSession?:FocusSession;
   onRead: (id: string, heading?:string) => void; onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void;
   onMaintain?: (value: ProjectMaintenance) => Promise<void>;
   toolsHost?: HTMLElement | null;
   onBeginEdit?: () => void;
+  onUpdateDecisions?: () => void;
+  updateDisabled?: boolean;
   onRename?:(name:string)=>void;
   /** Starts checking: evidence across the workspace, chapter by chapter ("issues" is kept for callers stepping through problems). */
   onReview?:(kind:"issues"|"evidence")=>void;
@@ -82,11 +83,10 @@ export function DocumentOverview({ session, reviewSession = session, zh, title, 
     {suggestedTitle?<p className="document-overview-title-notice">{zh?"项目名称建议：":"Suggested project name: "}{suggestedTitle}{onRename?<button type="button" onClick={()=>onRename(suggestedTitle)}>{zh?"检查名称":"Review name"}</button>:null}</p>:null}
     {wikiTitleReviewIncomplete(session.wikiTitleReview)?<p className="document-overview-title-notice" role="status">{zh?"部分标题未整理完成，已保留原名和正文；可在下次整理时重试。":"Some titles could not be refined. Original names and prose are preserved; you can retry during the next update."}</p>:null}
     {overview && <ProjectOverviewIntro session={session} text={overview.text} readingText={readingText} zh={zh} onMaintain={content ? onMaintain : undefined} editTarget={editTarget} onBeginEdit={onBeginEdit} claimMarkers={claimMarkers}/>}
-    {content && <LearningStanding session={session} zh={zh}/>}
     {!preview && pages.length > 0 && <section className="overview-block document-overview-chapters" aria-label={zh ? "一页速览" : "At a glance"}>
       <h2>{zh ? "一页速览" : "At a glance"}</h2>
       <ul>{pages.map(chapter)}</ul>
     </section>}
-    {overview && workspace && <DocumentOverviewDetails session={session} data={workspace} zh={zh} onRead={onRead} onLocate={onLocate}/>}
+    {overview && workspace && <DocumentOverviewDetails session={session} data={workspace} zh={zh} onRead={onRead} onLocate={onLocate} onUpdateDecisions={onUpdateDecisions} updateDisabled={updateDisabled}/>}
   </article></WikiClaimMarkerContext.Provider>;
 }

@@ -7,6 +7,13 @@
 [简体中文](../../CHANGELOG.md) · **English**
 
 
+## 0.1.7 — Alpha
+
+- Choose a concise wiki, development spec, or full audit before writing. Switch modes later using the existing knowledge ledger.
+- Improved source fidelity, targeted recovery, release scope, and decision updates. Handoff documents omit redundant decisions, resolved questions, and low-value appendices.
+- Resolve open questions from the overview. Wiki evidence review better locates entire tables and flows.
+- Refreshed the workspace home, history, and search pages, and removed the duplicate chapter-placement repair shortcut from the ledger.
+
 ## 0.1.6 — Alpha
 
 - Improved extraction reuse, targeted recovery, task budgets, and truncation handling, with failures and pending review shown in progress and diagnostics.

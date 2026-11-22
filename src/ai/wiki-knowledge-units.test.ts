@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { expect, it } from "vitest";
 import { comparedProducts, discussedProjects, droppedExceptions, movedCodes, extractWikiKnowledge, fittingQuote, ownNamesTaggedAsOthers, wikiUnitBatches, wikiUnitRequest, droppedFigures, uncoveredSentences } from "./wiki-knowledge-units";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
@@ -6,12 +7,57 @@ import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
 import { AIProviderHttpError, AIProviderResponseError } from "./provider-errors";
 import { requestBudget } from "./request-policy";
+import { statementDrift } from "./wiki-unit-fidelity";
 
 const material = (index: number, role: "user" | "assistant", body: string, conversationId = "c1"): CoverageMaterial => ({ id: `e:${conversationId}:${index}:1`, role, conversationId, sourceConversationIds: [conversationId], title: "讨论", messageId: `m${index}`, messageIndex: index, text: `${role}: ${body}`, rawEvidenceIds: [`e:${conversationId}:${index}:1`] });
 const signal = new AbortController().signal;
 const proposal = "我建议第一版用 Orama 做全文索引，每 30 秒增量更新一次。";
 const reply = (batch: CoverageMaterial[], all: CoverageMaterial[], value: unknown) => wikiUnitRequest(batch, all, "zh-CN", signal, material => pastedUserText(material.text)).validate(value);
 const unit = (extra: Record<string, unknown>) => ({ subject: "全文索引", statement: "全文索引使用 Orama，每 30 秒增量更新。", kind: "decision", details: ["30 秒"], quoteKey: "p1:1", adoption: "proposal", delivery: "unknown", ...extra });
+
+it("keeps an artifact request out of approval and reads feasibility questions as questions", () => {
+  const first = material(0, "assistant", proposal);
+  const request = material(1, "user", "可以给我一个准确的提示词了，可以参考现有的开源项目进行参考");
+  const result = reply([first], [first, request], { units: [unit({ adoption: "user_adopted", confirmationQuoteKey: "c1:1" })] });
+  expect(result.units[0]?.adoption.status).toBe("proposal");
+  const question = material(2, "user", "我可以前期不做这块只列出需要的吗？第一版必须保留本地导出。");
+  expect(uncoveredSentences([question], [], () => false)[0]?.sentences).toEqual(["第一版必须保留本地导出。"]);
+});
+
+it("does not reread an already grounded decision just for the author's conversational phrasing", () => {
+  const raw = "我刚才想了想，我不应该因为太难就放弃硬件AI。第一版只支持本地存储。";
+  const passage = material(0, "user", raw);
+  const [intent] = reply([passage], [passage], { units: [unit({
+    subject: "方向", statement: "坚持硬件AI方向。", quoteKey: "p1:1", adoption: "unknown", details: [],
+  })] }).units;
+  expect(intent).toBeDefined();
+  expect(uncoveredSentences([passage], [intent], () => false)[0]?.sentences).toEqual(["第一版只支持本地存储。"]);
+});
+
+it("does not let the Inspector clause prove a color the adjacent source forbids", () => {
+  const quote = "选择节点：切换 Component Inspector。按组件显示详情。";
+  const [point] = reply([material(1, "assistant", quote)], [], { units: [unit({
+    subject: "节点视觉", statement: "节点选中时染成红色，右侧 Inspector 显示详情。", details: [],
+  })] }).units;
+  expect(statementDrift(point, "Selected：强调色边框。不要：整个节点染成红色。\n" + quote)).toEqual(expect.arrayContaining([expect.stringContaining("节点选中时染成红色")]));
+  expect(statementDrift({ ...point, statement: "选择节点后切换 Component Inspector。" }, quote)).toEqual([]);
+});
+
+it("attributes a planned action in the same excerpt to the excluded project it actually names", () => {
+  const outsideQuote = "下一阶段支持增量更新知识文档。做完后，NoteTree 就不只是导出工具了。";
+  const mainQuote = "硬件画布使用蓝色标记选中节点。";
+  const source = outsideQuote + "\n\n" + mainQuote, mixed = material(4, "assistant", source);
+  const blocks = projectProofBlocks(source);
+  const keyOf = (phrase: string) => `p1:${blocks.findIndex(block => block.text.includes(phrase)) + 1}`;
+  const points = reply([mixed], [mixed], { units: [
+    unit({ subject: "增量更新", statement: "计划提供文档增量更新。", details: [], quoteKey: keyOf("NoteTree") }),
+    unit({ subject: "节点设计", statement: mainQuote, details: [], quoteKey: keyOf(mainQuote) }),
+  ] }).units;
+  expect(points).toHaveLength(2);
+  const scopes = discussedProjects(points, "Hardware Builder", new Map(), { seededOnly: true, projects: new Set(["notetree"]) });
+  expect(scopes.get(points[0].id)).toBe("NoteTree");
+  expect(scopes.has(points[1].id), JSON.stringify(points.map(point => point.evidence.quote))).toBe(false);
+});
 
 it("bounds transport retries and resumes a failed source without rereading a successful batch", async () => {
   const materials = [material(0, "assistant", proposal), material(1, "assistant", "保留历史对话的原始来源。", "second")];
@@ -38,7 +84,7 @@ it("bounds transport retries and resumes a failed source without rereading a suc
   expect(calls.map(call => call.failed)).toEqual([true]);
 });
 
-it("retains successful leaves of a truncated batch and resumes only its failed source", async () => {
+it.each([false, true])("resumes only the failed split leaf with shared cache %s", async sharedCache => {
   const materials = [0, 1, 2, 3].map(index => material(index, "assistant", "方案细节编号 " + index));
   const calls: number[][] = [];
   let available = false;
@@ -50,16 +96,33 @@ it("retains successful leaves of a truncated batch and resumes only its failed s
     if (ids[0] === 2 && !available) throw new AIProviderHttpError(403, "unavailable");
     return request.validate({ units: [] });
   };
-  const input = { materials, locale: "zh-CN", signal, ai: { generateStructured } };
+  const input = { materials, locale: "zh-CN", signal, ai: { generateStructured }, sharedCache };
   const first = await extractWikiKnowledge(input);
   expect(first.ledger.batches[0]).toMatchObject({ status: "failed" });
   expect(first.ledger.batches[0].failedSources).toEqual({ [materials[2].id]: { kind: "provider", code: "PROVIDER_HTTP_403" } });
   expect(first.ledger.batches[0].recoveredHalves?.map(part => part.path)).toEqual(["00", "01", "11"]);
   calls.length = 0;
   available = true;
-  const resumed = await extractWikiKnowledge({ ...input, previous: first.ledger });
+  const resumed = await extractWikiKnowledge({ ...input, ...(sharedCache ? {} : {previous:first.ledger}) });
   expect(resumed.ledger.status).toBe("complete");
   expect(calls).toEqual([[2]]);
+  expect(resumed.report).toMatchObject({ reusedSplitLeaves:3, resumedSharedBatches:sharedCache ? 1 : 0 });
+});
+
+it("starts extraction within the provider concurrency allowance", async () => {
+  const materials = Array.from({ length: 8 }, (_, index) => material(index, "assistant", "方案细节", `test-${index}`));
+  let active = 0, peak = 0;
+  const ai = { capabilities: { maxConcurrency: 2 }, generateStructured: async <T,>(request: StructuredAIRequest<T>) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 1));
+    active--;
+    return request.validate({ units: [] });
+  } };
+  const result = await extractWikiKnowledge({ materials, locale: "zh-CN", signal, ai });
+  expect(peak).toBe(2);
+  expect(result.report.requests).toBe(8);
+  expect(result.ledger.status).toBe("complete");
 });
 
 it("preserves a literal condition with the claim it qualifies, and rejects a condition absent from its quote", () => {

@@ -1,6 +1,7 @@
 import {replaceParagraph} from "../shared/wiki-body-text";
 import {reviewWikiEvidenceStates} from "./wiki-evidence-state";
 import {wikiDecisionRestatement,wikiLayerDeferral,wikiReleaseDeferral} from "./wiki-confirmation-scope";
+import type { WikiClaim } from "../shared/wiki-claims";
 import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
 import {wikiHistoricalHeading} from "../shared/wiki-history-layout";
 import {wikiSupplementRanges} from "../shared/wiki-source-supplements";
@@ -9,10 +10,73 @@ import {wikiLocalAnswer,wikiRepairIntegrationChoice,wikiScopedIntegration} from 
 import {wikiRepairClosedListCell} from "../shared/wiki-closed-list";
 import {confirmedRoadmaps,wikiRejectedReadingOfConfirmedOrder} from "../shared/wiki-confirmed-roadmap";
 import {wikiDesignContrast,wikiIntegrationProposal,wikiWithoutImplementationAside,wikiWithoutUnsupportedExample} from "./wiki-prose-grounding";
-import {aboutNameKey,wikiLedgerUnits,type WikiDraftChapter,type WikiKnowledgeLedger,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
+import {aboutNameKey,statesCore,wikiLedgerUnits,type WikiDraftChapter,type WikiKnowledgeLedger,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
+import {knowledgeTerms} from "../shared/knowledge-subject";
 import {separateUnconfirmedWikiPlans} from "./wiki-draft-checks";
 
 const DECISION_SUPPLEMENT=/^(?:已确认的决定补记|Confirmed decisions retained)$/u;
+const LEGACY_DECISION_HEADINGS=/^(?:已确[认定]的取舍|已确认的决定补记|其他已定决定|Confirmed choices|Confirmed decisions retained|Other confirmed decisions)$/u;
+
+const INTERNAL_DRAFT_LABEL = /^(?:用户补记|用户补注|用户补充记录|写作补记|整理补记|写作校对记录|User (?:addendum|supplement(?:ary note)?)|Writer(?:’s|'s)? note|Editorial (?:note|addendum))$/iu;
+
+export function wikiInternalDraftLabel(title: string) {
+  return INTERNAL_DRAFT_LABEL.test(title.replace(/^#{1,6}\s+/u, "").replace(/\*\*|__/gu, "").trim());
+}
+
+/** Hide generation labels while keeping the supported text and its existing bindings. */
+export function cleanWikiDraftDisplay(body: string) {
+  const original = compactWikiDecisionHeadings(body);
+  if (!/补记|补注|补充记录|校对记录|addendum|supplement|writer|editorial/iu.test(original)) return original;
+  const attachments = wikiSupplementRanges(original);
+  let result = original;
+  for (const block of wikiDocumentBlocks(original).reverse()) {
+    if (attachments.some(([start, end]) => block.start >= start && block.end <= end)) continue;
+    const text = original.slice(block.start, block.end);
+    const prefix = block.kind === "paragraph" && text.match(/^(?:\*\*|__)?([^：:\n]{1,40})[：:](?:\*\*|__)?[ \t]*/u);
+    if ((block.kind === "heading" || block.kind === "paragraph") && wikiInternalDraftLabel(text)) {
+      const blank = original.slice(block.end).match(/^\r?\n(?:\r?\n)?/u)?.[0].length ?? 0;
+      result = result.slice(0, block.start) + result.slice(block.end + blank);
+    } else if (prefix && wikiInternalDraftLabel(prefix[1])) {
+      result = result.slice(0, block.start) + result.slice(block.start + prefix[0].length);
+    }
+  }
+  return result.trim();
+}
+
+export function cleanWikiDraftClaims(body: string, claims: WikiClaim[]) {
+  return claims.map(claim => {
+    if (body.includes(claim.text)) return claim;
+    const text = cleanWikiDraftDisplay(claim.text);
+    return text && body.includes(text) ? { ...claim, text } : claim;
+  });
+}
+
+/** Project older recovery headings as one section without changing the
+ * retained statements, their order, or source blocks. */
+export function compactWikiDecisionHeadings(body:string):string{
+ if(!/(?:已确[认定]的取舍|已确认的决定补记|Confirmed choices|Confirmed decisions retained)/u.test(body))return body;
+ const blocks=wikiDocumentBlocks(body),attachments=wikiSupplementRanges(body);
+ const groups:Array<{start:number;end:number;text:string;depth:number;title:string}>=[];
+ for(const [index,block] of blocks.entries()){
+  if(block.kind!=="heading"||attachments.some(([start,end])=>block.start>=start&&block.end<=end))continue;
+  const depth=block.text.match(/^#+/u)?.[0].length??0;
+  const title=block.text.slice(depth).trim();
+  if(!depth||!LEGACY_DECISION_HEADINGS.test(title))continue;
+  const next=blocks.slice(index+1).find(item=>item.kind==="thematicBreak"||item.kind==="heading"&&(item.text.match(/^#+/u)?.[0].length??0)<=depth
+    ||attachments.some(([start])=>item.start>=start&&start>=block.end));
+  const end=next?.start??body.length;
+  groups.push({start:block.start,end,text:body.slice(block.end,end).trim(),depth,title});
+ }
+ if(!groups.length||groups.some((group,index)=>index>0&&group.start<groups[index-1].end))return body;
+ const [first]=groups;
+ const title=/\p{Script=Han}/u.test(first.title)?"其他已定决定":"Other confirmed decisions";
+ const retained=groups.map(group=>group.text).filter(Boolean).join("\n\n");
+ for(const group of groups.slice().reverse()){
+  const replacement=group===first&&retained?`${"#".repeat(first.depth)} ${title}\n\n${retained}${group.end<body.length?"\n\n":""}`:"";
+  body=body.slice(0,group.start)+replacement+body.slice(group.end);
+ }
+ return body.trimEnd();
+}
 
 /** Older previews may already contain two rendered copies of the same unit. */
 function compactDecisionSupplement(chapter:WikiDraftChapter,confirmed:ReadonlySet<string>):WikiDraftChapter{
@@ -128,7 +192,7 @@ export function retainWikiDecisions(chapters:WikiDraftChapter[],ledger:WikiKnowl
   if(!units?.length)return chapter;
   let body=chapter.body;
   const paragraphs=units.map(unit=>{
-   const topic=home.get(unit.id)?.subtopic,text=unit.statement.trim(),placed=topic&&putUnderTopic(body,topic,text);
+   const topic=home.get(unit.id)?.subtopic,text=unit.statement.trim(),placed=topic&&putUnderWikiDecisionTopic(body,topic,text,true);
    if(placed)body=placed;
    return {subtopic:placed?topic!:subtopic,text,unitIds:[unit.id],claims:[{text,unitIds:[unit.id]}]};
   });
@@ -143,10 +207,17 @@ function openingStatesChoice(chapter:WikiDraftChapter,choice:string){
  return opening.split(/(?<=[。！？])|(?<=[.!?])(?=\s|$)|\n/u).some(sentence=>wikiDecisionRestatement(sentence.trim(),choice));
 }
 
-function putUnderTopic(body:string,topic:string,text:string){
- if(wikiHistoricalHeading(topic))return;
- const block=wikiDocumentBlocks(body).find(block=>block.kind==="heading"&&block.text.replace(/^#{1,6}\s+/u,"").trim()===topic);
- return block?`${body.slice(0,block.end)}\n\n${text}${body.slice(block.end)}`:undefined;
+export function putUnderWikiDecisionTopic(body:string,topic:string,text:string,create=false){
+ if(!topic.trim()||/[\r\n]/u.test(topic)||wikiHistoricalHeading(topic)||LEGACY_DECISION_HEADINGS.test(topic))return;
+ const attachments=wikiSupplementRanges(body),blocks=wikiDocumentBlocks(body);
+ const heading=blocks.find(block=>block.kind==="heading"&&block.text.replace(/^#{1,6}\s+/u,"").trim()===topic
+   &&!attachments.some(([start,end])=>block.start>=start&&block.end<=end));
+ if(heading)return `${body.slice(0,heading.end)}\n\n${text}${body.slice(heading.end)}`;
+ if(!create)return;
+ const end=Math.min(attachments[0]?.[0]??body.length,blocks.find(block=>block.kind==="heading"&&(wikiHistoricalHeading(block.text)
+   ||LEGACY_DECISION_HEADINGS.test(block.text.replace(/^#{1,6}\s+/u,""))))?.start??body.length);
+ const before=body.slice(0,end).trimEnd(),after=body.slice(end).trimStart();
+ return [before,`### ${topic}\n\n${text}`,after].filter(Boolean).join("\n\n");
 }
 
 /** An answer may confirm an initial count without confirming the later target
@@ -296,7 +367,8 @@ export function reviewWikiEditorial(chapters:WikiDraftChapter[],ledger:WikiKnowl
     // A choice about a count does not reject every other clause of a compound unit.
     next=`关于${question.about}，项目发起人在整理时选择“${answer.answer}”。该取舍仅限于此问题的范围。`;
    }
-   if(sources.length===1&&!/早期|此前|待核对|earlier|previous/iu.test(next)){
+   if(sources.length===1&&knowledgeTerms(next).size>=2&&statesCore(sources[0].statement,next)
+    &&!/早期|此前|待核对|earlier|previous/iu.test(next)){
     const narrowing=ledger.organization?.relations.find(relation=>relation.older===sources[0].id&&relation.kind==="narrows"&&relation.status==="resolved");
     const chosen=narrowing&&ledger.userAnswers?.find(answer=>answer.unitIds.includes(narrowing.newer));
     const option=ledger.writingQuestions?.find(question=>question.id===chosen?.questionId)?.options.find(option=>option.id===chosen?.optionId);
@@ -342,7 +414,7 @@ export function reviewWikiEditorial(chapters:WikiDraftChapter[],ledger:WikiKnowl
   const plan=ledger.organization?.chapters.find(chapter=>chapter.subtopics.some(topic=>topic.subjectIds.includes(subject?.id??"")));
   const topic=plan?.subtopics.find(topic=>topic.subjectIds.includes(subject?.id??""));
   const owning=result.find(chapter=>chapter.id===plan?.id);
-  const placed=owning&&topic&&putUnderTopic(owning.body,topic.title,current.statement);
+  const placed=owning&&topic&&putUnderWikiDecisionTopic(owning.body,topic.title,current.statement,true);
   if(placed&&owning&&topic){
    const text=current.statement;
    owning.body=placed;
@@ -364,7 +436,7 @@ export function reviewWikiEditorial(chapters:WikiDraftChapter[],ledger:WikiKnowl
   const plan=ledger.organization?.chapters.find(chapter=>chapter.subtopics.some(topic=>topic.subjectIds.includes(subject?.id??"")));
   const topic=plan?.subtopics.find(topic=>topic.subjectIds.includes(subject?.id??""));
   const home=result.find(chapter=>chapter.id===plan?.id),text=workflow.qualify(unit.statement,[id]);
-  const placed=home&&topic&&text!==unit.statement&&putUnderTopic(home.body,topic.title,text);
+  const placed=home&&topic&&text!==unit.statement&&putUnderWikiDecisionTopic(home.body,topic.title,text);
   if(!placed||!home||!topic)continue;
   home.body=placed;
   home.paragraphs.push({text,subtopic:topic.title,unitIds:[id],claims:[{text,unitIds:[id]}]});

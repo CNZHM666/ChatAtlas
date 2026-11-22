@@ -57,10 +57,16 @@ export function FocusGenerationProgress({ zh, detail, sourceCount, retrying, mod
     const activity = ledger.stage === "cover" || ledger.stage === "proofread" ? wikiStageName(ledger.stage, zh)
       : ledgerStep === 1 ? zh ? "正在整理" : "Organizing" : wikiStepTitle(ledgerStep, zh);
     const status = retrying ? zh ? "重试中" : "Retrying" : activity;
+    const coverage = ledger.coverage;
+    const remaining = [
+      coverage?.failed ? zh ? `读取失败可重试 · ${coverage.failed} 条` : `${coverage.failed} source messages can be retried` : "",
+      coverage?.pending ? zh ? `依据不足待判断 · ${coverage.pending} 条` : `${coverage.pending} source messages need an evidence decision` : "",
+    ].filter(Boolean);
     const ledgerPanel = <section className="focus-generation-progress" aria-label={title}>
       <div className="focus-generation-heading-row"><strong role="status"><LoaderCircle size={18} aria-hidden="true" />{status}</strong><small>{elapsed}</small></div>
       <div className="focus-generation-meter"><small>{where}</small>{percent != null ? <span>{percent}%</span> : null}</div>
       <progress {...(measured ? { value: done } : {})} max={Math.max(1, measured)} aria-label={zh ? "当前步骤进度" : "Current step progress"} />
+      {remaining.length ? <small className="generation-recovery-note">{remaining.join(" · ")}</small> : null}
       <div className="focus-generation-actions"><small className="generation-round">{detail.resumed ? zh ? "从已保存的生成进度继续 · " : "Continuing saved work · " : ""}{zh ? `第 ${ledgerStep + 1}/3 步` : `Step ${ledgerStep + 1} of 3`}</small>{cancel}</div>
     </section>;
     return present(ledgerPanel, status, `${zh ? `${ledgerStep + 1}/3 步` : `${ledgerStep + 1}/3`}${percent != null ? ` · ${percent}%` : ""}`);

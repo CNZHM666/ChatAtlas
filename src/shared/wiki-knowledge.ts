@@ -20,8 +20,8 @@ export interface WikiKnowledgeUnit {
   details: string[];
   /** Literal prerequisites and applicability limits from the unit's own quote. */
   conditions?: string[];
-  /** conversationSpan: when its conversation was held, by the platform's own times (wikiSaidLater reads it). */
-  evidence: { evidenceId: string; conversationId: string; messageId: string; messageIndex: number; role: "user" | "assistant"; pasted: boolean; quote: string; conversationSpan?: WikiConversationSpan; /** The heading its quote stands under in its message (首页 Header), when the statement does not name it. */ section?: string; /** The code block its quote stands in or introduces (a file tree, a schema), as written. */ code?: { language: string; text: string }; /** A learning record's exercise: code the learner wrote, in their message or quoted back by the AI marking it. */ learnerCode?: true; /** The AI's review of that exercise, from the message quoting it: what it said of the code, and the code it gave instead. */ review?: { said: string; code?: { language: string; text: string }; /** A block the AI's words lead into ("这样不行，因为："). */ shows?: { language: string; text: string } }; /** The task the exercise answers, as the AI set it: its rule, and the data it gave. */ task?: { said: string; code?: { language: string; text: string } } };
+  /** discussedAt is the platform's message time, when known. conversationSpan is the fallback range. */
+  evidence: { evidenceId: string; conversationId: string; messageId: string; messageIndex: number; role: "user" | "assistant"; pasted: boolean; quote: string; discussedAt?: number; conversationSpan?: WikiConversationSpan; /** The heading its quote stands under in its message (首页 Header), when the statement does not name it. */ section?: string; /** The code block its quote stands in or introduces (a file tree, a schema), as written. */ code?: { language: string; text: string }; /** A learning record's exercise: code the learner wrote, in their message or quoted back by the AI marking it. */ learnerCode?: true; /** The AI's review of that exercise, from the message quoting it: what it said of the code, and the code it gave instead. */ review?: { said: string; code?: { language: string; text: string }; /** A block the AI's words lead into ("这样不行，因为："). */ shows?: { language: string; text: string } }; /** The task the exercise answers, as the AI set it: its rule, and the data it gave. */ task?: { said: string; code?: { language: string; text: string } } };
   adoption: { status: WikiUnitAdoption; approval?: { evidenceId: string; messageId: string; quote: string } };
   delivery: "unknown" | "planned" | "user_reported";
   relation?: { kind: "replaces" | "narrows" | "supplements" | "coexists" | "rejects"; hint: string };
@@ -30,7 +30,7 @@ export interface WikiKnowledgeUnit {
   about?: { name: string; role: WikiUnitAboutRole };
 }
 /** Where a ledger step is: requests done of the stage's total, for a progress bar. */
-export interface WikiProgress { stage: "extract" | "cover" | "verify" | "name" | "attach" | "split" | "same" | "merge" | "group" | "plan" | "write" | "proofread"; done: number; total: number }
+export interface WikiProgress { stage: "extract" | "cover" | "verify" | "name" | "attach" | "split" | "same" | "merge" | "group" | "plan" | "write" | "proofread"; done: number; total: number; coverage?: ReturnType<typeof wikiCoverageCounts> }
 export type WikiProgressFn = (progress: WikiProgress) => void;
 export type WikiUnitAboutRole = "competitor" | "reference" | "other_project";
 export const ABOUT_ROLES: WikiUnitAboutRole[] = ["competitor", "reference", "other_project"];
@@ -68,17 +68,24 @@ export interface WikiUnitBatch {
    * more. A reused batch without it is checked on the next run. */
   coverChecked?: number;
   /** Per-material recovery outcomes, bound to the source text and review rules. */
-  coverage?: Record<string, { version: number; sourceSignature: string; status: "covered" | "duplicate" | "no_knowledge" | "failed" | "pending"; reason?: string; failure?: WikiUnitBatch["failure"]; attempts: number; recoveryKey?: string }>;
+  coverage?: Record<string, { version: number; sourceSignature: string; status: "covered" | "duplicate" | "no_knowledge" | "failed" | "pending"; reason?: string; failure?: WikiUnitBatch["failure"]; attempts: number; recoveryKey?: string; pendingClauses?: string[] }>;
   /** The version of the statement check this batch passed: statements saying more than their source (a stronger rule,
    * a figure, a length) were asked to be told in the source's terms once. */
   fidelityChecked?: number;
   /** Successful statement checks survive failures of other requests in this batch. */
-  fidelityResults?: Record<string, { version: number; signature: string; remaining?: number }>;
+  fidelityResults?: Record<string, { version: number; signature: string; remaining?: number; blocked?: true }>;
   /** Such sentences still without a unit after that request, counted. */
   uncoveredSentences?: number;
 }
 
+export type WikiWritingMode = "concise" | "handoff" | "audit";
+
 export interface WikiKnowledgeLedger {
+  /** The purpose chosen before drafting. Older ledgers keep their original presentation. */
+  writingMode?: WikiWritingMode;
+  /** A decision about which saved, scoped receipt applies now. All receipts remain available. */
+  decisionArbitrations?: Record<string, { choice: string; at: number; chapterId?: string; heading?: string; text?: string; question?: string; locallyApplied?: boolean;
+    optionTexts?: string[]; unitIds?: string[]; evidenceIds?: string[]; mode?: "choose" | "defer" | "custom" | "merge" }>;
   version: 1;
   generatedAt: number;
   status: "complete" | "partial";
@@ -113,6 +120,7 @@ export interface WikiKnowledgeLedger {
   separateGroups?: string[];
   /** Questions the writer's reading of the material raised before writing, worked out for this organization. */
   writingQuestions?: WikiWritingQuestion[];
+  writingQuestionRun?: { signature: string; questionIds: string[] };
   /** The user's answers to them, in the user's own words: given to the writer beside the units they concern. */
   userAnswers?: WikiUserAnswer[];
   /** Points the user said belong to another project (unit id → its name): tagged as that project wherever it is read. */
@@ -280,6 +288,23 @@ export function wikiUncoveredMessageCount(batches: WikiUnitBatch[]) {
   return new Set(batches.flatMap(batch => batch.uncovered ?? []).map(id =>
     /^e:[^:]+:\d+:\d+$/u.test(id) ? id.replace(/:\d+$/u, "") : id)).size;
 }
+
+export function wikiCoverageCounts(batches: readonly WikiUnitBatch[]) {
+  const failed = new Set<string>(), pending = new Set<string>();
+  const message = (id: string) => /^e:[^:]+:\d+:\d+$/u.test(id) ? id.replace(/:\d+$/u, "") : id;
+  for (const batch of batches) {
+    if (batch.skipped) continue;
+    if (batch.status === "failed") for (const id of batch.failedSources ? Object.keys(batch.failedSources) : batch.sourceIds) {
+      failed.add(message(id));
+    }
+    for (const id of batch.uncovered ?? []) {
+      if (batch.coverage?.[id]?.status === "failed") failed.add(message(id));
+      else pending.add(message(id));
+    }
+  }
+  for (const key of failed) pending.delete(key);
+  return { failed: failed.size, pending: pending.size };
+}
 /** status says whether every writing request ran; quality says whether the material and the text can be relied on. */
 /** What the project is doing now, leaves out now, and counts as done, from the units the draft shows: what a reader
  * continuing the work needs first. holder: decided (the user confirmed it) or user (the user said it); none for a suggestion. */
@@ -287,7 +312,7 @@ export interface WikiBaselineItem { part: "now" | "notNow" | "done"; text: strin
 /** A document-wide check that failed: a point written without part of it, an earlier version told as current, the
  * user's words told as the assistant's (or the reverse), one point told in two chapters. */
 export interface WikiInvariantIssue { kind: "coverage" | "missing" | "earlier_as_current" | "user_as_ai" | "ai_as_user" | "rejected_as_current" | "declined_overstated" | "repeat"; chapterId: string; unitIds: string[]; text: string }
-export interface WikiUnitDraft { version: 1; generatedAt: number; status: "complete" | "partial"; chapters: WikiDraftChapter[]; report: Record<string, number>; quality?: WikiDraftQuality; baseline?: WikiBaselineItem[]; invariants?: WikiInvariantIssue[] }
+export interface WikiUnitDraft { version: 1; writingMode?: WikiWritingMode; generatedAt: number; status: "complete" | "partial"; chapters: WikiDraftChapter[]; report: Record<string, number>; quality?: WikiDraftQuality; baseline?: WikiBaselineItem[]; invariants?: WikiInvariantIssue[] }
 
 /** Planned chapters that failed writing remain visible in completeness reporting,
  * even though empty prose never becomes a saved Wiki page. */
@@ -307,9 +332,11 @@ export function wikiDraftCompleteness(ledger: WikiKnowledgeLedger | undefined) {
 export function scopedWikiDraft(source: WikiKnowledgeLedger): WikiUnitDraft | undefined {
   const ledger = withoutOwnProjectAnswers(source);
   const draft = ledger.draft, keys = Object.entries(ledger.scopeAnswers ?? {}).filter(([, answer]) => answer === "exclude").map(([key]) => key);
-  if (!draft || !keys.length) return draft;
+  const blocked = wikiBlockedUnitIds(ledger);
+  if (!draft || !keys.length && !blocked.size) return draft;
   const answered = withUserAnswers(ledger), active = new Set(answered.organization?.subjects.flatMap(subject => subject.unitIds));
-  const removed = new Set(ledger.organization?.subjects.flatMap(subject => subject.unitIds).filter(id => !active.has(id)));
+  const outside = keys.length ? ledger.organization?.subjects.flatMap(subject => subject.unitIds).filter(id => !active.has(id)) ?? [] : [];
+  const removed = new Set([...blocked, ...outside]);
   const units = new Map(wikiLedgerUnits(ledger).map(unit => [unit.id, unit]));
   for (const unit of units.values()) if (unit.about && keys.includes(aboutNameKey(unit.about.name))) removed.add(unit.id);
   const namesExcluded = (text: string) => keys.some(key => aboutNameKey(text).includes(key));
@@ -526,7 +553,10 @@ export interface WikiKnowledgeOrganization {
   groupRetryClusters?: string[][];
   layoutContext?: true;
   unitSignatures?: Record<string, string>;
+  unitOrganizationSignatures?: Record<string, string>;
+  unitSubjectNames?: Record<string, string>;
   fitSignatures?: Record<string, string>;
+  fitUnitChecks?: Record<string, { signature: string; scopedSignature?: string; move?: { chapterId: string; subtopic?: string; sure: boolean } }>;
   status: "complete" | "partial";
   subjects: WikiSubject[];
   /** Same-statement units folded into one; the kept unit carries the union of details. */
@@ -536,8 +566,10 @@ export interface WikiKnowledgeOrganization {
   restated?: string[][];
   relations: WikiUnitRelation[];
   chapters: WikiChapterPlan[];
-  /** The project's own name as the sources call it, from directory planning; names a new document no one named. */
+  /** The project's own name as the sources call it, from directory planning. */
   projectName?: string;
+  /** A descriptive title from the in-scope product's purpose. It has no effect on ownership. */
+  documentTitle?: string;
   /** Explanation groups (phase 2); absent on older ledgers, where every unit stands alone. */
   groups?: WikiExplanationGroup[];
   /** Groups split or joined by an update: the ids before and after. */
@@ -762,8 +794,12 @@ export function wikiUnitConditions(unit: WikiKnowledgeUnit): string[] {
   return [...scoped.values()].filter(item => item.applies).slice(0, 2).map(item => item.condition);
 }
 export function missingWikiConditions(unit: WikiKnowledgeUnit, text: string): string[] {
-  const key = conditionKey(text);
-  return wikiUnitConditions(unit).filter(condition => !key.includes(conditionKey(condition)));
+  // Interchangeable introductory conjunctions keep the same trigger. Leave
+  // scope restrictions (only if, unless, 仅当, 除非) intact.
+  const normalizeTrigger = (value: string) => conditionKey(value.replace(/如果|假如|倘若|若(?!干)/gu, "如果")
+    .replace(/((?:运营|运行|维护|投入|总)?成本|预算)(?:我|我们)?(?:能够|能)接受/gu, "$1可接受"));
+  const key = normalizeTrigger(text);
+  return wikiUnitConditions(unit).filter(condition => !key.includes(normalizeTrigger(condition)));
 }
 /** Report omissions only where the text actually states the conditional claim. */
 export function droppedWikiConditions(unit: WikiKnowledgeUnit, text: string): string[] {
@@ -825,6 +861,10 @@ export const keepsDetail = (text: string, detail: string) => detailKey(readableD
 
 export function wikiLedgerUnits(ledger: WikiKnowledgeLedger | undefined): WikiKnowledgeUnit[] {
   return ledger?.batches.flatMap(batch => batch.units) ?? [];
+}
+
+export function wikiBlockedUnitIds(ledger: WikiKnowledgeLedger): Set<string> {
+  return new Set(ledger.batches.flatMap(batch => Object.entries(batch.fidelityResults ?? {}).flatMap(([id, item]) => item.blocked ? [id] : [])));
 }
 
 /** An exception limiting a rule: 除非, 仅当, 只有……才, unless. */

@@ -9,6 +9,7 @@ interface Plan { version: 1; batches: string[][] }
 export async function stableReadingBatches<T extends Material>(materials: T[], options: {
   namespace?: string; signal: AbortSignal;
   partial?: boolean;
+  previousBatches?: string[][];
   fits: (batch: T[]) => boolean;
   partition: (items: T[], legacy?: boolean) => Promise<T[][]>;
   cached?: (batch: T[]) => Promise<boolean>;
@@ -26,9 +27,12 @@ export async function stableReadingBatches<T extends Material>(materials: T[], o
     const plan = record?.providerId === "focus-reading-planner" ? record.result as Partial<Plan> | undefined : undefined;
     const positions = new Map(items.map((item, index) => [item.id, index]));
     const anchors: Array<{ start: number; batch: T[] }> = [];
-    if (plan?.version === 1 && Array.isArray(plan.batches) && plan.batches.length <= 10000) {
+    const saved = plan?.version === 1 && Array.isArray(plan.batches) ? plan.batches : [];
+    const preferred = (options.previousBatches ?? []).filter(ids => positions.has(ids[0]));
+    const oldBoundaries = [...preferred, ...saved];
+    if (oldBoundaries.length && oldBoundaries.length <= 10000) {
       let end = 0;
-      const planned = plan.batches.filter(ids => Array.isArray(ids) && ids.length && ids.every(key => typeof key === "string")).sort((a, b) => (positions.get(a[0]) ?? Infinity) - (positions.get(b[0]) ?? Infinity));
+      const planned = oldBoundaries.filter(ids => Array.isArray(ids) && ids.length && ids.every(key => typeof key === "string")).sort((a, b) => (positions.get(a[0]) ?? Infinity) - (positions.get(b[0]) ?? Infinity));
       for (const ids of planned) {
         if (!Array.isArray(ids) || !ids.length || ids.length > MAX_FOCUS_PASSAGES || ids.some(key => typeof key !== "string")) continue;
         const start = positions.get(ids[0]);

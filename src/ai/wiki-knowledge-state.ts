@@ -2,7 +2,7 @@ import { leftOutClause } from "../shared/wiki-left-out";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { ITERATION_EN, ITERATION_ZH, PHASE } from "../shared/stage-words";
 import { LEAVES_OUT } from "../shared/negation";
-import { knowledgeTerms } from "../shared/knowledge-subject";
+import { knowledgeScopesAgree, knowledgeTerms } from "../shared/knowledge-subject";
 import { replaceParagraph } from "../shared/wiki-body-text";
 import { stageWord } from "./wiki-draft-checks";
 import { wikiUserChooses } from "../shared/wiki-user-choice";
@@ -11,6 +11,8 @@ import { wikiDiscussionOrder, wikiSaidLater } from "../shared/wiki-sources";
 import { UNDECIDED, wikiMeasure } from "../shared/wiki-section-status";
 import { wikiSaidInQuote } from "../shared/wiki-said-in-quote";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
+import { distinctWikiStageScopes } from "../shared/wiki-roadmap-scope";
+import { asksForDiscussionArtifact } from "../shared/statement-evidence";
 
 const ANALYSIS_KINDS: WikiKnowledgeUnit["kind"][] = ["fact", "report", "history", "question"];
 const LEFT_UNDECIDED = /\bcan'?t decide\b|\bcannot decide\b|\bhaven'?t decided\b|拿不定|定不下来/iu;
@@ -32,7 +34,7 @@ export function quotesMaterial(unit: WikiKnowledgeUnit): boolean {
 const decides = (unit: WikiKnowledgeUnit) => {
   if (unit.about || unit.evidence.pasted || wikiPersonalIntent(unit) || !DECIDING_KINDS.includes(unit.kind)) return false;
   const { status, approval } = unit.adoption;
-  if (status === "user_adopted") return unit.evidence.role === "assistant" && Boolean(approval?.evidenceId && approval.messageId && approval.messageId !== unit.evidence.messageId && approval.quote?.trim());
+  if (status === "user_adopted") return unit.evidence.role === "assistant" && Boolean(approval?.evidenceId && approval.messageId && approval.messageId !== unit.evidence.messageId && approval.quote?.trim() && !asksForDiscussionArtifact(approval.quote));
   return status === "user_decision" && unit.evidence.role === "user" && wikiUserChooses(unit.evidence.quote);
 };
 
@@ -129,8 +131,9 @@ const LIMITED_ITEMS = new RegExp(String.raw`${LEAVES_OUT}[：:]?\s*([^。；;]+)
  * in ("本阶段不开发实时商品比价" after the user answered that it does include 比价推荐及链接) is no current limit: one run
  * listed it under 暂不做 beside the user's own answer. */
 export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string, WikiUnitStatus>, takenUp: Map<string, string[]> = new Map(), answered: WikiKnowledgeUnit[] = [], replaced: Set<string> = new Set()): WikiBaselineItem[] {
+  const sameScope = (first: string, second: string) => knowledgeScopesAgree(first, second) && !distinctWikiStageScopes(first, second);
   const overridden = (scope: WikiKnowledgeUnit) => (scope.statement.match(LIMITED_ITEMS)?.[1] ?? "").split(/[、/，,]|以及|及|和|与|或/u).map(part => part.trim().replace(/^(?:开发|实现|支持|做)/u, "").replace(/^(?:实时|全网|在线|商品)+/u, "")).filter(part => part.length >= 2 && !GENERIC_NOUN.test(part))
-    .some(part => answered.some(unit => unit.statement.includes(part) || part.length > 2 && unit.statement.includes(part.slice(-2))));
+    .some(part => answered.some(unit => sameScope(scope.statement, unit.statement) && unit.statement.includes(part)));
   // Message indices are comparable only inside one conversation. Keep source order across conversations.
   const conversations = [...new Set(units.map(unit => unit.evidence.conversationId))];
   // Working steps for an AI and the user's own direction are no baseline: "给 Codex 的指令应包含……验收标准" was read as one.
@@ -164,13 +167,18 @@ export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string
     const target = stage ?? movedTo(unit.statement), held = theirs ?? movedTo(item.text);
     return target !== undefined && target === held && stageWords(own).filter(term => other.has(term)).length >= 2;
   };
-  const again = (unit: WikiKnowledgeUnit) => { const own = bareTerms(unit.statement); return said.find(({ terms: other, item }) => sameStage(unit, item, own, other) || (() => { let shared = 0; for (const term of own) if (other.has(term)) shared++; return shared / Math.max(1, Math.min(own.size, other.size)) >= BASELINE_SAME; })()); };
+  const again = (unit: WikiKnowledgeUnit, part: WikiBaselineItem["part"]) => {
+    const own = bareTerms(unit.statement);
+    return said.find(({ terms: other, item }) => item.part === part && sameScope(unit.statement, item.text)
+      && (sameStage(unit, item, own, other)
+        || [...own].filter(term => other.has(term)).length / Math.max(1, Math.min(own.size, other.size)) >= BASELINE_SAME));
+  };
   const pick = (part: WikiBaselineItem["part"], test: (unit: WikiKnowledgeUnit) => boolean) => {
     const items: WikiBaselineItem[] = [];
     for (const unit of live) {
       if (items.length >= BASELINE_ITEMS[part]) break;
       if (taken.has(unit.id) || !test(unit)) continue;
-      const same = again(unit);
+      const same = again(unit, part);
       // Said again in the user's own words, after the AI's later wording: the user's is the one listed. "Reliable CSV
       // export is assigned to Milestone 2." stood in place of "Milestone 2 includes CSV export …" [You].
       if (same) { if (!same.item.holder && holder(unit).holder) { Object.assign(same.item, { text: unit.statement.trim(), unitIds: [unit.id], ...holder(unit) }); same.terms = bareTerms(unit.statement); taken.add(unit.id); } continue; }
@@ -201,7 +209,9 @@ export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string
   const entered = candidates.find(unit => wikiStageTransition(unit.statement) && ["confirmed", "reported", "stated"].includes(statuses.get(unit.id)!));
   const proposedTransition = candidates.find(unit => wikiStageTransition(unit.statement) && statuses.get(unit.id) === "proposal");
   const before = (unit: WikiKnowledgeUnit) => Boolean(entered) && unit !== entered && wikiSaidLater(entered!, unit);
-  const criteria = live.filter(unit => BASELINE_DONE.test(unit.statement) && !currentScopes.some(scope => scope.evidence.conversationId === unit.evidence.conversationId && leavesOut(scope).some(part => unit.statement.toLocaleLowerCase().includes(part.toLocaleLowerCase()))));
+  const criteria = live.filter(unit => unit.kind !== "report" && statuses.get(unit.id) !== "reported"
+    && BASELINE_DONE.test(unit.statement) && !currentScopes.some(scope => scope.evidence.conversationId === unit.evidence.conversationId
+    && sameScope(scope.statement, unit.statement) && leavesOut(scope).some(part => unit.statement.toLocaleLowerCase().includes(part.toLocaleLowerCase()))));
   const currentCriteria = criteria.some(unit => !before(unit));
   const done = pick("done", unit => criteria.includes(unit) && (!currentCriteria || !before(unit)));
   const now = pick("now", unit => candidates.includes(unit) && !before(unit)

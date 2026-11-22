@@ -12,10 +12,11 @@ import {wikiReadingFormat} from "./wiki-reading-format";
 import {recoverWikiSourceLiterals,restoreWikiLiteralPayloads} from "./wiki-block-presentation";
 import {wikiLedgerUnits} from "./wiki-knowledge";
 import {wikiChapterLinks,wikiUnitChapterHomes} from "./wiki-chapter-links";
-import {qualifyWikiPriceTables} from "./wiki-document-blocks";
+import {qualifyWikiPriceTables,wikiDocumentBlocks} from "./wiki-document-blocks";
 import {wikiSections} from "./wiki-navigation";
 import {knowledgeOverlap} from "./knowledge-subject";
 import {reviewWikiChapter,wikiChapterReviewContext} from "../ai/wiki-claim-review";
+import {withoutWikiAuditWarnings} from "./wiki-editorial-cleanup";
 import {currentWikiEvidence,wikiEvidenceHref,wikiEvidenceKey} from "./wiki-evidence-link";
 import {wikiTableSignature} from "./wiki-table-source";
 export type {ProjectKnowledgeFact} from "./project-knowledge-facts";
@@ -157,7 +158,8 @@ export function projectKnowledgeReading(section:FocusSection,session:FocusSessio
  // Published evidence IDs can be reassigned when the document is assembled.
  // Match the selected excerpt and message, never widen the reading scope.
  const selected=new Set(projected.evidenceIds);
- const excerpts=new Map(currentWikiEvidence(session).filter(ref=>selected.has(ref.id)).map(ref=>[wikiEvidenceKey(ref),ref]));
+ const chapterReferences=currentWikiEvidence(session).filter(ref=>selected.has(ref.id));
+ const excerpts=new Map(chapterReferences.map(ref=>[wikiEvidenceKey(ref),ref]));
  const sourceOf=(unit:ReturnType<typeof wikiLedgerUnits>[number])=>excerpts.get(wikiEvidenceKey({...unit.evidence,excerpt:unit.evidence.quote}));
  const units=wikiLedgerUnits(session.wikiKnowledge).filter(unit=>sourceOf(unit));
  const zh=session.locale!=="en";
@@ -165,15 +167,17 @@ export function projectKnowledgeReading(section:FocusSection,session:FocusSessio
   const ref=sourceOf(unit);
   return ref&&unit.evidence.code?`[${zh?"来源":"Source"}](${wikiEvidenceHref(ref,wikiTableSignature(unit.evidence.code.text))})`:"";
  });
- let body=wikiChapterLinks(wikiReadingFormat(projected.body,projected,{zh,units,citeTable:linkTable}),projected,reviewed,zh,homes);
+ const tableSources=!citeTable&&projected.body.includes("|")?chapterReferences.flatMap(ref=>ref.excerpt.includes("|")
+  ?wikiDocumentBlocks(ref.excerpt).flatMap(block=>block.kind==="table"
+   ?[{text:block.text,link:`[${zh?"来源":"Source"}](${wikiEvidenceHref(ref,wikiTableSignature(block.text))})`}]
+   :[]):[]):undefined;
+ let body=wikiChapterLinks(wikiReadingFormat(projected.body,projected,{zh,units,citeTable:linkTable,tableSources}),projected,reviewed,zh,homes);
  if(session.wikiKnowledge&&/\|\s*(?:交付主题|Delivery topic)\s*\|/iu.test(body)){
   for(const {plan} of confirmedRoadmaps(session.wikiKnowledge))if(units.some(unit=>unit.id===plan.unitId))
    body=groupWikiConfirmedRoadmap(body,plan,zh);
  }
- const competitorChapter=session.wikiKnowledge?.documentType!=="learning"&&/竞品|竞争对手|competitor|competitive landscape/iu.test(projected.title)
-  &&units.some(unit=>unit.about?.role==="competitor");
- const sourceNote=competitorChapter?(zh?"下文为讨论时的竞品记录。来源链接与核实日期以原文为准，未明确核实的能力仍待核验。":"Competitor information reflects the discussion. Links and verification dates come from its sources. Capabilities without explicit verification remain unverified."):"";
- return {...projected,body:sourceNote?`> ${sourceNote}\n\n${body}`:body};
+ return {...projected,body:session.wikiKnowledge?.draft&&session.wikiKnowledge.documentType!=="learning"
+  ?withoutWikiAuditWarnings(body,false,true):body};
 }
 
 /** Explicit, reusable reading context for a single document content revision. */

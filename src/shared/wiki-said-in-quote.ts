@@ -10,9 +10,9 @@ import { sourceQuoteText } from "./source-quote-text";
 const SUMMARY_REQUEST = /总结|汇总|整理成|写成|生成[^。]{0,12}(?:MD|文档|文件)|\bsummari[sz]e\b|\bwrite (?:it|this|them) up\b/iu;
 const latinWords = (text: string) => new Set((text.toLowerCase().match(/[a-z][a-z0-9-]{2,}/gu) ?? []).filter(word => !QUOTE_STOP.has(word)));
 const QUOTE_STOP = new Set("the and for are was were with from that this these those has have had its into not but can will should must all any our your their about than then also only".split(" "));
-const FEEDBACK_ONLY = /^(?:(?:现在|現在|这个|這個|这样|這樣|这版|這版|效果)?\s*(?:怎[么麽麼][样樣]|怎[么麽麼]看|如何|好[吗嗎])|what do you think|how (?:is it|does it look)(?: now)?)$/iu;
+const FEEDBACK_ONLY = /^(?:(?:现在|現在|这个|這個|这样|這樣|这版|這版|效果)?\s*(?:怎[么麽麼][样樣]|怎[么麽麼]看|如何|好[吗嗎])|(?:是的?[，,\s]*)?(?:所以)?我想问你?有哪[些个]值得优化的|[为爲為]什[么麽麼]看起[来來][这這][么麽麼][^，。！？]{1,12}(?:[，,]\s*(?:而且)?[^。！？]{1,32}也有[点點]问題|[，,]\s*(?:而且)?[^。！？]{1,32}也有[点點][问問][题題])?|what do you think|how (?:is it|does it look)(?: now)?)$/iu;
 export function wikiQuoteAsksOnlyForFeedback(quote: string): boolean {
-  if (!/怎[么麽麼]|如何|好[吗嗎]|what do you think|how (?:is it|does it look)|!\[/iu.test(quote)) return false;
+  if (!/怎[么麽麼]|如何|好[吗嗎]|值得优化|[为爲為]什[么麽麼]|what do you think|how (?:is it|does it look)|!\[/iu.test(quote)) return false;
   const words = sourceQuoteText(quote).normalize("NFKC").trim().replace(/[。.!?！？]+$/u, "").trim();
   return words ? FEEDBACK_ONLY.test(words) : /!\[/u.test(quote);
 }

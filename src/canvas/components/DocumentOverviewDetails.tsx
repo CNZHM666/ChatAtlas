@@ -6,63 +6,57 @@ import { saveOverviewChoice, type OverviewBasis, type ProjectOverviewWorkspace }
 import { WorkspaceEvidenceContext, type WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import { ReaderGuide } from "./ReaderGuide";
 import { WikiDisclosure } from "./ReaderSourceSupplement";
+import { WikiDecisionCards } from "./WikiDecisionCards";
 
 type Question = ProjectOverviewWorkspace["questions"][number];
 type Chapter = Question["chapter"];
 type Locate = (source: FocusEvidence, options?: WorkspaceEvidenceOptions) => void;
 
-function OverviewChoices({ question, selected, zh, working, onChoose, tools, onDefer }: {
+function OverviewChoices({ question, selected, zh, working, onChoose }: {
   question: Question;
-  selected?: string;
+  selected: string;
   zh: boolean;
   working: boolean;
-  onChoose?: (optionId: string) => void;
-  tools: ReactNode;
-  onDefer?: () => void;
+  onChoose: (optionId: string) => void;
 }) {
   const group = useId();
   const [draft, setDraft] = useState(selected);
   const optionsLabel = zh ? "备选方案" : "Options";
 
   return <>
-    {onChoose ? <fieldset className="overview-options" aria-label={optionsLabel} disabled={working}>
-      {question.options.map(option => <label key={option.id}>
+    <fieldset className="overview-options" aria-label={optionsLabel} disabled={working}>
+      {question.options.map(option => <div key={option.id}><label>
         <input type="radio" name={group} value={option.id} checked={draft === option.id} onChange={() => setDraft(option.id)}/>
         <span>{option.label}</span>
-      </label>)}
-    </fieldset> : <ul className="overview-options" aria-label={optionsLabel}>
-      {question.options.map(option => <li key={option.id}>{option.label}</li>)}
-    </ul>}
+        {option.decidedAt&&<small>{new Intl.DateTimeFormat(zh?"zh-CN":"en",{dateStyle:"medium",timeStyle:"short"}).format(option.decidedAt)}</small>}
+      </label></div>)}
+    </fieldset>
     <div className="overview-question-footer">
-      <div className="overview-row-actions">{tools}</div>
-      {onChoose && <div className="overview-row-actions">
-        {onDefer && <button type="button" className="overview-text-button" disabled={working} onClick={onDefer}>{zh ? "暂缓" : "Defer"}</button>}
-        <button type="button" className="overview-choice" disabled={working || !draft || draft === selected}
-          onClick={() => draft && onChoose(draft)}>{zh ? "确认选择" : "Confirm choice"}</button>
-      </div>}
+      <button type="button" className="overview-choice" disabled={working || draft === selected}
+        onClick={() => onChoose(draft)}>{zh ? "确认选择" : "Confirm choice"}</button>
     </div>
   </>;
 }
 
-export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate }: {
+export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate, onUpdateDecisions, updateDisabled }: {
   session: FocusSession;
   data: ProjectOverviewWorkspace;
   zh: boolean;
   onRead: (id: string, heading?: string) => void;
   onLocate: Locate;
+  onUpdateDecisions?: () => void;
+  updateDisabled?: boolean;
 }) {
   const actions = useContext(ProjectKnowledgeActions);
   const activeId = useContext(WorkspaceEvidenceContext)?.active?.overviewEntryId;
   const questionGroup = useId();
   const [editing, setEditing] = useState<string>();
-  const [saved, setSaved] = useState<Record<string, number | undefined>>({});
   const [feedback, setFeedback] = useState<{ error: boolean; text: string }>();
   const [working, setWorking] = useState(false);
   const lock = useRef(false);
   const tr = (cn: string, en: string) => zh ? cn : en;
   const deferred = new Set(session.projectMaintenance?.deferredOverviewQuestions);
-  const pending = data.questions.filter(question => !deferred.has(question.id)
-    && !(Object.hasOwn(saved, question.id) && saved[question.id] !== data.decisionsAt));
+  const pending = data.questions.filter(question => !deferred.has(question.id));
   const paused = data.questions.filter(question => deferred.has(question.id));
   const plan = data.plan;
   const evidence = (items: OverviewBasis[], id: string, claim?: string) => items.length > 0 &&
@@ -97,42 +91,28 @@ export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate }:
     }
   }
 
-  function defer(question: Question, value: boolean) {
+  function resume(question: Question) {
     void save(current => {
       const ids = new Set(current.projectMaintenance?.deferredOverviewQuestions);
-      if (value) ids.add(question.id);
-      else ids.delete(question.id);
+      ids.delete(question.id);
       return { ...current, updatedAt: Date.now(), projectMaintenance: { ...current.projectMaintenance, deferredOverviewQuestions: [...ids] } };
-    }, value ? tr("已暂缓。", "Deferred.") : tr("已移回待决问题。", "Moved back to open questions."));
+    }, tr("已移回待决问题。", "Moved back to open questions."));
   }
 
   async function choose(question: Question, optionId: string) {
-    let time: number | undefined;
-    const ok = await save(current => {
-      const next = saveOverviewChoice(current, question, optionId, zh);
-      time = next.wikiKnowledge?.decisionsAt;
-      return next;
-    }, tr("已保存选择。", "Choice saved."));
-    if (ok) {
-      setSaved(previous => ({ ...previous, [question.id]: time }));
-      setEditing(undefined);
-    }
+    if (await save(current => saveOverviewChoice(current, question, optionId, zh), tr("已保存选择。", "Choice saved."))) setEditing(undefined);
   }
 
-  const questionRow = (question: Question, deferredRow = false) => <li key={question.id} className="overview-row">
-    {deferredRow ? <WikiDisclosure label={highlighted(question.text, question.id)} name={questionGroup} className="overview-question">
-      <div className="overview-entry-tools">
-        {evidence(question.basis, question.id)}
-        {actions && <button type="button" className="overview-text-button" disabled={working} onClick={() => defer(question, false)}>{tr("继续处理", "Resume")}</button>}
-      </div>
-    </WikiDisclosure> : <WikiDisclosure label={highlighted(question.text, question.id)} name={questionGroup} className="overview-question">
-      <div className="overview-question-detail">
-        <OverviewChoices question={question} zh={zh} working={working}
-          onChoose={actions && (id => void choose(question, id))} onDefer={actions && (() => defer(question, true))}
-          tools={<>{evidence(question.basis, question.id)}{chapterLink(question.chapter)}</>}/>
-      </div>
-    </WikiDisclosure>}
-  </li>;
+  const deferredQuestions = paused.length > 0 ? <WikiDisclosure className="overview-disclosure" label={<>{tr("已暂缓", "Deferred")}<small>{paused.length}</small></>}>
+    <ul className="overview-list">{paused.map(question => <li className="overview-row" key={question.id}>
+      <WikiDisclosure label={highlighted(question.text, question.id)} name={questionGroup} className="overview-question">
+        <div className="overview-entry-tools">
+          {evidence(question.basis, question.id)}
+          {actions&&<button type="button" className="overview-text-button" disabled={working} onClick={()=>resume(question)}>{tr("继续处理","Resume")}</button>}
+        </div>
+      </WikiDisclosure>
+    </li>)}</ul>
+  </WikiDisclosure> : undefined;
 
   const standing = { confirmed: tr("已确认", "Confirmed"), stated: tr("用户提出", "From you"), proposed: tr("讨论中", "Discussed") };
   const parts = { now: tr("安排", "Action"), notNow: tr("范围", "Scope"), done: tr("验收", "Acceptance") };
@@ -148,10 +128,10 @@ export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate }:
     <button type="button" className="overview-icon-button" aria-expanded={editing === id}
       aria-label={tr("修改选择", "Change choice")} title={tr("修改选择", "Change choice")}
       onClick={() => setEditing(previous => previous === id ? undefined : id)}><Pencil size={15} aria-hidden="true"/></button>;
-  const choiceEditor = (id: string, choice: Choice) => editing === id && choice &&
+  const choiceEditor = (id: string, choice: Choice) => editing === id && choice && actions &&
     <div className="overview-question-detail"><p>{choice.question.text}</p>
       <OverviewChoices key={choice.option} question={choice.question} selected={choice.option} zh={zh} working={working}
-        onChoose={actions && (option => void choose(choice.question, option))} tools={evidence(choice.question.basis, id)}/>
+        onChoose={option => void choose(choice.question, option)}/>
       {choice.previous?.length ? <WikiDisclosure label={tr("此前的选择", "Previous choices")} className="overview-disclosure">
         <ul>{choice.previous.map((entry, index) => <li key={entry.at + "-" + index}>{entry.answer}</li>)}</ul>
       </WikiDisclosure> : null}
@@ -175,16 +155,8 @@ export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate }:
   const decisionLabel = tr("已定的关键决定", "Key decisions");
   return <>
     {feedback && <p className={feedback.error ? "overview-feedback" : "sr-only"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
-    {(pending.length > 0 || paused.length > 0) && <section className="overview-block" aria-label={tr("待决问题", "Open questions")}>
-      <h2>{tr("待决问题", "Open questions")}<small aria-live="polite">{pending.length}</small></h2>
-      {pending[0] && <ul className="overview-list">{questionRow(pending[0])}</ul>}
-      {pending.length > 1 && <WikiDisclosure className="overview-disclosure" label={tr("查看全部待决问题", "View all open questions")}>
-        <ul className="overview-list">{pending.slice(1).map(question => questionRow(question))}</ul>
-      </WikiDisclosure>}
-      {paused.length > 0 && <WikiDisclosure className="overview-disclosure" label={<>{tr("已暂缓", "Deferred")}<small>{paused.length}</small></>}>
-        <ul className="overview-list">{paused.map(question => questionRow(question, true))}</ul>
-      </WikiDisclosure>}
-    </section>}
+    <WikiDecisionCards session={session} questions={pending} deferred={deferredQuestions} zh={zh} onLocate={onLocate}
+      onUpdate={onUpdateDecisions} updateDisabled={updateDisabled}/>
     {(plan?.personal || planCount > 0 || discussionRoadmap) && <section className="overview-fold overview-plan" aria-label={planLabel}>
       <WikiDisclosure className="overview-section-toggle" label={<>{planLabel}{planCount > 0 && <small>{planCount}</small>}</>}>
         {plan?.personal && <div className="overview-plan-group overview-personal-plan">
@@ -194,7 +166,7 @@ export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate }:
           <h3>{standing.confirmed}</h3>
           <ul className="overview-list">
             {planRows.map(item => planLine(item.unit.id, item.roadmap ? tr("交付顺序", "Delivery order") : tr("版本安排", "Release plan"),
-              item.text, evidence([{ ref: item.source, quote: item.unit.evidence.quote, text: item.text }], item.unit.id, item.text), data.planChoices[item.unit.id]))}
+              item.text, <>{evidence([{ ref: item.source, quote: item.unit.evidence.quote, text: item.text }], item.unit.id, item.text)}{chapterLink(data.planChapters[item.unit.id])}</>, data.planChoices[item.unit.id]))}
             {confirmedFollowup.map(followupLine)}
           </ul>
         </div>}

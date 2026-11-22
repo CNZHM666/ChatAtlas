@@ -1,5 +1,7 @@
 import type { WikiDraftChapter } from "../shared/wiki-knowledge";
 import { replaceParagraph } from "../shared/wiki-body-text";
+import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
+import { repairGeneratedWikiTable } from "../shared/wiki-table-source";
 
 /** A table written on one line, its rows joined by "||": "| 层级 | 代表项目 || --- | --- || 重量级 | PX4 |". */
 const JOINED_TABLE = /^\s*\|.*\|\|\s*:?-{3,}/u;
@@ -24,25 +26,62 @@ export function renumberedLists(text: string): string {
     for (; at < lines.length; at++) {
       const match = lines[at].match(ITEM);
       if (match && match[1] === indent) { items.push(at); continue; }
+      if (!lines[at].trim() && lines[at + 1]?.match(ITEM)?.[1] === indent) continue;
       if (lines[at].trim() && /^\s{2,}\S/u.test(lines[at]) && !match) continue;
       break;
     }
     const numbers = items.map(line => Number(lines[line].match(ITEM)![2]));
-    if (numbers.every((number, place) => !place || number > numbers[place - 1]) && numbers.some((number, place) => place && number !== numbers[place - 1] + 1))
+    // Strip the presentation number in the item label before changing the list counter.
+    items.forEach(line => { lines[line] = lines[line].replace(/^(\s*(\d{1,3})[.)]\s+(?:\*\*|__)?)(\d{1,3})[.)、][ \t]+(?=\S)/u,
+      (whole, opening: string, outer: string, inner: string) => outer === inner ? opening : whole); });
+    const sequence = numbers.every((number, place) => !place || number > numbers[place - 1]
+      || number === 1 && numbers[place - 1] >= 3 && numbers[place + 1] === 2);
+    if (sequence && numbers.some((number, place) => place && number !== numbers[place - 1] + 1))
       items.forEach((line, place) => { lines[line] = lines[line].replace(ITEM, (_, lead: string, _number: string, mark: string, gap: string) => `${lead}${numbers[0] + place}${mark}${gap}`); });
     index = at - 1;
   }
   return lines.join("\n");
 }
 
+function tidyHeadings(text: string): string {
+  if (/独立研究章节|Independent research section/iu.test(text)) {
+    for (const block of wikiDocumentBlocks(text).reverse()) {
+      if (block.kind !== "heading") continue;
+      const heading = /^(#{2,6}[ \t]+)(独立研究章节|Independent research section)[ \t]*$/iu.exec(block.text);
+      if (heading) text = text.slice(0, block.start) + heading[1]
+        + (/\p{Script=Han}/u.test(heading[2]) ? "外部研究与参考" : "Research and references") + text.slice(block.end);
+    }
+  }
+  return text;
+}
+
+export function tidyGeneratedWikiMarkdown(text: string): string {
+  for (const block of wikiDocumentBlocks(text).reverse()) if (block.kind === "table") {
+    const repaired = repairGeneratedWikiTable(block.text);
+    if (repaired !== block.text) text = text.slice(0, block.start) + repaired + text.slice(block.end);
+  }
+  return renumberedLists(tidyHeadings(text));
+}
+
 /** Written paragraphs as Markdown reads them: a table joined on one line split into rows, a list numbered in turn.
  * Returns the number of paragraphs changed. */
 export function tidiedMarkdown(chapters: WikiDraftChapter[]): number {
   let changed = 0;
+  for (const chapter of chapters) {
+    const body = tidyHeadings(chapter.body);
+    const titles = new Map<string, string>();
+    for (const topic of chapter.paragraphs.map(paragraph => paragraph.subtopic)) {
+      const heading = `### ${topic}`, title = tidyHeadings(heading);
+      if (title !== heading) titles.set(topic, title.slice(4));
+    }
+    if (body !== chapter.body) { chapter.body = body; changed++; }
+    for (const paragraph of chapter.paragraphs) paragraph.subtopic = titles.get(paragraph.subtopic) ?? paragraph.subtopic;
+  }
   for (const chapter of chapters) for (const paragraph of chapter.paragraphs) {
-    const text = renumberedLists(splitJoinedTable(paragraph.text));
+    const text = tidyGeneratedWikiMarkdown(splitJoinedTable(paragraph.text));
     if (text === paragraph.text) continue;
     chapter.body = replaceParagraph(chapter.body, paragraph.text, text);
+    if (paragraph.claims) paragraph.claims = paragraph.claims.map(claim => ({ ...claim, text: tidyGeneratedWikiMarkdown(claim.text) }));
     paragraph.text = text;
     changed++;
   }

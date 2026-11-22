@@ -51,4 +51,25 @@ describe("quick AI switching", () => {
     expect(configure).toHaveBeenCalledOnce();
     expect((await getAISettings())?.model).toBe("deepseek-chat");
   });
+
+  it("opens the workbench model list with the keyboard and saves only the chosen model", async () => {
+    await saveAISettings({ mode: "byok", provider: "qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", apiKey: "qwen-fixture", model: "qwen-plus", economyModel: "qwen-flash" });
+    render(<AIQuickSelect compact zh onConfigure={vi.fn()} />);
+    const trigger = await screen.findByRole("button", { name: /选择生成 AI.*qwen-plus/u });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    const current = screen.getByRole("option", { name: "qwen-plus", selected: true });
+    expect(current).toHaveFocus();
+    fireEvent.keyDown(current, { key: "Escape" });
+    expect(trigger).toHaveFocus();
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("option", { name: "qwen-plus" }), { key: "ArrowDown" });
+    const flash = screen.getByRole("option", { name: "qwen-flash" });
+    expect(flash).toHaveFocus();
+    fireEvent.click(flash);
+    await screen.findByRole("button", { name: /选择生成 AI.*qwen-flash/u });
+    expect((await getAISettings())?.model).toBe("qwen-flash");
+    expect(trigger).toHaveFocus();
+  });
 });

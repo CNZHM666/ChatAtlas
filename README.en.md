@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <a href="README.md">简体中文</a> · <b>English</b> · <b>v0.1.6 Alpha</b>
+  <a href="README.md">简体中文</a> · <b>English</b> · <b>v0.1.7 Alpha</b>
 </p>
 
 <p align="center">
-  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip"><b>Download v0.1.6 ZIP</b></a>
+  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip"><b>Download v0.1.7 ZIP</b></a>
   · <a href="#preview">Preview</a>
   · <a href="#install-on-chrome-or-edge">Install</a>
   · <a href="docs/en/CHANGELOG.md">Changelog</a>
@@ -37,8 +37,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/wiki-chapter-light.png" alt="A focus timer wiki chapter with evidence review, source markers, and export controls" width="920">
-  <br><sub>Focus timer wiki chapter · Built-in controls for evidence review, source markers, and export</sub>
+  <img src="docs/images/wiki-chapter-light.png" alt="A project wiki chapter with the evidence review panel open on the right" width="920">
+  <br><sub>Review a wiki claim alongside the original message and its surrounding context</sub>
 </p>
 
 <details>
@@ -53,7 +53,7 @@
 |:---:|:---:|
 | ![Project overview and wiki chapters](docs/images/project-overview-light.png) | ![Original messages in the dark-mode reader](docs/images/reader-dark.png) |
 | **Workbench** | **Web sidebar** |
-| ![Workbench and source material](docs/images/home-en-light.png) | ![ChatAtlas sidebar on ChatGPT](docs/images/sidecar-chatgpt-light.png) |
+| ![Workspace home in Chinese](docs/images/home-zh-light.png) | ![ChatAtlas sidebar on ChatGPT](docs/images/sidecar-chatgpt-light.png) |
 
 </details>
 
@@ -97,7 +97,7 @@ flowchart LR
 
 ## Install on Chrome or Edge
 
-**[Download v0.1.6 Alpha (ZIP)](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip)** · [Release notes](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.6)
+**[Download v0.1.7 Alpha (ZIP)](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip)** · [Release notes](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.7)
 
 Chrome and Edge share the same ZIP. During Alpha, the extension is distributed via GitHub and loaded manually.
 
@@ -111,8 +111,8 @@ Chrome and Edge share the same ZIP. During Alpha, the extension is distributed v
 Paste this prompt into an AI coding agent with terminal access, then load the folder it returns in your browser.
 
 ```text
-Download the ChatAtlas v0.1.6 Alpha extension ZIP from this URL.
-https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.6/ChatAtlas-extension-v0.1.6.zip
+Download the ChatAtlas v0.1.7 Alpha extension ZIP from this URL.
+https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip
 Extract it to a folder I can keep. Verify that the folder directly contains manifest.json, then give me its absolute path and the steps to load it in Chrome or Edge.
 ```
 

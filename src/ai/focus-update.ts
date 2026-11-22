@@ -17,7 +17,7 @@ import { datedSources, reextractSessionKnowledge } from "./wiki-knowledge-sessio
 import { organizeLedger } from "./wiki-knowledge-organize";
 import { writeFocusWikiDraft, type FocusWikiDraftCallbacks } from "./focus-wiki-draft";
 import { measureAILocalStep, startAIRun } from "./pipeline-timing";
-import { wikiLedgerUnits, wikiOrganizationIncomplete, type WikiProgress } from "../shared/wiki-knowledge";
+import { wikiLedgerUnits, wikiOrganizationIncomplete, type WikiKnowledgeLedger, type WikiProgress, type WikiWritingMode } from "../shared/wiki-knowledge";
 import { readingTitle } from "../shared/reading-title";
 import { mapSemanticEvidence } from "../shared/semantic-structure";
 import { reconcileWikiTopics } from "./wiki-topic-update";
@@ -38,7 +38,7 @@ import {previousWikiDirectory} from "./wiki-topic-plan";
 import {WIKI_SEMANTIC_VERSION} from "../shared/wiki-explanations";
 
 export interface FocusUpdatePlan { fallback: boolean; changed: boolean; affectedSectionIds: string[]; scope: FocusScope; removedKeys: string[]; addedConversationIds?: string[] }
-type FocusUpdateCallbacks = FocusWikiDraftCallbacks & { scope?: FocusScope };
+type FocusUpdateCallbacks = FocusWikiDraftCallbacks & { scope?: FocusScope; writingMode?: WikiWritingMode; applyDecisions?: boolean };
 const key = (conversationId: string, messageId: string) => JSON.stringify([conversationId, messageId]);
 
 /** Revisit the changed chapter and subsequent discussion, including dependent corrections. */
@@ -200,17 +200,32 @@ async function ledgerUpdate(previous: FocusSession, sources: Conversation[], mes
   const known = new Set(wikiLedgerUnits(earlier).map(unit => unit.id)), units = wikiLedgerUnits(extracted), fresh = units.filter(unit => !known.has(unit.id)).length;
   const common = { ai, ...embeddingsFor(settings, id), locale, signal, runId: id, conversations: sources.length, names: [boundary.name, previous.goal.length <= 32 ? previous.goal : undefined, ...sources.map(source => source.title)], progress };
   // An update keeps the document's type; a learning document's roles are read again for the points it now has.
-  const documentType = earlier?.documentType ?? scope?.documentType ?? "project";
+  const documentType = earlier?.documentType ?? "project";
   const typed = learningUnitsOwn({ ...extracted, documentType, documentTypeBy: earlier?.documentTypeBy ?? (scope?.documentType ? "user" : "auto") });
   const carried = keptLearnerCode(typed, earlier);
-  const reorganized = decisionsOnly && earlier?.organization ? earlier : await organizeLedger(carried, fresh > units.length * REORGANIZE_SHARE ? { ...common, directory: earlier?.organization } : { ...common, previous: earlier?.organization });
-  requireLedgerDirectory(reorganized, locale);
-  const organized = decisionsOnly ? reorganized : await asLearningDocument(reorganized, { ai, locale, signal });
+  type Placement = { ledger: WikiKnowledgeLedger; stable?: ReadonlySet<string> };
+  let showPlacement: (placement: Placement) => void = () => undefined;
+  const firstPlacement = new Promise<Placement>(resolve => { showPlacement = resolve; });
+  let checkingPlacement = !decisionsOnly;
+  const ready = (decisionsOnly && earlier?.organization ? Promise.resolve(earlier) : organizeLedger(carried, {
+    ...common, ...(fresh > units.length * REORGANIZE_SHARE ? { directory: earlier?.organization } : { previous: earlier?.organization }),
+    onPlacement: documentType === "project" ? (ledger, stable) => { if (stable.size) showPlacement({ ledger, stable }); } : undefined,
+  })).then(ledger => {
+    checkingPlacement = false;
+    requireLedgerDirectory(ledger, locale);
+    return ledger;
+  });
+  const placed = await Promise.race([ready.then((ledger): Placement => ({ ledger })), firstPlacement]);
+  const organized = decisionsOnly ? placed.ledger : await asLearningDocument(placed.ledger, { ai, locale, signal });
   const { ledger } = await writeFocusWikiDraft(organized, {
-    ...callbacks, ...(decisionsOnly ? { onKeyDecisions: undefined } : {}), ai, locale, signal, runId: id,
-    project: boundary.name, previous: earlier?.draft, progress, originals: messages, sources, title: () => previous.title,
+    ...callbacks, ...(decisionsOnly ? { onKeyDecisions: undefined, onWritingMode: undefined } : {}), ai, locale, signal, runId: id,
+    project: boundary.name, previous: earlier?.draft, progress, originals: messages, sources,
+    placement: placed.stable ? { ready, stable: placed.stable, pending: () => checkingPlacement } : undefined, title: () => previous.title,
     preview: { goal: previous.goal, mode: previous.mode, scope, locale: previous.locale, sourceConversationIds, wikiProjectBoundary: boundary },
   });
+  if (callbacks?.writingMode && (ledger.lastFailure?.step === "write" || ledger.draft?.writingMode !== callbacks.writingMode)) {
+    throw new Error(locale === "zh-CN" ? "切换写作模式失败，原稿已保留，请重试。" : "Could not change the writing mode. Your saved draft is retained.");
+  }
   const patch = await ledgerDocumentSession(ledger, { id: crypto.randomUUID(), runId: id, goal: previous.goal, mode: previous.mode, strategy: previous.strategy, scope, title: previous.title, locale: previous.locale, sourceConversationIds, wikiProjectBoundary: boundary,
     coverage: { method: "full_batched", sourceCount: sources.length, processedSegments: units.length, totalSegments: units.length, batchCount: ledger.batches.length } }, sources, messages, ai, signal, id);
   signal.throwIfAborted();
@@ -242,8 +257,25 @@ export async function generateFocusUpdate(previous: FocusSession, sources: Conve
   const allMessages = loadedMessages.flat();
   const messages = allMessages.filter(message => scope?.kind !== "goal" || scope.blocks?.some(block => block.conversationId === message.conversationId && block.messageIds.includes(message.id)));
   if (sources.some(source => !messages.some(item => item.conversationId === source.id && item.content.trim() && !isInternalSearchQueryMessage(item)))) throw new Error(locale === "zh-CN" ? "部分项目来源已没有正文，请重新确认材料。原稿和笔记仍保留。" : "Some project sources have no text. Confirm materials again; your original and notes are preserved.");
-  const plan = planWikiEditionUpdate(previous,messages,planFocusUpdate(previous, messages,Object.fromEntries(baselines)));
+  const sourcePlan = planFocusUpdate(previous, messages, Object.fromEntries(baselines));
+  const plan = planWikiEditionUpdate(previous, messages, sourcePlan);
   const currentWiki = previous.mode === "work" && ledgerPipelineEnabled();
+  if (callbacks?.writingMode || callbacks?.applyDecisions) {
+    const ledger = previous.wikiKnowledge;
+    if (!currentWiki || !ledger?.organization || (callbacks.writingMode && ledger.documentType === "learning")) {
+      throw new Error(locale === "zh-CN" ? "这个结果暂无可复用的项目账本。" : "This result has no reusable project ledger.");
+    }
+    if (sourcePlan.changed) {
+      throw new Error(callbacks.applyDecisions
+        ? locale === "zh-CN" ? "来源已有变化，请用页面顶部的「更新」同步材料与决定。" : "Sources changed. Use Update in the toolbar to sync sources and decisions."
+        : locale === "zh-CN" ? "来源有变化，请先更新材料，再切换写作模式。" : "Update the changed sources before switching writing modes.");
+    }
+    const id = runId ?? `focus-${crypto.randomUUID()}`;
+    const base = callbacks.writingMode ? { ...previous, wikiKnowledge: { ...ledger, writingMode: callbacks.writingMode } } : previous;
+    return measureAILocalStep(id, "wiki", "wiki:generation", () =>
+      ledgerUpdate(base, sources, messages, allMessages, plan, locale, signal, onState, id, onProgress, true, callbacks.applyDecisions
+        ? { ...callbacks, onKeyDecisions: undefined } : callbacks));
+  }
   if (currentWiki && previous.wikiKnowledge) {
     const retryCoverage = ledgerCoverageRetryNeeded(previous.wikiKnowledge);
     const needsDraft = !previous.wikiKnowledge.draft;

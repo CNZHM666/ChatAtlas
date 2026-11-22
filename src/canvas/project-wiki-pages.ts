@@ -1,5 +1,3 @@
-import { wikiDraftOutOfPlace } from "../ai/wiki-draft-fit";
-import { ledgerDecisionsPending, wikiDecisionQuestions } from "../ai/wiki-key-decisions";
 import { resolveWikiReading } from "../ai/wiki-knowledge-reading";
 import { wikiOverviewNeedsClaimReview } from "../ai/wiki-claim-review";
 import { aiAdvicePresentation } from "../shared/ai-advice-presentation";
@@ -31,7 +29,7 @@ export function projectOverviewPage(session: FocusSession, zh: boolean, preview 
     ? points : approximatePoints("overview", session.evidence, readingText, zh, 12) };
 }
 
-export function projectLedgerPage(session: FocusSession, zh: boolean, reading?: Reading) {
+export function projectLedgerPage(session: FocusSession, reading?: Reading) {
   const ledger = session.wikiKnowledge;
   if (!ledger?.organization) return;
   const resolved = reading ?? resolveWikiReading(ledger);
@@ -57,19 +55,17 @@ export function projectLedgerPage(session: FocusSession, zh: boolean, reading?: 
     const status = statuses.get(id);
     if (status) counts.set(status, (counts.get(status) ?? 0) + 1);
   }
-  return { chapters, statuses, total: unitIds.size, counts,
-    misplaced: wikiDraftOutOfPlace(ledger, resolved), pending: ledgerDecisionsPending(ledger),
-    questions: wikiDecisionQuestions(ledger, zh) };
+  return { chapters, statuses, total: unitIds.size, counts };
 }
 
 export function projectWikiPages(session: FocusSession, zh: boolean) {
   const reading = session.wikiKnowledge && resolveWikiReading(session.wikiKnowledge);
-  const ledger = projectLedgerPage(session, zh, reading);
+  const ledger = projectLedgerPage(session, reading);
   return {
     overview: projectOverviewPage(session, zh, false, reading),
     review: documentEvidenceReview(session, zh),
     ledger,
-    workspace: projectOverviewWorkspace(session, zh, reading, ledger?.questions.versions),
+    workspace: projectOverviewWorkspace(session, zh, reading),
   };
 }
 export type ProjectWikiPages = ReturnType<typeof projectWikiPages>;
@@ -77,7 +73,7 @@ export type WikiPageTarget = "pages" | "overview" | "ledger" | "preview";
 
 export function projectWikiPage(session: FocusSession, zh: boolean, target: WikiPageTarget): Partial<ProjectWikiPages> {
   if (target === "pages") return projectWikiPages(session, zh);
-  if (target === "ledger") return { ledger: projectLedgerPage(session, zh) };
+  if (target === "ledger") return { ledger: projectLedgerPage(session) };
   if (target === "preview") return { overview: projectOverviewPage(session, zh, true) };
   const reading = session.wikiKnowledge && resolveWikiReading(session.wikiKnowledge);
   return {

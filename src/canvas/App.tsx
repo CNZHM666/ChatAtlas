@@ -27,7 +27,6 @@ import { ReaderToolbarProvider } from "./components/ReaderToolbar";
 import { MapSidebar } from "./components/MapSidebar";
 import { ProposalActionBar } from "./components/ProposalActionBar";
 import { PanelBoundary } from "./components/PanelBoundary";
-import { chosenDocumentType } from "../shared/wiki-document-type";
 import { useOrganizationTasks } from "./hooks/useOrganizationTasks";
 import { useCanvasHistory } from "./hooks/useCanvasHistory";
 import { attachConversationToTopic, createTopicFromConversation } from "./global-attachments";
@@ -145,6 +144,8 @@ function AtlasApp() {
   const [organizeStage, setOrganizeStage] = useState<AutoOrganizeStage | null>(null);
   const [taskWorkspaceId, setTaskWorkspaceId] = useState<string | null>(null);
   const [taskHistoryOpen, setTaskHistoryOpen] = useState(false);
+  const [workbenchHistoryOpen, setWorkbenchHistoryOpen] = useState(false);
+  const [workbenchHomeRequest, setWorkbenchHomeRequest] = useState(0);
   const [taskSourceRefs, setTaskSourceRefs] = useState<SourceRef[] | null>(null);
   const [autoOrganizeUndo, setAutoOrganizeUndo] = useState<{ historyVersion: number; plan: OrganizationPlan } | null>(null);
   const [knowledgeProposal, setKnowledgeProposal] = useState<KnowledgeProposal | null>(null);
@@ -713,7 +714,6 @@ function AtlasApp() {
   const isPreviewCanvas = previewCanvasIds.has(activeCanvasId);
   const activeTask = tasks.runs.find((run) => run.id === taskWorkspaceId);
   const openTask = (id: string, fromHistory = false) => { setGoalRequest(undefined); setFocusSessionId(undefined); setTaskWorkspaceId(id); setTaskHistoryOpen(fromHistory); setTaskSourceRefs(null); };
-  const openTaskHistory = () => { setGoalRequest(undefined); setFocusSessionId(undefined); setTaskWorkspaceId(null); setTaskHistoryOpen(true); setTaskSourceRefs(null); };
   const applyTask = async (selection?: { canvasIds: ReadonlySet<string>; conversationIds: ReadonlySet<string> }) => {
     if (!activeTask) return;
     try { await tasks.apply(activeTask, knowledgeProposal, selection); if (activeTask.targetType === "conversation") selectConversation(activeTask.targetIds[0]); else { setKnowledgeUndoId(activeTask.proposalId ?? null); if (knowledgeProposal) openAppliedKnowledge(knowledgeProposal, selection?.canvasIds); } flash(t("knowledgeGenerated")); }
@@ -731,6 +731,15 @@ function AtlasApp() {
     setGoalRequest(undefined); setFocusSessionId(undefined); setStructureView(false); setDiscoverView(false);
     setActiveCanvasId(id); setView("canvas"); setGlobalMode("browse"); setKnowledgeCreateRequest(null);
     setTaskWorkspaceId(null); setTaskHistoryOpen(false); setSelectedCardId(null); setSelectedEdgeId(null);
+    setWorkbenchHistoryOpen(false);
+  };
+  const openWorkbenchHistory = () => {
+    openSpace(OVERVIEW_CANVAS_ID);
+    setWorkbenchHistoryOpen(true);
+  };
+  const openWorkbenchHome = () => {
+    openSpace(OVERVIEW_CANVAS_ID);
+    setWorkbenchHomeRequest(previous => previous + 1);
   };
   const openProject = async (id: string, created?: AtlasCanvas) => {
     if (id === OVERVIEW_CANVAS_ID) { openSpace(id); return; }
@@ -775,9 +784,8 @@ function AtlasApp() {
     }
     workbenchDraft.current = { goal, mode };
     workbenchResumeTask.current = undefined;
-    // The document type chosen in the input area goes with the request, kept with the task when it is resumed.
-    const chosenType = chosenDocumentType(), requestScope: FocusScope = scope ?? { kind: "all", sourceConversationIds: [...sourceIds] };
-    setGoalRequest({ id: resume?.id ?? crypto.randomUUID(), ...(resume ? { runId: resume.runId } : {}), goal, mode, sourceIds: [...sourceIds], sourcePoolIds, scopeCanvasId, scope: requestScope.documentType || chosenType === "auto" ? requestScope : { ...requestScope, documentType: chosenType } }); setFocusSessionId(undefined);
+    const requestScope: FocusScope = scope ?? { kind: "all", sourceConversationIds: [...sourceIds] };
+    setGoalRequest({ id: resume?.id ?? crypto.randomUUID(), ...(resume ? { runId: resume.runId } : {}), goal, mode, sourceIds: [...sourceIds], sourcePoolIds, scopeCanvasId, scope: requestScope }); setFocusSessionId(undefined);
     setView("canvas"); setKnowledgeCreateRequest(null); setTaskWorkspaceId(null); setTaskHistoryOpen(false); setSelectedCardId(null); setGlobalMode("browse");
   };
   const [contextHandoff,setContextHandoff]=useState<ContextHandoff>();
@@ -865,7 +873,9 @@ function AtlasApp() {
         generationProgressRef={setFocusProgressTarget}
         syncStatus={<BackgroundSyncStatus job={importJob} source={importSource} onPause={() => void pauseImport()} onResume={() => void resumeImport()} onConnect={() => void openChatGPTForImport()} />}
         view={view}
-        onHome={() => openSpace(OVERVIEW_CANVAS_ID)}
+        onHome={openWorkbenchHome}
+        onWorkbenchHistory={showMapSidebar ? openWorkbenchHistory : undefined}
+        workbenchHistoryActive={isOverview && !discoverView && workbenchHistoryOpen}
         structureView={structureView}
         onStructureChange={canSwitchStructure ? (next) => { setStructureView(next); setGlobalMode("browse"); setSelectedCardId(null); } : undefined}
         onNewCard={() => setNewCardOpen(true)}
@@ -887,7 +897,7 @@ function AtlasApp() {
         {showMapSidebar ? <MapSidebar
           canvases={sidebarCanvases}
           activeId={activeCanvasId}
-          onSelect={(id) => void openProject(id)}
+          onSelect={id => id === OVERVIEW_CANVAS_ID ? openWorkbenchHome() : void openProject(id)}
           onRename={(id, name) => void renameMap(id, name)}
           onDelete={id => void changeProjectDeletion(id)} deletedProjects={deletedProjects} onRestore={id => void changeProjectDeletion(id, true)}
           deletedVersions={deletedVersions} onRestoreVersion={id => void changeVersionDeletion(id, true)} onEmptyTrash={clearProjectTrash}
@@ -895,7 +905,8 @@ function AtlasApp() {
           tasks={tasks.runs}
           activeTaskId={taskWorkspaceId}
           onSelectTask={openTask}
-          onTaskHistory={openTaskHistory}
+          onWorkbenchHistory={openWorkbenchHistory}
+          workbenchHistoryActive={isOverview && !discoverView && workbenchHistoryOpen}
         /> : null}
         <div className={`workspace ${!structureView && !isOverview && view === "canvas" && !focusOpen && !knowledgeCreateRequest ? "contents-workspace" : ""} ${selectedCard && view === "canvas" && !taskWorkspaceId && !taskHistoryOpen && !focusOpen ? globalMode === "browse" && selectedCard.kind !== "conversation" && selectedCard.kind !== "portal" ? "reader-open" : "detail-open" : ""}`}>
         <Suspense fallback={<div className="workspace-loading" role="status">{locale === "zh-CN" ? "正在打开…" : "Opening…"}</div>}>
@@ -912,7 +923,7 @@ function AtlasApp() {
           queuedBehindReview={activeTask.status === "queued" && activeTask.targetType !== "conversation" && tasks.runs.some((run) => run.id !== activeTask.id && run.status === "waiting_review" && run.targetType !== "conversation")}
           onOpenConversation={(id, message) => { selectConversationFromUser(id, message ? "reader" : "map"); setConversationFocusRequest(message ? { message, nonce: Date.now() } : null); setView("conversations"); setTaskWorkspaceId(null); setTaskSourceRefs(null); }}
         /> : taskHistoryOpen ? <OrganizationHistory runs={tasks.runs} onBack={() => setTaskHistoryOpen(false)} onSelect={(id) => openTask(id, true)} /> : view === "canvas" ? (isOverview ? (
-          !discoverView ? <ReviewHome onReadConversation={(id, message, sourceRange, search) => { selectConversationFromUser(id, "reader"); setConversationFocusRequest(message ? { message, sourceRange, search, nonce: Date.now() } : null); setView("conversations"); setTaskWorkspaceId(null); setTaskSourceRefs(null); }} canvases={canvases} sessions={focusSessions} projectsReady={focusSessionsReady} conversations={capturedConversations} organizationRuns={tasks.runs} focusTasks={focusTasks} onContinueTask={(task) => task.needsConfirmation ? returnGoalToWorkbench("", task.mode, task.sourceIds, task) : startGoal(task.goal, task.mode, task.sourceIds, task.scopeCanvasId, task.scope, task)} onTask={openTask} importJob={importJob} importSource={importSource} selectedIds={workbenchSelectedIds} onSelectedIds={selectWorkbenchSources} syncSelectedIds={syncSelectedIds} onSyncSelectedIds={setSyncSelectedIds} onPrioritize={prioritizeWorkbenchSource} draft={workbenchDraft.current} onDraft={(next) => { workbenchDraft.current = next; }} recentReading={recentReading} resumeTask={workbenchResumeTask.current} onContinueProject={(session, instruction, poolIds) => { openFocus(session.id); setFocusRevisionRequest({ sessionId: session.id, nonce: Date.now(), instruction, poolIds }); }} onStart={(goal, mode, sourceIds, scope, poolIds) => startGoal(goal, mode, sourceIds, workbenchResumeTask.current?.scopeCanvasId, scope, workbenchResumeTask.current, poolIds)} onSession={openFocus} onOpenChapter={(sessionId, sectionId) => { openFocus(sessionId); setSearchChapter({ sessionId, sectionId, note: false, nonce: Date.now() }); }} onTaskHistory={openTaskHistory} onResume={resumeReading} onSpace={openSpace} onScan={() => void commandImport("titles")} onHydrate={hydrateWorkbenchSources} onZip={importWorkbenchFile} onPause={() => void pauseImport()} onResumeImport={() => void resumeImport()} onConnect={() => void openChatGPTForImport()} onDiscover={() => setDiscoverView(true)} onConfigureAI={() => openSettings("ai")} onProjectsChanged={refreshLibraryProjects} sourcesRequest={sourcesRequest} /> : <KnowledgeOverview
+          !discoverView ? <ReviewHome onReadConversation={(id, message, sourceRange, search) => { selectConversationFromUser(id, "reader"); setConversationFocusRequest(message ? { message, sourceRange, search, nonce: Date.now() } : null); setView("conversations"); setTaskWorkspaceId(null); setTaskSourceRefs(null); }} canvases={canvases} sessions={focusSessions} projectsReady={focusSessionsReady} conversations={capturedConversations} organizationRuns={tasks.runs} focusTasks={focusTasks} onContinueTask={(task) => task.needsConfirmation ? returnGoalToWorkbench("", task.mode, task.sourceIds, task) : startGoal(task.goal, task.mode, task.sourceIds, task.scopeCanvasId, task.scope, task)} onTask={openTask} importJob={importJob} importSource={importSource} selectedIds={workbenchSelectedIds} onSelectedIds={selectWorkbenchSources} syncSelectedIds={syncSelectedIds} onSyncSelectedIds={setSyncSelectedIds} onPrioritize={prioritizeWorkbenchSource} draft={workbenchDraft.current} onDraft={(next) => { workbenchDraft.current = next; }} recentReading={recentReading} resumeTask={workbenchResumeTask.current} onContinueProject={(session, instruction, poolIds) => { openFocus(session.id); setFocusRevisionRequest({ sessionId: session.id, nonce: Date.now(), instruction, poolIds }); }} onStart={(goal, mode, sourceIds, scope, poolIds) => startGoal(goal, mode, sourceIds, workbenchResumeTask.current?.scopeCanvasId, scope, workbenchResumeTask.current, poolIds)} onSession={openFocus} onOpenChapter={(sessionId, sectionId) => { openFocus(sessionId); setSearchChapter({ sessionId, sectionId, note: false, nonce: Date.now() }); }} historyOpen={workbenchHistoryOpen} homeRequest={workbenchHomeRequest} onHistoryChange={setWorkbenchHistoryOpen} onResume={resumeReading} onSpace={openSpace} onScan={() => void commandImport("titles")} onHydrate={hydrateWorkbenchSources} onZip={importWorkbenchFile} onPause={() => void pauseImport()} onResumeImport={() => void resumeImport()} onConnect={() => void openChatGPTForImport()} onDiscover={() => setDiscoverView(true)} onConfigureAI={() => openSettings("ai")} onProjectsChanged={refreshLibraryProjects} sourcesRequest={sourcesRequest} /> : <KnowledgeOverview
             canvases={sidebarCanvases}
             recentReading={readingHistory.recent.flatMap((entry) => {
               const card = searchableCards.find((item) => item.id === entry.cardId);

@@ -2,6 +2,8 @@ import {sourceMessageSignature} from "./source-signature";
 import type {FocusSession} from "./focus-session";
 import {withoutProgressDisclaimer} from "./wiki-cross-duplicates";
 
+export const WIKI_PROJECT_POSITIONING = /^(?:本|该|这个)?(?:项目|产品|平台)(?:的)?定位(?:为|是)|^[^，。,]{0,40}定位为面向|^.{0,30}\b(?:is a|is an|is built for|is positioned as)\b/iu;
+
 /** Old generated introductions sometimes used a confirmation as delivery evidence. */
 export function wikiConfirmedScopeText(text:string){
  return text.replace(/(?:目前|当前|现阶段)?\s*已(?:经)?确认(?:实现|完成|上线|交付)\s*(?=\S)/gu,"已确认的范围包括 ")

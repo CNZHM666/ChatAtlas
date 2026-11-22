@@ -7,9 +7,10 @@ import { wikiFlowSteps } from "./wiki-flow-steps";
 import { wikiDocumentBlocks } from "./wiki-document-blocks";
 import { wikiSupplementRanges } from "./wiki-source-supplements";
 import { wikiTableCells } from "./wiki-table-source";
+import { wikiRoadmapScope } from "./wiki-roadmap-scope";
 
-const ORDER = /\b(Phase|Milestone|M|P)\s*(\d{1,2})\s*(?:[-–—~～至到]|through|to)\s*(?:\1)?\s*(\d{1,2})\b/iu;
-const FAMILY = /\b(Phase|Milestone|M|P)\s*(\d{1,2})\b/giu;
+const ORDER = /\b(Phase|Milestone|M)\s*(\d{1,2})\s*(?:[-–—~～至到]|through|to)\s*(?:\1)?\s*(\d{1,2})\b/iu;
+const FAMILY = /\b(Phase|Milestone|M)\s*(\d{1,2})\b/giu;
 const CHOICE = /顺序|路线|里程碑|阶段|按(?:照)?\s*(?:Phase|Milestone|[MP]\s*\d)|\b(?:order|roadmap|develop|follow)\b/iu;
 const UNSETTLED = /未定|待定|不采用|暂不|两者|both|neither|undecided/iu;
 
@@ -90,6 +91,27 @@ export function confirmedRoadmaps(ledger: WikiKnowledgeLedger) {
     });
   }
   return [...plans.values()];
+}
+
+export function wikiRoadmapScopes(ledger: WikiKnowledgeLedger, plans = confirmedRoadmaps(ledger).map(({ plan }) => plan)) {
+  const memberships = new Map<string, Set<string>>();
+  const replaced = new Set(ledger.organization?.relations.flatMap(relation => relation.kind === "replaces"
+    && relation.status === "resolved" && relation.evidence ? [relation.older] : []));
+  for (const plan of plans) for (const id of new Set([plan.unitId, ...plan.stages.map(stage => stage.unitId)])) {
+    const previous = memberships.get(id) ?? new Set<string>();
+    previous.add(plan.proposalId);
+    memberships.set(id, previous);
+  }
+  return new Map(wikiLedgerUnits(ledger).flatMap(unit => {
+    if (unit.about) return [];
+    const schemes = memberships.get(unit.id);
+    const metadata = wikiRoadmapScope(unit, {
+      schemeId: schemes?.size === 1 ? [...schemes][0] : undefined,
+      superseded: replaced.has(unit.id),
+    });
+    return metadata.rawLabels.length || metadata.priorities.length || metadata.bucket || metadata.schemeId || metadata.replacement
+      ? [[unit.id, metadata] as const] : [];
+  }));
 }
 
 export function confirmedRoadmapText(plan: WikiConfirmedRoadmap, zh: boolean) {
