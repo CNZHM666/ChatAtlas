@@ -3,16 +3,17 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { HomeTopicWorkspace } from "./HomeTopicWorkspace";
 import { getDatabase } from "../../storage/db";
-import { saveAISettings } from "../../storage/knowledge-graph";
+import * as aiSettings from "../../storage/knowledge-graph";
 import { sourceMessageSignature } from "../../shared/source-signature";
 import * as discovery from "../../ai/history-discovery";
+import * as savedDiscoveries from "../../storage/home-discovery";
 import type { Conversation } from "../../shared/types";
 import { PreferencesProvider } from "../preferences";
 import { listHomeResults } from "../../storage/home-results";
 
 const sources:Conversation[]=["a","b","c"].map(id=>({id,title:"数据库项目",platform:"chatgpt",url:"",messageCount:2,updatedAt:1,hydrationState:"hydrated",importState:"complete"}));
 const props=()=>({goal:"发现可以继续的数据库项目",poolIds:["a","b"],conversations:sources,zh:true,onBack:vi.fn(),onRequest:vi.fn(),onSelectedIds:vi.fn()});
-beforeEach(async()=>{localStorage.setItem("atlas-locale","zh-CN");await(await getDatabase()).clear("semanticDecisionCache");await(await getDatabase()).clear("homeResults");await saveAISettings({mode:"byok",provider:"openai",baseUrl:"https://fixture.example/v1",apiKey:"fixture",model:"fixture"});});
+beforeEach(async()=>{localStorage.setItem("atlas-locale","zh-CN");await(await getDatabase()).clear("semanticDecisionCache");await(await getDatabase()).clear("homeResults");await aiSettings.saveAISettings({mode:"byok",provider:"openai",baseUrl:"https://fixture.example/v1",apiKey:"fixture",model:"fixture"});});
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 it("opens saved experimental discoveries read-only without analysis, retry controls or data writes",async()=>{
  const recommend=vi.spyOn(discovery,"recommendHistory"),value=props();
@@ -46,5 +47,18 @@ it("records a submitted discovery even before model configuration without making
 });
 it("reopens a saved topic record without model calls and only reanalyzes after an explicit action",async()=>{
  const recommend=vi.spyOn(discovery,"recommendHistory").mockResolvedValue([]),initialActivity={id:"saved-topic",kind:"discovery" as const,question:props().goal,topicGoal:props().goal,poolIds:["a","b"],createdAt:1,status:"completed" as const,candidates:[]};
- render(<HomeTopicWorkspace {...props()} initialActivity={initialActivity}/>);await screen.findByText("暂未发现有充分依据的共同主题。");await screen.findByRole("combobox",{name:"选择生成 AI"});expect(recommend).not.toHaveBeenCalled();fireEvent.click(screen.getByRole("button",{name:"重新发现"}));await waitFor(()=>expect(recommend).toHaveBeenCalledOnce());await waitFor(async()=>expect(await listHomeResults()).toEqual([expect.objectContaining({id:"saved-topic",status:"completed",candidates:[]})]));
+ const recheck=vi.spyOn(savedDiscoveries,"currentHomeDiscoveries");
+ vi.spyOn(aiSettings,"getAISettings").mockResolvedValueOnce(undefined);
+ render(<HomeTopicWorkspace {...props()} initialActivity={initialActivity}/>);
+ await screen.findByText("暂未发现有充分依据的共同主题。");
+ expect(screen.getByText("主题分析需要模型，请先配置模型。")).toBeVisible();
+ const rediscover=screen.getByRole("button",{name:"重新发现"});
+ await act(async()=>{window.dispatchEvent(new Event("atlas-ai-settings-changed"));});
+ await waitFor(()=>expect(screen.queryByText("主题分析需要模型，请先配置模型。")).toBeNull());
+ expect(screen.getByRole("button",{name:"重新发现"})).toBe(rediscover);
+ expect(recheck).toHaveBeenCalledOnce();
+ expect(recommend).not.toHaveBeenCalled();
+ fireEvent.click(rediscover);
+ await waitFor(()=>expect(recommend).toHaveBeenCalledOnce());
+ await waitFor(async()=>expect(await listHomeResults()).toEqual([expect.objectContaining({id:"saved-topic",status:"completed",candidates:[]})]));
 });

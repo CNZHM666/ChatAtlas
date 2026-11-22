@@ -76,16 +76,17 @@ export function HomeTopicWorkspace({goal,poolIds,conversations,zh,onBack,onReque
     {!discovering && discoveryProgress?.failedGroups ? <p className="history-hint">{zh?"部分主题未完成，已完成结果可用。":"Some topics could not be checked; completed results remain available."}</p>:null}
   </section> : null;
 
+ const canAutoDiscover = !(initialActivity && retry === 0) && !readOnly && aiReady && !switchingAI;
  useEffect(()=>{
   setAICandidates(undefined);setDiscoveryProgress(undefined);setError("");setDiscovering(false);
   if(initialActivity&&retry===0){let alive=true;void currentHomeDiscoveries(discoveryPool,initialActivity.candidates??[]).then(rows=>{if(alive){setAICandidates(rows);if(rows.length!==(initialActivity.candidates?.length??0))setError(zh?"部分主题来源已变化，请重新发现。":"Some topic sources changed. Discover again.");}}).catch(()=>{if(alive)setError(zh?"历史来源暂时无法核对，请重试。":"Could not check saved sources. Try again.");});return()=>{alive=false;};}
-  if(readOnly||!aiReady||switchingAI)return;
+  if(!canAutoDiscover)return;
   let alive=true;
   void (async()=>{const cached=retry===0?await readHomeDiscoveries(discoveryPool,zh,goal).catch(()=>[]):[];if(!alive)return;if(cached.length){setAICandidates(cached);persistActivity({status:"completed",candidates:cached});}else await recommend();})();
   return()=>{alive=false;recommendation.current?.abort();recommendation.current=undefined;recommending.current=false;};
   // Source identity and the user's goal bound this task, not callback identities.
   // eslint-disable-next-line react-hooks/exhaustive-deps
- },[aiReady,switchingAI,revision,goal,retry,zh,initialActivity,readOnly]);
+ },[canAutoDiscover,revision,goal,retry,zh,initialActivity]);
 
  return <main className="home-task-workspace home-topic-workspace"><header className="home-task-header"><div className="home-task-navigation"><ReaderBackButton onClick={()=>onBack(goal)} label={zh?"返回":"Back"}/><h1>{zh?"发现整理主题":"Discover topics"}</h1></div><div className="home-task-tools">{onHistory?<button onClick={async()=>{recommendation.current?.abort();if(discovering)persistActivity({candidates:aiCandidates??[]});await activitySave.current;onHistory(activity.current);}}><History size={15}/>{zh?"历史记录":"History"}</button>:null}{!readOnly?<AIQuickSelect zh={zh} configureLabel={zh?"配置模型":"Configure model"} onConfigure={onConfigureAI} onReady={setAIReady} onBusy={setSwitchingAI}/>:null}</div></header><div className="home-task-body"><div className="home-task-content history-workbench"><header className="home-task-goal-heading"><h2 className="home-task-goal">{goal}</h2></header>{initialActivity&&!readOnly&&retry===0?<p className="home-recall-limit">{zh?"已保存的主题记录，不会自动重新分析。":"Saved topic record; no automatic analysis."}</p>:null}{readOnly?<p className="home-recall-limit">{zh?"已保存的主题记录，仅供查看；该功能暂未开放。":"Saved topic record, available for reading only. This feature is not currently open."}</p>:null}{!readOnly&&!aiReady?<p className="home-task-connect-hint">{zh?"主题分析需要模型，请先配置模型。":"Configure a model to analyze topics."}</p>:null}{error?<section className="home-task-panel"><p role="alert">{error}</p><div className="home-task-actions">{!readOnly?<button type="button" disabled={!aiReady||discovering} onClick={()=>{setError("");setRetry(value=>value+1);}}>{zh?"重试":"Retry"}</button>:null}<button type="button" onClick={()=>onBack(goal)}>{zh?"调整目标与材料":"Adjust goal and sources"}</button></div></section>:null}{saveError?<p className="home-recall-limit" role="alert">{zh?"历史记录保存失败。":"Could not save history."}<button onClick={()=>{setSaveError(false);persistActivity({});}}>{zh?"重新保存":"Save again"}</button></p>:null}{discoveryContent}{evidenceCandidate?<HistoryDiscoveryEvidence candidate={evidenceCandidate} zh={zh} onRead={onRead} onClose={()=>setEvidenceCandidate(undefined)}/>:null}</div></div></main>;
 }
