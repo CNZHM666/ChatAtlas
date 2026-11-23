@@ -105,10 +105,10 @@ export function ReviewHome({ onOpenChapter, sessions, projectsReady = true, expe
     <div ref={sourcesRef} className="home-section home-materials">
       <header><div className="home-materials-heading"><h2>{importFirst ? zh ? "导入你的第一批对话" : "Import your first conversations" : <button type="button" className="home-materials-toggle" aria-expanded={materialsExpanded} aria-controls="home-source-materials" onClick={() => { const opening = !materialsExpanded; setMaterialsOpen(opening);
         // Collapsing from inside the list would leave the reader below where the section now ends: bring its heading back.
-        if (!opening) window.setTimeout(() => { const box = sourcesRef.current; if (box && box.getBoundingClientRect().top < 0) box.scrollIntoView({ block: "start" }); }, 0); }}><span>{zh ? "来源材料与同步" : "Source materials and sync"}</span><ChevronDown size={16} aria-hidden="true" /></button>}</h2>
+        if (!opening) window.setTimeout(() => { const box = sourcesRef.current; if (box && box.getBoundingClientRect().top < 0) box.scrollIntoView({ block: "start" }); }, 0); }}><span>{onPreviewAction ? (zh ? "来源材料" : "Source materials") : (zh ? "来源材料与同步" : "Source materials and sync")}</span><ChevronDown size={16} aria-hidden="true" /></button>}</h2>
         {importFirst && conversations.length ? <p className="home-import-pending">{zh ? `已发现 ${conversations.length} 条对话，同步正文后即可全文搜索。` : `${conversations.length} conversations found. Sync messages to search the full text.`}</p> : !importFirst ? <p className="home-source-inventory">
           <span>{zh ? `${conversations.length} 条对话` : `${conversations.length} conversations`}</span>
-          {pendingCount > 0 ? <span className="workbench-pending-dot">{zh ? `${pendingCount} 条待同步` : `${pendingCount} pending`}</span> : null}
+          {!onPreviewAction && pendingCount > 0 ? <span className="workbench-pending-dot">{zh ? `${pendingCount} 条待同步` : `${pendingCount} pending`}</span> : null}
           {!materialsExpanded && zh ? <span>{[...new Set(conversations.map(source => platformName(source.platform, "zh-CN")))].join(" / ")}</span> : null}
         </p> : null}
       </div>{conversations.length?<span className="home-materials-actions" ref={setMaterialActions}/>:null}</header>

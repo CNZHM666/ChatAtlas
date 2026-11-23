@@ -100,7 +100,12 @@ export function AIQuickSelect({ zh, onConfigure, onBusy, onReady, configureLabel
     } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
     finally { setBusy(false); onBusy?.(false); }
   };
-  if (!options.length && onConfigure) return <div className={className}><button type="button" className="ai-quick-connect" onClick={onConfigure}>{selectedLabel}</button>{error ? <span role="alert" className="ai-quick-error">{error}</span> : null}</div>;
+  if (!options.length && onConfigure) return <div className={className}>
+    <button type="button" className="ai-quick-connect" onClick={onConfigure}>
+      {compact && <Settings2 size={15} aria-hidden="true" />}<span>{selectedLabel}</span>
+    </button>
+    {error ? <span role="alert" className="ai-quick-error">{error}</span> : null}
+  </div>;
   // Models are grouped by provider once there is more than one, so two providers' models are told apart. Managing
   // connections is its own button: as an option of this list it was a choice that opened a panel instead.
   const groups = new Map<string, [string, AIConnection][]>();

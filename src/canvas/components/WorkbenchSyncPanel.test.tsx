@@ -7,6 +7,20 @@ import { WorkbenchSyncPanel } from "./WorkbenchSyncPanel";
 
 afterEach(cleanup);
 describe("material list responsiveness during import", () => {
+  it("keeps example conversations readable without presenting any sync actions or statuses", () => {
+    const conversation: Conversation = { id: "example", title: "Circuit Studio", platform: "chatgpt", url: "", messageCount: 2, hydrationState: "hydrated", importState: "complete", updatedAt: 1 };
+    const onOpen = vi.fn(), onPreviewAction = vi.fn();
+    render(<PreferencesProvider initialLocale="en"><WorkbenchSyncPanel conversations={[conversation]} importJob={null} importSource="web"
+      selectedIds={new Set([conversation.id])} onSelectedIds={vi.fn()} onPrioritize={vi.fn()} onScan={vi.fn()} onHydrate={vi.fn()}
+      onZip={vi.fn()} onPause={vi.fn()} onConnect={vi.fn()} onPreviewAction={onPreviewAction} onOpen={onOpen} /></PreferencesProvider>);
+    expect(screen.queryByRole("button", { name: /sync/i })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Synced" })).toBeNull();
+    expect(screen.queryByText("Synced")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Read: Circuit Studio" }));
+    expect(onOpen).toHaveBeenCalledWith(conversation.id, undefined, undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Import files" }));
+    expect(onPreviewAction).toHaveBeenCalledOnce();
+  });
   it("combines AI categories, sync state and title search, selecting only the filtered results",()=>{
     localStorage.setItem("atlas-locale","zh-CN");
     const conversations=[{id:"gpt",platform:"chatgpt",title:"GPT title",messageCount:null,importState:"discovered",updatedAt:1},{id:"claude-ready",platform:"claude",title:"Claude ready",messageCount:2,importState:"complete",hydrationState:"hydrated",updatedAt:2},{id:"claude-pending",platform:"claude",title:"Claude pending",messageCount:null,importState:"discovered",updatedAt:3}] as Conversation[];

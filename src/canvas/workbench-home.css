@@ -211,13 +211,18 @@
 .review-home .history-shortcuts > button:disabled { opacity: .55; }
 
 .review-home .goal-composer.is-simple.history-composer { position: relative; overflow: visible; border-radius: 13px; box-shadow: 0 1px 3px #0001; }
-.review-home .goal-composer.is-simple.history-composer:focus-within { border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); box-shadow: 0 0 0 3px var(--accent-soft), 0 1px 3px #0001; }
+.review-home .goal-composer.is-simple.history-composer:focus-within { border-color: var(--border); }
+.review-home .goal-composer.is-simple.history-composer:has(> label textarea:focus) { border-color: var(--border-strong); }
 .review-home .history-composer:has(.ai-model-menu) { z-index: 3; }
 .review-home .history-composer > .history-source-attachments { margin: 0 16px; padding: 9px 0 8px; border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent); }
 .history-source-attachments:not(.is-expanded) .history-source-chips { overflow-x: auto; scrollbar-width: thin; }
 .review-home .history-composer .history-source-clear { margin-left: 0; padding-inline: 6px; border: 0; border-radius: 6px; }
 .review-home .goal-composer.is-simple.history-composer > label { padding: 10px 16px 0; }
 .review-home .goal-composer.is-simple.history-composer textarea { min-height: 48px; max-height: 220px; font-size: var(--text-md); }
+.review-home .goal-composer.is-simple.history-composer textarea:focus-visible { outline: none; }
+@media (forced-colors: active) {
+  .review-home .goal-composer.is-simple.history-composer:has(> label textarea:focus-visible) { border-color: Highlight; }
+}
 .review-home .goal-composer.is-simple.history-composer .goal-composer-footer { display: flex; flex-wrap: wrap; min-height: 44px; margin: 0; padding: 5px 12px 9px; gap: 6px 10px; border: 0; background: transparent; }
 .review-home .history-composer .history-selection-summary { min-height: 32px; padding: 4px 6px; border-radius: 6px; white-space: nowrap; }
 .review-home .history-composer .history-selection-summary:hover { background: var(--surface-muted); color: var(--text); }
@@ -230,6 +235,8 @@
 .history-composer .ai-quick-select.is-compact :is(.ai-model-trigger, .ai-quick-manage, .ai-quick-connect) { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 4px 8px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-muted); color: var(--text); font-size: var(--text-xs); }
 .history-composer .ai-quick-select.is-compact .ai-quick-manage { width: 32px; padding: 0; background: transparent; color: var(--muted); }
 .history-composer .ai-quick-select.is-compact :is(.ai-model-trigger, .ai-quick-manage, .ai-quick-connect):hover { border-color: var(--border); background: var(--surface-muted); color: var(--text); }
+.history-composer .ai-quick-select.is-compact .ai-quick-connect { padding-inline: 9px; border-color: var(--border); background: transparent; color: var(--muted); white-space: nowrap; }
+.history-composer .ai-quick-select.is-compact .ai-quick-connect > svg { flex: none; }
 .review-home .history-composer .ai-quick-select.is-compact :is(.ai-model-trigger, .ai-quick-manage, .ai-quick-connect):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ai-model-trigger { max-width: min(210px, 36vw); }
 .ai-model-trigger[aria-expanded="true"] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, var(--border)); }

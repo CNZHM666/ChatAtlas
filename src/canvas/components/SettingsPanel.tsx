@@ -2,7 +2,7 @@ import { generationFailureReason } from "../generation-notice";
 import "../settings-panel.css";
 import { WebCaptureSettings } from "./WebCaptureSettings";
 import { createAtlasAI } from "../../ai/atlas-ai";
-import { CheckCircle2, ChevronDown, Database, ListChecks, LoaderCircle, RefreshCw, SlidersHorizontal, X } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, ChevronDown, Database, Info, ListChecks, LoaderCircle, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { AISettings } from "../../shared/types";
 import { AI_PROVIDER_PRESETS, canonicalModelId, discoveredModelId, embeddingModelsOf, listAvailableModels, recommendedEmbeddingModel, providerModelsUrl, requestProviderPermission, type AvailableAIModel } from "../../ai/provider";
@@ -164,7 +164,11 @@ export function SettingsPanel({ onClose, initialTab = "data", installUrl }: { on
       <button className={tab === "data" ? "active" : ""} aria-current={tab === "data" ? "page" : undefined} onClick={() => setTab("data")}><Database size={15}/>{l("采集与数据", "Capture & data")}</button>
       <button className={tab === "usage" ? "active" : ""} aria-current={tab === "usage" ? "page" : undefined} onClick={() => setTab("usage")}><ListChecks size={15}/>{l("使用记录", "Usage history")}</button>
     </nav>
-    {installUrl ? <div className="settings-demo-notice"><span>{l("在线演示仅供查看设置。", "Settings are read-only in this demo.")}</span> <a href={installUrl}>{l("安装扩展", "Install extension")}</a></div> : null}
+    {installUrl ? <div className="settings-demo-notice">
+      <Info size={15} aria-hidden="true" />
+      <p>{l("演示设置仅供查看", "Demo settings are read-only")}</p>
+      <a href={installUrl}>{l("安装扩展", "Install extension")}<ArrowUpRight size={13} aria-hidden="true" /></a>
+    </div> : null}
     {tab === "usage" ? <div key="usage" className="settings-usage"><UsageLedger locale={locale} readOnly={readOnly}/></div> : null}
     {tab === "data" ? <div key="data" className="settings-data"><WebCaptureSettings zh={locale==="zh-CN"} readOnly={readOnly}/><section className="settings-privacy-card"><header><Database size={18} aria-hidden="true" /><h3>{t("dataPrivacy")}</h3></header><dl>
       <div><dt>{locale === "zh-CN" ? "保存位置" : "Storage"}</dt><dd>{locale === "zh-CN" ? "保存在此设备的浏览器中" : "This browser on this device"}</dd></div>

@@ -2,7 +2,7 @@
 
 **简体中文** · [English](en/GETTING_STARTED.md)
 
-先按[三步安装说明](../README.md#安装到-chrome-或-edge)把 ChatAtlas 加载到 Chrome 或 Edge。
+先按[三步安装说明](../README.zh-CN.md#安装到-chrome-或-edge)把 ChatAtlas 加载到 Chrome 或 Edge。
 
 对话文件导入支持 ChatGPT、Claude、Gemini（Google Takeout JSON）和 DeepSeek 的官方导出，以及其他 AI 的 Markdown／JSON 对话记录。Claude、Gemini、DeepSeek、豆包、Kimi、通义千问（含 Qwen 国际站）提供网页适配试用：浏览器授予网站权限后默认自动运行，可在设置中暂停或恢复；支持原生侧栏、本地查找、项目关联、已加载消息同步、原文定位和输入框填入。网页历史导入读取已加载标题并逐条保存已加载正文；仅保存当前已加载的消息，不保证完整历史。ChatGPT 保留专用历史列表与正文同步。新增适配尚未经登录网站逐一验收；BYOK 模型服务商与对话来源平台相互独立。
 

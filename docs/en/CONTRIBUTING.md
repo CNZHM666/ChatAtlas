@@ -25,7 +25,7 @@ Keep temporary scripts, logs, screenshots of private data, exports and diagnosti
 
 ## Feedback
 
-Maintain both Simplified Chinese guides at their existing paths and the English edition under `docs/en/`, with `README.en.md` as its root entry. Keep language links and update both editions when capabilities, cost, limits or setup change. Preserve license texts in their original language; historical local notes are not current product guides.
+Maintain both the Simplified Chinese guides at their existing paths and the English guides under `docs/en/`. The repository opens with the English `README.md` and links to `README.zh-CN.md` for Simplified Chinese. Keep language links and update both editions when capabilities, cost, limits or setup change. Preserve license texts in their original language; historical local notes are not current product guides.
 
 Use Issues with version, browser, import method, provider/model, reproduction steps, expected and actual result. Remove keys and private text. For AI quality reports, include measured time, provider-reported input/output tokens and specific omissions separately from estimated budgets. Mocked tests do not establish live-model quality.
 
