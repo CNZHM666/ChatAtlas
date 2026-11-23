@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <strong>把散落在多个 AI 长对话里的项目讨论，整理成可核对原话、可增量更新的项目 Wiki。</strong><br>
-  按需导出 Markdown，直接交给队友、<strong>Codex</strong> 或 <strong>Claude Code</strong> 接着做。
+  <strong>把跨平台的不同对话整理成可以溯源的交接文档。</strong><br>
+  本地优先的Chrome扩展，接入API即可使用。按需导出 Markdown，交给队友、<strong>Codex</strong> 或 <strong>Claude Code</strong> 接着做。
 </p>
 
 > [!NOTE]
@@ -25,7 +25,7 @@
 
 ## 为什么用 ChatAtlas
 
-- **区分结论，原话一键溯源。** 已确认决定、AI 建议与用户报告分别标记。打开「核对依据」即可查看原话及前后文，遇到关键冲突时由你拍板确认。
+- **把多段对话整理成一份 Wiki。** 从 ChatGPT、Claude、Gemini 等平台选取相关对话，汇总成项目文档。已确认决定、AI 建议与用户报告分别标记，打开「核对依据」可核对原话并查看前后文，遇到关键冲突时由你拍板确认。
 - **知识点账本与增量更新。** 分批提取知识点并关联原始消息 ID。后续补充对话时，复用符合条件且已通过检查的读取结果，补读聚焦遗漏材料，应用变更前可先预览受影响的章节。
 - **导出 Markdown，无缝交接。** 按需勾选项目总览和指定章节导出 `.md`（可保留引用编号或附上原话），直接作为项目上下文交给队友、Codex 或 Claude Code。[查看 Markdown 模板 →](docs/examples/project-context-template.md)
 - **本地优先，按需调用 AI。** 对话、账本与 Wiki 均保存在浏览器 IndexedDB 中。阅读、关键词搜索与导出在本地完成。主动生成或更新 Wiki 时，所选范围内的必要材料直接发往你配置的模型服务商。

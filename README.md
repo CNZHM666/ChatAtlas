@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <strong>Turn long, scattered AI conversations into a project wiki with verifiable citations and incremental updates.</strong><br>
-  Export only the Markdown you need and hand it to a teammate, <strong>Codex</strong>, or <strong>Claude Code</strong> to pick up right where you left off.
+  <strong>Combine conversations from different AI platforms into one project handoff with verifiable citations.</strong><br>
+  A local-first Chrome extension. Connect your own model API to generate a wiki, then export the Markdown you need for teammates, <strong>Codex</strong>, or <strong>Claude Code</strong>.
 </p>
 
 > [!NOTE]
@@ -25,7 +25,7 @@
 
 ## Why use ChatAtlas?
 
-- **Review decisions at the source.** Confirmed decisions, AI suggestions, and user reports are clearly labeled. Open **Check evidence** to read the original passage in context and resolve key conflicts yourself.
+- **Build one wiki from multiple conversations.** Select threads from ChatGPT, Claude, Gemini, and other supported platforms. The wiki labels confirmed decisions, AI suggestions, and user reports. Open **Check evidence** to jump to the original passage in its conversation and resolve key conflicts yourself.
 - **Knowledge ledger with incremental updates.** ChatAtlas extracts knowledge in batches and links each entry to its source message ID. Updates reuse eligible, validated reads and focus follow-up reads on uncovered material. You can preview affected chapters before applying changes.
 - **Markdown built for project handoffs.** Export the project overview and selected chapters as a `.md` file, with citation IDs or original excerpts, ready for a teammate, Codex, or Claude Code. [See the Markdown template →](docs/en/examples/project-context-template.md)
 - **Local-first, with AI on demand.** Conversations, the ledger, and the wiki are stored in your browser's IndexedDB. Reading, keyword search, and export run locally. When you generate or update a wiki, ChatAtlas sends the necessary material from your selected sources directly to your configured provider.
