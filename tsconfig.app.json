@@ -17,5 +17,5 @@
     "jsx": "react-jsx",
     "types": ["chrome", "vite/client", "vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "manifest.config.ts"]
+  "include": ["src", "demo/main.tsx", "manifest.config.ts"]
 }
