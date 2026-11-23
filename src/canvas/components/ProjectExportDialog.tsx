@@ -9,9 +9,8 @@ import {projectKeyEvidence} from "../../export/project-key-evidence";
 import {projectReferenceGroups} from "../../export/project-reference-examples";
 import {wikiReadingFormat} from "../../shared/wiki-reading-format";
 import {wikiQualityCsvMetrics} from "../../shared/wiki-quality-metrics";
-import {projectAnalysisInBackground} from "../project-analysis-background";
 
-export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;zh:boolean;onClose:()=>void}){
+export function ProjectExportDialog({session,zh,onClose,allowCopyMarkdown=false}:{session:FocusSession;zh:boolean;onClose:()=>void;allowCopyMarkdown?:boolean}){
  const l=(cn:string,en:string)=>zh?cn:en,root=useRef<HTMLDivElement>(null),wikiCheckbox=useRef<HTMLInputElement>(null);
  const pages=useMemo(()=>wikiSections(session).filter(page=>page.body.trim()),[session]);
  const projectPreset=Boolean(session.wikiKnowledge?.draft)&&!session.wikiKnowledge?.draft?.writingMode&&session.wikiKnowledge?.documentType!=="learning";
@@ -42,20 +41,27 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
  // The knowledge ledger the Wiki is written from goes as its own JSON file, beside the document in any format.
  const [ledger,setLedger]=useState(false),hasLedger=Boolean(session.wikiKnowledge);
  // The generation record (time, requests, tokens) of this project's runs, so an evaluation needs no trip to settings.
- const [analysis,setAnalysis]=useState(false),[busy,setBusy]=useState(false),hasRun=Boolean(session.runId);
+ const [analysis,setAnalysis]=useState(false),[busy,setBusy]=useState(false),hasRun=!import.meta.env.VITE_ATLAS_STATIC_DEMO&&Boolean(session.runId);
  const parts=wikiSelected||selection.matters||selection.history;
  const diagnosticCount=Number(ledger&&hasLedger)+Number(analysis&&hasRun);
  const count=Number(parts)+diagnosticCount;
  useEffect(()=>{const previous=document.activeElement as HTMLElement|null;root.current?.querySelector<HTMLButtonElement>("button")?.focus();return()=>{if(previous?.isConnected)previous.focus({preventScroll:true});};},[]);
+ const selectedFile=(fileFormat:ProjectExportFormat)=>projectDocument(session,{...selection,referenceAppendix:references?true:"omit"},fileFormat,zh);
+ const copy=async()=>{
+  setError("");setStatus("");setBusy(true);
+  try{await navigator.clipboard.writeText(selectedFile("md").text);setStatus(l("已复制 Markdown","Markdown copied"));}
+  catch{setError(l("无法复制，请使用导出。","Could not copy. Use Export to download the file."));}
+  finally{setBusy(false);}
+ };
  const download=async()=>{
   setError("");setStatus("");setBusy(true);
   const save=(text:string,filename:string,mime:string)=>{const url=URL.createObjectURL(new Blob([text],{type:mime}));try{const a=document.createElement("a");a.href=url;a.download=filename;a.click();}finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}};
   try{
-   const file=parts?projectDocument(session,{...selection,referenceAppendix:references?true:"omit"},format,zh):undefined;
+   const file=parts?selectedFile(format):undefined;
    if(file)save(file.text,file.filename,file.mime);
    if(ledger&&session.wikiKnowledge){const file=projectLedgerFile(session);save(file.text,file.filename,file.mime);}
    let missing=false;
-   if(analysis&&hasRun){const fullMd=file&&format==="md"&&zh&&allWiki&&(!selection.preset||selection.preset==="archive")&&selection.sourceMode==="locators"&&selection.holderMarks!==false&&!selection.matters&&!selection.history;const quality=fullMd?{sessionId:session.id,updatedAt:session.updatedAt,metrics:wikiQualityCsvMetrics(file.text)}:undefined;const csv=await projectAnalysisInBackground({runId:session.runId,sourceConversationIds:session.sourceConversationIds,quality});if(csv)save(csv,projectAnalysisFilename(session),"text/csv;charset=utf-8");else missing=true;}
+   if(!import.meta.env.VITE_ATLAS_STATIC_DEMO&&analysis&&hasRun){const {projectAnalysisInBackground}=await import("../project-analysis-background");const fullMd=file&&format==="md"&&zh&&allWiki&&(!selection.preset||selection.preset==="archive")&&selection.sourceMode==="locators"&&selection.holderMarks!==false&&!selection.matters&&!selection.history;const quality=fullMd?{sessionId:session.id,updatedAt:session.updatedAt,metrics:wikiQualityCsvMetrics(file.text)}:undefined;const csv=await projectAnalysisInBackground({runId:session.runId,sourceConversationIds:session.sourceConversationIds,quality});if(csv)save(csv,projectAnalysisFilename(session),"text/csv;charset=utf-8");else missing=true;}
    const done=[file?l("文件","Files"):"",ledger&&hasLedger?l("账本","ledger"):"",analysis&&hasRun&&!missing?l("生成记录","generation record"):""].filter(Boolean);
    setStatus(missing&&!done.length?l("这个项目没有可导出的生成记录","This project has no generation record to export"):`${done.join(l("和"," and "))}${l("已导出"," exported")}${missing?l("；这个项目没有可导出的生成记录","; this project has no generation record"):""}`);
   }
@@ -120,6 +126,8 @@ export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;z
     </div>
    </div>
   </div>
-  <footer><span className="project-export-status" data-state={error?"error":status?"success":undefined} role={error?"alert":"status"}>{error||status||(busy?l("正在准备生成记录…","Preparing generation record…"):l(`将导出 ${count} 个文件`,`${count} ${count===1?"file":"files"} to export`))}</span><button type="button" className="primary" disabled={!count||busy} onClick={()=>void download()}><Download size={16}/>{l("导出","Export")}</button></footer>
+  <footer><span className="project-export-status" data-state={error?"error":status?"success":undefined} role={error?"alert":"status"}>{error||status||(busy?(analysis?l("正在准备生成记录…","Preparing generation record…"):l("正在准备文件…","Preparing files…")):l(`将导出 ${count} 个文件`,`${count} ${count===1?"file":"files"} to export`))}</span>
+   {allowCopyMarkdown&&format==="md"&&<button type="button" className="demo-export-copy" disabled={!parts||busy} onClick={()=>void copy()}>{l("复制 Markdown","Copy Markdown")}</button>}
+   <button type="button" className="primary" disabled={!count||busy} onClick={()=>void download()}><Download size={16}/>{l("导出","Export")}</button></footer>
  </div></div>;
 }

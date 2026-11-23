@@ -32,7 +32,7 @@
 
 ## 效果预览
 
-**[在线体验中文示例](https://cnzhm666.github.io/ChatAtlas/?lang=zh#/wiki/operation-plans)** · 无需安装或配置模型。虚构项目 Circuit Studio 串联了 ChatGPT、Claude 和 Gemini 的四段对话。打开「核对依据」，先看为什么改用「先确认、再执行」，再切换到 Gemini 核对失败恢复规则。你也可以搜「回滚」或导出带原话的 Markdown。
+**[在线体验中文示例](https://cnzhm666.github.io/ChatAtlas/?lang=zh#/wiki/operation-plans)** · 无需安装或配置模型。虚构项目 Circuit Studio 将 ChatGPT、Claude 和 Gemini 的六段对话整理为五个 Wiki 章节。打开「核对依据」，先在 Claude 查看为什么改用「先确认、再执行」，再到 Gemini 核对失败恢复规则与原表。可从项目顶栏导出带原话的 Markdown。
 
 <p align="center">
   <img src="docs/images/citation-check.gif" alt="在 Wiki 中开启显示出处并查看对应原话" width="920">

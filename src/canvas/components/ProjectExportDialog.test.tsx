@@ -110,7 +110,7 @@ it("exports this project's generation record as a CSV when ticked",async()=>{
  fireEvent.click(screen.getByRole("checkbox",{name:/生成记录/}));
  fireEvent.click(screen.getByRole("button",{name:"导出"}));
  expect(screen.getByText("正在准备生成记录…")).toBeInTheDocument();
- expect(post).toHaveBeenCalledWith({runId:"run-1",sourceConversationIds:session.sourceConversationIds,quality:expect.objectContaining({sessionId:session.id,updatedAt:session.updatedAt})});
+ await waitFor(()=>expect(post).toHaveBeenCalledWith({runId:"run-1",sourceConversationIds:session.sourceConversationIds,quality:expect.objectContaining({sessionId:session.id,updatedAt:session.updatedAt})}));
  receive?.({data:{csv:"\uFEFFrun_id\r\nrun-1\r\n"}});
  await screen.findByText("文件和生成记录已导出");
  expect(names.some(name=>name.endsWith("-analysis.csv"))).toBe(true);

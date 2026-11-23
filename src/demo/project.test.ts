@@ -6,18 +6,19 @@ import { architectureChapter, demoProject } from "./project";
 it.each(["en", "zh"] as const)("binds every %s demo claim to a real message in its localized fixture", locale => {
   const { knowledge } = demoProject(locale);
   const { session, conversations, messages } = knowledge;
-  expect(conversations.map(chat => chat.platform)).toEqual(["chatgpt", "claude", "gemini", "chatgpt"]);
+  expect(conversations.map(chat => chat.platform)).toEqual(["chatgpt", "claude", "gemini", "chatgpt", "claude", "gemini"]);
   expect(session.activeSectionId).toBe(architectureChapter);
-  expect(session.sections.find(chapter => chapter.id === architectureChapter)?.evidenceIds).toEqual([
+  const architecture = session.sections.find(chapter => chapter.id === architectureChapter)!;
+  expect(architecture.evidenceIds).toEqual([
     "source-architecture-2", "source-validation-2",
   ]);
   const ruleTable = (text: string) => text.split("\n\n").find(block => block.startsWith("|"));
-  const tableInChapter = ruleTable(session.sections[0].body);
+  const tableInChapter = ruleTable(architecture.body);
   const validationOriginal = messages.find(message => message.id === "validation-2");
   expect(tableInChapter).toBeDefined();
   expect(ruleTable(validationOriginal!.content)).toBeDefined();
   expect(wikiTableSignature(tableInChapter!)).toBe(wikiTableSignature(ruleTable(validationOriginal!.content)!));
-  expect(session.sections[0].claims?.every(claim => claim.holder === "decided" && claim.holderMark)).toBe(true);
+  expect(architecture.claims?.every(claim => claim.holder === "decided" && claim.holderMark)).toBe(true);
 
   for (const chapter of session.sections) {
     for (const claim of chapter.claims ?? []) {

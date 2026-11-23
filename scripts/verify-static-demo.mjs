@@ -5,7 +5,7 @@ import path from "node:path";
 const root = new URL("../dist-demo/", import.meta.url);
 const files = await readdir(root, { recursive: true });
 assert.ok(files.includes("index.html"), "Pages needs a root index.html");
-const forbidden = /(?:^|[\\/])(?:manifest\.json|(?:[^\\/]*-)?(?:service.worker|background|content.script|sidecar)(?:[.\\/-]|$))/iu;
+const forbidden = /(?:^|[\\/])(?:manifest\.json|(?:[^\\/]*-)?(?:service.worker|background|content.script|sidecar|project-analysis-worker|project-analysis-csv)(?:[.\\/-]|$))/iu;
 assert.deepEqual(files.filter(file => file !== path.join(".vite", "manifest.json") && forbidden.test(file)), []);
 
 const inventory = new URL(".vite/manifest.json", root);

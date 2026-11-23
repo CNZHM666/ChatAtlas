@@ -32,7 +32,7 @@
 
 ## Preview
 
-**[Try the English demo](https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans)** · No installation or API key required. Circuit Studio is a fictional project built around four conversations from ChatGPT, Claude, and Gemini. Choose **Check evidence** to trace the approval-before-execution decision to Claude, then switch to Gemini to verify the recovery rule. You can also search for “rollback” or export Markdown with the original quotes.
+**[Try the English demo](https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans)** · No installation or API key required. Circuit Studio turns six fictional conversations from ChatGPT, Claude, and Gemini into five wiki chapters. Use **Check evidence** to trace the approval-before-execution decision to Claude, then open the original recovery rules and table in Gemini. Export Markdown with original quotes from the project toolbar.
 
 <p align="center">
   <img src="docs/images/citation-check.gif" alt="Turn on source markers in the wiki and open the cited passage" width="920">

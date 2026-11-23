@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => ({
       }
     },
   }],
-  define: { "import.meta.env.VITE_ATLAS_API_BASE_URL": JSON.stringify("") },
+  define: { "import.meta.env.VITE_ATLAS_API_BASE_URL": JSON.stringify(""), "import.meta.env.VITE_ATLAS_STATIC_DEMO": "true" },
   publicDir: false,
   resolve: { conditions: ["worker", ...defaultClientConditions] },
   build: {
