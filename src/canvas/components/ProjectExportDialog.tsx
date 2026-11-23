@@ -10,7 +10,7 @@ import {projectReferenceGroups} from "../../export/project-reference-examples";
 import {wikiReadingFormat} from "../../shared/wiki-reading-format";
 import {wikiQualityCsvMetrics} from "../../shared/wiki-quality-metrics";
 
-export function ProjectExportDialog({session,zh,onClose,allowCopyMarkdown=false}:{session:FocusSession;zh:boolean;onClose:()=>void;allowCopyMarkdown?:boolean}){
+export function ProjectExportDialog({session,zh,onClose}:{session:FocusSession;zh:boolean;onClose:()=>void}){
  const l=(cn:string,en:string)=>zh?cn:en,root=useRef<HTMLDivElement>(null),wikiCheckbox=useRef<HTMLInputElement>(null);
  const pages=useMemo(()=>wikiSections(session).filter(page=>page.body.trim()),[session]);
  const projectPreset=Boolean(session.wikiKnowledge?.draft)&&!session.wikiKnowledge?.draft?.writingMode&&session.wikiKnowledge?.documentType!=="learning";
@@ -127,7 +127,7 @@ export function ProjectExportDialog({session,zh,onClose,allowCopyMarkdown=false}
    </div>
   </div>
   <footer><span className="project-export-status" data-state={error?"error":status?"success":undefined} role={error?"alert":"status"}>{error||status||(busy?(analysis?l("正在准备生成记录…","Preparing generation record…"):l("正在准备文件…","Preparing files…")):l(`将导出 ${count} 个文件`,`${count} ${count===1?"file":"files"} to export`))}</span>
-   {allowCopyMarkdown&&format==="md"&&<button type="button" className="demo-export-copy" disabled={!parts||busy} onClick={()=>void copy()}>{l("复制 Markdown","Copy Markdown")}</button>}
-   <button type="button" className="primary" disabled={!count||busy} onClick={()=>void download()}><Download size={16}/>{l("导出","Export")}</button></footer>
+   <div className="project-export-actions">{format==="md"&&<button type="button" disabled={!parts||busy} onClick={()=>void copy()}>{l("复制 Markdown","Copy Markdown")}</button>}
+   <button type="button" className="primary" disabled={!count||busy} onClick={()=>void download()}><Download size={16}/>{l("导出","Export")}</button></div></footer>
  </div></div>;
 }

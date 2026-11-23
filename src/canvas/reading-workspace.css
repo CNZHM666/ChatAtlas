@@ -1079,7 +1079,6 @@
 .reading-outline .project-navigation-tabs > button[aria-selected="true"] { color: var(--text); background: var(--accent-soft); }
 .project-navigation-tabs small { margin-left: 7px; font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .project-navigation-list { min-height: 0; }
-.reading-outline .outline-source-item strong { font-weight: 400; }
 .question-reader-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; margin: 0 0 18px; padding-block: 8px; }
 .question-reader-controls button { padding: 6px 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; font-size: var(--text-sm); }
 .question-reader-controls .source-focus-toggle[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
@@ -2845,6 +2844,7 @@
 .project-export-dialog .project-export-status { min-width:0; color:var(--muted); font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .project-export-dialog .project-export-status[data-state=success] { color:var(--accent); }
 .project-export-dialog .project-export-status[data-state=error] { color:var(--text); }
+.project-export-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .project-export-dialog footer button { display:inline-flex; flex:none; align-items:center; justify-content:center; gap:7px; min-width:86px; min-height:36px; padding:7px 14px; margin:0; border-radius:7px; font-size:13px; line-height:1.5; }
 .project-export-dialog :is(button,input):focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .project-export-dialog .project-export-selection input[type=checkbox]:focus-visible { outline:none; }
@@ -3090,10 +3090,46 @@
 /* Where an answer matched the search: the line under the question, so the match says why it is listed. */
 .conversation-message-item .message-search-snippet { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: var(--text-xs); line-height: 1.5; font-weight: 400; }
 /* A project's sources from several AIs, under each AI's name. */
-.outline-source-group + .outline-source-group { margin-top: 10px; }
-.outline-source-group > h3 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 12px 4px; color: var(--muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: .02em; }
+.outline-source-group + .outline-source-group { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+.outline-source-group > h3 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 10px 5px; color: var(--muted); font-size: var(--text-xs); font-weight: 650; }
 .outline-source-group > h3 .ai-platform-icon, .outline-source-group > h3 .ai-platform-icon > img, .outline-source-group > h3 .ai-platform-icon-mask { flex-basis: 16px; width: 16px; height: 16px; }
-.outline-source-group > h3 small { margin-left: auto; font-weight: 400; }
+.outline-source-group > h3 small { margin-left: auto; font-weight: 400; font-variant-numeric: tabular-nums; }
+.reading-outline .outline-item.outline-source-item { min-height: 34px; gap: 7px; padding: 6px 10px; margin: 1px 0; }
+.reading-outline .outline-source-group .outline-source-item { padding-inline-start: 18px; }
+.reading-outline .outline-source-item > svg { flex: 0 0 13px; }
+.reading-outline .outline-source-item strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); font-weight: 400; }
+.project-navigation-actions { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 12px; }
+.project-navigation-actions > .reader-back-button { margin: 0; min-width: 0; }
+.focus-workspace button.conversation-sidebar-toggle { padding: 0; border: 0; border-radius: 8px; color: var(--muted); background: transparent; }
+.focus-workspace button.conversation-sidebar-toggle:is(:hover, :focus-visible) { color: var(--text); background: var(--surface-muted); }
+.focus-workspace button.project-navigation-mobile, .project-navigation-rail { display: none; }
+.project-navigation-resize { display: none; }
+@media (min-width: 761px) {
+  .focus-workspace .project-reading-base > .reading-outline:has(> .project-navigation-actions) {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex-basis: var(--project-navigation-width, var(--project-navigation-default, 250px));
+    max-width: 34%;
+    overflow: hidden;
+  }
+  .reading-outline:has(> .project-navigation-actions) > :not(.project-navigation-list) { flex-shrink: 0; }
+  .reading-outline:has(> .project-navigation-actions) > .project-navigation-list { overflow: auto; overscroll-behavior: contain; }
+  .focus-workspace[data-project-navigation-collapsed] .project-reading-base > .reading-outline:has(> .project-navigation-actions) { display: none; }
+  .project-navigation-rail { display: flex; flex: 0 0 52px; justify-content: center; padding-top: 14px; border-inline-end: 1px solid var(--border); background: var(--page); }
+  .focus-workspace:is(.has-original-panel, :has(> .wiki-scope-reader)) { --project-navigation-default: 210px; }
+  .focus-workspace[data-project-navigation-side="right"] .project-reading-base > :is(.reading-outline, .project-navigation-rail) { order: 3; border-left: 1px solid var(--border); border-right: 0; }
+  .project-navigation-resize { display: block; position: absolute; inset: 0 0 0 auto; width: 7px; z-index: 2; cursor: col-resize; touch-action: none; }
+  [data-project-navigation-side="right"] .project-navigation-resize { right: auto; left: 0; }
+  .project-navigation-resize:is(:hover, :focus-visible) { outline: none; background: color-mix(in srgb, var(--accent) 25%, transparent); }
+}
+@media (max-width: 760px) {
+  .focus-workspace button.project-navigation-mobile { display: grid; }
+  .project-reading-base:has(> .reading-outline.is-mobile-open) button.project-navigation-mobile { visibility: hidden; }
+}
+@media (min-width: 761px) and (max-width: 1000px) {
+  .focus-workspace { --project-navigation-default: 210px; }
+}
 /* Version picker: a quiet row of the sidebar, not a white card; the list leads with each version's time. */
 .focus-workspace .project-result-picker > summary { padding: 8px 10px; border-color: transparent; background: color-mix(in srgb, var(--text) 4%, transparent); border-radius: 10px; transition: background .15s, border-color .15s; }
 .focus-workspace .project-result-picker > summary:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }

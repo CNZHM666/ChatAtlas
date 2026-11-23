@@ -13,7 +13,7 @@ import type {MessageSourceRange,ReaderSearchContext} from "../shared/message-loc
 import {getDatabase} from "../storage/db";
 import {listFocusSessions} from "../storage/focus-sessions";
 import {linkSidecarProject,unlinkSidecarProject} from "../storage/sidecar-links";
-import {savedSidecarProjects} from "./project-model";
+import {savedFocusProjects} from "../canvas/focus-versions";
 import {isCurrentHydrationComplete} from "../sync/import-state";
 import {observeMessageSearchEvents} from "../search/message-search-events";
 import {WEB_CAPTURE_PLATFORMS} from "../shared/web-capture";
@@ -82,7 +82,7 @@ export function SidecarProject({conversationId,conversationTitle="",zh,platformL
     const db = await getDatabase();
     const [sessions, sources] = await Promise.all([listFocusSessions(), db.getAll("conversations")]);
     if (!alive.current || currentConversationId.current !== conversationId || revision!==refreshRevision.current) return;
-    const saved = savedSidecarProjects(sessions); setProjects(saved); setConversations(sources); setLoaded(true);
+    const saved = savedFocusProjects(sessions); setProjects(saved); setConversations(sources); setLoaded(true);
     setSelected(previous => {
       const matches=(item:FocusSession)=>item.sourceConversationIds.includes(conversationId)||item.sidecarConversationIds?.includes(conversationId);
       if(previous && saved.some(item=>item.id===previous&&matches(item)))return previous;

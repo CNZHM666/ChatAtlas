@@ -4,7 +4,7 @@ import type { Conversation } from "../../shared/types";
 import type { FocusEvidence, FocusMode, FocusScope, FocusSession } from "../../shared/focus-session";
 import { eligibleHomeProjects, homeTaskMode, planHomeTask, retrieveHomeTask, type HomeTaskPlan } from "../../ai/home-task";
 import { searchKnowledge } from "../../sidecar/knowledge-search";
-import { savedSidecarProjects } from "../../sidecar/project-model";
+import { savedFocusProjects } from "../focus-versions";
 import { createAtlasAI } from "../../ai/atlas-ai";
 import { getAISettings } from "../../storage/knowledge-graph";
 import { effectiveAISettings, hasAIConnection } from "../../ai/ai-mode";
@@ -71,7 +71,7 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
   const lastRecord = useRef(initialRecord);
   const parsedSearch = useMemo(() => parseHistoryFilters(historyRequest(taskGoal).query, zh), [taskGoal, zh]);
   // Already organized knowledge comes first, as in the sidebar: the saved Wiki chapters that match, at most three.
-  const savedProjects = useMemo(() => savedSidecarProjects(sessions), [sessions]);
+  const savedProjects = useMemo(() => savedFocusProjects(sessions), [sessions]);
   const knowledgeHits = useMemo(() => localOnly && parsedSearch.query ? searchKnowledge(parsedSearch.query, savedProjects, zh) : [], [localOnly, parsedSearch.query, savedProjects, zh]);
   const activeChips = parsedSearch.chips.filter(chip => !(removed?.goal === taskGoal && removed.keys.includes(chip.key)));
   const filterKey = JSON.stringify(mergeHistoryFilters(activeChips)), includeUndated = undatedFor === taskGoal;

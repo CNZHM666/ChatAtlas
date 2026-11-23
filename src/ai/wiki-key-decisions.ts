@@ -85,9 +85,27 @@ export function withDecision(ledger: WikiKnowledgeLedger, unitIds: string[], ver
   return { ...ledger, decisions, decisionsAt: at };
 }
 
-/** Verdicts given or withdrawn since the draft was written: the document does not show them yet. */
+/** Decisions applied in place already appear in the document. A withdrawal can have no surviving decision row. */
+export function pendingLedgerDecisions(ledger: WikiKnowledgeLedger | undefined) {
+  if (!ledger?.draft || !ledger.decisionsAt || ledger.decisionsAt <= ledger.draft.generatedAt) return;
+  const since = ledger.draft.generatedAt;
+  const receipts = Object.entries(ledger.decisionArbitrations ?? {}).filter(([, entry]) => entry.at > since);
+  const local = receipts.filter(([, entry]) => entry.locallyApplied);
+  const unapplied = receipts.filter(([, entry]) => !entry.locallyApplied).map(([, entry]) => entry);
+  const unitIds = new Set(Object.entries(ledger.decisions ?? {}).filter(([id, verdict]) => verdict.at > since
+    && !local.some(([, entry]) => entry.at === verdict.at && entry.unitIds?.includes(id))).map(([id]) => id));
+  for (const answer of ledger.userAnswers ?? []) {
+    if (answer.at > since && !local.some(([id]) => id === answer.questionId)) {
+      for (const id of answer.unitIds) unitIds.add(id);
+    }
+  }
+  if (unitIds.size || unapplied.length || !local.some(([, entry]) => entry.at === ledger.decisionsAt)) {
+    return { revision: ledger.decisionsAt, unitIds, unapplied };
+  }
+}
+
 export function ledgerDecisionsPending(ledger: WikiKnowledgeLedger | undefined): boolean {
-  return Boolean(ledger?.draft && ledger.decisionsAt && ledger.decisionsAt > ledger.draft.generatedAt);
+  return Boolean(pendingLedgerDecisions(ledger));
 }
 
 /** A choice of which version holds now: between roadmaps of one scope, or two versions of one point. */

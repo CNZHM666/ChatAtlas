@@ -56,9 +56,10 @@ import { rewriteWikiSection } from "../../ai/wiki-section-rewrite";
 import { keepWikiDraft, wikiEditorialSignature } from "../../shared/wiki-review";
 import { WikiRewritePreview } from "./WikiRewritePreview";
 import { readSessionSource } from "../../storage/source-versions";
-import { withDecision } from "../../ai/wiki-key-decisions";
+import { ledgerDecisionsPending, withDecision } from "../../ai/wiki-key-decisions";
 import { wikiCoverageCounts } from "../../shared/wiki-knowledge";
-import { ledgerGenerationRetryNeeded, ledgerRewriteNeeded } from "../../ai/wiki-draft-fit";
+import { ledgerGenerationRetryNeeded } from "../../ai/wiki-draft-fit";
+import { ProjectNavigationLayout, ProjectNavigationOpen, useProjectNavigationLayout } from "./ProjectNavigationLayout";
 import { DecisionSteps } from "./DecisionSteps";
 import { WikiWritingModePicker } from "./WikiWritingModePicker";
 import { prewritingWikiQuestions, wikiNamedProjects } from "../../ai/wiki-writing-questions";
@@ -254,6 +255,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   const priorityOwner=useRef<string>(),[prioritized,setPrioritized]=useState<string>();
   const [analysisProgress, setAnalysisProgress] = useState<FocusAnalysisProgress>();
   const [resumedAfterConfirmation, setResumedAfterConfirmation] = useState(false);
+  const navigationLayout = useProjectNavigationLayout();
   const [freshness, setFreshness] = useState<{sessionId:string;items:SourceChange[]}>();
   const changes = freshness?.sessionId===session?.id ? freshness?.items??[] : [];
   const checkingSources=useRef(false);
@@ -283,7 +285,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
     return [...grouped.values()];
   }, [session?.sections, session?.evidence, activeId]);
   const controller = useRef<AbortController>();
-  const lastGeneration = useRef({ revise: false, expansion: undefined as string | undefined, complete: false, scope: undefined as "section" | "whole" | undefined, scopeChoice:undefined as WikiScopeChoice|undefined, writingMode: undefined as WikiWritingMode | undefined, initialWritingMode: undefined as WikiWritingMode | undefined, applyDecisions: false });
+  const lastGeneration = useRef({ revise: false, expansion: undefined as string | undefined, complete: false, scope: undefined as "section" | "whole" | undefined, scopeChoice:undefined as WikiScopeChoice|undefined, writingMode: undefined as WikiWritingMode | undefined, initialWritingMode: undefined as WikiWritingMode | undefined, reorganize: false });
   const saves = useFocusSave(onSaved, (state) => setStatus(state === "saving" || state === "saved" ? "" : zh ? "保存失败，请点击重试保存。" : "Save failed. Retry saving."));
   const saveSearchPosition = saves.save;
   useEffect(() => {
@@ -388,14 +390,14 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   };
   /** Leaving the editor by another way than its own buttons asks first when there is a draft. */
   const leaveEditor = () => !editing || !editorDirty.current || window.confirm(zh ? "本章有未保存的修改，离开将放弃这些修改。确定离开？" : "This chapter has unsaved changes. Leave and discard them?");
-  const generate = async (goal: string, ids: string[], revise = false, expansion?: string, complete = false, scope?: "section" | "whole", retry = false, scopeChoice?:WikiScopeChoice, writingMode?:WikiWritingMode, applyDecisions = false, initialWritingMode?:WikiWritingMode) => {
+  const generate = async (goal: string, ids: string[], revise = false, expansion?: string, complete = false, scope?: "section" | "whole", retry = false, scopeChoice?:WikiScopeChoice, writingMode?:WikiWritingMode, reorganize = false, initialWritingMode?:WikiWritingMode) => {
     const scopeBase=scopeChoice?(proposal??session):undefined;
     const writingBase = writingMode ? proposal ?? session : undefined;
     const previousPhase = writingBase?.status === "preview" ? "preview" : session ? "reading" : "error";
-    try { if (!hasAIConnection(await getAISettings())) { lastGeneration.current = { revise, expansion, complete, scope, scopeChoice, writingMode, applyDecisions, initialWritingMode }; setConfirmed({ goal, ids }); setError(zh ? "请先连接自己的 AI。" : "Connect your AI API first."); setPhase(previousPhase); onSettings(); return; } }
+    try { if (!hasAIConnection(await getAISettings())) { lastGeneration.current = { revise, expansion, complete, scope, scopeChoice, writingMode, reorganize, initialWritingMode }; setConfirmed({ goal, ids }); setError(zh ? "请先连接自己的 AI。" : "Connect your AI API first."); setPhase(previousPhase); onSettings(); return; } }
     catch { setError(zh ? "读取 AI 配置失败，请重新打开 AI 设置。" : "Could not read AI settings. Reopen AI settings."); return; }
     const discussionScope = scopeBase?.scope ?? (revise ? session?.scope : confirmedScope.current);
-    lastGeneration.current = { revise, expansion, complete, scope, scopeChoice, writingMode, applyDecisions, initialWritingMode };
+    lastGeneration.current = { revise, expansion, complete, scope, scopeChoice, writingMode, reorganize, initialWritingMode };
     if (!retry || !generationRun.current) generationRun.current = !generationRun.current && !revise && !complete && request ? request.runId ?? request.id : `focus-${crypto.randomUUID()}`;
     controller.current?.abort();
     const abort = new AbortController(); controller.current = abort;
@@ -431,8 +433,8 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       } : undefined;
       const execute: typeof generateFocusSession = incremental ? async (...args) => {
         const { generateFocusUpdate } = await import("../../ai/focus-update");
-        const scope = !writingMode && !applyDecisions && discussionScope !== session?.scope ? discussionScope : undefined;
-        return generateFocusUpdate(priorWiki ?? session!, args[2], args[3], args[4], args[6], args[7], args[8], { ...args[9], scope, writingMode, applyDecisions });
+        const scope = !writingMode && !reorganize && discussionScope !== session?.scope ? discussionScope : undefined;
+        return generateFocusUpdate(priorWiki ?? session!, args[2], args[3], args[4], args[6], args[7], args[8], { ...args[9], scope, writingMode, reorganize });
       } : generateFocusSession;
       abort.signal.throwIfAborted();
       let result = await execute(goal, revise ? session?.mode ?? confirmedMode.current : confirmedMode.current, sources as Conversation[], locale, abort.signal, revise && session ? { instruction: expansion ?? instruction, sections: session.sections, evidence: session.evidence, sectionId: sectionRevision ? session.activeSectionId : undefined, title: session.title, completedSectionIds: session.completedSectionIds, locale: session.locale } : undefined, (state) => {
@@ -490,10 +492,12 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
     // Each request has a new workspace key; subsequent edits use explicit actions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.id]);
-  const reviseProjectWiki = async () => {
+  const reviseProjectWiki = async (onlyChapter?: FocusSection) => {
     const base=sessionRef.current;
     if(!base||busy||wikiActionPending.current)return;
-    const selected=base.sections.filter(chapter=>!chapter.origin&&!chapter.userEdited&&(revisionScope==="whole"||revisionScope==="section"&&chapter.id===base.activeSectionId||revisionScope==="selected"&&revisionIds.includes(chapter.id)));
+    const revisionInstruction = onlyChapter ? "" : instruction;
+    const selected=base.sections.filter(chapter=>!chapter.origin&&!chapter.userEdited&&(onlyChapter ? chapter.id === onlyChapter.id :
+      revisionScope==="whole"||revisionScope==="section"&&chapter.id===base.activeSectionId||revisionScope==="selected"&&revisionIds.includes(chapter.id)));
     if(!selected.length){setError(zh?"请选择可调整的章节。":"Select available chapters.");return;}
     wikiActionPending.current=true;setBusy(true);setError("");setErrorInfo(undefined);setRevisionFailure(undefined);
     const abort=new AbortController();controller.current=abort;setWikiRevisionProgress({done:0,total:selected.length});
@@ -505,7 +509,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       const refIds=new Set(selected.flatMap(chapter=>chapter.evidenceIds));
       const sources=[...new Set(base.evidence.filter(ref=>refIds.has(ref.id)).map(ref=>ref.conversationId))];
       const originals=(await Promise.all(sources.map(id=>readSessionSource(base,id)))).flat();
-      const revised=await reviseWikiChapters(base,selected.map(chapter=>chapter.id),originals,instruction,createAtlasAI(settings,abort.signal,base.runId??base.id),abort.signal,(done,total,detail)=>{if(!abort.signal.aborted)setWikiRevisionProgress({done,total,...detail});},base.runId??base.id);
+      const revised=await reviseWikiChapters(base,selected.map(chapter=>chapter.id),originals,revisionInstruction,createAtlasAI(settings,abort.signal,base.runId??base.id),abort.signal,(done,total,detail)=>{if(!abort.signal.aborted)setWikiRevisionProgress({done,total,...detail});},base.runId??base.id);
       const current=sessionRef.current;
       if(!current||current.id!==base.id||selected.some(chapter=>{const latest=current.sections.find(item=>item.id===chapter.id);return !latest||wikiBasis(current,latest)!==wikiBasis(base,chapter);})||(await sourceChanges(base)).some(change=>change.added||change.changed||change.removed||change.reordered))throw new Error(zh?"正文或来源已变化，当前内容已保留，请重新调整。":"Text or sources changed. Current content is retained; revise again.");
       abort.signal.throwIfAborted();
@@ -517,7 +521,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       try{await savePreview(next);}catch{/* Keep candidate available for save-only retry. */}
     }catch(failure){if(!abort.signal.aborted){
       const message=failure instanceof Error?failure.message:String(failure);setError(message);
-      setRevisionFailure({message,budget:failure instanceof WikiRewriteBudgetError?failure:undefined,ids:selected.map(chapter=>chapter.id),instruction});
+      setRevisionFailure({message,budget:failure instanceof WikiRewriteBudgetError?failure:undefined,ids:selected.map(chapter=>chapter.id),instruction:revisionInstruction});
       setErrorInfo(failure instanceof AIProviderHttpError||failure instanceof AIProviderResponseError||failure instanceof AIProviderValidationError||failure instanceof DemoApiError?{code:failure.code,requestId:failure.requestId}:failure instanceof AILocalInputError?{code:failure.code}:undefined);
     }}
     finally{wikiActionPending.current=false;setBusy(false);setWikiRevisionProgress(undefined);}
@@ -647,7 +651,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   };
   const authorize = () => { void requestProviderPermission(providerUrl).then((allowed) => setStatus(allowed ? zh ? "已授权，请重试生成。" : "Authorized. Retry generation." : zh ? "未获得连接权限。" : "Connection permission denied.")).catch((failure) => setError(String(failure))); };
 
-  const retryGeneration = () => { if (confirmed) void generate(confirmed.goal, confirmed.ids, lastGeneration.current.revise, lastGeneration.current.expansion, lastGeneration.current.complete, lastGeneration.current.scope, true, lastGeneration.current.scopeChoice, lastGeneration.current.writingMode, lastGeneration.current.applyDecisions, lastGeneration.current.initialWritingMode); };
+  const retryGeneration = () => { if (confirmed) void generate(confirmed.goal, confirmed.ids, lastGeneration.current.revise, lastGeneration.current.expansion, lastGeneration.current.complete, lastGeneration.current.scope, true, lastGeneration.current.scopeChoice, lastGeneration.current.writingMode, lastGeneration.current.reorganize, lastGeneration.current.initialWritingMode); };
   const retainedProgress = analysisProgress?.processedSegments ? <p className="muted">{analysisProgress.processedSegments === analysisProgress.totalSegments ? zh ? `材料分析已完成（${analysisProgress.totalSegments} 段）；重试将复用分析结果，重新汇总预览。` : `Material analysis complete (${analysisProgress.totalSegments} passages). Retry reuses the analysis to compose the preview.` : zh ? `已处理 ${analysisProgress.processedSegments}/${analysisProgress.totalSegments} 段；重试只补未完成的分析或汇总。` : `${analysisProgress.processedSegments}/${analysisProgress.totalSegments} passages processed. Retry resumes unfinished analysis or composition.`}</p> : null;
   const errorDetails = errorInfo ? <details><summary>{zh ? "诊断信息" : "Diagnostic details"}<ChevronDown size={14}/></summary><p>{error}</p><p>{errorInfo.code}</p>{errorInfo.fields?.length?<p style={{overflowWrap:"anywhere"}}>{zh?"校验位置":"Validation fields"}: {errorInfo.fields.join(", ")}</p>:null}{errorInfo.requestId ? <p style={{ overflowWrap: "anywhere" }}>{errorInfo.requestId}</p> : null}{errorInfo.output ? <p>{zh ? "输出额度" : "Output limit"}: {errorInfo.output.outputTokenLimit} token · {zh ? "返回内容" : "Returned content"}: {errorInfo.output.receivedCharacters} {zh ? "字符" : "characters"}{errorInfo.output.reasoningTokens !== undefined ? ` · ${zh ? "思考" : "Reasoning"}: ${errorInfo.output.reasoningTokens} token` : (errorInfo.output.reasoningCharacters ?? 0) > 0 ? ` · ${zh ? "思考" : "Reasoning"}: ${errorInfo.output.reasoningCharacters} ${zh ? "字符" : "characters"}` : ""}</p> : null}</details> : null;
   const needsConnectionPermission = Boolean(providerUrl && /授权 AI 连接|Authorize the AI connection/u.test(error));
@@ -674,7 +678,10 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
   // Reads only what changed in the sources, rewrites the chapters it touches and opens the result as a preview.
   const updateProject = async () => {
     if (!session || busy || checkingSources.current) return;
-    if (session.sidecarConversationIds?.some(id=>!session.sourceConversationIds.includes(id))) { setSourcePickerOpen(true); return; }
+    if (session.sidecarConversationIds?.some(id=>!session.sourceConversationIds.includes(id))) {
+      if (leaveEditor()) setSourcePickerOpen(true);
+      return;
+    }
     checkingSources.current=true;
     try {
       const items=await sourceChanges(session);
@@ -683,21 +690,43 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       if (conversations.some(source=>session.sourceConversationIds.includes(source.id)&&!isCurrentHydrationComplete(source))) {
         setStatus(zh ? "来源正在同步，稍后再检查。" : "Sources are syncing. Check again shortly.");
       } else if (items.some(item=>hasSourceChange(item)||item.unknown) && session.scope?.kind === "goal") {
+        if (!leaveEditor()) return;
         setScopeUpdateIds(session.scope.sourceConversationIds ?? session.sourceConversationIds);
         setPhase("scope");
-      } else if (!items.some(item=>hasSourceChange(item)||item.unknown) && !ledgerGenerationRetryNeeded(session.wikiKnowledge) && !ledgerRewriteNeeded(session.wikiKnowledge)) {
-        setStatus(zh ? "没有发现来源变化。" : "No source changes found.");
-      } else void generate(session.goal, session.sourceConversationIds, false, undefined, true);
+      } else if (!items.some(item=>hasSourceChange(item)||item.unknown) && !ledgerGenerationRetryNeeded(session.wikiKnowledge) && !ledgerDecisionsPending(session.wikiKnowledge)) {
+        setStatus(zh ? "文档已是最新。" : "The document is up to date.");
+      } else if (leaveEditor()) await generate(session.goal, session.sourceConversationIds, false, undefined, true);
     } catch { setStatus(zh?"暂时无法检查来源，请重试。":"Could not check sources. Try again."); }
     finally { checkingSources.current=false; }
   };
-  const applySavedDecisions = () => {
+  const reorganizeProject = async () => {
     if (!session || busy || checkingSources.current || !leaveEditor()) return;
+    if (!window.confirm(zh
+      ? "重整会重新规划整份 Wiki 的目录并改写 AI 正文。采用前可预览，个人编辑会保留。继续吗？"
+      : "Reorganization replans the whole directory and rewrites AI-authored chapters. Your edits are preserved and you can preview the result. Continue?")) return;
     checkingSources.current = true;
-    void generate(session.goal, session.sourceConversationIds, false, undefined, true, undefined, false, undefined, undefined, true)
-      .finally(() => { checkingSources.current = false; });
+    try {
+      const items = await sourceChanges(session);
+      if (sessionRef.current !== session) return;
+      if (items.some(item => hasSourceChange(item) || item.unknown) ||
+          conversations.some(source => session.sourceConversationIds.includes(source.id) && !isCurrentHydrationComplete(source))) {
+        setFreshness({ sessionId: session.id, items });
+        setStatus(zh ? "请先更新或完成同步来源，再重整整份 Wiki。" : "Update or finish syncing sources before reorganizing the Wiki.");
+        return;
+      }
+      if (session.wikiKnowledge) {
+        await generate(session.goal, session.sourceConversationIds, false, undefined, true, undefined, false, undefined, undefined, true);
+      } else {
+        await generate(session.goal, session.sourceConversationIds, false, undefined, false, undefined, false, {
+          includeKeys: [...session.wikiScopeReview?.includeKeys ?? []],
+          excludeKeys: [...session.wikiScopeReview?.excludeKeys ?? []],
+          ignoredKeys: [...session.wikiScopeReview?.ignoredKeys ?? []],
+        });
+      }
+    } catch { setStatus(zh ? "暂时无法检查来源，请重试。" : "Could not check sources. Try again."); }
+    finally { checkingSources.current = false; }
   };
-  const reorganize = () => { if (session) void generate(session.goal, session.sourceConversationIds, false, undefined, false, undefined, false, { includeKeys: [...session.wikiScopeReview?.includeKeys ?? []], excludeKeys: [...session.wikiScopeReview?.excludeKeys ?? []], ignoredKeys:[...session.wikiScopeReview?.ignoredKeys??[]] }); };
+
   const adjustSources = () => { void saves.flush().catch(() => undefined); onReturnToWorkbench((session && !session.sections.length ? revisionRequest?.instruction : undefined) ?? confirmed?.goal ?? session?.goal ?? request?.goal ?? "", confirmed?.ids ?? session?.scope?.sourceConversationIds ?? session?.sourceConversationIds ?? request?.sourceIds ?? [], session?.mode ?? confirmedMode.current); };
 
   const currentVersion=phase==="preview"?proposal:session;
@@ -881,9 +910,10 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
     if (!refs || refs.length < 2 || index < 0) return undefined;
     return { index, total: refs.length, onPrevious: () => { if (refs[index - 1]) setFocusedEvidence(refs[index - 1]); }, onNext: () => { if (refs[index + 1]) setFocusedEvidence(refs[index + 1]); }, onChapter, chapterLabel };
   })();
-  return <ProjectKnowledgeActions.Provider value={session.mode==="work"?{save:async update=>{const current=sessionRef.current;if(!current||current.id!==session.id)throw new Error("Project changed");await persistRoute(update(current));},read:move,matter:ref=>{const source=projectMatters(session).find(item=>item.id===ref.id&&item.type===ref.type)?.sources[0];if(source)openEvidence(source);else{setNotesOpen(false);setSourcesOpen(true);}}}:undefined}><WorkspaceEvidenceContext.Provider value={session.mode === "work" ? {open:openEvidence,close:()=>{closeEvidence();setSourcesOpen(false);},active:originalPanelOpen?{...sourceSelection,shown:focusedEvidence}:undefined} : undefined}><div ref={setScopeReaderHost} className={`focus-workspace${originalPanelOpen?" has-original-panel":""}`}><div ref={readingBaseRef} className="project-reading-base" aria-hidden={sourceReadingOpen || undefined}><nav id="project-workspace-navigation" className={`reading-outline${mobileNavigation?" is-mobile-open":""}`} aria-label={zh ? "对话章节" : "Conversation chapters"} onClick={event=>{if((event.target as HTMLElement).closest(".outline-item"))setMobileNavigation(false);}} onKeyDown={event=>{if(event.key==="Escape"){setMobileNavigation(false);document.querySelector<HTMLButtonElement>(".project-mobile-nav-toggle")?.focus();}}}>
-    <button type="button" className="project-mobile-nav-close" onClick={()=>setMobileNavigation(false)}>{zh?"关闭项目导航":"Close project navigation"}</button>
-    <ReaderBackButton onClick={() => { void saves.flush().catch(() => undefined); onClose(); }} label={zh ? "返回工作台" : "Back to Workbench"} />
+  return <ProjectKnowledgeActions.Provider value={session.mode==="work"?{save:async update=>{const current=sessionRef.current;if(!current||current.id!==session.id)throw new Error("Project changed");await persistRoute(update(current));},read:move,matter:ref=>{const source=projectMatters(session).find(item=>item.id===ref.id&&item.type===ref.type)?.sources[0];if(source)openEvidence(source);else{setNotesOpen(false);setSourcesOpen(true);}}}:undefined}><WorkspaceEvidenceContext.Provider value={session.mode === "work" ? {open:openEvidence,close:()=>{closeEvidence();setSourcesOpen(false);},active:originalPanelOpen?{...sourceSelection,shown:focusedEvidence}:undefined} : undefined}><div ref={setScopeReaderHost} className={`focus-workspace${originalPanelOpen?" has-original-panel":""}`} data-project-navigation-side={navigationLayout.side} data-project-navigation-collapsed={navigationLayout.collapsed || undefined} style={navigationLayout.style}><div ref={readingBaseRef} className="project-reading-base" aria-hidden={sourceReadingOpen || undefined}><ProjectNavigationOpen layout={navigationLayout} zh={zh} navigationId="project-workspace-navigation" /><nav id="project-workspace-navigation" hidden={navigationLayout.collapsed && !mobileNavigation} className={`reading-outline${mobileNavigation?" is-mobile-open":""}`} aria-label={zh ? "对话章节" : "Conversation chapters"} onClick={event=>{if((event.target as HTMLElement).closest(".outline-item"))setMobileNavigation(false);}} onKeyDown={event=>{if(event.key==="Escape" && window.innerWidth<=760){setMobileNavigation(false);requestAnimationFrame(() => document.getElementById("project-workspace-navigation-open")?.focus());}}}>
+    <ProjectNavigationLayout layout={navigationLayout} zh={zh} navigationId="project-workspace-navigation" onCloseMobile={() => setMobileNavigation(false)}>
+      <ReaderBackButton onClick={() => { void saves.flush().catch(() => undefined); onClose(); }} label={zh ? "返回工作台" : "Back to Workbench"} />
+    </ProjectNavigationLayout>
     <h2 title={projectName}>{readingTitle(projectName, 40)}</h2>{projectPicker}
     <button className="outline-item" aria-current={overview && !ledgerPage ? "page" : undefined} onClick={() => { if (!leaveEditor()) return; setEditing(false); setLedgerPage(false); setOverview(true); bodyRef.current?.scrollTo?.({ top: 0 }); }}><LayoutDashboard size={18} aria-hidden="true" /><strong>{session.mode === "work" ? zh ? "文档总览" : "Document overview" : zh ? "阅读总览" : "Reading overview"}</strong></button>
     {session.mode === "work" && session.wikiKnowledge?.organization ? <button className="outline-item" aria-current={overview && ledgerPage ? "page" : undefined} onClick={() => { if (!leaveEditor()) return; setEditing(false); closeEvidence(); setLedgerPage(true); setOverview(true); bodyRef.current?.scrollTo?.({ top: 0 }); }}><BookMarked size={18} aria-hidden="true" /><strong>{zh ? "知识点账本" : "Knowledge ledger"}</strong></button> : null}
@@ -899,18 +929,23 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
     {session.mode !== "work" ? <ReaderProgress zh={zh} completed={session.completedSectionIds.length} total={session.sections.length} work={false} /> : null}
     </nav>
     <div className={`focus-reader-main${notesOpen || sourcesOpen ? " has-utility-panel" : ""}`}>
-    <div className="focus-reader-toolbar"><button type="button" className="project-mobile-nav-toggle" aria-controls="project-workspace-navigation" aria-expanded={mobileNavigation} onClick={()=>setMobileNavigation(!mobileNavigation)}>{zh?"项目导航":"Project navigation"}</button><div className="focus-reader-location">{renamingProject ? projectRenameForm : <span>{(space || optimisticName || session.mode === "work" ? projectName : zh ? session.sourceConversationIds.length > 1 ? "跨对话回顾" : "对话回顾" : session.sourceConversationIds.length > 1 ? "Cross-conversation review" : "Conversation review")}</span>}{!overview && session.mode !== "work" ? <small>{zh ? `第 ${position + 1}/${session.sections.length} 节 · 待理解 ${Math.max(0, session.sections.length - session.completedSectionIds.length)} 节` : `Section ${position + 1}/${session.sections.length} · ${Math.max(0, session.sections.length - session.completedSectionIds.length)} left to understand`}</small> : null}</div><div className={`focus-reader-toolbar-actions${session.mode === "work" ? " project-document-actions" : ""}`}>{!overview && session.mode !== "work" ? <button type="button" disabled={busy || session.completedSectionIds.includes(section.id)} onClick={complete}>{session.completedSectionIds.includes(section.id) ? zh ? "已理解" : "Reviewed" : zh ? "标记已理解" : "Mark understood"}</button> : null}{!renamingProject && !session.canvasId ? <button type="button" disabled={busy} onClick={() => void attach()}><Save size={15} aria-hidden="true" /><span>{zh ? "保存项目" : "Save project"}</span></button> : null}{session.mode === "work" && session.canvasId ? <button type="button" disabled={busy} title={zh ? "只读取新增或变化的对话，重写受影响的章节，先预览再采用" : "Read only new or changed messages, rewrite the chapters they touch, and preview before applying"} onClick={updateProject} aria-label={zh ? "增量更新" : "Update"}><RefreshCw size={15} aria-hidden="true" /><span>{zh ? "更新" : "Update"}</span></button> : null}{session.mode === "work" ? <button type="button" disabled={busy} onClick={() => void exportProject()} title={zh ? "导出项目" : "Export project"} aria-label={zh ? "导出" : "Export"}><Download size={15} aria-hidden="true" /><span>{zh ? "导出" : "Export"}</span></button> : null}<ReaderMoreMenu iconOnly={session.mode==="work"} flat={session.mode==="work"} zh={zh} sourcesLabel={zh ? overview ? "项目来源" : "本章来源" : overview ? "Project sources" : "Chapter sources"} onSources={session.mode==="work"?undefined:() => { setNotesOpen(false); setSourcesOpen(true); }} edits={[
+    <div className="focus-reader-toolbar"><ProjectNavigationOpen layout={navigationLayout} zh={zh} navigationId="project-workspace-navigation" mobile onOpenMobile={() => setMobileNavigation(true)} /><div className="focus-reader-location">{renamingProject ? projectRenameForm : <span>{(space || optimisticName || session.mode === "work" ? projectName : zh ? session.sourceConversationIds.length > 1 ? "跨对话回顾" : "对话回顾" : session.sourceConversationIds.length > 1 ? "Cross-conversation review" : "Conversation review")}</span>}{!overview && session.mode !== "work" ? <small>{zh ? `第 ${position + 1}/${session.sections.length} 节 · 待理解 ${Math.max(0, session.sections.length - session.completedSectionIds.length)} 节` : `Section ${position + 1}/${session.sections.length} · ${Math.max(0, session.sections.length - session.completedSectionIds.length)} left to understand`}</small> : null}</div><div className={`focus-reader-toolbar-actions${session.mode === "work" ? " project-document-actions" : ""}`}>{!overview && session.mode !== "work" ? <button type="button" disabled={busy || session.completedSectionIds.includes(section.id)} onClick={complete}>{session.completedSectionIds.includes(section.id) ? zh ? "已理解" : "Reviewed" : zh ? "标记已理解" : "Mark understood"}</button> : null}{!renamingProject && !session.canvasId ? <button type="button" disabled={busy} onClick={() => void attach()}><Save size={15} aria-hidden="true" /><span>{zh ? "保存项目" : "Save project"}</span></button> : null}{session.mode === "work" && session.canvasId ? <button type="button" disabled={busy} title={zh ? "纳入来源变化或已保存的决定，先预览受影响的章节" : "Apply changed sources or saved decisions and preview affected chapters"} onClick={updateProject} aria-label={zh ? "增量更新" : "Update"}><RefreshCw size={15} aria-hidden="true" /><span>{zh ? "更新" : "Update"}</span></button> : null}{session.mode === "work" ? <button type="button" disabled={busy} onClick={() => void exportProject()} title={zh ? "导出项目" : "Export project"} aria-label={zh ? "导出" : "Export"}><Download size={15} aria-hidden="true" /><span>{zh ? "导出" : "Export"}</span></button> : null}<ReaderMoreMenu iconOnly={session.mode==="work"} flat={session.mode==="work"} zh={zh} sourcesLabel={zh ? overview ? "项目来源" : "本章来源" : overview ? "Project sources" : "Chapter sources"} onSources={session.mode==="work"?undefined:() => { setNotesOpen(false); setSourcesOpen(true); }} edits={[
       ...projectNameActions,
-      ...(session.mode === "work" ? [{ label: zh ? "调整目录" : "Edit directory", title: zh ? "在本地调整章节顺序、标题与分组，不调用模型" : "Reorder, rename and group chapters locally, without model calls", disabled: busy, run: () => { setNavigationTab("chapters"); setWikiAdjusting(true); setMobileNavigation(true); } }] : []),
+      ...(session.mode === "work" ? [navigationLayout.moveAction(zh)] : []),
+      ...(session.mode === "work" ? [{ label: zh ? "调整目录" : "Edit directory", title: zh ? "在本地调整章节顺序、标题与分组，不调用模型" : "Reorder, rename and group chapters locally, without model calls", disabled: busy, run: () => { setNavigationTab("chapters"); setWikiAdjusting(true); navigationLayout.update({ collapsed: false }); setMobileNavigation(true); } }] : []),
+      ...(session.mode === "work" && !overview && !section.origin && !section.userEdited ? [{
+        label: zh ? "重整本章" : "Reorganize this chapter",
+        title: zh ? "只改写当前章节，先预览再采用" : "Rewrite only this chapter and preview before applying",
+        disabled: busy || editing, run: () => void reviseProjectWiki(section),
+      }] : []),
       ...(session.mode!=="work" && !overview ? [{ label: editing ? zh ? "完成编辑" : "Done editing" : zh ? "编辑本节" : "Edit this section", disabled: busy, run: () => { if(editing)void finishChapterEdit();else startEditing(); } }] : []),
-      // Project Wikis use 重新整理 · 先预览 instead; other modes keep instruction-based revision.
       ...(session.mode!=="review"&&session.mode!=="work"?[{ label: zh ? "AI 调整内容" : "Revise with AI", disabled: busy, run: () => { setRevisionScope(overview ? "whole" : "section"); setRevisionIds([section.id]); setRevisionFailure(undefined); setFollowUpOpen(true); } }]:[]),
       ...(differentLanguage && session.mode!=="review" ? [{ label: zh ? "转换为中文 · 先预览" : "Translate to English · Preview", disabled: busy, run: translate }] : []),
     ]} maintenance={[
       ...(session.mode==="work"&&session.wikiKnowledge?.draft&&session.wikiKnowledge.organization&&session.wikiKnowledge.documentType!=="learning"?[{label:zh?"切换写作模式":"Change writing mode",disabled:busy,run:()=>{if(leaveEditor())setWritingSwitch(true);}}]:[]),
-      // A ledger document is generated again from its extracted knowledge units: the directory is planned anew and every
-      // chapter rewritten; Update in the toolbar handles only what changed.
-      ...(session.mode==="work"?[session.wikiKnowledge?{ label: zh ? "重新生成 · 先预览" : "Regenerate · Preview", title: zh ? "复用已抽取的知识点，重新规划目录并重写全文；只处理变化部分请用「增量更新」" : "Reuses the extracted knowledge units, plans the directory again and rewrites every chapter; use Update for changes only", disabled: busy, run: reorganize }:{ label: zh ? "重新整理 · 先预览" : "Reorganize · Preview", disabled: busy, run: reorganize }]:[]),
+      ...(session.mode === "work" ? [{ label: zh ? "重整整份 Wiki" : "Reorganize entire Wiki",
+        title: zh ? "重新规划目录和 AI 正文，先预览再采用" : "Replan the directory and AI-authored chapters, then preview",
+        disabled: busy, run: () => void reorganizeProject() }] : []),
       // Only after writing: a saved project, never while it is generated.
       ...(session.mode!=="work"?[{ label: zh ? "调整项目材料" : "Change project materials", disabled: busy, run: adjustSources }]:[]),
     ]} danger={deleteActions} /></div></div>
@@ -922,9 +957,9 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
       {session.mode!=="review"?<SourceUpdateNotice session={session} changes={changes} conversations={conversations} zh={zh} onUpdate={updateProject} disabled={busy} overview={overview && session.mode==="work" && (!ledgerPage || !session.wikiKnowledge?.organization)} />:null}
 
 
-      {overview ? session.mode === "work" ? ledgerPage && session.wikiKnowledge?.organization ? <KnowledgeLedger session={session} pageReading={wikiPages} zh={zh} onLocate={openEvidence}/> : <DocumentOverview reviewSession={session} onReview={startReview} onRename={name=>{setSpaceName(name);setRenamingProject(true);}} title={projectName} key={session.id} session={wikiPages === undefined ? readingSession : session} pageReading={wikiPages} zh={zh} onLocate={openEvidence} onRead={move} onUpdateDecisions={applySavedDecisions} updateDisabled={busy} toolsHost={originalPanelOpen ? wikiToolsHost : null} onBeginEdit={closeEvidence} onMaintain={async projectMaintenance => { const current = sessionRef.current; if (current) await persistRoute({ ...current, projectMaintenance, updatedAt: Date.now() }); }} scope={session.wikiKnowledge?undefined:<WikiScopeNotice readerHost={focusedEvidence||sourceReadingOpen?null:scopeReaderHost} onRead={()=>{setFocusedEvidence(undefined);setSourceSelection(undefined);setFullSourceReader(false);}} key={`scope:${session.id}`} session={session} zh={zh} busy={busy} onRetry={()=>void generate(session.goal,session.sourceConversationIds,false,undefined,false,undefined,false,{includeKeys:session.wikiScopeReview?.includeKeys??[],excludeKeys:session.wikiScopeReview?.excludeKeys??[],ignoredKeys:session.wikiScopeReview?.ignoredKeys??[]})} onSource={openEvidence} onApply={choice=>void applyScopeChoice(choice)}/>}/>
+      {overview ? session.mode === "work" ? ledgerPage && session.wikiKnowledge?.organization ? <KnowledgeLedger session={session} pageReading={wikiPages} zh={zh} onLocate={openEvidence}/> : <DocumentOverview reviewSession={session} onReview={startReview} onRename={name=>{setSpaceName(name);setRenamingProject(true);}} title={projectName} key={session.id} session={wikiPages === undefined ? readingSession : session} pageReading={wikiPages} zh={zh} onLocate={openEvidence} onRead={move} onUpdateDecisions={updateProject} updateDisabled={busy} toolsHost={originalPanelOpen ? wikiToolsHost : null} onBeginEdit={closeEvidence} onMaintain={async projectMaintenance => { const current = sessionRef.current; if (current) await persistRoute({ ...current, projectMaintenance, updatedAt: Date.now() }); }} scope={session.wikiKnowledge?undefined:<WikiScopeNotice readerHost={focusedEvidence||sourceReadingOpen?null:scopeReaderHost} onRead={()=>{setFocusedEvidence(undefined);setSourceSelection(undefined);setFullSourceReader(false);}} key={`scope:${session.id}`} session={session} zh={zh} busy={busy} onRetry={()=>void generate(session.goal,session.sourceConversationIds,false,undefined,false,undefined,false,{includeKeys:session.wikiScopeReview?.includeKeys??[],excludeKeys:session.wikiScopeReview?.excludeKeys??[],ignoredKeys:session.wikiScopeReview?.ignoredKeys??[]})} onSource={openEvidence} onApply={choice=>void applyScopeChoice(choice)}/>}/>
        : <><FocusOverview showSourceNavigation={false} route={<ProjectUnderstanding adaptive onDelete={deleteUnderstandingCard} onAnalyze={session.mode==="review"?undefined:() => void structureAnalysis.analyze()} analyzing={structureAnalysis.running} analysisError={structureAnalysis.error} readingRoute={<FocusUnderstandingPath sections={session.sections} activeId={section.id} zh={zh} onRead={move} onSave={draft => saveRoute(draft, true)} onMove={moveRoute} />} session={session} zh={zh} onRead={move} onLocate={openEvidence} onSave={async projectUnderstanding => { const current = sessionRef.current; if (!current) throw new Error("No reading result"); await persistRoute({ ...current, projectUnderstanding, updatedAt: Date.now() }); }} />} session={session} conversations={conversations} zh={zh} onRead={move} onLocate={openEvidence} onOpenSource={(id) => { void saves.flush().catch(() => undefined); setOpenSourceId(id); }} onAdjustScope={session.mode!=="review" && session.scope?.kind === "goal" ? () => setPhase("scope") : undefined} onAnalyze={session.mode==="review"?undefined:() => void generate(session.goal, session.sourceConversationIds, false, undefined, true)} >{session.brief ? <FocusBrief hideOpenQuestions session={session} zh={zh} onOpenEvidence={setFocusedEvidence} onChange={(brief) => update({ brief, briefUserEdited: true })} /> : null}</FocusOverview></> : <>
-      <WikiDocument decisionUpdate={session.wikiKnowledge?.organization ? <SourceUpdateNotice session={session} changes={[]} conversations={[]} zh={zh} onUpdate={applySavedDecisions} disabled={busy} decisionChapterId={section.id} /> : undefined} scrollRef={bodyRef} key={section.id} issue={currentIssue&&currentIssue.sectionId===section.id?{issue:currentIssue,index:reviewIssues.indexOf(currentIssue),total:reviewIssues.length}:undefined} onIssueStep={stepIssue} onIssueClose={()=>setDocReview(undefined)} pendingReview={session.mode==="work"?pendingWikiEvidence(section,session,zh):undefined} autoReview={docReview?.kind==="evidence"&&docReview.sectionId===section.id&&!docReview.opened?docReview.revision:undefined} onAutoReviewed={()=>setDocReview(value=>value?.kind==="evidence"?{...value,opened:true}:value)} headingTarget={wikiHeadingTarget?.id===section.id?wikiHeadingTarget:undefined} section={readingSection} session={readingSession} readingProjection={prepared?.projection} toolsHost={originalPanelOpen ? wikiToolsHost : null} zh={zh} updatedConversationIds={changes.filter(change => change.added || change.changed || change.removed || change.reordered).map(change => change.conversationId)} structure={chapterStructure} editor={chapterEditor} onEdit={target=>{setFocusedEvidence(undefined);setSourceSelection(undefined);startEditing(target);}} onLocate={openEvidence} onCurrent={() => setOverview(true)} />
+      <WikiDocument decisionUpdate={session.wikiKnowledge?.organization ? <SourceUpdateNotice session={session} changes={[]} conversations={[]} zh={zh} onUpdate={updateProject} disabled={busy} decisionChapterId={section.id} /> : undefined} scrollRef={bodyRef} key={section.id} issue={currentIssue&&currentIssue.sectionId===section.id?{issue:currentIssue,index:reviewIssues.indexOf(currentIssue),total:reviewIssues.length}:undefined} onIssueStep={stepIssue} onIssueClose={()=>setDocReview(undefined)} pendingReview={session.mode==="work"?pendingWikiEvidence(section,session,zh):undefined} autoReview={docReview?.kind==="evidence"&&docReview.sectionId===section.id&&!docReview.opened?docReview.revision:undefined} onAutoReviewed={()=>setDocReview(value=>value?.kind==="evidence"?{...value,opened:true}:value)} headingTarget={wikiHeadingTarget?.id===section.id?wikiHeadingTarget:undefined} section={readingSection} session={readingSession} readingProjection={prepared?.projection} toolsHost={originalPanelOpen ? wikiToolsHost : null} zh={zh} updatedConversationIds={changes.filter(change => change.added || change.changed || change.removed || change.reordered).map(change => change.conversationId)} structure={chapterStructure} editor={chapterEditor} onEdit={target=>{setFocusedEvidence(undefined);setSourceSelection(undefined);startEditing(target);}} onLocate={openEvidence} onCurrent={() => setOverview(true)} />
 
 
       {session.mode !== "work" && session.completedSectionIds.length === session.sections.length ? <section className="focus-completed"><strong>{zh ? "本次阅读已完成" : "Review complete"}</strong></section> : null}

@@ -19,7 +19,7 @@ interface MapSidebarProps {
   onRestoreVersion?: (id: string) => void;
   onEmptyTrash?: () => Promise<void>;
   onSelect: (id: string) => void;
-  onRename: (id: string, name: string) => void;
+  onRename?: (id: string, name: string) => void;
   previewIds?: Set<string>;
   tasks?: OrganizationRun[];
   activeTaskId?: string | null;
@@ -41,15 +41,22 @@ export function MapSidebar({ canvases, activeId, onSelect, onRename, onDelete, d
     try { await onEmptyTrash(); setConfirmEmpty(false); } catch { setTrashError(true); }
     finally { setEmptying(false); }
   };
-  const [width, setWidth] = useState(() => Math.min(380, Math.max(200, Number(localStorage.getItem("atlas-map-sidebar-width")) || 240)));
+  const [width, setWidth] = useState(() => {
+    try { return Math.min(380, Math.max(200, Number(localStorage.getItem("atlas-map-sidebar-width")) || 240)); }
+    catch { return 240; }
+  });
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const rememberWidth = (next: number) => {
+    setWidth(next);
+    try { localStorage.setItem("atlas-map-sidebar-width", String(next)); } catch { /* The sidebar still resizes this visit. */ }
+  };
   useEffect(() => inputRef.current?.focus(), [editingId]);
 
   const submit = () => {
     const next = name.trim();
     if (!next || !editingId) return;
-    onRename(editingId, next);
+    onRename?.(editingId, next);
     setName("");
     setEditingId(null);
   };
@@ -82,7 +89,7 @@ export function MapSidebar({ canvases, activeId, onSelect, onRename, onDelete, d
               {canvas.type === "overview" ? <CircleDot className="overview-orb-icon" size={13} /> : previewIds.has(canvas.id) ? <Sparkles className="preview-spark" size={12} /> : <Circle className="topic-dot-icon" size={7} />}
               <span>{canvas.type === "overview" ? locale === "zh-CN" ? "首页" : "Home" : localizeKnowledgeCanvasTitle(canvas.title ?? canvas.name, locale)}</span>
             </button>
-            <div className="map-item-actions">{canvas.type !== "overview" && !previewIds.has(canvas.id) ? <button type="button" className="map-rename" aria-label={`${t("renameMap")} ${canvas.title ?? canvas.name}`} title={t("renameMap")} onClick={() => { setEditingId(canvas.id); setName(canvas.title ?? canvas.name); }}><Pencil size={12} /></button> : null}
+            <div className="map-item-actions">{onRename && canvas.type !== "overview" && !previewIds.has(canvas.id) ? <button type="button" className="map-rename" aria-label={`${t("renameMap")} ${canvas.title ?? canvas.name}`} title={t("renameMap")} onClick={() => { setEditingId(canvas.id); setName(canvas.title ?? canvas.name); }}><Pencil size={12} /></button> : null}
             {onDelete && !previewIds.has(canvas.id) ? <button type="button" className="map-delete" aria-label={`${locale === "zh-CN" ? "删除项目" : "Delete project"} ${canvas.title ?? canvas.name}`} title={locale === "zh-CN" ? "删除项目" : "Delete project"} onClick={() => onDelete(canvas.id)}><Trash2 size={13} /></button> : null}</div>
           </div>
         ))}
@@ -99,11 +106,11 @@ export function MapSidebar({ canvases, activeId, onSelect, onRename, onDelete, d
       <div className="map-sidebar-resize" role="separator" aria-label={locale === "zh-CN" ? "调整画布侧边栏宽度" : "Resize canvas sidebar"} aria-orientation="vertical" aria-valuemin={146} aria-valuemax={380} aria-valuenow={width} tabIndex={0} title={locale === "zh-CN" ? "拖动调整宽度，双击重置" : "Drag to resize, double-click to reset"}
         onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); resizeStart.current = { x: event.clientX, width }; event.currentTarget.setPointerCapture(event.pointerId); }}
         onPointerMove={(event) => { if (!resizeStart.current) return; setWidth(Math.min(380, Math.max(146, resizeStart.current.width + event.clientX - resizeStart.current.x))); }}
-        onPointerUp={(event) => { const start = resizeStart.current; if (!start) return; const next = Math.min(380, Math.max(146, start.width + event.clientX - start.x)); resizeStart.current = null; setWidth(next); event.currentTarget.releasePointerCapture(event.pointerId); localStorage.setItem("atlas-map-sidebar-width", String(next)); }}
+        onPointerUp={(event) => { const start = resizeStart.current; if (!start) return; const next = Math.min(380, Math.max(146, start.width + event.clientX - start.x)); resizeStart.current = null; event.currentTarget.releasePointerCapture(event.pointerId); rememberWidth(next); }}
         onPointerCancel={() => { resizeStart.current = null; }}
         onLostPointerCapture={() => { resizeStart.current = null; }}
-        onDoubleClick={() => { setWidth(240); localStorage.setItem("atlas-map-sidebar-width", "240"); }}
-        onKeyDown={(event) => { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; event.preventDefault(); const next = Math.min(380, Math.max(146, width + (event.key === "ArrowRight" ? 16 : -16))); setWidth(next); localStorage.setItem("atlas-map-sidebar-width", String(next)); }} />
+        onDoubleClick={() => rememberWidth(240)}
+        onKeyDown={(event) => { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; event.preventDefault(); const next = Math.min(380, Math.max(146, width + (event.key === "ArrowRight" ? 16 : -16))); rememberWidth(next); }} />
     </aside>
   );
 }

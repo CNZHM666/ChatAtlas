@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SidecarProject } from "./SidecarProject";
 import { projectSession } from "../test/project-fixture";
 import { getDatabase } from "../storage/db";
-import { savedSidecarProjects } from "./project-model";
+import { savedFocusProjects } from "../canvas/focus-versions";
 import { currentSourceChange, type SourceChange } from "../canvas/source-freshness";
 import { invalidateStoredMessageSearchIndex } from "../storage/messages";
 vi.mock("../canvas/source-freshness",async original=>({...await original<typeof import("../canvas/source-freshness")>(),currentSourceChange:vi.fn()}));
@@ -31,7 +31,7 @@ it("keeps project linking and local search without context-generation entry poin
  expect(copy).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();
 });
 it("does not select an unrelated project automatically and keeps saved candidates out of the picker",async()=>{
- const saved=projectSession(),candidate={...saved,id:"preview",rootSessionId:saved.id,status:"preview" as const,createdAt:5,updatedAt:5};expect(savedSidecarProjects([saved,candidate]).map(item=>item.id)).toEqual([saved.id]);expect(savedSidecarProjects([candidate])).toEqual([]);
+ const saved=projectSession(),candidate={...saved,id:"preview",rootSessionId:saved.id,status:"preview" as const,createdAt:5,updatedAt:5};expect(savedFocusProjects([saved,candidate]).map(item=>item.id)).toEqual([saved.id]);expect(savedFocusProjects([candidate])).toEqual([]);
  renderProject(<SidecarProject conversationId="unlinked" zh/>);
  await waitFor(()=>expect(screen.getByRole("button",{name:"关联项目"})).toBeEnabled());
  fireEvent.click(screen.getByRole("button",{name:"关联项目"}));

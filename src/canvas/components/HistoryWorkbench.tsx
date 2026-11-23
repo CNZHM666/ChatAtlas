@@ -14,11 +14,11 @@ const defaultGoals={
  summary:{"zh-CN":"总结全部已选对话的主要结论、决策和未解决问题",en:"Summarize the conclusions, decisions and open questions in all selected conversations"},
 } as const;
 
-export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSources, onHydrate, onConfigureAI, selectedIds, onSelectedIds, onDiscoverGoal, discovery = true, experimentalActions = false }: {
+export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSources, onHydrate, onConfigureAI, selectedIds, onSelectedIds, onDiscoverGoal, discovery = true, experimentalActions = false, readOnly = false }: {
   conversations: Conversation[]; goal: string; onGoal: (goal: string) => void;
   onRequest: (goal: string, ids?: string[], action?: HomeTaskPlan["action"], localSearch?: boolean) => void; onSources: () => void;
   onRead?: (id: string, message?: ConversationMessage, sourceRange?: MessageSourceRange) => void;
-  onHydrate: (ids: string[], force?: boolean) => void; onDiscover: () => void; onConfigureAI?: () => void; selectedIds?: Set<string>; onSelectedIds?: (ids: Set<string>) => void; discovery?: boolean; onDiscoverGoal?: (goal:string,poolIds:string[])=>void; experimentalActions?:boolean;
+  onHydrate: (ids: string[], force?: boolean) => void; onDiscover: () => void; onConfigureAI?: () => void; selectedIds?: Set<string>; onSelectedIds?: (ids: Set<string>) => void; discovery?: boolean; onDiscoverGoal?: (goal:string,poolIds:string[])=>void; experimentalActions?:boolean; readOnly?: boolean;
 }) {
   const { locale, t } = usePreferences(), zh = locale === "zh-CN";
   const projectGoal=defaultGoals.project[locale],summaryGoal=defaultGoals.summary[locale];
@@ -135,7 +135,7 @@ export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSou
       </label>
       <div className="goal-composer-footer">
         <button type="button" className="history-selection-summary" onClick={onSources}><Plus size={15} aria-hidden="true"/>{t("workbenchAddChat")}</button>
-        <div className="goal-composer-actions"><AIQuickSelect compact zh={zh} configureLabel={zh ? "配置模型" : "Configure model"} onConfigure={onConfigureAI} onBusy={setSwitchingAI} /><button className="primary" title="Ctrl / ⌘ + Enter" disabled={!goal.trim() || switchingAI}><SubmitIcon size={15} aria-hidden="true" />{shortcut===3?zh?"发现主题":"Discover topics":currentAction === "project" ? zh ? "开始整理" : "Organize project" : currentAction === "continue" ? zh ? "继续项目" : "Continue project" : summary ? zh ? "总结讨论" : "Summarize" : currentAction==="clarify"&&goal.trim()?zh?"选择操作":"Choose action":zh ? "搜索历史" : "Search history"}</button></div>
+        <div className="goal-composer-actions"><AIQuickSelect compact zh={zh} readOnly={readOnly} configureLabel={zh ? "配置模型" : "Configure model"} onConfigure={onConfigureAI} onBusy={setSwitchingAI} /><button className="primary" title="Ctrl / ⌘ + Enter" disabled={!goal.trim() || switchingAI}><SubmitIcon size={15} aria-hidden="true" />{shortcut===3?zh?"发现主题":"Discover topics":currentAction === "project" ? zh ? "开始整理" : "Organize project" : currentAction === "continue" ? zh ? "继续项目" : "Continue project" : summary ? zh ? "总结讨论" : "Summarize" : currentAction==="clarify"&&goal.trim()?zh?"选择操作":"Choose action":zh ? "搜索历史" : "Search history"}</button></div>
       </div>
     </form>
     {coverageHint && incompleteIds.length ? <div className="history-coverage-hint"><Info size={14} aria-hidden="true"/><span>{zh ? `还有 ${incompleteIds.length} 条已发现对话未导入完整正文，${experimentalActions?"搜索和主题发现":"搜索"}可能遗漏结果。` : `${incompleteIds.length} discovered conversations still need their full messages imported; ${experimentalActions?"search and topic discovery":"search"} may miss results.`}</span><button type="button" disabled={switchingAI} onClick={() => onHydrate(incompleteIds)}>{zh ? "同步全部正文" : "Sync all messages"}</button></div> : null}

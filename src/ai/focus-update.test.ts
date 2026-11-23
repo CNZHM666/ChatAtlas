@@ -62,6 +62,15 @@ it("detects role/order changes and uses a full fallback without a reliable basel
   expect(planFocusUpdate({ ...previous, sourceSignatures: undefined, sourceOutlines: undefined }, appended).fallback).toBe(true);
   expect(planFocusUpdate(previous, messages).changed).toBe(false);
 });
+
+it("does not count intentionally excluded messages as removed during a scoped rebuild", () => {
+  const chosen = messages.slice(0, 2), ids = chosen.map(item => item.id);
+  const old: FocusSession = { ...previous, scope: { kind: "goal", blocks: [
+    { conversationId: "source", title: "First exchange", messageIds: ids, messageSignatures: previous.sourceSignatures!.source },
+  ] } };
+  expect(planFocusUpdate(old, chosen)).toMatchObject({ changed: false, removedKeys: [] });
+  expect(planFocusUpdate(old, chosen.slice(1))).toMatchObject({ changed: true, removedKeys: [JSON.stringify(["source", "m0"])] });
+});
 it("revisits later corrections after deletion without losing personal notes when chapter matching is ambiguous", () => {
   const current = messages.filter(item => item.id !== "m2");
   const plan = planFocusUpdate(previous, current);
@@ -105,6 +114,7 @@ it.each(["writing mode", "saved decisions"] as const)("reuses the ledger for %s 
     wikiKnowledge: { version: 1, writingMode: "concise", generatedAt: 1, status: "partial", materials: 4,
       batches: [{ sourceIds: ["m0"], status: "ok", units: [], rejected: {} }],
       organization: { version: 1, generatedAt: 1, status: "complete", chapters: [], subjects: [], merged: [], relations: [], report: {} },
+      decisionsAt: operation === "saved decisions" ? 2 : undefined,
       draft: { version: 1, writingMode: "concise", generatedAt: 1, status: "complete", chapters: [], report: {} } } };
   vi.mocked(generateFocusSession).mockClear();
   vi.mocked(reextractSessionKnowledge).mockClear();
@@ -116,7 +126,7 @@ it.each(["writing mode", "saved decisions"] as const)("reuses the ledger for %s 
   ] });
   const switching = operation === "writing mode";
   const next = await generateFocusUpdate(old, sources, "en", new AbortController().signal, undefined, undefined, undefined,
-    switching ? { writingMode: "handoff" } : { applyDecisions: true, onKeyDecisions: vi.fn() });
+    switching ? { writingMode: "handoff" } : { onKeyDecisions: vi.fn() });
   expect(reextractSessionKnowledge).not.toHaveBeenCalled();
   expect(generateFocusSession).not.toHaveBeenCalled();
   const mode = switching ? "handoff" : "concise";

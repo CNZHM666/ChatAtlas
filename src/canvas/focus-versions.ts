@@ -28,3 +28,11 @@ export function groupFocusVersions(sessions: FocusSession[]): FocusVersionGroup[
     return { id, latest: versions[0], versions };
   }).sort((a, b) => Math.max(...b.versions.map((item) => item.updatedAt)) - Math.max(...a.versions.map((item) => item.updatedAt)));
 }
+
+/** Completed local results only; never use an unconfirmed revision as the handoff. */
+export function savedFocusProjects(sessions: FocusSession[]): FocusSession[] {
+  return groupFocusVersions(sessions).flatMap(group => {
+    const saved = group.versions.find(item => item.mode === "work" && item.status !== "preview" && (item.sections.length || item.projectState));
+    return saved ? [saved] : [];
+  }).sort((a, b) => b.updatedAt - a.updatedAt);
+}

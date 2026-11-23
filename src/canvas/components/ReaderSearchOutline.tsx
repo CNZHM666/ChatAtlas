@@ -1,4 +1,5 @@
-import { PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { Search } from "lucide-react";
+import { ReaderSidebarToggle } from "./ReaderSidebarToggle";
 import { useMemo, useState } from "react";
 import type { ConversationMessage } from "../../shared/types";
 import type { ReaderSearchContext, ReaderSearchHit } from "../../shared/message-location";
@@ -27,7 +28,7 @@ export function ReaderSearchOutline({ context, title, messages, hits, selectedId
     return !needle || label.normalize("NFKC").toLocaleLowerCase().includes(needle) ? [{ hit, label }] : [];
   });
   return <aside className={`conversation-sidebar is-question-navigation reader-search-outline${collapsed ? " is-collapsed" : ""}`} aria-label={zh ? "命中目录" : "Search matches"}>
-    <div className="conversation-sidebar-top">{!collapsed ? <ReaderBackButton onClick={onReturn} label={zh ? "返回原目录" : "Original outline"} /> : null}<button className="conversation-sidebar-toggle" type="button" onClick={onToggle} aria-label={zh ? collapsed ? "展开侧边栏" : "收起侧边栏" : collapsed ? "Expand sidebar" : "Collapse sidebar"}>{collapsed ? <PanelLeftOpen size={18}/> : <PanelLeftClose size={18}/>}</button></div>
+    <div className="conversation-sidebar-top">{!collapsed ? <ReaderBackButton onClick={onReturn} label={zh ? "返回原目录" : "Original outline"} /> : null}<ReaderSidebarToggle zh={zh} collapsed={collapsed} onToggle={onToggle} /></div>
     {!collapsed ? <>
       <div className="conversation-outline-intro"><h2 title={title}>{title}</h2></div>
       <label className="conversation-outline-search"><Search size={16}/><input aria-label={zh ? "筛选命中" : "Filter matches"} placeholder={context.query} value={filter} onChange={event => setFilter(event.target.value)}/></label>

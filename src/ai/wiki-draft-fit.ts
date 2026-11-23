@@ -1,7 +1,6 @@
 import { wikiOrganizationIncomplete, type WikiKnowledgeLedger } from "../shared/wiki-knowledge";
 import { curateWikiUnits } from "./wiki-knowledge-select";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
-import { ledgerDecisionsPending } from "./wiki-key-decisions";
 
 /** A paragraph the writer did not place by its points' home: a source block shown beside the claim it backs, and
  * earlier versions told with what holds now, may sit in another chapter than their points. */
@@ -39,15 +38,10 @@ export function wikiDraftOutOfPlace(stored: WikiKnowledgeLedger | undefined, rea
   return [...new Set([...organization.chapters, ...draft.chapters].map(chapter => chapter.id).filter(id => out.has(id)))].map(id => titles.get(id) ?? id);
 }
 
-/** The document is behind its ledger: verdicts given since it was written, or chapters written for another layout. */
-export function ledgerRewriteNeeded(ledger: WikiKnowledgeLedger | undefined): boolean {
-  return ledgerDecisionsPending(ledger) || wikiDraftOutOfPlace(ledger).length > 0;
-}
-
-/** An explicit update can retry incomplete source reading even when the
- * conversation itself has not changed. Successful batches remain reusable. */
+/** Retry execution failures. Successfully read material with unresolved evidence stays available for review. */
 export function ledgerCoverageRetryNeeded(ledger: WikiKnowledgeLedger | undefined): boolean {
-  return Boolean(ledger?.batches.some(batch=>!batch.skipped&&(batch.status==="failed"||batch.uncovered?.length||batch.uncoveredSentences)));
+  return Boolean(ledger?.batches.some(batch => !batch.skipped &&
+    (batch.status === "failed" || batch.uncovered?.some(id => batch.coverage?.[id]?.status === "failed"))));
 }
 
 export function ledgerGenerationRetryNeeded(ledger: WikiKnowledgeLedger | undefined): boolean {

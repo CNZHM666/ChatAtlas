@@ -29,6 +29,28 @@ beforeEach(async () => { vi.clearAllMocks(); localStorage.setItem("atlas-locale"
 
 async function confirmDiscussionScope() { const button = await screen.findByRole("button", { name: "Generate preview" }); await waitFor(() => expect(screen.queryByText("Finding discussions…")).not.toBeInTheDocument()); if ((button as HTMLButtonElement).disabled) { fireEvent.click(screen.getByRole("button", { name: "Browse other discussions" })); fireEvent.click(screen.getAllByRole("checkbox")[0]); } fireEvent.click(button); }
 
+it("collapses the Wiki directory with the Reader control and restores its selected tab", () => {
+  const key = "atlas-project-navigation-layout";
+  localStorage.removeItem(key);
+  try {
+    render(<PreferencesProvider><FocusWorkspace initialSession={projectSession()} conversations={[]} canvases={[]} settingsRevision={0}
+      onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
+    const nav = screen.getByRole("navigation", { name: "Conversation chapters" });
+    fireEvent.click(within(nav).getByRole("tab", { name: /Sources/ }));
+    fireEvent.click(within(nav).getByRole("button", { name: "Collapse sidebar" }));
+    expect(nav).toHaveAttribute("hidden");
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ collapsed: true });
+    fireEvent.click(screen.getByText("More", { exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Move project sidebar right" }));
+    const open = within(document.querySelector(".project-navigation-rail") as HTMLElement).getByRole("button", { name: "Expand sidebar" });
+    expect(open).toHaveAttribute("aria-controls", nav.id);
+    fireEvent.click(open);
+    expect(nav).not.toHaveAttribute("hidden");
+    expect(within(nav).getByRole("tab", { name: /Sources/, selected: true })).toBeVisible();
+    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ side: "right", collapsed: false });
+  } finally { localStorage.removeItem(key); }
+});
+
 it("waits for a choice before writing and starts in the selected mode", async () => {
  const book = { version: 1, generatedAt: 1, status: "complete", materials: 1, batches: [] } as const;
  const wrote = vi.fn();
@@ -113,7 +135,7 @@ it("checks the local source before previewing an update and leaves the Wiki alon
  await db.put("focusSessions",project);
  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[canvas]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
  fireEvent.click(screen.getByRole("button",{name:"Update"}));
- expect(await screen.findByText("No source changes found.")).toBeVisible();
+ expect(await screen.findByText("The document is up to date.")).toBeVisible();
  expect(screen.queryByText("Sources changed")).toBeNull();
  expect(generateFocusSession).not.toHaveBeenCalled();
 });
@@ -143,7 +165,7 @@ it.each(["coverage", "writing"] as const)("retries incomplete Wiki %s through Up
  await act(async()=>finish({...project,id:"retry-preview"}));
  expect(await screen.findByRole("button",{name:"Save and view"})).toBeVisible();
  await waitFor(async()=>expect((await db.get("focusSessions","retry-preview"))?.scope).toEqual(project.scope));
- expect(screen.queryByText("No source changes found.")).toBeNull();
+ expect(screen.queryByText("The document is up to date.")).toBeNull();
 });
 
 it("reviews a question inline and uses the sidebar only for its source", async () => {
@@ -210,7 +232,8 @@ it("previews a saved decision from its chapter and returns there after applying"
   fireEvent.click(apply);
   fireEvent.click(await screen.findByRole("button", { name: "Save and view" }));
   await waitFor(() => expect(screen.getByRole("heading", { name: chapter.title })).toBeVisible());
-  expect(update.mock.calls[0][7]).toMatchObject({ applyDecisions: true });
+  expect(update).toHaveBeenCalledOnce();
+  expect(update.mock.calls[0][7]).toMatchObject({ reorganize: false });
   expect(screen.queryByRole("button", { name: "Preview article update" })).toBeNull();
 });
 
@@ -584,7 +607,7 @@ describe("goal reading workflow", () => {
     fireEvent.click(screen.getByText("More"));
     expect(screen.queryByRole("button", { name: "Edit content" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reanalyze architecture" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Update chapter understanding" })).toBeNull();expect(screen.getByRole("button", { name: "Reorganize · Preview" })).toBeVisible();expect(screen.queryByRole("button", { name: "Revise with AI" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Update chapter understanding" })).toBeNull();expect(screen.getByRole("button", { name: "Reorganize entire Wiki" })).toBeVisible();expect(screen.queryByRole("button", { name: "Revise with AI" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reconcile project plan" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create project plan" })).not.toBeInTheDocument();
     expect(generateFocusSession).not.toHaveBeenCalled();
@@ -1342,21 +1365,24 @@ it("reopens chapter selection after a local revision budget error without retryi
 it("reorganizes a project Wiki from its saved sources into a preview, keeping the saved Wiki and user edits",async()=>{
  const edited={...session.sections[0],id:"mine",title:"My chapter",body:"My own words.",userEdited:true};
  const savedLedger:NonNullable<FocusSession["wikiKnowledge"]>={version:1,generatedAt:1,status:"complete",materials:1,batches:[{sourceIds:["source-1"],signature:"test-signature",status:"ok",units:[],rejected:{}}]};
- const project:FocusSession={...projectSession(),id:"s",status:"ready",locale:"en",sourceConversationIds:["c"],evidence:session.evidence,sections:[...session.sections,edited],wikiScopeReview:{version:1,goal:"",includeKeys:["k-in"],excludeKeys:["k-out"],materials:[]},wikiKnowledge:savedLedger};
- await (await getDatabase()).put("focusSessions",project);
- vi.mocked(generateFocusSession).mockResolvedValue({...project,id:"reorganized",wikiKnowledge:undefined,sections:session.sections.map(chapter=>({...chapter,body:"Rewritten."}))});
+ const project:FocusSession={...projectSession(),id:"s",status:"ready",locale:"en",sourceConversationIds:["c"],evidence:session.evidence,sections:[...session.sections,edited],wikiScopeReview:{version:1,goal:"",includeKeys:["k-in"],excludeKeys:["k-out"],materials:[]},wikiKnowledge:savedLedger,
+  sourceSignatures:{c:{m1:sourceMessageSignature("Why poles?")}}};
+ const db=await getDatabase();
+ await db.put("focusSessions",project);
+ await db.put("conversations",conversation);
+ const action=vi.spyOn(focusUpdates,"generateFocusUpdate").mockResolvedValue({...project,id:"reorganized",sections:[{...session.sections[0],body:"Rewritten."},edited]});
+ vi.spyOn(window,"confirm").mockReturnValue(true);
  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
- fireEvent.click(screen.getByText("More",{exact:true}));fireEvent.click(screen.getByRole("button",{name:"Regenerate · Preview"}));
- await waitFor(async()=>expect((await (await getDatabase()).get("focusSessions","reorganized"))?.status).toBe("preview"));
- const summary=await screen.findByRole("region",{name:"Reorganization summary"}),scope=document.querySelector(".wiki-scope-notice")!;
- expect(summary.compareDocumentPosition(scope)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ fireEvent.click(screen.getByText("More",{exact:true}));fireEvent.click(screen.getByRole("button",{name:"Reorganize entire Wiki"}));
+ await waitFor(async()=>expect((await db.get("focusSessions","reorganized"))?.status).toBe("preview"));
+ expect(await screen.findByRole("region",{name:"Reorganization summary"})).toBeVisible();
  expect(document.querySelectorAll(".update-preview-summary")).toHaveLength(1);
- const call=vi.mocked(generateFocusSession).mock.calls[0];
- expect(call[2].map(source=>source.id)).toEqual(["c"]);
- expect(call[9]?.wikiPreviousLedger).toEqual(savedLedger);
- expect(call.find(arg=>arg&&typeof arg==="object"&&"wikiScopeExcludeKeys" in arg)).toMatchObject({wikiScopeIncludeKeys:["k-in"],wikiScopeExcludeKeys:["k-out"]});
- // The saved Wiki is untouched, and the preview keeps the user's own chapter.
- expect(await (await getDatabase()).get("focusSessions","s")).toEqual(project);
- const preview=await (await getDatabase()).get("focusSessions","reorganized");
+ expect(action.mock.calls[0]?.[0].wikiKnowledge).toEqual(savedLedger);
+ expect(action.mock.calls[0]?.[0].wikiScopeReview).toEqual(project.wikiScopeReview);
+ expect(action.mock.calls[0]?.[1].map(source=>source.id)).toEqual(["c"]);
+ expect(action.mock.calls[0]?.[7]).toMatchObject({reorganize:true});
+ expect(generateFocusSession).not.toHaveBeenCalled();
+ expect(await db.get("focusSessions","s")).toEqual(project);
+ const preview=await db.get("focusSessions","reorganized");
  expect(preview?.sections.find(chapter=>chapter.title==="My chapter")?.body).toBe("My own words.");
 });

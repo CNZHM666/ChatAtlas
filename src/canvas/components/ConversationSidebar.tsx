@@ -1,7 +1,8 @@
 import { ReaderBackButton } from "./ReaderBackButton";
 import { chronologicalGroups } from "../review-presentation";
 import { ChapterPhase } from "./ChapterPhase";
-import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search } from "lucide-react";
+import { ReaderSidebarToggle } from "./ReaderSidebarToggle";
+import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Plus, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ContextEpisode, Conversation, ConversationChapter, ConversationMessage, OrganizationRun } from "../../shared/types";
 import { conversationDragType, parseConversationDragPayload, type ConversationDragPayload } from "../conversation-graph";
@@ -115,11 +116,11 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
   }, [props.selectedMessageId]);
   useEffect(() => { if (!props.showingAll) { localStorage.setItem("atlas-conversation-sidebar-visited", "1"); setShowHelp(false); } }, [props.showingAll]);
   if (props.hidden) return null;
-  if (props.collapsed) return <aside className="conversation-sidebar is-collapsed"><button className="conversation-sidebar-toggle" type="button" onClick={props.onToggleCollapsed} aria-label={locale === "zh-CN" ? "展开侧边栏" : "Expand sidebar"} title={locale === "zh-CN" ? "展开侧边栏" : "Expand sidebar"}><PanelLeftOpen size={18} /></button></aside>;
+  if (props.collapsed) return <aside className="conversation-sidebar is-collapsed"><ReaderSidebarToggle zh={locale === "zh-CN"} collapsed onToggle={props.onToggleCollapsed} /></aside>;
   if (props.showingAll) {
     return (
       <aside className="conversation-sidebar">
-        <button className="conversation-sidebar-toggle" type="button" onClick={props.onToggleCollapsed} aria-label={locale === "zh-CN" ? "收起侧边栏" : "Collapse sidebar"} title={locale === "zh-CN" ? "收起侧边栏" : "Collapse sidebar"}><PanelLeftClose size={18} /></button>
+        <ReaderSidebarToggle zh={locale === "zh-CN"} onToggle={props.onToggleCollapsed} />
         <div className="conversation-sidebar-heading">
           <span className="eyebrow">{t("allConversations")}</span>
           {showHelp ? <h2>{t("chooseConversation")}</h2> : null}
@@ -177,7 +178,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
 
   return (
     <aside className="conversation-sidebar">
-      <div className="conversation-sidebar-top"><ReaderBackButton onClick={props.onShowAll} label={props.backLabel ?? t("allConversations")} /><div className="conversation-sidebar-tools">{!props.questionNavigation ? <button type="button" className="conversation-sidebar-toggle" onClick={() => setMenuOpen((value) => !value)} aria-label={locale === "zh-CN" ? "更多章节操作" : "More outline actions"} aria-expanded={menuOpen}><MoreHorizontal size={18} /></button> : null}<button className="conversation-sidebar-toggle" type="button" onClick={props.onToggleCollapsed} aria-label={locale === "zh-CN" ? "收起侧边栏" : "Collapse sidebar"} title={locale === "zh-CN" ? "收起侧边栏" : "Collapse sidebar"}><PanelLeftClose size={18} /></button></div></div>
+      <div className="conversation-sidebar-top"><ReaderBackButton onClick={props.onShowAll} label={props.backLabel ?? t("allConversations")} /><div className="conversation-sidebar-tools">{!props.questionNavigation ? <button type="button" className="conversation-sidebar-toggle" onClick={() => setMenuOpen((value) => !value)} aria-label={locale === "zh-CN" ? "更多章节操作" : "More outline actions"} aria-expanded={menuOpen}><MoreHorizontal size={18} /></button> : null}<ReaderSidebarToggle zh={locale === "zh-CN"} onToggle={props.onToggleCollapsed} /></div></div>
       <div className="conversation-outline-intro"><h2 title={activeConversation.title}>{activeConversation.title}</h2>{!props.questionNavigation && (chapters.length || questions.length) ? <p>{allQuestions ? locale === "zh-CN" ? `全部问题 · ${questions.length}` : `All questions · ${questions.length}` : !chapters.length ? locale === "zh-CN" ? `${questions.length} 个问题` : `${questions.length} questions` : locale === "zh-CN" ? `${chapters.length} 章 · ${questions.length} 个问题` : `${chapters.length} chapters · ${questions.length} questions`}</p> : null}</div>
       {props.onOverview ? <button type="button" className="source-outline-overview" aria-current={props.overviewSelected ? "page" : undefined} onClick={props.onOverview}>{locale === "zh-CN" ? "对话总览" : "Conversation overview"}</button> : null}
       {chapters.length || questions.length ? <label className="conversation-outline-search"><Search size={16} /><input value={questionQuery} onChange={(event) => setQuestionQuery(event.target.value)} placeholder={props.questionNavigation ? locale === "zh-CN" ? "搜索问题或回答" : "Search questions or answers" : locale === "zh-CN" ? "查找章节或正文" : "Find chapters or discussion"} aria-label={props.questionNavigation ? locale === "zh-CN" ? "搜索问题或回答" : "Search questions or answers" : locale === "zh-CN" ? "查找章节或问题" : "Find chapters or questions"} /></label> : null}

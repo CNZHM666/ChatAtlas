@@ -30,14 +30,15 @@ function calendarDay(at: number) {
   return day.getTime();
 }
 
-export function HomeResultHistory({ sessions, zh, onResult, onSession }: {
-  sessions: FocusSession[]; zh: boolean; onResult: (record: HomeResult) => void; onSession: (id: string) => void;
+export function HomeResultHistory({ sessions, zh, onResult, onSession, readOnly = false }: {
+  sessions: FocusSession[]; zh: boolean; onResult: (record: HomeResult) => void; onSession: (id: string) => void; readOnly?: boolean;
 }) {
   const [records, setRecords] = useState<HomeResult[]>([]), [hiddenIds, setHiddenIds] = useState(new Set<string>());
-  const [query, setQuery] = useState(""), [error, setError] = useState(false), [ready, setReady] = useState(false);
+  const [query, setQuery] = useState(""), [error, setError] = useState(false), [ready, setReady] = useState(readOnly);
   const [confirmClear, setConfirmClear] = useState(false), [clearing, setClearing] = useState(false), [clearError, setClearError] = useState("");
   const search = useRef<HTMLInputElement>(null), clearButton = useRef<HTMLButtonElement>(null), cancelButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
+    if (readOnly) return;
     let live = true;
     void Promise.allSettled([listHomeResults(), listHiddenHistorySessionIds()]).then(([results, hidden]) => {
       if (!live) return;
@@ -47,7 +48,7 @@ export function HomeResultHistory({ sessions, zh, onResult, onSession }: {
       setReady(true);
     });
     return () => { live = false; };
-  }, []);
+  }, [readOnly]);
   useEffect(() => { if (confirmClear) cancelButton.current?.focus(); }, [confirmClear]);
 
   const historySessions = useMemo(() => sessions.filter(session => !session.deletedAt && !session.historyHiddenAt && !hiddenIds.has(session.id)), [sessions, hiddenIds]);
@@ -108,7 +109,7 @@ export function HomeResultHistory({ sessions, zh, onResult, onSession }: {
       <header className="home-history-heading">
         <h1>{zh ? "历史记录" : "History"}</h1>
         <button ref={clearButton} type="button" className="home-history-clear" title={clearLabel} aria-label={clearLabel}
-          aria-expanded={confirmClear} disabled={!ready || error || clearing || !rows.length} onClick={() => confirmClear ? cancelClear() : setConfirmClear(true)}>
+          aria-expanded={confirmClear} disabled={readOnly || !ready || error || clearing || !rows.length} onClick={() => confirmClear ? cancelClear() : setConfirmClear(true)}>
           <Trash2 size={16} aria-hidden="true"/><span>{clearLabel}</span>
         </button>
       </header>

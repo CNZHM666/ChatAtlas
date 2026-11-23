@@ -17,7 +17,7 @@ export function sourceChangeLabels(change: Omit<SourceChange, "conversationId" |
   ].filter(Boolean);
 }
 
-export function sourceChangeDetails(session: FocusSession, conversationId: string, messages: ConversationMessage[], retained?: ConversationMessage[]) {
+export function sourceChangeDetails(session: FocusSession, conversationId: string, messages: ConversationMessage[], retained?: ConversationMessage[], inScope?: ReadonlySet<string>) {
   const outline = session.sourceOutlines?.find(item => item.conversationId === conversationId);
   const originals = retained && readableSourceMessages(retained);
   const signatures = originals ? Object.fromEntries(originals.map(item => [item.id, sourceMessageSignature(item.content)]))
@@ -26,7 +26,8 @@ export function sourceChangeDetails(session: FocusSession, conversationId: strin
   if (!signatures) return { ...empty, unknown: true };
   const order = originals?.map(item => item.id) ?? session.sourceMessageOrder?.[conversationId] ?? outline?.messageOrder;
   const roles = originals ? undefined : session.sourceRoles?.[conversationId] ?? outline?.messageRoles;
-  return { ...sourceMessageDelta(messages, signatures, roles, order, retained), unknown: false };
+  const baseline = inScope ? Object.fromEntries(Object.entries(signatures).filter(([id]) => inScope.has(id))) : signatures;
+  return { ...sourceMessageDelta(messages, baseline, roles, order, retained), unknown: false };
 }
 
 export function sourceChange(session: FocusSession, conversationId: string, messages: ConversationMessage[], retained?: ConversationMessage[]): SourceChange {
@@ -72,9 +73,16 @@ export async function currentSourceChange(session: FocusSession, conversationId:
   const result = sourceChange(session, conversationId, messages);
   // Older summaries may only store signatures for the selected material. Check their saved
   // original transcript before calling the rest of the same conversation new.
-  if (!session.sourceVersionIds?.[conversationId] || session.scope?.kind !== "goal" && !result.unknown && !hasSourceChange(result)) return result;
+  if (session.scope?.kind !== "goal" && (!session.sourceVersionIds?.[conversationId] || !result.unknown && !hasSourceChange(result))) return result;
   const retained = await loadSourceBaseline(session, conversationId);
-  return retained ? sourceChange(session, conversationId, messages, retained) : result;
+  if (retained) return sourceChange(session, conversationId, messages, retained);
+  const scopedIds = new Set(session.scope?.blocks?.filter(block => block.conversationId === conversationId).flatMap(block => block.messageIds));
+  const signatures = session.sourceSignatures?.[conversationId] ?? session.sourceOutlines?.find(item => item.conversationId === conversationId)?.messageSignatures;
+  // A legacy scoped summary might only have fingerprints for the messages the user selected.
+  // An older out-of-scope message cannot be called new without the full saved transcript.
+  if (!scopedIds.size || !signatures || Object.keys(signatures).some(id => !scopedIds.has(id))) return result;
+  if (!readableSourceMessages(messages).some(message => !scopedIds.has(message.id))) return result;
+  return { ...sourceChange(session, conversationId, messages.filter(message => scopedIds.has(message.id))), unknown: true };
 }
 
 export function sourceChanges(session: FocusSession): Promise<SourceChange[]> {

@@ -17,8 +17,9 @@ const emptySettings: Omit<AISettings, "id" | "updatedAt"> = {
   mode: "byok", provider: "openai", baseUrl: "https://api.openai.com/v1", apiKey: "", model: "", economyModel: "", analysisMode: "balanced",
 };
 
-export function SettingsPanel({ onClose, initialTab = "data" }: { onClose: () => void; initialTab?: "ai" | "data" }) {
+export function SettingsPanel({ onClose, initialTab = "data", installUrl }: { onClose: () => void; initialTab?: "ai" | "data"; installUrl?: string }) {
   const { locale, t } = usePreferences();
+  const readOnly = Boolean(installUrl);
   const [tab, setTab] = useState<"ai" | "data" | "usage">(initialTab);
   const [settings, setSettings] = useState(emptySettings);
   const [status, setStatus] = useState<"idle" | "testing" | "connected" | "failed">("idle");
@@ -39,16 +40,19 @@ export function SettingsPanel({ onClose, initialTab = "data" }: { onClose: () =>
   const [backupBusy, setBackupBusy] = useState(false);
 
   const exportBackup = async () => {
+    if (import.meta.env.VITE_ATLAS_STATIC_DEMO) return;
     setBackupBusy(true);
     try { downloadAtlasBackup(await createAtlasBackup()); setBackupStatus("downloaded"); }
     catch (error) { setBackupStatus({raw:error instanceof Error ? error.message : String(error)}); }
     finally { setBackupBusy(false); }
   };
   const inspectBackup = async (file: File) => {
+    if (import.meta.env.VITE_ATLAS_STATIC_DEMO) return;
     try { setPendingBackup(parseAtlasBackup(await file.text())); setBackupStatus(undefined); }
     catch (error) { setPendingBackup(null); setBackupStatus({raw:error instanceof Error ? error.message : String(error)}); }
   };
   const applyBackup = async () => {
+    if (import.meta.env.VITE_ATLAS_STATIC_DEMO) return;
     if (!pendingBackup) return;
     setBackupBusy(true);
     try { await restoreAtlasBackup(pendingBackup); window.location.reload(); }
@@ -56,6 +60,7 @@ export function SettingsPanel({ onClose, initialTab = "data" }: { onClose: () =>
   };
 
   useEffect(() => {
+    if (import.meta.env.VITE_ATLAS_STATIC_DEMO || readOnly) return;
     let active = true;
     const current = { ...settings, id: "ai-settings" as const, updatedAt: Date.now() };
     void resolveEmbeddingProvider(current).then(async (embedding) => {
@@ -63,9 +68,11 @@ export function SettingsPanel({ onClose, initialTab = "data" }: { onClose: () =>
       if (active) setRebuildRequired(required);
     }).catch(() => { if (active) setRebuildRequired(false); });
     return () => { active = false; };
-  }, [settings]);
+  }, [readOnly, settings]);
 
-  useEffect(() => { void getAISettings().then((value) => { if (value) setSettings(value); }).catch(() => undefined); }, []);
+  useEffect(() => {
+    if (!readOnly) void getAISettings().then((value) => { if (value) setSettings(value); }).catch(() => undefined);
+  }, [readOnly]);
 
   useEffect(() => {
     modelLoad.current?.abort();
@@ -112,6 +119,7 @@ export function SettingsPanel({ onClose, initialTab = "data" }: { onClose: () =>
   };
 
   const test = async () => {
+    if (import.meta.env.VITE_ATLAS_STATIC_DEMO) return;
     setStatus("testing"); setMessage(undefined);
     try {
       if (!settings.baseUrl || !settings.apiKey || !settings.model) throw new Error(t("fillAISettings"));
@@ -156,13 +164,14 @@ export function SettingsPanel({ onClose, initialTab = "data" }: { onClose: () =>
       <button className={tab === "data" ? "active" : ""} aria-current={tab === "data" ? "page" : undefined} onClick={() => setTab("data")}><Database size={15}/>{l("采集与数据", "Capture & data")}</button>
       <button className={tab === "usage" ? "active" : ""} aria-current={tab === "usage" ? "page" : undefined} onClick={() => setTab("usage")}><ListChecks size={15}/>{l("使用记录", "Usage history")}</button>
     </nav>
-    {tab === "usage" ? <div key="usage" className="settings-usage"><UsageLedger locale={locale}/></div> : null}
-    {tab === "data" ? <div key="data" className="settings-data"><WebCaptureSettings zh={locale==="zh-CN"}/><section className="settings-privacy-card"><header><Database size={18} aria-hidden="true" /><h3>{t("dataPrivacy")}</h3></header><dl>
+    {installUrl ? <div className="settings-demo-notice"><span>{l("在线演示仅供查看设置。", "Settings are read-only in this demo.")}</span> <a href={installUrl}>{l("安装扩展", "Install extension")}</a></div> : null}
+    {tab === "usage" ? <div key="usage" className="settings-usage"><UsageLedger locale={locale} readOnly={readOnly}/></div> : null}
+    {tab === "data" ? <div key="data" className="settings-data"><WebCaptureSettings zh={locale==="zh-CN"} readOnly={readOnly}/><section className="settings-privacy-card"><header><Database size={18} aria-hidden="true" /><h3>{t("dataPrivacy")}</h3></header><dl>
       <div><dt>{locale === "zh-CN" ? "保存位置" : "Storage"}</dt><dd>{locale === "zh-CN" ? "保存在此设备的浏览器中" : "This browser on this device"}</dd></div>
       <div><dt>{locale === "zh-CN" ? "AI 处理" : "AI processing"}</dt><dd>{locale === "zh-CN" ? "任务所需内容直接发送至所选服务商" : "Task content is sent directly to your chosen provider"}</dd></div>
       <div><dt>{locale === "zh-CN" ? "本地备份" : "Local backup"}</dt><dd>{locale === "zh-CN" ? "由你手动下载或恢复" : "Download or restore manually"}</dd></div>
-    </dl><details className="settings-privacy-more"><summary>{locale === "zh-CN" ? "了解数据如何处理" : "How data is handled"}</summary><p>{t("dataPrivacyDescription")} {t("cloudOptInDescription")}</p></details></section><section className="settings-backup"><h3>{locale === "zh-CN" ? "本地知识备份" : "Local knowledge backup"}</h3><p>{locale === "zh-CN" ? "包含对话正文、知识结构、笔记、阅读路线和阅读位置；不包含 API 密钥。请妥善保存文件。" : "Includes conversations, knowledge, notes, reading paths and positions. API keys are excluded. Keep the file private."}</p><div><button type="button" className="import-button" disabled={backupBusy} onClick={() => void exportBackup()}>{locale === "zh-CN" ? "下载备份" : "Download backup"}</button><button type="button" className="import-button" disabled={backupBusy} onClick={() => backupInput.current?.click()}>{locale === "zh-CN" ? "选择备份文件" : "Choose backup file"}</button></div><input ref={backupInput} type="file" accept=".json,application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectBackup(file); event.currentTarget.value = ""; }} />{pendingBackup ? <div className="settings-backup-confirm"><p>{locale === "zh-CN" ? `备份时间 ${pendingBackup.createdAt}，包含 ${pendingBackup.stores.conversations.length} 条对话。恢复会替换本机现有的 ChatAtlas 知识数据。` : `Backup from ${pendingBackup.createdAt}, with ${pendingBackup.stores.conversations.length} conversations. Restore replaces this device's ChatAtlas knowledge.`}</p><button type="button" className="import-button" disabled={backupBusy} onClick={() => void applyBackup()}>{locale === "zh-CN" ? "确认恢复" : "Restore backup"}</button><button type="button" className="import-button" onClick={() => setPendingBackup(null)}>{locale === "zh-CN" ? "取消" : "Cancel"}</button></div> : null}{backupStatus ? <p role="status">{backupStatus === "downloaded" ? locale === "zh-CN" ? "备份已下载。" : "Backup downloaded." : generationFailureReason(backupStatus.raw,undefined,locale === "zh-CN")}</p> : null}</section></div> : tab === "ai" ? <div key="ai" className="ai-settings-form">
-      <section className="settings-form-group settings-step"><div className="settings-group-heading"><span className="settings-step-number" aria-hidden="true">1</span><h3>{l("连接服务商", "Connect a provider")}</h3></div>
+    </dl><details className="settings-privacy-more"><summary>{locale === "zh-CN" ? "了解数据如何处理" : "How data is handled"}</summary><p>{t("dataPrivacyDescription")} {t("cloudOptInDescription")}</p></details></section><section className="settings-backup"><h3>{locale === "zh-CN" ? "本地知识备份" : "Local knowledge backup"}</h3><p>{locale === "zh-CN" ? "包含对话正文、知识结构、笔记、阅读路线和阅读位置；不包含 API 密钥。请妥善保存文件。" : "Includes conversations, knowledge, notes, reading paths and positions. API keys are excluded. Keep the file private."}</p><div><button type="button" className="import-button" disabled={readOnly || backupBusy} onClick={() => void exportBackup()}>{locale === "zh-CN" ? "下载备份" : "Download backup"}</button><button type="button" className="import-button" disabled={readOnly || backupBusy} onClick={() => backupInput.current?.click()}>{locale === "zh-CN" ? "选择备份文件" : "Choose backup file"}</button></div><input ref={backupInput} type="file" accept=".json,application/json" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void inspectBackup(file); event.currentTarget.value = ""; }} />{pendingBackup ? <div className="settings-backup-confirm"><p>{locale === "zh-CN" ? `备份时间 ${pendingBackup.createdAt}，包含 ${pendingBackup.stores.conversations.length} 条对话。恢复会替换本机现有的 ChatAtlas 知识数据。` : `Backup from ${pendingBackup.createdAt}, with ${pendingBackup.stores.conversations.length} conversations. Restore replaces this device's ChatAtlas knowledge.`}</p><button type="button" className="import-button" disabled={backupBusy} onClick={() => void applyBackup()}>{locale === "zh-CN" ? "确认恢复" : "Restore backup"}</button><button type="button" className="import-button" onClick={() => setPendingBackup(null)}>{locale === "zh-CN" ? "取消" : "Cancel"}</button></div> : null}{backupStatus ? <p role="status">{backupStatus === "downloaded" ? locale === "zh-CN" ? "备份已下载。" : "Backup downloaded." : generationFailureReason(backupStatus.raw,undefined,locale === "zh-CN")}</p> : null}</section></div> : tab === "ai" ? <div key="ai" className="ai-settings-form">
+      <fieldset className="settings-preview-fields" disabled={readOnly}><section className="settings-form-group settings-step"><div className="settings-group-heading"><span className="settings-step-number" aria-hidden="true">1</span><h3>{l("连接服务商", "Connect a provider")}</h3></div>
       <label>{t("providerLabel")}<select value={settings.provider} onChange={(event) => {
         const provider = event.target.value as AISettings["provider"];
         const preset = AI_PROVIDER_PRESETS.find((item) => item.id === provider)!;
@@ -212,11 +221,11 @@ export function SettingsPanel({ onClose, initialTab = "data" }: { onClose: () =>
         await (await import("../../search/semantic-index")).rebuildSemanticIndex();
         setRebuildRequired(false);
       })().catch(() => setMessage({key:"connectionFailed"})).finally(() => setRebuilding(false)); }}>{rebuilding ? locale === "zh-CN" ? "重建中…" : "Rebuilding…" : locale === "zh-CN" ? "重建语义索引" : "Rebuild semantic index"}</button></div> : null}
-      </div></details>
+      </div></details></fieldset>
     </div> : null}
     {tab === "ai" ? <footer className="settings-save-bar"><div className="ai-settings-actions">
-        <button className="import-button" onClick={() => void test()} disabled={status === "testing" || saving || !settings.model}>{status === "testing" ? <LoaderCircle className="spin" size={15} /> : status === "connected" ? <CheckCircle2 size={15} /> : null}{t("testConnection")}</button>
-        <button className="import-button primary" disabled={saving || status === "testing"} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" size={15}/> : null}{t("saveSettings")}</button>
+        <button className="import-button" onClick={() => void test()} disabled={readOnly || status === "testing" || saving || !settings.model}>{status === "testing" ? <LoaderCircle className="spin" size={15} /> : status === "connected" ? <CheckCircle2 size={15} /> : null}{t("testConnection")}</button>
+        <button className="import-button primary" disabled={readOnly || saving || status === "testing"} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" size={15}/> : null}{t("saveSettings")}</button>
         
       </div>{messageText ? <p role={status === "failed" ? "alert" : "status"} className={status === "failed" ? "settings-feedback error" : "settings-feedback"}>{messageText}</p> : null}</footer> : null}
   </aside>;

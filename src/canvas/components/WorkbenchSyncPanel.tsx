@@ -9,7 +9,7 @@ import type { FocusSession } from "../../shared/focus-session";
 import type { MessageSourceRange } from "../../shared/message-location";
 import { messageFullTextSearch, type MessageSearchHit } from "../../search/message-fulltext";
 import { normalizeSearch } from "../../search/query";
-import { savedSidecarProjects } from "../../sidecar/project-model";
+import { savedFocusProjects } from "../focus-versions";
 import { isCurrentHydrationComplete } from "../../sync/import-state";
 import { usePreferences } from "../preferences";
 import { useStableCallback } from "../hooks/useStableCallback";
@@ -60,7 +60,8 @@ const WorkbenchSourceList = memo(function WorkbenchSourceList({ visible, selecte
   </div>;
 });
 
-export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversations, importJob, importSource, selectedIds, onSelectedIds, onScan, onHydrate, onZip, onPause, onResume, onConnect, heading, onToggle, expanded = true, compact = false, initialImport = false, controlsHost,statusHost, sessions, onOpen, onOpenProject, onLinkProject, onUseSources }: {
+export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversations, importJob, importSource, selectedIds, onSelectedIds, onScan, onHydrate, onZip, onPause, onResume, onConnect, heading, onToggle, expanded = true, compact = false, initialImport = false, controlsHost,statusHost, sessions, onOpen, onOpenProject, onLinkProject, onUseSources, onPreviewAction }: {
+  onPreviewAction?: () => void;
   onUseSources?: (ids: string[]) => void;
   /** Saved projects: each row says which ones it belongs to, and selected rows can join one. */
   sessions?: FocusSession[];
@@ -110,7 +111,7 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
   };
   const projects = useMemo(() => {
     const byProject = new Map<string, FocusSession>();
-    for (const session of savedSidecarProjects(sessions ?? [])) if (!byProject.has(session.canvasId ?? session.id)) byProject.set(session.canvasId ?? session.id, session);
+    for (const session of savedFocusProjects(sessions ?? [])) if (!byProject.has(session.canvasId ?? session.id)) byProject.set(session.canvasId ?? session.id, session);
     return [...byProject.values()];
   }, [sessions]);
   const related = useMemo(() => {
@@ -149,13 +150,13 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
   const bodyQuery = normalizeSearch(deferredQuery.trim());
   const [bodySearch, setBodySearch] = useState<{ query: string; matches: Map<string, MessageSearchHit> }>();
   useEffect(() => {
-    if (!bodyQuery || !onOpen) return;
+    if (import.meta.env.VITE_ATLAS_STATIC_DEMO || !bodyQuery || !onOpen || onPreviewAction) return;
     const controller = new AbortController();
     void messageFullTextSearch.searchConversations(bodyQuery, { conversationIds: inFilter.map(({ item }) => item.id), signal: controller.signal })
       .then(result => { if (!controller.signal.aborted) setBodySearch({ query: bodyQuery, matches: new Map(result.hits.map(hit => [hit.conversationId, hit])) }); })
       .catch(() => { if (!controller.signal.aborted) setBodySearch({ query: bodyQuery, matches: new Map() }); });
     return () => controller.abort();
-  }, [bodyQuery, inFilter, onOpen]);
+  }, [bodyQuery, inFilter, onOpen, onPreviewAction]);
   const matches = bodySearch?.query === bodyQuery ? bodySearch.matches : undefined;
   const listed = useMemo(() => {
     const search = deferredQuery.trim().toLocaleLowerCase();
@@ -212,7 +213,7 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
           title={zh ? "从 AI 网页读取对话列表" : "Read the conversation list from an AI website"}
           aria-label={introductory ? zh ? "同步" : "Sync" : undefined}><RefreshCw size={introductory?22:14} aria-hidden="true" />
           {introductory ? <><strong>{zh ? "同步" : "Sync"}</strong><small>{zh ? "自动检测 AI · 读取对话列表" : "Detect AI · read the conversation list"}</small></> : zh ? "同步" : "Sync"}</button>
-        <ChatGPTFileImport onImport={onZip} disabled={Boolean(active) || submitting} ariaLabel={introductory?zh?"导入对话文件":"Import conversation files":undefined}><Upload size={introductory?22:14} />{introductory?<><strong>{zh?"导入对话文件":"Import conversation files"}</strong><small>ZIP / JSON / Markdown / TXT</small></>:zh?"导入文件":"Import files"}</ChatGPTFileImport>
+        <ChatGPTFileImport onPreviewAction={onPreviewAction} onImport={onZip} disabled={Boolean(active) || submitting} ariaLabel={introductory?zh?"导入对话文件":"Import conversation files":undefined}><Upload size={introductory?22:14} />{introductory?<><strong>{zh?"导入对话文件":"Import conversation files"}</strong><small>ZIP / JSON / Markdown / TXT</small></>:zh?"导入文件":"Import files"}</ChatGPTFileImport>
         {needsConnection && importSource === "web" ? <button type="button" className="primary" onClick={onConnect}>{importJob?.native ? zh ? "打开 AI 后重试" : "Retry after opening AI" : zh ? "打开 ChatGPT" : "Open ChatGPT"}</button> : null}
         {paused && onResume ? <button type="button" onClick={onResume}>{zh ? "继续同步" : "Resume sync"}</button> : null}
         {error && !needsConnection && importSource === "web" && importJob?.failedIds?.length ? <button type="button" disabled={submitting} onClick={() => void requestSync(importJob.failedIds)}>{zh ? `重试失败 ${importJob.failedIds.length} 条` : `Retry ${importJob.failedIds.length} failed`}</button> : null}

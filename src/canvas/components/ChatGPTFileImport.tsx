@@ -10,17 +10,17 @@ const GUIDE_PLATFORMS:Array<{id:GuidePlatform;zh:string;en:string}>=[{id:"chatgp
 
 /** Shared by file-import entries. Opening or reading the guide never imports,
  * requests an export, or calls a model. The user explicitly chooses a file. */
-export function ChatGPTFileImport({onImport,disabled=false,children,className,ariaLabel}:{
- onImport:(file:File)=>void;disabled?:boolean;children:ReactNode;className?:string;ariaLabel?:string;
+export function ChatGPTFileImport({onImport,disabled=false,children,className,ariaLabel,onPreviewAction}:{
+ onImport:(file:File)=>void;disabled?:boolean;children:ReactNode;className?:string;ariaLabel?:string;onPreviewAction?:()=>void;
 }){
  const {locale}=usePreferences(),zh=locale==="zh-CN";
  const [open,setOpen]=useState(false),input=useRef<HTMLInputElement>(null);
  return <>
-  <button type="button" className={className} disabled={disabled} aria-label={ariaLabel} aria-haspopup="dialog" onClick={()=>setOpen(true)}>{children}</button>
-  <input ref={input} type="file" aria-label={zh?"导入对话文件":"Import conversation file"} accept=".zip,.json,.md,.markdown,.txt,application/zip,application/json,text/markdown,text/plain" hidden disabled={disabled} onChange={event=>{
+  <button type="button" className={className} disabled={disabled} aria-label={ariaLabel} aria-haspopup={onPreviewAction ? undefined : "dialog"} onClick={()=>onPreviewAction ? onPreviewAction() : setOpen(true)}>{children}</button>
+  {!onPreviewAction && <input ref={input} type="file" aria-label={zh?"导入对话文件":"Import conversation file"} accept=".zip,.json,.md,.markdown,.txt,application/zip,application/json,text/markdown,text/plain" hidden disabled={disabled} onChange={event=>{
    const field=event.currentTarget,file=field.files?.[0];
    try{if(file&&!disabled){setOpen(false);onImport(file);}}finally{field.value="";}
-  }}/>
+  }}/>}
   {open?<ChatGPTExportGuide zh={zh} disabled={disabled} onClose={()=>setOpen(false)} onChoose={()=>input.current?.click()}/>:null}
  </>;
 }

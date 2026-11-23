@@ -1,13 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { routeWikiUnits, wikiUnitLane } from "./wiki-unit-routing";
 import { answeredTogether } from "./wiki-user-questions";
-import { wikiDraftOutOfPlace } from "./wiki-draft-fit";
+import { ledgerCoverageRetryNeeded, wikiDraftOutOfPlace } from "./wiki-draft-fit";
+import { ledgerDecisionsPending } from "./wiki-key-decisions";
 import type { WikiKnowledgeLedger, WikiKnowledgeOrganization, WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 
 const unit = (id: string, subject: string, statement: string, kind: WikiKnowledgeUnit["kind"] = "decision"): WikiKnowledgeUnit => ({ id, subject, statement, kind, details: [], adoption: { status: "proposal" }, delivery: "unknown",
   evidence: { evidenceId: "e", conversationId: "c", messageId: `m-${id}`, messageIndex: 1, role: "assistant", pasted: false, quote: statement } });
 const organization = (subjects: Array<[string, string[]]>, chapters: Array<[string, string, string[]]>): WikiKnowledgeOrganization => ({ version: 1, generatedAt: 0, status: "complete", merged: [], relations: [], report: {},
   subjects: subjects.map(([id, unitIds]) => ({ id, name: id, aliases: [], unitIds })), chapters: chapters.map(([id, title, subjectIds]) => ({ id, title, question: "", group: "", subtopics: [{ title, subjectIds }] })) });
+
+it("keeps reviewed evidence gaps from repeatedly triggering an update", () => {
+  const ledger: WikiKnowledgeLedger = { version: 1, status: "partial", generatedAt: 1, materials: 1,
+    batches: [{ sourceIds: ["m"], status: "ok", units: [], rejected: {}, uncovered: ["m"], uncoveredSentences: 2 }] };
+  expect(ledgerCoverageRetryNeeded(ledger)).toBe(false);
+  ledger.batches[0].status = "failed";
+  expect(ledgerCoverageRetryNeeded(ledger)).toBe(true);
+});
+
+it("skips decisions integrated into the current text and still applies a subsequent withdrawal", () => {
+  const ledger: WikiKnowledgeLedger = { version: 1, status: "complete", generatedAt: 1, materials: 0, batches: [],
+    draft: { version: 1, generatedAt: 2, status: "complete", chapters: [], report: {} },
+    decisionsAt: 3, decisions: { pick: { verdict: "confirmed", at: 3 } },
+    decisionArbitrations: { choice: { choice: "pick", mode: "choose", at: 3, unitIds: ["pick"], locallyApplied: true } } };
+  expect(ledgerDecisionsPending(ledger)).toBe(false);
+  expect(ledgerDecisionsPending({ ...ledger, decisions: {}, decisionsAt: 4 })).toBe(true);
+});
 
 describe("points routed by their role", () => {
   it("moves appearance specs from a journey to visual design and keeps step actions in the journey", () => {

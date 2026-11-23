@@ -1,20 +1,28 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Github, Languages, LayoutDashboard, Moon, Sun } from "lucide-react";
+import { Download, Github, History, Languages, LayoutDashboard, Moon, Settings, Sun } from "lucide-react";
 import { DocumentOverview } from "../canvas/components/DocumentOverview";
+import { MapSidebar } from "../canvas/components/MapSidebar";
+import { ProjectNavigationLayout, ProjectNavigationOpen, useProjectNavigationLayout } from "../canvas/components/ProjectNavigationLayout";
 import { ProjectSourceList } from "../canvas/components/ProjectSourceList";
 import { ProjectWikiNavigation } from "../canvas/components/ProjectWikiNavigation";
 import { ReaderBackButton } from "../canvas/components/ReaderBackButton";
 import { ReaderConversation } from "../canvas/components/ReaderConversation";
+import { ReaderMoreMenu } from "../canvas/components/ReaderMoreMenu";
 import { WikiDocument } from "../canvas/components/WikiDocument";
 import { WorkspaceSourcePanel } from "../canvas/components/WorkspaceSourcePanel";
 import { ProjectExampleContext } from "../canvas/project-example-context";
 import { WorkspaceEvidenceContext, type WorkspaceEvidenceOptions } from "../canvas/workspace-evidence-context";
+import { PreferencesProvider, usePreferences, type Locale, type Theme } from "../canvas/preferences";
 import { BrandMark } from "../shared/BrandMark";
+import { OVERVIEW_CANVAS_ID } from "../shared/constants";
 import type { FocusEvidence } from "../shared/focus-session";
 import { architectureChapter, demoProject, type DemoLocale } from "./project";
 
 const ProjectExportDialog = lazy(() => import("../canvas/components/ProjectExportDialog").then(module => ({ default: module.ProjectExportDialog })));
+const ReviewHome = lazy(() => import("../canvas/components/ReviewHome").then(module => ({ default: module.ReviewHome })));
+const SettingsPanel = lazy(() => import("../canvas/components/SettingsPanel").then(module => ({ default: module.SettingsPanel })));
 const repository = "https://github.com/CNZHM666/ChatAtlas";
+const installUrl = repository + "/releases";
 
 function readPreference(key: string) {
   try { return window.localStorage.getItem("chatatlas-demo-" + key); } catch { return null; }
@@ -30,27 +38,55 @@ function initialLocale(): DemoLocale {
 }
 
 export function DemoApp() {
-  const [locale, setLocale] = useState(initialLocale);
-  const [theme, setTheme] = useState<"light" | "dark">(() => readPreference("theme") === "dark" ? "dark" : "light");
-  const [route, setRoute] = useState(() => location.hash.slice(1));
+  return <PreferencesProvider initialLocale={initialLocale() === "zh" ? "zh-CN" : "en"} initialTheme={readPreference("theme") === "dark" ? "dark" : "light"}
+    onLocaleChange={saveLocale} onThemeChange={saveTheme}><DemoWorkspace /></PreferencesProvider>;
+}
+
+function saveLocale(locale: Locale) {
+  const value = locale === "zh-CN" ? "zh" : "en", url = new URL(location.href);
+  url.searchParams.set("lang", value);
+  history.replaceState(history.state, "", url);
+  savePreference("lang", value);
+}
+
+function saveTheme(theme: Theme) { savePreference("theme", theme); }
+
+function DemoWorkspace() {
+  const { locale: uiLocale, setLocale, theme, setTheme } = usePreferences();
+  const locale = uiLocale === "zh-CN" ? "zh" : "en";
+  const [routeHash, setRoute] = useState(() => location.hash.slice(1));
   const [source, setSource] = useState<{ reference: FocusEvidence; options: WorkspaceEvidenceOptions }>();
   const [fullSource, setFullSource] = useState(false);
   const [toolsHost, setToolsHost] = useState<HTMLDivElement | null>(null);
   const [navigationTab, setNavigationTab] = useState<"wiki" | "sources">("wiki");
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [settings, setSettings] = useState<"ai" | "data">();
+  const [needsExtension, setNeedsExtension] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set<string>());
+  const navigationLayout = useProjectNavigationLayout();
   const [headingTarget, setHeadingTarget] = useState<{ title: string; revision: number }>();
   const readingBody = useRef<HTMLElement>(null);
   const readingBase = useRef<HTMLDivElement>(null);
   const zh = locale === "zh", tr = (cn: string, en: string) => zh ? cn : en;
   const { knowledge, overview } = useMemo(() => demoProject(locale), [locale]);
   const session = knowledge.session;
+  const defaultRoute = "/wiki/" + architectureChapter;
+  const route = routeHash === "/search" ? "/workbench"
+    : ["/overview", "/workbench", "/workbench/history"].includes(routeHash) || session.sections.some(section => "/wiki/" + section.id === routeHash)
+      ? routeHash : defaultRoute;
+  const canvases = useMemo(() => [
+    { id: OVERVIEW_CANVAS_ID, name: "Workbench", type: "overview" as const, createdAt: session.createdAt, updatedAt: session.updatedAt },
+    { id: session.canvasId ?? session.id, name: session.title, type: "topic" as const, createdAt: session.createdAt, updatedAt: session.updatedAt },
+  ], [session]);
   const readers = useMemo(() => ({
     message: (reference: FocusEvidence) => knowledge.messages.find(message => message.id === reference.messageId && message.conversationId === reference.conversationId),
     knowledge: () => knowledge,
   }), [knowledge]);
   const chapter = session.sections.find(section => route === "/wiki/" + section.id) ?? session.sections.find(section => section.id === architectureChapter)!;
   const isOverview = route === "/overview";
+  const isHome = route === "/workbench" || route === "/workbench/history";
+  const isHistory = route === "/workbench/history";
   const original = fullSource && source ? knowledge.conversations.find(chat => chat.id === source.reference.conversationId) : undefined;
   const open = (reference: FocusEvidence, options: WorkspaceEvidenceOptions = {}) => {
     setNavigationOpen(false);
@@ -61,35 +97,55 @@ export function DemoApp() {
   const navigate = (next: string, heading?: string) => {
     close();
     setNavigationOpen(false);
+    setExportOpen(false);
+    setNeedsExtension(false);
     setHeadingTarget(heading ? { title: heading, revision: performance.now() } : undefined);
     if (!heading) readingBody.current?.scrollTo({ top: 0 });
     setRoute(next);
-    if (location.hash.slice(1) !== next) location.hash = next;
+    if (location.hash.slice(1) !== next) history.pushState(null, "", "#" + next);
   };
   const read = (id: string, heading?: string) => { setNavigationTab("wiki"); navigate("/wiki/" + id, heading); };
   const readOverview = () => navigate("/overview");
+  const readHome = () => navigate("/workbench");
+  const readHistory = () => navigate("/workbench/history");
+  const requireExtension = () => setNeedsExtension(true);
+  const readConversation = (id: string, message?: (typeof knowledge.messages)[number]) => {
+    const references = session.evidence.filter(ref => ref.conversationId === id);
+    const reference = references.find(ref => ref.messageId === message?.id) ?? references[0];
+    if (!reference) return;
+    navigate("/overview");
+    setNavigationTab("sources");
+    open(reference, { references, reader: true });
+  };
   const review = () => {
     const sourcePassages = (chapter.claims ?? []).flatMap(claim => claim.evidenceIds.map(referenceId => ({ referenceId, quote: claim.quote })));
     const references = chapter.evidenceIds.flatMap(id => session.evidence.find(ref => ref.id === id) ?? []);
     if (references[0]) open(references[0], { references, sourcePassages, sectionId: chapter.id, mode: "view" });
   };
   useEffect(() => {
+    if (routeHash && routeHash !== route && location.hash.slice(1) === routeHash) {
+      history.replaceState(history.state, "", "#" + route);
+      setRoute(route);
+    }
+  }, [routeHash, route]);
+  useEffect(() => {
     const onHash = () => {
       const next = location.hash.slice(1);
-      // In-app chapter navigation sets its scroll target before the hash event.
       setRoute(next);
       setSource(undefined);
       setFullSource(false);
       setExportOpen(false);
+      setSettings(undefined);
+      setHeadingTarget(undefined);
+      setNeedsExtension(false);
+      setNavigationOpen(false);
     };
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    return () => { window.removeEventListener("hashchange", onHash); };
   }, []);
   useEffect(() => {
-    document.documentElement.lang = zh ? "zh-CN" : "en";
     document.title = zh ? "ChatAtlas · 只读演示" : "ChatAtlas · Read-only demo";
   }, [zh]);
-  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   useEffect(() => {
     const base = readingBase.current;
     if (!original || !base) return;
@@ -97,36 +153,51 @@ export function DemoApp() {
     return () => { base.inert = false; };
   }, [original]);
   const changeLanguage = () => {
-    const next = zh ? "en" : "zh", url = new URL(location.href);
-    url.searchParams.set("lang", next);
-    history.replaceState(history.state, "", url);
-    savePreference("lang", next);
-    setLocale(next);
+    setLocale(zh ? "en" : "zh-CN");
     close();
   };
 
-  return <div className="app-shell demo-shell">
+  return <div className={`app-shell demo-shell${isHome ? " is-canvas-view" : ""}`}>
     <header className="topbar">
-      <button type="button" className="brand brand-home" onClick={readOverview} aria-label={tr("ChatAtlas 演示首页", "ChatAtlas demo home")}><BrandMark className="brand-mark" /><span>ChatAtlas</span></button>
+      <button type="button" className="brand brand-home" onClick={readHome} aria-label={tr("ChatAtlas 工作台", "ChatAtlas Workbench")}><BrandMark className="brand-mark" /><span>ChatAtlas</span></button>
       <span className="demo-badge">{tr("只读演示", "Read-only demo")}</span>
+      {isHome && <button type="button" className="icon-button topbar-workbench-history" onClick={isHistory ? readHome : readHistory} aria-label={tr("历史记录", "History")}><History size={17} aria-hidden="true" /></button>}
       <div className="topbar-actions demo-actions">
         <a className="demo-github" href={repository}><Github size={16} aria-hidden="true" />GitHub</a>
-        <a className="demo-install" href={repository + "/releases"}>{tr("安装扩展", "Install extension")}</a>
+        <a className="demo-install" href={installUrl}>{tr("安装扩展", "Install extension")}</a>
+        <button type="button" className="icon-button" onClick={() => setSettings("data")} aria-label={tr("设置", "Settings")} title={tr("设置", "Settings")}><Settings size={17} aria-hidden="true" /></button>
         <button type="button" className="icon-button" onClick={changeLanguage} aria-label={tr("切换为英文", "Switch to Chinese")} title={tr("切换为英文", "Switch to Chinese")}><Languages size={17} aria-hidden="true" /></button>
         <button type="button" className="icon-button" aria-label={tr("切换主题", "Switch theme")} title={tr("切换主题", "Switch theme")} onClick={() => {
-          const next = theme === "light" ? "dark" : "light";
-          setTheme(next); savePreference("theme", next);
+          setTheme(theme === "light" ? "dark" : "light");
         }}>{theme === "light" ? <Moon size={17} aria-hidden="true" /> : <Sun size={17} aria-hidden="true" />}</button>
       </div>
     </header>
     <div className="workspace-shell">
-      <ProjectExampleContext.Provider value={readers}>
+      {isHome ? <>
+        <MapSidebar canvases={canvases} activeId={OVERVIEW_CANVAS_ID} onSelect={id => id === OVERVIEW_CANVAS_ID ? readHome() : readOverview()} workbenchHistoryActive={isHistory} onWorkbenchHistory={readHistory} />
+        <div className="workspace"><Suspense fallback={null}><ReviewHome
+          canvases={canvases} sessions={[session]} conversations={knowledge.conversations}
+          selectedIds={selectedIds} onSelectedIds={setSelectedIds} importJob={null} importSource="web" recentReading={[]}
+          historyOpen={isHistory} onHistoryChange={open => open ? readHistory() : readHome()} onSession={readOverview}
+          onReadConversation={readConversation} onPreviewAction={requireExtension} onConfigureAI={() => setSettings("ai")}
+          onStart={requireExtension} onResume={readOverview} onSpace={readOverview} onPrioritize={requireExtension} onScan={requireExtension}
+          onHydrate={requireExtension} onZip={requireExtension} onPause={requireExtension} onConnect={requireExtension} onDiscover={requireExtension}
+        /></Suspense></div>
+      </> : <ProjectExampleContext.Provider value={readers}>
         <WorkspaceEvidenceContext.Provider value={{ open, close, active: source && !original ? { ...source.options, shown: source.reference } : undefined }}>
-          <div className={source && !original ? "focus-workspace has-original-panel" : "focus-workspace"}>
+          <div className={source && !original ? "focus-workspace has-original-panel" : "focus-workspace"} data-project-navigation-side={navigationLayout.side}
+            data-project-navigation-collapsed={navigationLayout.collapsed || undefined} style={navigationLayout.style}>
             <div className="project-reading-base" ref={readingBase} aria-hidden={Boolean(original) || undefined}>
-              <nav id="demo-project-navigation" className={navigationOpen ? "reading-outline is-mobile-open" : "reading-outline"} aria-label={tr("项目导航", "Project navigation")}>
-                <button type="button" className="project-mobile-nav-close" onClick={() => setNavigationOpen(false)}>{tr("关闭项目导航", "Close project navigation")}</button>
-                <ReaderBackButton onClick={readOverview} label={tr("返回示例总览", "Back to example overview")} />
+              <ProjectNavigationOpen layout={navigationLayout} zh={zh} navigationId="demo-project-navigation" />
+              <nav id="demo-project-navigation" className={navigationOpen ? "reading-outline is-mobile-open" : "reading-outline"}
+                hidden={navigationLayout.collapsed && !navigationOpen} aria-label={tr("项目导航", "Project navigation")} onKeyDown={event => {
+                  if (event.key !== "Escape" || window.innerWidth > 760) return;
+                  setNavigationOpen(false);
+                  requestAnimationFrame(() => document.getElementById("demo-project-navigation-open")?.focus());
+                }}>
+                <ProjectNavigationLayout layout={navigationLayout} zh={zh} navigationId="demo-project-navigation" onCloseMobile={() => setNavigationOpen(false)}>
+                  <ReaderBackButton onClick={readHome} label={tr("返回工作台", "Back to Workbench")} />
+                </ProjectNavigationLayout>
                 <h2>{session.title}</h2>
                 <button type="button" className="outline-item" aria-current={isOverview ? "page" : undefined} onClick={readOverview}><LayoutDashboard size={18} aria-hidden="true" /><strong>{tr("文档总览", "Document overview")}</strong></button>
                 <div className="project-navigation-tabs" role="tablist" aria-label={tr("项目目录", "Project directory")} onKeyDown={event => {
@@ -149,10 +220,11 @@ export function DemoApp() {
               </nav>
               <div className="focus-reader-main">
                 <div className="focus-reader-toolbar">
-                  <button type="button" className="project-mobile-nav-toggle" aria-controls="demo-project-navigation" aria-expanded={navigationOpen} onClick={() => setNavigationOpen(!navigationOpen)}>{tr("项目导航", "Project navigation")}</button>
+                  <ProjectNavigationOpen layout={navigationLayout} zh={zh} navigationId="demo-project-navigation" mobile onOpenMobile={() => setNavigationOpen(true)} />
                   <div className="focus-reader-location"><span>{session.title}</span></div>
                   <div className="focus-reader-toolbar-actions project-document-actions">
                     <button type="button" aria-label={tr("导出", "Export")} title={tr("导出项目", "Export project")} onClick={() => setExportOpen(true)}><Download size={15} aria-hidden="true" /><span>{tr("导出", "Export")}</span></button>
+                    <ReaderMoreMenu zh={zh} iconOnly flat edits={[navigationLayout.moveAction(zh)]} />
                   </div>
                 </div>
                 <main className={isOverview ? "focus-reading-body" : "focus-reading-body is-chapter-view"} ref={readingBody} key={route}>
@@ -191,10 +263,15 @@ export function DemoApp() {
               })} />}
           </div>
         </WorkspaceEvidenceContext.Provider>
-      </ProjectExampleContext.Provider>
+      </ProjectExampleContext.Provider>}
     </div>
     {exportOpen && <Suspense fallback={<p className="sr-only" role="status">{tr("正在打开导出", "Opening export")}</p>}>
-      <ProjectExportDialog session={session} zh={zh} onClose={() => setExportOpen(false)} allowCopyMarkdown />
+      <ProjectExportDialog session={session} zh={zh} onClose={() => setExportOpen(false)} />
     </Suspense>}
+    {settings && <Suspense fallback={null}><SettingsPanel key={settings} initialTab={settings} onClose={() => setSettings(undefined)} installUrl={installUrl} /></Suspense>}
+    {needsExtension && <div className="demo-action-notice" role="status"><span>{tr("安装扩展后可操作自己的对话。", "Install the extension to work with your own conversations.")}</span>
+      <a href={installUrl}>{tr("安装扩展", "Install extension")}</a>
+      <button type="button" className="icon-button" onClick={() => setNeedsExtension(false)} aria-label={tr("关闭提示", "Dismiss notice")}>×</button>
+    </div>}
   </div>;
 }

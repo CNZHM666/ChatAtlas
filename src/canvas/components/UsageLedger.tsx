@@ -12,13 +12,13 @@ type Period="all"|"30"|"7";
 type Dimension="feature"|"model"|"conversation";
 const DAY=86_400_000;
 
-export function UsageLedger({locale}:{locale:string}){
+export function UsageLedger({locale,readOnly=false}:{locale:string;readOnly?:boolean}){
  const zh=locale!=="en",l=(cn:string,en:string)=>zh?cn:en,id=useId();
  const [events,setEvents]=useState<AIUsageEvent[]>([]),[names,setNames]=useState<Record<string,string>>({});
  const [view,setView]=useState<"usage"|"diagnostics"|"tests">("usage"),[visited,setVisited]=useState({diagnostics:false,tests:false});
  const [dimension,setDimension]=useState<Dimension>("feature"),[expanded,setExpanded]=useState(false),[period,setPeriod]=useState<Period>("all");
  const [loadError,setLoadError]=useState(false);
- useEffect(()=>{let active=true;void Promise.all([listAIUsage(),listConversations()]).then(([usage,conversations])=>{if(active){setEvents(usage);setNames(Object.fromEntries(conversations.map(item=>[item.id,item.title])));}}).catch(()=>{if(active)setLoadError(true);});return()=>{active=false;};},[]);
+ useEffect(()=>{if(import.meta.env.VITE_ATLAS_STATIC_DEMO||readOnly)return;let active=true;void Promise.all([listAIUsage(),listConversations()]).then(([usage,conversations])=>{if(active){setEvents(usage);setNames(Object.fromEntries(conversations.map(item=>[item.id,item.title])));}}).catch(()=>{if(active)setLoadError(true);});return()=>{active=false;};},[readOnly]);
  const since=period==="all"?-Infinity:Date.now()-Number(period)*DAY,scoped=events.filter(item=>item.createdAt>=since);
  const provider=scoped.filter(item=>item.tokenSource==="provider"),estimated=scoped.filter(item=>item.tokenSource==="estimated"),unavailable=scoped.filter(item=>item.tokenSource==="unavailable");
  const counted=[...provider,...estimated],input=counted.reduce((sum,item)=>sum+item.inputTokens,0),output=counted.reduce((sum,item)=>sum+item.outputTokens,0),embedding=counted.reduce((sum,item)=>sum+(item.embeddingTokens??0),0);
@@ -45,7 +45,7 @@ export function UsageLedger({locale}:{locale:string}){
     <p className="ai-usage-footnote">{l("本机记录 · 费用以服务商账单为准","Local records · provider bills determine final cost")}</p>
    </>:<p className="ai-usage-empty">{period==="all"?l("暂无 AI 使用记录。","No AI usage recorded yet."):l("这段时间没有 AI 使用记录。","No AI usage in this period.")}</p>}
   </div>
-  {visited.diagnostics?<div id={`${id}-diagnostics`} className="ai-usage-view" hidden={view!=="diagnostics"} role="region" aria-label={l("任务诊断","Diagnostics")}><DeveloperAnalysis locale={locale}/></div>:null}
-  {visited.tests?<div id={`${id}-tests`} className="ai-usage-view" hidden={view!=="tests"} role="region" aria-label={l("开发者测试","Developer tests")}><DeveloperProjectTests zh={zh} embedded/></div>:null}
+  {visited.diagnostics?<div id={`${id}-diagnostics`} className="ai-usage-view" hidden={view!=="diagnostics"} role="region" aria-label={l("任务诊断","Diagnostics")}>{import.meta.env.VITE_ATLAS_STATIC_DEMO||readOnly?<p className="ai-usage-empty">{l("安装扩展后可查看任务诊断。","Install the extension to view task diagnostics.")}</p>:<DeveloperAnalysis locale={locale}/>}</div>:null}
+  {visited.tests?<div id={`${id}-tests`} className="ai-usage-view" hidden={view!=="tests"} role="region" aria-label={l("开发者测试","Developer tests")}>{import.meta.env.VITE_ATLAS_STATIC_DEMO||readOnly?<p className="ai-usage-empty">{l("开发者测试需在扩展中运行。","Developer tests run in the extension.")}</p>:<DeveloperProjectTests zh={zh} embedded/>}</div>:null}
  </div>;
 }

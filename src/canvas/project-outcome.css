@@ -732,6 +732,7 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 @media (max-width: 760px) {
   .focus-workspace .project-reading-base > .reading-outline { display: none; }
   .focus-workspace .project-reading-base > .reading-outline.is-mobile-open { display: block; position: absolute; inset: 0 auto 0 0; z-index: 25; width: min(320px, 88vw); max-height: none; padding: 16px 12px; overflow-y: auto; box-shadow: 8px 0 28px #00000025; }
+  .focus-workspace[data-project-navigation-side="right"] .project-reading-base > .reading-outline.is-mobile-open { inset-inline: auto 0; box-shadow: -8px 0 28px #00000025; }
   .focus-workspace .project-mobile-nav-toggle, .focus-workspace .project-mobile-nav-close { display: inline-flex; }
   .focus-workspace .project-mobile-nav-toggle { flex-shrink: 0; font-size: var(--text-xs); padding: 6px 8px; }
   .focus-workspace .focus-reader-toolbar { flex-wrap: wrap; }

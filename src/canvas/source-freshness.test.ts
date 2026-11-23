@@ -65,6 +65,13 @@ describe("source update notices", () => {
     await db.put("messages", original[1]);
     await db.put("conversations", { ...metadata, hydrationState: "hydrated" });
     expect(await currentSourceChange(base, id)).toMatchObject({ added: 0, changed: 0, removed: 0 });
+    const legacy = { ...base, sourceVersionIds: undefined, scope: { kind: "goal" as const, blocks: [
+      { conversationId: id, title: "First only", messageIds: [original[0].id], messageSignatures: base.sourceSignatures[id] },
+    ] } };
+    expect(await currentSourceChange(legacy, id)).toMatchObject({ added: 0, changed: 0, removed: 0, unknown: true });
+    await db.put("messages", { ...original[0], content: "First (edited)" });
+    expect(await currentSourceChange(legacy, id)).toMatchObject({ added: 0, changed: 1, removed: 0, unknown: true });
+    await db.put("messages", original[0]);
     await db.put("messages", { ...message("new-scope-reply", "New reply"), conversationId: id, messageIndex: 2 });
     expect(await currentSourceChange(base, id)).toMatchObject({ added: 1, changed: 0, removed: 0 });
     await db.delete("messages", original[1].id);

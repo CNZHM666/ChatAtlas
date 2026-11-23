@@ -4,6 +4,7 @@ import "../src/canvas/reader-code-theme.css";
 import "../src/canvas/styles.css";
 import "../src/canvas/reader-media.css";
 import "../src/canvas/reading-workspace.css";
+import "../src/canvas/history-workbench.css";
 import "../src/canvas/project-outcome.css";
 import "../src/canvas/workspace-source-panel.css";
 import "../src/demo/demo.css";

@@ -130,9 +130,15 @@ interface PreferencesValue {
 const PreferencesContext = createContext<PreferencesValue | null>(null);
 
 
-export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(preferredOutputLocale);
-  const [theme, setThemeState] = useState<Theme>(preferredTheme);
+export function PreferencesProvider({ children, initialLocale, initialTheme, onLocaleChange, onThemeChange }: {
+  children: ReactNode;
+  initialLocale?: Locale;
+  initialTheme?: Theme;
+  onLocaleChange?: (locale: Locale) => void;
+  onThemeChange?: (theme: Theme) => void;
+}) {
+  const [locale, setLocaleState] = useState<Locale>(() => initialLocale ?? preferredOutputLocale());
+  const [theme, setThemeState] = useState<Theme>(() => initialTheme ?? preferredTheme());
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.lang = locale;
@@ -141,14 +147,14 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   const value = useMemo<PreferencesValue>(() => ({
     locale,
     theme,
-    setLocale(next) { setLocaleState(next); localStorage.setItem("atlas-locale", next); },
-    setTheme(next) { setThemeState(next); localStorage.setItem("atlas-theme", next); },
+    setLocale(next) { setLocaleState(next); if (onLocaleChange) onLocaleChange(next); else localStorage.setItem("atlas-locale", next); },
+    setTheme(next) { setThemeState(next); if (onThemeChange) onThemeChange(next); else localStorage.setItem("atlas-theme", next); },
     t(key, variables = {}) {
       let text: string = messages[locale][key];
       for (const [name, replacement] of Object.entries(variables)) text = text.replace(`{{${name}}}`, String(replacement));
       return text;
     },
-  }), [locale, theme]);
+  }), [locale, theme, onLocaleChange, onThemeChange]);
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
 }
 

@@ -1,5 +1,5 @@
 import { RefreshCw, X } from "lucide-react";
-import { ledgerDecisionsPending } from "../../ai/wiki-key-decisions";
+import { pendingLedgerDecisions } from "../../ai/wiki-key-decisions";
 import { hasSourceChange, sourceChangeLabels, type SourceChange } from "../source-freshness";
 import type { Conversation } from "../../shared/types";
 import type { FocusSession } from "../../shared/focus-session";
@@ -8,25 +8,16 @@ import { useNoticeDismissal } from "../../shared/use-notice-dismissal";
 import { wikiUnitChapterHomes } from "../../shared/wiki-chapter-links";
 
 function decisionChanges(session: FocusSession | undefined, chapterId?: string) {
-  const ledger = session?.wikiKnowledge;
-  if (!ledger?.draft || !ledgerDecisionsPending(ledger)) return;
-  const since = ledger.draft.generatedAt;
-  const receipts = Object.entries(ledger.decisionArbitrations ?? {}).filter(([, entry]) => entry.at > since);
-  const local = receipts.filter(([, entry]) => entry.locallyApplied);
-  const units = new Set(Object.entries(ledger.decisions ?? {}).filter(([id, verdict]) => verdict.at > since
-    && !local.some(([, entry]) => entry.at === verdict.at && entry.unitIds?.includes(id))).map(([id]) => id));
-  for (const answer of ledger.userAnswers ?? []) if (answer.at > since && !local.some(([id]) => id === answer.questionId)) {
-    for (const id of answer.unitIds) units.add(id);
-  }
-  const homes = wikiUnitChapterHomes(ledger.organization);
+  const pending = pendingLedgerDecisions(session?.wikiKnowledge);
+  if (!pending) return;
+  const { unitIds: units, unapplied, revision } = pending;
+  const homes = wikiUnitChapterHomes(session?.wikiKnowledge?.organization);
   const chapterIds = new Set([...units].map(id => homes.get(id)));
-  const unapplied = receipts.filter(([, entry]) => !entry.locallyApplied);
-  for (const [, entry] of unapplied) if (entry.chapterId) chapterIds.add(session?.wikiSectionAliases?.[entry.chapterId] ?? entry.chapterId);
-  if (local.length && !units.size && !unapplied.length) return;
+  for (const entry of unapplied) if (entry.chapterId) chapterIds.add(session?.wikiSectionAliases?.[entry.chapterId] ?? entry.chapterId);
   const chapters = session?.sections.filter(section => chapterIds.has(section.id)
     || section.claims?.some(claim => claim.unitIds?.some(id => units.has(id)))) ?? [];
   if (chapterId && !chapters.some(chapter => chapter.id === chapterId)) return;
-  return { revision: ledger.decisionsAt, titles: [...new Set(chapters.map(chapter => chapter.wikiDisplayTitle || chapter.title))] };
+  return { revision, titles: [...new Set(chapters.map(chapter => chapter.wikiDisplayTitle || chapter.title))] };
 }
 
 export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updateLabel, session, overview = false, decisionChapterId, disabled = false }: {
@@ -39,12 +30,14 @@ export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updat
   const decisions = overview || decisionChapterId ? decisionChanges(session, decisionChapterId) : undefined;
   if (!changed.length && !pending.length && !decisions) return null;
   const key = `atlas-workspace-source-update:${session?.canvasId ?? session?.rootSessionId ?? session?.id ?? ""}${decisionChapterId ? `:${decisionChapterId}` : ""}`;
-  const revision = sourceMessageSignature(JSON.stringify([
-    session?.id, pending.slice().sort(), decisions?.revision,
+  const changeSignature = [
+    pending.slice().sort(), decisions?.revision,
     changed.map(item => [item.conversationId, item.fingerprint ?? sourceChangeLabels(item, false)])
       .sort(([a], [b]) => String(a).localeCompare(String(b))),
-  ]));
-  if (dismissedRevision(key) === revision) return null;
+  ];
+  const revision = sourceMessageSignature(JSON.stringify(changeSignature));
+  const dismissed = dismissedRevision(key);
+  if (dismissed === revision || dismissed && dismissed === sourceMessageSignature(JSON.stringify([session?.id, ...changeSignature]))) return null;
   if (decisionChapterId) return <button type="button" className="wiki-decision-source" disabled={disabled} onClick={onUpdate}>
     <RefreshCw size={13} aria-hidden="true"/>{zh ? "预览正文更新" : "Preview article update"}
   </button>;

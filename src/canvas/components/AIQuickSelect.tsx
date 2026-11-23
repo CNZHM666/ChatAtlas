@@ -65,17 +65,18 @@ function ModelMenu({ name, title, current, selected, groups, busy, onChange }: {
   </div>;
 }
 
-export function AIQuickSelect({ zh, onConfigure, onBusy, onReady, configureLabel, compact = false }: { zh: boolean; onConfigure?: () => void; onBusy?: (busy: boolean) => void; onReady?: (ready: boolean) => void; configureLabel?: string; compact?: boolean }) {
+export function AIQuickSelect({ zh, onConfigure, onBusy, onReady, configureLabel, compact = false, readOnly = false }: { zh: boolean; onConfigure?: () => void; onBusy?: (busy: boolean) => void; onReady?: (ready: boolean) => void; configureLabel?: string; compact?: boolean; readOnly?: boolean }) {
   const [settings, setSettings] = useState<AISettings>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
+    if (readOnly) return;
     let active = true;
     const load = () => { void getAISettings().then((value) => { if (active) setSettings(value); }).catch(() => { if (active) setError(zh ? "读取 AI 配置失败" : "Could not load AI settings"); }); };
     const visible = () => { if (!document.hidden) load(); };
     load(); window.addEventListener("atlas-ai-settings-changed", load); window.addEventListener("focus", load); document.addEventListener("visibilitychange", visible);
     return () => { active = false; window.removeEventListener("atlas-ai-settings-changed", load); window.removeEventListener("focus", load); document.removeEventListener("visibilitychange", visible); };
-  }, [zh]);
+  }, [zh, readOnly]);
   useEffect(() => { onReady?.(hasAIConnection(settings)); }, [settings, onReady]);
   const connections = new Map<string, AIConnection>();
   for (const item of [...settings?.connections ?? [], settings]) if (item?.baseUrl && item.apiKey && item.model) {

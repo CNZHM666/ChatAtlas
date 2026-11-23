@@ -9,7 +9,7 @@ type Source = { id: string; title: string; platform: string };
  * was discussed; from one AI they stay one list. */
 export function ProjectSourceList({ ids, conversations, fallbackTitle, zh, onOpen }: { ids: readonly string[]; conversations: readonly Conversation[]; fallbackTitle: (id: string) => string | undefined; zh: boolean; onOpen: (id: string) => void }) {
   const sources: Source[] = ids.map(id => { const conversation = conversations.find(item => item.id === id); return { id, title: conversation?.title ?? fallbackTitle(id) ?? (zh ? "来源对话" : "Source conversation"), platform: conversation?.platform ?? "other" }; });
-  const item = (source: Source) => <button type="button" key={source.id} className="outline-item outline-source-item" onClick={() => onOpen(source.id)}><FileText size={18} aria-hidden="true" /><strong>{source.title}</strong></button>;
+  const item = (source: Source) => <button type="button" key={source.id} className="outline-item outline-source-item" title={source.title} onClick={() => onOpen(source.id)}><FileText size={13} aria-hidden="true" /><strong>{source.title}</strong></button>;
   const groups = platformGroups(sources);
   if (groups.length < 2) return <>{sources.map(item)}</>;
   return <>{groups.map(group => <section key={group.platform} className="outline-source-group" aria-label={platformName(group.platform, zh ? "zh-CN" : "en")}>
