@@ -18,7 +18,7 @@ async function walk(directory) {
 }
 
 export async function publicSourceFiles() {
-  return [...new Set([...rootFiles, ...docs.map(name => `docs/${name}`),...englishDocs.map(name=>`docs/en/${name}`), ...await walk("src"), ...await walk("scripts"), ...await walk(".github"), ...await walk("docs/handoff"), ...await walk("docs/images"), ...await walk("samples"), "evaluation/memory-search/cases.ts"])].sort();
+  return [...new Set([...rootFiles, "demo/index.html", "vite.demo.config.ts", ...docs.map(name => `docs/${name}`),...englishDocs.map(name=>`docs/en/${name}`), ...await walk("src"), ...await walk("scripts"), ...await walk(".github"), ...await walk("docs/handoff"), ...await walk("docs/images"), ...await walk("samples"), "evaluation/memory-search/cases.ts"])].sort();
 }
 
 export async function verifyPublicSource({ checkGit = true } = {}) {
@@ -31,7 +31,7 @@ export async function verifyPublicSource({ checkGit = true } = {}) {
       continue;
     }
     const text = bytes.toString("utf8");
-    if (/(?:^|\/)(?:\.env(?!\.example$)|node_modules|dist|dist-dev|artifacts|deploy-output|release-output|archive)(?:\/|$)/u.test(name) || /\.(?:zip|log|pem|key)$/u.test(name)) issues.push(`${name}: non-public file`);
+    if (/(?:^|\/)(?:\.env(?!\.example$)|node_modules|dist|dist-dev|dist-demo|artifacts|deploy-output|release-output|archive)(?:\/|$)/u.test(name) || /\.(?:zip|log|pem|key)$/u.test(name)) issues.push(`${name}: non-public file`);
     // Report paths, never the matched credential or private text.
     if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,})\b/u.test(text)) issues.push(`${name}: possible credential`);
     if (/[A-Z]:[\\/]Users[\\/][^/\\\s]+[\\/](?:Desktop|AppData)[\\/]/u.test(text)) issues.push(`${name}: machine-specific user path`);

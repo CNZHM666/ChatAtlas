@@ -7,7 +7,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip"><b>Download v0.1.7 ZIP</b></a>
+  <a href="https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans"><b>Live demo</b></a>
+  · <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip">Download v0.1.7 ZIP</a>
   · <a href="#preview">Preview</a>
   · <a href="#install-on-chrome-or-edge">Install</a>
   · <a href="docs/en/CHANGELOG.md">Changelog</a>
@@ -30,6 +31,8 @@
 - **Local-first, with AI on demand.** Conversations, the ledger, and the wiki are stored in your browser's IndexedDB. Reading, keyword search, and export run locally. When you generate or update a wiki, ChatAtlas sends the necessary material from your selected sources directly to your configured provider.
 
 ## Preview
+
+**[Try the English demo](https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans)** · No installation or API key required. Circuit Studio is a fictional project built around four conversations from ChatGPT, Claude, and Gemini. Choose **Check evidence** to trace the approval-before-execution decision to Claude, then switch to Gemini to verify the recovery rule. You can also search for “rollback” or export Markdown with the original quotes.
 
 <p align="center">
   <img src="docs/images/citation-check.gif" alt="Turn on source markers in the wiki and open the cited passage" width="920">

@@ -5,7 +5,7 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/u, "$1")), "..");
 const src = path.join(root, "src");
-const ENTRIES = ["src/canvas/main.tsx", "src/sidecar/main.tsx", "src/background/service-worker.ts", "src/content/chatgpt-content.ts", "manifest.config.ts"];
+const ENTRIES = ["src/canvas/main.tsx", "src/sidecar/main.tsx", "src/background/service-worker.ts", "src/content/chatgpt-content.ts", "src/demo/main.tsx", "manifest.config.ts"];
 
 const files = [];
 (function walk(dir) {

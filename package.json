@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:demo": "vite --config vite.demo.config.ts",
+    "build:demo": "vite build --config vite.demo.config.ts && node scripts/verify-static-demo.mjs",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",

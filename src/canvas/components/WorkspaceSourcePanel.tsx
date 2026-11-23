@@ -102,11 +102,12 @@ function HolderQuestion({ point, zh, asked, canEdit, originalLocated, onAnswer }
 /** Which mark shows where two overlap: the quote over close wording over its surrounding sentence; the lines (cue,
  * rest of the exchange) above them all, since they only underline. */
 const HIGHLIGHT_PRIORITY:Record<string,number>={"atlas-original-context":0,"atlas-original-related":1,"atlas-original-support":1,"atlas-original-similar":2,"atlas-original-proof":3,"atlas-original-cue":4};
-export function WorkspaceSourcePanel({ session, reference, references, onSelect, claim, quote: savedQuote, sourcePassages, tableTarget, sectionId, readerError, zh, onClose, onReader, embedded=false, returnLabel, points, pointIndex, onPoint, onHolder, next, mode, locationRevision, onEditClaim, onToolsHost }: {
+export function WorkspaceSourcePanel({ session, reference, references, onSelect, claim, quote: savedQuote, sourcePassages, tableTarget, sectionId, readerError, zh, onClose, onReader, embedded=false, returnLabel, points, pointIndex, onPoint, onHolder, next, mode, locationRevision, onEditClaim, onToolsHost, showSourceTitle = false }: {
   session: FocusSession; reference: FocusEvidence; references?: FocusEvidence[]; claim?: string; quote?: string; conversationTitle?: string; zh: boolean;
   sourcePassages?: WorkspaceEvidenceOptions["sourcePassages"];
   onSelect: (ref: FocusEvidence) => void; onClose: () => void; onReader?: () => void; embedded?:boolean; returnLabel?:string;
   readerError?: string; sectionId?:string; tableTarget?:string;
+  showSourceTitle?: boolean;
   /** Point-by-point mode: step through claims; references are only this point's originals. */
   points?: EvidencePoint[]; pointIndex?: number; onPoint?: (index: number) => void; locationRevision?:number;
   onToolsHost?: (element: HTMLDivElement | null) => void;
@@ -409,6 +410,7 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     <div className="workspace-source-rule"><span aria-live="polite">{position}</span>{point?.label&&!checking?<span className={`workspace-source-kind is-${point.source}${point.approximate?" is-approximate":""}`}>{point.label}</span>:null}{target&&!loading?<span className="workspace-source-rule-role">{roleName(target)}</span>:null}
       {available.length > 1 && sourceIndex >= 0 ? <nav className="workspace-source-navigation" aria-label={zh ? "依据消息导航" : "Evidence navigation"}><button type="button" disabled={loading || sourceIndex === 0} aria-label={zh ? "上一条依据" : "Previous evidence"} onClick={() => onSelect(available[sourceIndex - 1])}><ChevronLeft size={14} aria-hidden="true"/></button><span>{point ? zh ? "原话" : "Original" : zh ? "原文" : "Original"} {sourceIndex + 1} / {available.length}</span><button type="button" disabled={loading || sourceIndex === available.length - 1} aria-label={zh ? "下一条依据" : "Next evidence"} onClick={() => onSelect(available[sourceIndex + 1])}><ChevronRight size={14} aria-hidden="true"/></button></nav> : null}
     </div>
+    {showSourceTitle && <p className="workspace-source-title">{current.title}</p>}
     {checkMode&&next&&!remaining?<button type="button" className="workspace-source-next-chapter" onClick={next.onNext}>{next.label}</button>:null}
     {point?.attention&&!checking?<p className="workspace-source-attention">{evidenceAttentionText(point.attention,zh)}</p>:null}
     {point?.source === "decision" && available.length > 1 ? <p className="workspace-source-point-note">{zh ? "包含 AI 的提议和你的确认，用“原话”箭头切换。" : "Includes the AI proposal and your confirmation; switch with the Original arrows."}</p> : null}

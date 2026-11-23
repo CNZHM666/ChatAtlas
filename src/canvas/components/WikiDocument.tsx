@@ -42,7 +42,7 @@ function structureAt(link: HTMLAnchorElement) {
   return flow ?? (next instanceof HTMLElement ? next.matches("table") ? next : next.querySelector("table") : null);
 }
 
-export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,pendingReview,readingProjection,toolsHost,decisionUpdate }: {
+export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,pendingReview,readingProjection,toolsHost,decisionUpdate,persistSourceMarks }: {
   section: FocusSection; session: FocusSession; zh: boolean; structure: ReactNode; editor?: ReactNode;
   /** A pending problem in this chapter the overview sent the reader to: its paragraph is marked and named. */
   issue?: { issue: WikiBlockIssue; index: number; total: number }; onIssueStep?: (delta: number) => void; onIssueClose?: () => void;
@@ -60,6 +60,7 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   readingProjection?: WikiReadingProjection;
   toolsHost?: HTMLElement | null;
   decisionUpdate?: ReactNode;
+  persistSourceMarks?: boolean;
 }) {
   const evidencePanel=useContext(WorkspaceEvidenceContext);
   const review=session.mode==="review",[updatesOpen,setUpdatesOpen]=useState(false);
@@ -93,7 +94,7 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
    return projectKnowledgeReading(context.chapters.find(chapter=>chapter.id===section.id)??section,readingSession,context.view,context.chapters,true);
   }),[readingCache,readingSession,section,readingProjection]);
   const learning=session.wikiKnowledge?.documentType==="learning";
-  const [holderMarks,setHolderMarks]=useHolderMarks();
+  const [holderMarks,setHolderMarks]=useHolderMarks(persistSourceMarks);
   const compact=Boolean(session.wikiKnowledge?.draft&&!learning&&!review&&session.wikiKnowledge.draft.writingMode!=="audit"&&!holderMarks);
   const body=reading.body;
   const stateGraphs=useMemo(()=>!review&&!learning&&!editor&&!section.userEdited&&!section.origin

@@ -7,7 +7,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip"><b>下载 v0.1.7 安装包</b></a>
+  <a href="https://cnzhm666.github.io/ChatAtlas/?lang=zh#/wiki/operation-plans"><b>在线体验</b></a>
+  · <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip">下载 v0.1.7 安装包</a>
   · <a href="#效果预览">效果预览</a>
   · <a href="#安装到-chrome-或-edge">安装</a>
   · <a href="CHANGELOG.md">更新记录</a>
@@ -30,6 +31,8 @@
 - **本地优先，按需调用 AI。** 对话、账本与 Wiki 均保存在浏览器 IndexedDB 中。阅读、关键词搜索与导出在本地完成。主动生成或更新 Wiki 时，所选范围内的必要材料直接发往你配置的模型服务商。
 
 ## 效果预览
+
+**[在线体验中文示例](https://cnzhm666.github.io/ChatAtlas/?lang=zh#/wiki/operation-plans)** · 无需安装或配置模型。虚构项目 Circuit Studio 串联了 ChatGPT、Claude 和 Gemini 的四段对话。打开「核对依据」，先看为什么改用「先确认、再执行」，再切换到 Gemini 核对失败恢复规则。你也可以搜「回滚」或导出带原话的 Markdown。
 
 <p align="center">
   <img src="docs/images/citation-check.gif" alt="在 Wiki 中开启显示出处并查看对应原话" width="920">
