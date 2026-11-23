@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Download, Moon, Quote, Search, Sun } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Download, Github, Moon, Search, Sun } from "lucide-react";
 import { WikiDocument } from "../canvas/components/WikiDocument";
 import { WorkspaceSourcePanel } from "../canvas/components/WorkspaceSourcePanel";
 import { ProjectExampleContext } from "../canvas/project-example-context";
@@ -11,13 +11,13 @@ import { architectureChapter, demoProject, type DemoLocale } from "./project";
 const repository = "https://github.com/CNZHM666/ChatAtlas";
 const release = repository + "/releases";
 const words = {
-  zh: { demo: "只读演示", back: "项目总览", search: "搜索示例对话", fictional: "虚构项目", install: "安装扩展", theme: "切换主题", review: "核对依据",
-    reviewHint: "从 Claude 核对执行条件，再到 Gemini 查看失败时怎样恢复。", sources: "对话来源", chapters: "Wiki 章节",
+  zh: { demo: "只读演示", back: "项目总览", search: "搜索示例对话", fictional: "虚构项目", install: "安装扩展", theme: "切换主题",
+    reviewHint: "点「核对依据」可从 Claude 追溯到 Gemini，也可以直接查看下方表格的来源。", sources: "对话来源", chapters: "Wiki 章节",
     find: "搜索", empty: "没有匹配的示例消息。", searchPrompt: "试试搜索「回滚」或「引脚」。", export: "导出 Markdown",
     exportLabel: "导出选项", excerpts: "附上原话", copy: "复制", copied: "已复制 Markdown", download: "下载", downloaded: "已下载 Markdown",
     failed: "操作失败。可以重试，或改用下载。", close: "关闭", extension: "导入自己的对话", user: "用户", assistant: "AI 回复" },
-  en: { demo: "Read-only demo", back: "Project overview", search: "Search sample chats", fictional: "Fictional project", install: "Install extension", theme: "Switch theme", review: "Check evidence",
-    reviewHint: "Check the execution decision in Claude, then follow the recovery rule back to Gemini.", sources: "Source conversations", chapters: "Wiki chapters",
+  en: { demo: "Read-only demo", back: "Project overview", search: "Search sample chats", fictional: "Fictional project", install: "Install extension", theme: "Switch theme",
+    reviewHint: "Use Check evidence to trace decisions from Claude to Gemini, or open the table’s source directly.", sources: "Source conversations", chapters: "Wiki chapters",
     find: "Search", empty: "No matching sample messages.", searchPrompt: "Try searching for “rollback” or “pin”.", export: "Export Markdown",
     exportLabel: "Export options", excerpts: "Include original quotes", copy: "Copy", copied: "Markdown copied", download: "Download", downloaded: "Markdown downloaded",
     failed: "That didn't work. Try again or use Download.", close: "Close", extension: "Import your own chats", user: "User", assistant: "AI reply" },
@@ -42,6 +42,8 @@ export function DemoApp() {
   const [theme, setTheme] = useState<keyof typeof brandLogos>(() => readPreference("theme") === "dark" ? "dark" : "light");
   const [route, setRoute] = useState(() => location.hash.slice(1));
   const [source, setSource] = useState<{ reference: FocusEvidence; options: WorkspaceEvidenceOptions }>();
+  const [toolsHost, setToolsHost] = useState<HTMLDivElement | null>(null);
+  const readingBody = useRef<HTMLElement>(null);
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
@@ -54,6 +56,7 @@ export function DemoApp() {
   }), [knowledge]);
   const chapter = session.sections.find(section => route === "/wiki/" + section.id) ?? session.sections[0];
   const onSearch = route === "/search", onOverview = route === "/overview";
+  const isWiki = !onSearch && !onOverview;
   const open = (reference: FocusEvidence, options: WorkspaceEvidenceOptions = {}) => setSource({ reference, options });
   const close = () => setSource(undefined);
   const review = () => {
@@ -100,7 +103,7 @@ export function DemoApp() {
                 const next = theme === "light" ? "dark" : "light";
                 setTheme(next); savePreference("theme", next);
               }}>{theme === "light" ? <Moon size={17} /> : <Sun size={17} />}</button>
-              <a href={repository}>GitHub</a><a className="demo-install" href={release}>{t.install}</a>
+              <a href={repository}><Github size={16} aria-hidden="true" />GitHub</a><a className="demo-install" href={release}>{t.install}</a>
             </div>
           </header>
           <div className="demo-layout">
@@ -110,7 +113,7 @@ export function DemoApp() {
               {session.sections.map(section => <a key={section.id} href={"#/wiki/" + section.id} aria-current={!onSearch && !onOverview && chapter.id === section.id ? "page" : undefined}>{section.title}</a>)}
               <a href="#/search" aria-current={onSearch ? "page" : undefined}><Search size={16} />{t.search}</a>
             </nav>
-            <main className="demo-main" key={route}>
+            <main className="demo-main" key={route} ref={readingBody}>
               {onSearch ? <section className="demo-search">
                 <h1>{t.search}</h1>
                 <form onSubmit={event => { event.preventDefault(); setSubmitted(query.trim()); }}>
@@ -137,13 +140,13 @@ export function DemoApp() {
                 <a href={release}>{t.extension}</a>
               </section> : <>
                 <div className="demo-reader-actions">
-                  <button type="button" className="demo-review" onClick={review}><Quote size={17} />{t.review}</button>
                   <button type="button" onClick={() => setExportOpen(!exportOpen)} aria-expanded={exportOpen}><Download size={16} />{t.export}</button>
                 </div>
                 {chapter.id === architectureChapter && <p className="demo-review-hint">{t.reviewHint}</p>}
                 {exportOpen && <DemoExport session={session} chapterId={chapter.id} zh={zh} t={t} onClose={() => setExportOpen(false)} />}
                 <WikiDocument key={locale + chapter.id} section={chapter} session={session} zh={zh} structure={null}
-                  onLocate={open} onCurrent={() => { location.hash = "/overview"; }} persistSourceMarks={false} />
+                  onLocate={open} onReviewEvidence={review} onCurrent={() => { location.hash = "/overview"; }} persistSourceMarks={false}
+                  toolsHost={source ? toolsHost : null} scrollRef={readingBody} />
               </>}
             </main>
           </div>
@@ -151,6 +154,11 @@ export function DemoApp() {
         {source && <WorkspaceSourcePanel key={locale} session={session} reference={source.reference} references={source.options.references} showSourceTitle
           sectionId={source.options.sectionId} quote={source.options.quote} sourcePassages={source.options.sourcePassages}
           claim={source.options.claim} tableTarget={source.options.tableTarget} zh={zh} mode="view" onClose={close}
+          onToolsHost={isWiki ? setToolsHost : undefined} points={source.options.points} pointIndex={source.options.pointIndex}
+          onPoint={index => {
+            const point = source.options.points?.[index];
+            if (point) open(point.reference, { ...source.options, claim: point.claim, quote: point.quote, references: point.references, pointIndex: index });
+          }}
           locationRevision={source.options.locationRevision} onSelect={reference => open(reference, source.options.sourcePassages ? source.options : {
             ...source.options, claim: undefined, quote: undefined,
           })} />}

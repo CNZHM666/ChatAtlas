@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { sourceMessageSignature } from "../shared/source-signature";
+import { wikiTableSignature } from "../shared/wiki-table-source";
 import { architectureChapter, demoProject } from "./project";
 
 it.each(["en", "zh"] as const)("binds every %s demo claim to a real message in its localized fixture", locale => {
@@ -10,6 +11,13 @@ it.each(["en", "zh"] as const)("binds every %s demo claim to a real message in i
   expect(session.sections.find(chapter => chapter.id === architectureChapter)?.evidenceIds).toEqual([
     "source-architecture-2", "source-validation-2",
   ]);
+  const ruleTable = (text: string) => text.split("\n\n").find(block => block.startsWith("|"));
+  const tableInChapter = ruleTable(session.sections[0].body);
+  const validationOriginal = messages.find(message => message.id === "validation-2");
+  expect(tableInChapter).toBeDefined();
+  expect(ruleTable(validationOriginal!.content)).toBeDefined();
+  expect(wikiTableSignature(tableInChapter!)).toBe(wikiTableSignature(ruleTable(validationOriginal!.content)!));
+  expect(session.sections[0].claims?.every(claim => claim.holder === "decided" && claim.holderMark)).toBe(true);
 
   for (const chapter of session.sections) {
     for (const claim of chapter.claims ?? []) {

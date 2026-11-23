@@ -22,10 +22,6 @@
 .demo-nav a:last-child { margin-top: 8px; }
 .demo-main { min-width: 0; min-height: 0; overflow: auto; padding: 28px clamp(20px, 5vw, 60px) 60px; background: var(--surface); }
 .demo-main > * { max-width: 720px; margin-inline: auto; }
-.demo-reader-actions .demo-review { color: #fff; background: var(--accent); }
-:root[data-theme="dark"] .demo-reader-actions .demo-review { color: #18201d; }
-.demo-reader-actions .demo-review:hover { color: var(--accent); background: var(--accent-soft); }
-:root[data-theme="dark"] .demo-reader-actions .demo-review:hover { color: var(--accent); }
 .demo-review-hint { margin-block: 10px 24px; line-height: 1.5; }
 .demo-reader-actions + .wiki-document, .demo-export + .wiki-document { margin-top: 24px; }
 .demo-export { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-block: 12px; }

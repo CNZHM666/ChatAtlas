@@ -42,7 +42,7 @@ function structureAt(link: HTMLAnchorElement) {
   return flow ?? (next instanceof HTMLElement ? next.matches("table") ? next : next.querySelector("table") : null);
 }
 
-export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,pendingReview,readingProjection,toolsHost,decisionUpdate,persistSourceMarks }: {
+export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,pendingReview,readingProjection,toolsHost,decisionUpdate,persistSourceMarks,onReviewEvidence }: {
   section: FocusSection; session: FocusSession; zh: boolean; structure: ReactNode; editor?: ReactNode;
   /** A pending problem in this chapter the overview sent the reader to: its paragraph is marked and named. */
   issue?: { issue: WikiBlockIssue; index: number; total: number }; onIssueStep?: (delta: number) => void; onIssueClose?: () => void;
@@ -61,6 +61,8 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   toolsHost?: HTMLElement | null;
   decisionUpdate?: ReactNode;
   persistSourceMarks?: boolean;
+  /** Opens the curated reading path in the read-only example. */
+  onReviewEvidence?: () => void;
 }) {
   const evidencePanel=useContext(WorkspaceEvidenceContext);
   const review=session.mode==="review",[updatesOpen,setUpdatesOpen]=useState(false);
@@ -154,8 +156,9 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
       const gap=14,inset=8;
       panel.style.setProperty("--wiki-status-width",`${Math.max(0,right-left-2*inset)}px`);
       const width=panel.getBoundingClientRect().width;
-      if(right-anchor.right>=width+gap+inset)panel.dataset.placement="right";
-      else if(anchor.left-left>=width+gap+inset)panel.dataset.placement="left";
+      const horizontalRail=control.parentElement&&getComputedStyle(control.parentElement).flexDirection==="row";
+      if(!horizontalRail&&right-anchor.right>=width+gap+inset)panel.dataset.placement="right";
+      else if(!horizontalRail&&anchor.left-left>=width+gap+inset)panel.dataset.placement="left";
       else {
         panel.dataset.placement="below";
         const offset=Math.max(left+inset,Math.min(anchor.right-width,right-width-inset))-anchor.left;
@@ -231,8 +234,9 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   const readingBody=!review?page.overview?.readingBody??page.body:page.body;
   const parts=useMemo(()=>wikiDiagramParts(readingBody,section.wikiDiagram?.afterHeading??suggestedDiagramHeading(section)),[readingBody,section]);
   const read=(body:string)=>body.trim()?<div className="chapter-guide"><ReaderGuide hideCitationAnnotations content={body} sourceTexts={sourceTexts} flowSources={flowSources} zh={zh} complete hideEvidenceMarkers={!section.userEdited&&section.origin!=="user"} claimMarkers={claimMarkers}/></div>:null;
+  const reviewLabel = onReviewEvidence ? (zh ? "核对依据" : "Check evidence") : undefined;
   const tools = !editor ? <nav className="wiki-tool-rail" aria-label={zh?"文档工具":"Document tools"}>
-      {ordered.length||attention.length?<button type="button" className={`wiki-tool evidence-review-button${attention.length?" has-attention":""}`} aria-label={attention.length?zh?`核对依据 · ${attention.length} 条待确认`:`Check evidence · ${attention.length} to confirm`:zh?"来源已定位":"Sources located"} title={attention.length?zh?`核对依据：${attention.length} 处需要你确认，逐条带你看`:`Check evidence: ${attention.length} points need your look`:zh?"点开查看来源":"Open sources"} onClick={reviewEvidence}><Quote size={17} aria-hidden="true"/>{attention.length?<span className="wiki-tool-badge" aria-hidden="true">{attention.length}</span>:null}</button>:<EvidenceReviewButton iconOnly sources={sources} zh={zh} onLocate={onLocate} historical={Boolean(section.userEdited||section.origin)}/>}
+      {onReviewEvidence||ordered.length||attention.length?<button type="button" className={`wiki-tool evidence-review-button${!onReviewEvidence&&attention.length?" has-attention":""}`} aria-label={reviewLabel??(attention.length?zh?`核对依据 · ${attention.length} 条待确认`:`Check evidence · ${attention.length} to confirm`:zh?"来源已定位":"Sources located")} title={reviewLabel??(attention.length?zh?`核对依据：${attention.length} 处需要你确认，逐条带你看`:`Check evidence: ${attention.length} points need your look`:zh?"点开查看来源":"Open sources")} onClick={onReviewEvidence??reviewEvidence}><Quote size={17} aria-hidden="true"/>{!onReviewEvidence&&attention.length?<span className="wiki-tool-badge" aria-hidden="true">{attention.length}</span>:null}</button>:<EvidenceReviewButton iconOnly sources={sources} zh={zh} onLocate={onLocate} historical={Boolean(section.userEdited||section.origin)}/>}
       {hasHolders?<div className="wiki-status-control" ref={statusControl} onKeyDown={event=>{
         if(event.key!=="Escape"||!holderMarks)return;
         event.stopPropagation();
