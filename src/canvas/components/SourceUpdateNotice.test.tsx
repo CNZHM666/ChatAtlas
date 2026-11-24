@@ -75,3 +75,20 @@ it("leaves locally applied decisions out of the rewrite notice", () => {
   expect(screen.queryByRole("status")).toBeNull();
   expect(onUpdate).not.toHaveBeenCalled();
 });
+
+it("suppresses an older inline status reminder when the claimed text already has the saved status", () => {
+  const session = projectSession(), text = "首版支持编辑画布。";
+  const section = { ...session.sections[0], body: text,
+    claims: [{ text, quote: text, evidenceIds: [], unitIds: ["pick"], holder: "decided" as const, holderMark: true, checked: true }] };
+  session.sections = [section];
+  session.wikiKnowledge = { version: 1, generatedAt: 1, status: "complete", materials: 0, batches: [],
+    draft: { version: 1, generatedAt: 2, status: "complete", chapters: [], report: {} },
+    decisionsAt: 3, decisions: { pick: { at: 3, verdict: "confirmed" } } };
+  const notice = (value: typeof session) => <SourceUpdateNotice session={value} zh changes={[]} conversations={[]} overview onUpdate={vi.fn()}/>;
+  const view = render(notice(session));
+  expect(screen.queryByRole("status")).toBeNull();
+  const pending = { ...session, wikiKnowledge: { ...session.wikiKnowledge, decisionArbitrations:
+    { pick: { choice: "custom", mode: "custom" as const, at: 3, unitIds: ["pick"], chapterId: section.id, locallyApplied: false } } } };
+  view.rerender(notice(pending));
+  expect(screen.getByRole("status")).toHaveTextContent("已保存的决定待写入正文");
+});

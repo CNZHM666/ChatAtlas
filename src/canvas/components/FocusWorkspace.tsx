@@ -694,7 +694,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
         if (!leaveEditor()) return;
         setScopeUpdateIds(session.scope.sourceConversationIds ?? session.sourceConversationIds);
         setPhase("scope");
-      } else if (!items.some(item=>hasSourceChange(item)||item.unknown) && !ledgerGenerationRetryNeeded(session.wikiKnowledge) && !ledgerDecisionsPending(session.wikiKnowledge)) {
+      } else if (!items.some(item=>hasSourceChange(item)||item.unknown) && !ledgerGenerationRetryNeeded(session.wikiKnowledge) && !ledgerDecisionsPending(session.wikiKnowledge, session.sections)) {
         setStatus(zh ? "文档已是最新。" : "The document is up to date.");
       } else if (leaveEditor()) await generate(session.goal, session.sourceConversationIds, false, undefined, true);
     } catch { setStatus(zh?"暂时无法检查来源，请重试。":"Could not check sources. Try again."); }
@@ -875,7 +875,7 @@ function FocusWorkspaceContent({ request, initialSession, searchTarget, revision
     const claims=matching.length?page.claims?.map(claim=>matching.includes(claim)?{...claim,...(changed?answer:{checked:true})}:claim)
       : [...page.claims??[],{text:point.claim,quote:point.quote??point.reference.excerpt,evidenceIds,...answer}];
     const next = update({ sections: current.sections.map(item => item.id !== page.id ? item : { ...page, claims }),
-      ...(changed&&unitIds.length&&current.wikiKnowledge ? { wikiKnowledge: withDecision(current.wikiKnowledge, unitIds, verdict, undefined, [point.claim]) } : {}) });
+      ...(changed&&unitIds.length&&current.wikiKnowledge ? { wikiKnowledge: withDecision(current.wikiKnowledge, unitIds, verdict, undefined, [point.claim], { locallyApplied: true }) } : {}) });
     setSourceSelection(value => value && { ...value, points: value.points?.map(item => item.key === point.key ? { ...item, ...(holder === undefined ? {} : { holder, holderMark: true }), checked: true } : item) });
     if (next?.wikiKnowledge?.draft) {
       readingRefreshAbort.current?.abort();

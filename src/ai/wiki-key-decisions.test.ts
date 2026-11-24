@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { ledgerDecisionsPending, wikiDecisionCandidates, wikiSameQuestions, wikiVersionQuestions, withDecision, withVersionAnswer } from "./wiki-key-decisions";
+import { ledgerDecisionsPending, pendingLedgerDecisions, wikiDecisionCandidates, wikiSameQuestions, wikiVersionQuestions, withDecision, withVersionAnswer } from "./wiki-key-decisions";
 import { wikiUnitStatuses } from "./wiki-knowledge-write";
 import { wikiLedgerUnits, withUserRelations } from "../shared/wiki-knowledge";
 import type { WikiKnowledgeLedger, WikiKnowledgeUnit } from "../shared/wiki-knowledge";
@@ -30,6 +30,20 @@ it("applies a verdict to every unit of the point, marks the draft out of date, a
   const undone = withDecision(decided, ["u1"], undefined);
   expect(undone.decisions).toEqual({});
   expect(wikiDecisionCandidates(undone)[0].verdict).toBeUndefined();
+});
+
+it("records inline status changes without queuing a rewrite or clearing another pending decision", () => {
+  const base = ledgerOf([unit(1, "第一版使用 MIT 许可证开源。"), unit(2, "先公开基础版。")]);
+  for (const verdict of ["confirmed", "open", "rejected"] as const) {
+    const updated = withDecision(base, ["u1"], verdict, 6, [], { locallyApplied: true });
+    expect(updated.decisions?.u1).toMatchObject({ verdict, locallyApplied: true });
+    expect(ledgerDecisionsPending(updated)).toBe(false);
+    expect(ledgerDecisionsPending(withDecision(updated, ["u1"], undefined, 7, [], { locallyApplied: true }))).toBe(false);
+  }
+  const pending = withDecision(base, ["u2"], "confirmed", 6);
+  const updated = withDecision(pending, ["u1"], "confirmed", 7, [], { locallyApplied: true });
+  expect(updated.decisionsAt).toBe(6);
+  expect(pendingLedgerDecisions(updated)?.unitIds).toEqual(new Set(["u2"]));
 });
 
 it("asks which roadmap holds now and which of two versions the AI changed, then writes the answers as verdicts", () => {

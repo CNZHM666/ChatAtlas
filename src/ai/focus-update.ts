@@ -295,7 +295,7 @@ export async function generateFocusUpdate(previous: FocusSession, sources: Conve
     const needsDraft = !previous.wikiKnowledge.draft;
     const sourceWork = plan.changed || retryCoverage || needsDraft || Boolean(callbacks?.scope);
     const organizationWork = wikiOrganizationIncomplete(previous.wikiKnowledge.organization) || previous.wikiKnowledge.lastFailure?.step === "organize";
-    if (sourceWork || ledgerGenerationRetryNeeded(previous.wikiKnowledge) || ledgerDecisionsPending(previous.wikiKnowledge)) {
+    if (sourceWork || ledgerGenerationRetryNeeded(previous.wikiKnowledge) || ledgerDecisionsPending(previous.wikiKnowledge, previous.sections)) {
       const id = runId ?? `focus-${crypto.randomUUID()}`;
       return measureAILocalStep(id, "wiki", "wiki:generation", () =>
         ledgerUpdate(previous, sources, messages, allMessages, plan, locale, signal, onState, id, onProgress, !(sourceWork || organizationWork), callbacks));

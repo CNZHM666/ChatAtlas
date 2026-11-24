@@ -7,6 +7,8 @@ import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { knowledgeScopesAgree } from "../shared/knowledge-subject";
 import { distinctWikiStageScopes } from "../shared/wiki-roadmap-scope";
 import { factTextKey } from "../shared/project-fact-state";
+import type { FocusSection } from "../shared/focus-session";
+import { wikiQuoteRange } from "../shared/wiki-claims";
 
 /** A key point the user can confirm as a decision or set aside: one point however often it was restated. */
 export interface WikiDecisionCandidate {
@@ -73,39 +75,61 @@ export function wikiDecisionCandidates(ledger: WikiKnowledgeLedger | undefined, 
 }
 
 /** The ledger with the user's verdict on a point (all its units), or the verdict removed. */
-export function withDecision(ledger: WikiKnowledgeLedger, unitIds: string[], verdict: WikiUserDecision["verdict"] | undefined, at = Date.now(), shown: readonly string[] = []): WikiKnowledgeLedger {
+export function withDecision(ledger: WikiKnowledgeLedger, unitIds: string[], verdict: WikiUserDecision["verdict"] | undefined, at = Date.now(), shown: readonly string[] = [], options?: { locallyApplied: true }): WikiKnowledgeLedger {
   const decisions = { ...ledger.decisions };
   const wholeUnits = verdict === "confirmed" && shown.length
     ? new Set(wikiLedgerUnits(ledger).filter(unit => shown.includes(unit.statement)).map(unit => unit.id))
     : undefined;
   for (const id of unitIds) {
-    if (verdict) decisions[id] = { verdict, at, ...(wholeUnits?.has(id) ? { wholeUnit: true } : {}) };
+    if (verdict) decisions[id] = { verdict, at, ...(wholeUnits?.has(id) ? { wholeUnit: true } : {}), ...(options ? { locallyApplied: true } : {}) };
     else delete decisions[id];
   }
-  return { ...ledger, decisions, decisionsAt: at };
+  return { ...ledger, decisions, ...(options ? {} : { decisionsAt: at }) };
 }
 
 /** Decisions applied in place already appear in the document. A withdrawal can have no surviving decision row. */
-export function pendingLedgerDecisions(ledger: WikiKnowledgeLedger | undefined) {
+export function pendingLedgerDecisions(ledger: WikiKnowledgeLedger | undefined, sections: readonly FocusSection[] = []) {
   if (!ledger?.draft || !ledger.decisionsAt || ledger.decisionsAt <= ledger.draft.generatedAt) return;
   const since = ledger.draft.generatedAt;
   const receipts = Object.entries(ledger.decisionArbitrations ?? {}).filter(([, entry]) => entry.at > since);
   const local = receipts.filter(([, entry]) => entry.locallyApplied);
   const unapplied = receipts.filter(([, entry]) => !entry.locallyApplied).map(([, entry]) => entry);
-  const unitIds = new Set(Object.entries(ledger.decisions ?? {}).filter(([id, verdict]) => verdict.at > since
-    && !local.some(([, entry]) => entry.at === verdict.at && entry.unitIds?.includes(id))).map(([id]) => id));
+  // Before inline edits had a receipt, a reviewed visible claim was the
+  // only record that its status was already applied to the article.
+  const unappliedIds = new Set(unapplied.flatMap(entry => entry.unitIds ?? []));
+  const reviewed = new Set<string>();
+  for (const section of sections) {
+    if (section.origin || section.userEdited) continue;
+    for (const claim of section.claims ?? []) {
+      if (!claim.checked || !claim.holderMark || !claim.unitIds?.length) continue;
+      const verdict = claim.holder === "decided" ? "confirmed" : claim.holder === "open" ? "open" : claim.holder === "earlier" ? "rejected" : undefined;
+      const matching = verdict && claim.unitIds.filter(id => {
+        const decision = ledger.decisions?.[id];
+        return decision?.verdict === verdict && decision.at > since && !decision.locallyApplied && !unappliedIds.has(id);
+      });
+      if (matching && matching.length && [claim.text, ...claim.formulations ?? []].some(text => wikiQuoteRange(section.body, text))) {
+        matching.forEach(id => reviewed.add(id));
+      }
+    }
+  }
+  const changed = Object.entries(ledger.decisions ?? {}).filter(([, decision]) => decision.at > since);
+  const applied = ([id, decision]: [string, WikiUserDecision]) => decision.locallyApplied || reviewed.has(id)
+    || local.some(([, entry]) => entry.at === decision.at && entry.unitIds?.includes(id));
+  const unitIds = new Set(changed.filter(entry => !applied(entry)).map(([id]) => id));
   for (const answer of ledger.userAnswers ?? []) {
     if (answer.at > since && !local.some(([id]) => id === answer.questionId)) {
       for (const id of answer.unitIds) unitIds.add(id);
     }
   }
-  if (unitIds.size || unapplied.length || !local.some(([, entry]) => entry.at === ledger.decisionsAt)) {
+  const appliedAtRevision = local.some(([, entry]) => entry.at === ledger.decisionsAt)
+    || changed.some(entry => entry[1].at === ledger.decisionsAt && applied(entry));
+  if (unitIds.size || unapplied.length || !appliedAtRevision) {
     return { revision: ledger.decisionsAt, unitIds, unapplied };
   }
 }
 
-export function ledgerDecisionsPending(ledger: WikiKnowledgeLedger | undefined): boolean {
-  return Boolean(pendingLedgerDecisions(ledger));
+export function ledgerDecisionsPending(ledger: WikiKnowledgeLedger | undefined, sections?: readonly FocusSection[]): boolean {
+  return Boolean(pendingLedgerDecisions(ledger, sections));
 }
 
 /** A choice of which version holds now: between roadmaps of one scope, or two versions of one point. */

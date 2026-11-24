@@ -8,7 +8,7 @@ import { useNoticeDismissal } from "../../shared/use-notice-dismissal";
 import { wikiUnitChapterHomes } from "../../shared/wiki-chapter-links";
 
 function decisionChanges(session: FocusSession | undefined) {
-  const pending = pendingLedgerDecisions(session?.wikiKnowledge);
+  const pending = pendingLedgerDecisions(session?.wikiKnowledge, session?.sections);
   if (!pending) return;
   const { unitIds: units, unapplied, revision } = pending;
   const homes = wikiUnitChapterHomes(session?.wikiKnowledge?.organization);

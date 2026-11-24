@@ -219,7 +219,7 @@ export function withUserAnswers(source: WikiKnowledgeLedger): WikiKnowledgeLedge
   return { ...ledger, organization: { ...organization, subjects: subjects.filter(subject => live.has(subject.id)), chapters } };
 }
 /** open: the user said the point is not settled yet; it is written as still open. */
-export interface WikiUserDecision { verdict: "confirmed" | "rejected" | "open"; at: number; wholeUnit?: true }
+export interface WikiUserDecision { verdict: "confirmed" | "rejected" | "open"; at: number; wholeUnit?: true; locallyApplied?: true }
 /** The ledger's relations with the user's answers applied: versions the user said both hold coexist. */
 export function withUserRelations(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
   if (!ledger.coexisting?.length || !ledger.organization) return ledger;
