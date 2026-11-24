@@ -1,28 +1,18 @@
-import type { FocusEvidence, FocusSection, FocusSession } from "../shared/focus-session";
+import type { FocusSession } from "../shared/focus-session";
+import { projectKnowledgeReading, projectKnowledgeReadingContext } from "../shared/project-knowledge-view";
 import { wikiBlocks, type WikiBlockIssue } from "../shared/wiki-explanations";
-import { wikiSections } from "../shared/wiki-navigation";
-import { wikiEvidencePoints } from "./wiki-evidence";
+import { wikiChapterEvidencePoints } from "./wiki-evidence";
 import { needsConfirmation } from "./workspace-evidence-context";
-import { restoreWikiSourceNegation } from "../shared/wiki-source-negation";
-
-const CONSEQUENTIAL = /版本|首版|范围|路线|顺序|里程碑|安全|隐私|凭证|验收|门槛|先做|暂缓|\b(?:release|scope|roadmap|sequence|order|phase|milestone|safety|security|privacy|credential|acceptance|threshold)\b/iu;
-const pendingCache=new WeakMap<FocusSection,{evidence:FocusEvidence[];signatures:FocusSession["sourceSignatures"];
-  versions:FocusSession["sourceVersionIds"];zh:boolean;points:ReturnType<typeof wikiEvidencePoints>}>();
-
-/** The count and the review queue share this view of the saved claims. */
-export function pendingWikiEvidence(section:FocusSection,session:FocusSession,zh:boolean) {
-  const cached=pendingCache.get(section);
-  if(cached&&cached.evidence===session.evidence&&cached.signatures===session.sourceSignatures&&cached.versions===session.sourceVersionIds&&cached.zh===zh)return cached.points;
-  const points=wikiEvidencePoints(restoreWikiSourceNegation(section,session),session.evidence,zh).filter(point =>
-    needsConfirmation(point) && (point.attention?.kind !== "approximate" || point.holder !== "ai" || CONSEQUENTIAL.test(point.claim)));
-  points.sort((a,b)=>Number(CONSEQUENTIAL.test(b.claim))-Number(CONSEQUENTIAL.test(a.claim)));
-  pendingCache.set(section,{evidence:session.evidence,signatures:session.sourceSignatures,versions:session.sourceVersionIds,zh,points});
-  return points;
-}
+import { wikiChapterPage } from "./wiki-document";
 
 export function documentEvidenceReview(session: FocusSession, zh: boolean) {
-  return wikiSections(session).flatMap(section => {
-    const count = pendingWikiEvidence(section,session,zh).length;
+  if (!session.wikiKnowledge?.draft && !session.sections.some(section => section.claims?.some(claim => !claim.checked && !claim.markOnly))) return [];
+  const { view, chapters } = projectKnowledgeReadingContext(session);
+  return chapters.flatMap(section => {
+    if (!section.claims?.some(claim => !claim.checked && !claim.markOnly)) return [];
+    const reading = projectKnowledgeReading(section, session, view, chapters, true);
+    const page = wikiChapterPage(reading, session.evidence);
+    const count = wikiChapterEvidencePoints({ ...reading, body: page.body }, session.evidence, zh).filter(needsConfirmation).length;
     return count ? [{ sectionId: section.id, count }] : [];
   });
 }

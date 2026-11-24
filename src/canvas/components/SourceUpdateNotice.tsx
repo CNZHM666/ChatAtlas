@@ -7,7 +7,7 @@ import { sourceMessageSignature } from "../../shared/source-signature";
 import { useNoticeDismissal } from "../../shared/use-notice-dismissal";
 import { wikiUnitChapterHomes } from "../../shared/wiki-chapter-links";
 
-function decisionChanges(session: FocusSession | undefined, chapterId?: string) {
+function decisionChanges(session: FocusSession | undefined) {
   const pending = pendingLedgerDecisions(session?.wikiKnowledge);
   if (!pending) return;
   const { unitIds: units, unapplied, revision } = pending;
@@ -16,20 +16,19 @@ function decisionChanges(session: FocusSession | undefined, chapterId?: string) 
   for (const entry of unapplied) if (entry.chapterId) chapterIds.add(session?.wikiSectionAliases?.[entry.chapterId] ?? entry.chapterId);
   const chapters = session?.sections.filter(section => chapterIds.has(section.id)
     || section.claims?.some(claim => claim.unitIds?.some(id => units.has(id)))) ?? [];
-  if (chapterId && !chapters.some(chapter => chapter.id === chapterId)) return;
   return { revision, titles: [...new Set(chapters.map(chapter => chapter.wikiDisplayTitle || chapter.title))] };
 }
 
-export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updateLabel, session, overview = false, decisionChapterId, disabled = false }: {
+export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updateLabel, session, overview = false, disabled = false }: {
   changes: SourceChange[]; conversations: Conversation[]; zh: boolean; onUpdate: () => void; updateLabel?: string; session?: FocusSession;
-  overview?: boolean; decisionChapterId?: string; disabled?: boolean;
+  overview?: boolean; disabled?: boolean;
 }) {
   const { dismissedRevision, rememberDismissal } = useNoticeDismissal();
   const changed = changes.filter(hasSourceChange);
-  const pending = decisionChapterId ? [] : [...new Set(session?.sidecarConversationIds ?? [])].filter(id => !session?.sourceConversationIds.includes(id));
-  const decisions = overview || decisionChapterId ? decisionChanges(session, decisionChapterId) : undefined;
+  const pending = [...new Set(session?.sidecarConversationIds ?? [])].filter(id => !session?.sourceConversationIds.includes(id));
+  const decisions = overview ? decisionChanges(session) : undefined;
   if (!changed.length && !pending.length && !decisions) return null;
-  const key = `atlas-workspace-source-update:${session?.canvasId ?? session?.rootSessionId ?? session?.id ?? ""}${decisionChapterId ? `:${decisionChapterId}` : ""}`;
+  const key = `atlas-workspace-source-update:${session?.canvasId ?? session?.rootSessionId ?? session?.id ?? ""}`;
   const changeSignature = [
     pending.slice().sort(), decisions?.revision,
     changed.map(item => [item.conversationId, item.fingerprint ?? sourceChangeLabels(item, false)])
@@ -38,9 +37,6 @@ export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updat
   const revision = sourceMessageSignature(JSON.stringify(changeSignature));
   const dismissed = dismissedRevision(key);
   if (dismissed === revision || dismissed && dismissed === sourceMessageSignature(JSON.stringify([session?.id, ...changeSignature]))) return null;
-  if (decisionChapterId) return <button type="button" className="wiki-decision-source" disabled={disabled} onClick={onUpdate}>
-    <RefreshCw size={13} aria-hidden="true"/>{zh ? "预览正文更新" : "Preview article update"}
-  </button>;
   const totals = changed.reduce((sum, item) => ({
     added: sum.added + item.added, changed: sum.changed + item.changed, removed: sum.removed + item.removed,
     reordered: sum.reordered || Boolean(item.reordered),

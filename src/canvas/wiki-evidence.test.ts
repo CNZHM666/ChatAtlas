@@ -20,11 +20,12 @@ it("takes a point the user answered out of the questions, whatever it was flagge
   const session = projectSession();
   const source = { id: "a", conversationId: "c", messageId: "m", title: "", excerpt: "索引可以用 Orama。" };
   const claim = { text: "已决定索引使用 Orama。", quote: "索引可以用 Orama", evidenceIds: ["a"], workStatus: "proposed" as const, holder: "ai" as const, holderMark: true };
-  const section = { ...session.sections[0], evidenceIds: ["a"], claims: [claim] };
+  const section = { ...session.sections[0], body: claim.text, evidenceIds: ["a"], claims: [claim] };
   const [asked] = wikiEvidencePoints(section, [source], true);
   expect(asked.attention?.kind).toBe("settled");expect(needsConfirmation(asked)).toBe(true);
   const [answered] = wikiEvidencePoints({ ...section, claims: [{ ...claim, checked: true }] }, [source], true);
   expect(answered.checked).toBe(true);expect(needsConfirmation(answered)).toBe(false);
+  expect(wikiEvidencePoints({ ...section, body: "索引方式仍在讨论。" }, [source], true).some(needsConfirmation)).toBe(false);
 });
 
 it("never asks about a table cell or a list of names for a negation its row's sentence holds", () => {
@@ -34,7 +35,7 @@ it("never asks about a table cell or a list of names for a negation its row's se
   const cell = { text: "Threadback, Echoes, LLM Wiki", quote, evidenceIds: ["a"] };
   // A sentence that drops the "不再" is still asked about.
   const sentence = { text: "单纯搜索或 Wiki 生成是 Atlas 的独特优势，应作为主要卖点。", quote, evidenceIds: ["a"] };
-  const section = { ...session.sections[0], evidenceIds: ["a"], claims: [cell, sentence] };
+  const section = { ...session.sections[0], body: sentence.text, evidenceIds: ["a"], claims: [cell, sentence] };
   const points = wikiEvidencePoints(section, [source], true);
   expect(points.map(point => point.attention?.kind)).toEqual([undefined, "negation"]);
 });
@@ -42,6 +43,18 @@ it("does not revive review tasks from the removed AI meaning check's stored verd
   const session = projectSession(), ref = { ...session.evidence[0], excerpt: "默认中性灰。" };
   const section = { ...session.sections[0], evidenceIds: [ref.id], claims: [{ text: "默认中性灰。", quote: "默认中性灰。", evidenceIds: [ref.id], meaning: { text: "默认中性灰。", verdict: "unsupported" as const, checkedAt: 1 } }] };
   expect(wikiEvidencePoints(section, [ref], true)[0].attention).toBeUndefined();
+});
+
+it("uses the full bound Wiki sentence and the original around a clipped quote", () => {
+  const session = projectSession(), phrase = "自动同步采购草稿";
+  const ref = { ...session.evidence[0], excerpt: `首版不要${phrase}。` };
+  const section = { ...session.sections[0], body: `首版**不要**${phrase}。`, claims: [{ text: phrase, quote: phrase, evidenceIds: [ref.id] }] };
+  expect(wikiEvidencePoints(section, [ref], true).some(needsConfirmation)).toBe(false);
+  expect(wikiEvidencePoints({ ...section, body: `首版会${phrase}。` }, [ref], true)[0].attention).toMatchObject({
+    kind: "negation", cue: `首版不要${phrase}`, claimExcerpt: `首版会${phrase}`,
+  });
+  const rephrased = { ...section, body: "禁止自动同步采购草稿。", claims: [{ ...section.claims[0], text: "系统会同步采购草稿", formulations: ["禁止自动同步采购草稿。"] }] };
+  expect(wikiEvidencePoints(rephrased, [ref], true).some(needsConfirmation)).toBe(false);
 });
 
 it("repairs a literal negation from one retained source and leaves genuinely unresolved scope for review",()=>{
@@ -52,6 +65,8 @@ it("repairs a literal negation from one retained source and leaves genuinely unr
   const fixed=restoreWikiSourceNegation(section,session);
   expect(fixed.body).toBe(quote);
   expect(wikiEvidencePoints(fixed,[ref],true).some(needsConfirmation)).toBe(false);
+  const alreadyRestricted = { ...section, body: `不要${text}` };
+  expect(restoreWikiSourceNegation(alreadyRestricted,session).body).toBe(alreadyRestricted.body);
   expect(restoreWikiSourceNegation({...section,userEdited:true},session).body).toBe(text);
   expect(restoreWikiSourceNegation(section,{...session,sourceSignatures:{[ref.conversationId]:{[ref.messageId]:"changed"}}}).body).toBe(text);
   const ambiguous={...section,body:"首版涵盖计时控制、后台运行、网站屏蔽。",claims:[{...section.claims[0],text:"首版涵盖计时控制、后台运行、网站屏蔽。",quote:"| 网站屏蔽 | V2 |"}]};

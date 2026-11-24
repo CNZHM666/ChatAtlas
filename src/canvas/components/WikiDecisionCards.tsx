@@ -15,14 +15,12 @@ type Question = ProjectOverviewWorkspace["questions"][number];
 type Action = Parameters<typeof applyWikiDecisionCard>[2];
 type Locate = (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void;
 
-export function WikiDecisionCards({session, questions, deferred, zh, onLocate, onUpdate, updateDisabled}: {
+export function WikiDecisionCards({session, questions, deferred, zh, onLocate}: {
   session: FocusSession;
   questions: Question[];
   deferred?: ReactNode;
   zh: boolean;
   onLocate: Locate;
-  onUpdate?: () => void;
-  updateDisabled?: boolean;
 }) {
   const actions=useContext(ProjectKnowledgeActions);
   const activeId=useContext(WorkspaceEvidenceContext)?.active?.overviewEntryId;
@@ -146,9 +144,6 @@ export function WikiDecisionCards({session, questions, deferred, zh, onLocate, o
       </div>
     </details>;
   };
-  const entry=settled&&session.wikiKnowledge?.decisionArbitrations?.[settled.id];
-  const needsUpdate=Boolean(settled&&settled.at===session.wikiKnowledge?.decisionsAt
-    &&(entry?entry.locallyApplied===false&&entry.at>(session.wikiKnowledge?.draft?.generatedAt??0):ledgerDecisionsPending(session.wikiKnowledge)));
   if(!pending.length&&!deferred&&!notice)return null;
   const label=t("待决问题","Open questions");
   return <section className="overview-block overview-pending" aria-label={label}>
@@ -164,7 +159,6 @@ export function WikiDecisionCards({session, questions, deferred, zh, onLocate, o
     {deferred}
     {notice?<div className="wiki-decision-notice"><span role="status">{notice}</span>
       {undo?<button type="button" className="wiki-decision-source" disabled={working} onClick={()=>void reverse()}>{t("撤销","Undo")}</button>:null}
-      {needsUpdate&&onUpdate?<button type="button" className="wiki-decision-source" onClick={onUpdate} disabled={updateDisabled}>{t("预览正文更新","Preview article update")}</button>:null}
     </div>:null}
   </section>;
 }

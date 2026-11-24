@@ -1,4 +1,4 @@
-import { localMeaningProblem, type ClaimMeaningCheck, type EvidenceAttention } from "../shared/claim-meaning";
+import { isRejectedQuoteLead, listItems, localMeaningProblem, type ClaimMeaningCheck, type EvidenceAttention } from "../shared/claim-meaning";
 import type { FocusEvidence, FocusSection } from "../shared/focus-session";
 import { wikiClaimSource, wikiClaimSourceLabel, type WikiClaimSource } from "../shared/wiki-chapter-status";
 import { wikiQuoteRange, type WikiClaim } from "../shared/wiki-claims";
@@ -6,6 +6,7 @@ import type { EvidencePoint } from "./workspace-evidence-context";
 import { pastedMaterial } from "../shared/source-text-display";
 import type { WikiHistoryEntry } from "../shared/wiki-history";
 import { sourceMessageSignature } from "../shared/source-signature";
+import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
 
 const normalized = (text: string) => text.normalize("NFKC").replace(/\s+/gu, " ").trim();
 const snapshotKey = (ref: FocusEvidence) => JSON.stringify([ref.conversationId, ref.sourceVersionId ?? ""]);
@@ -60,30 +61,71 @@ function evidenceItems(section: FocusSection, refsById: Map<string,{ref:FocusEvi
  * originals, starting at the user's message for a decision or report. */
 /** Prose that presents a point as settled by the user. */
 const SETTLED = /已决定|已确定|已确认|决定采用|确定采用|用户(?:已经?)?(?:确认|决定)|(?:decided|confirmed)/iu;
+const sentenceBoundary = /(?<=[。！？!?；;])|(?<=\.)(?=\s)|\n/u;
+function quoteWithSentenceContext(excerpt: string, range: { start: number; end: number }): string {
+  const before = excerpt.slice(0, range.start).split(sentenceBoundary).at(-1) ?? "";
+  const after = excerpt.slice(range.end).split(sentenceBoundary)[0] ?? "";
+  const match = excerpt.slice(range.start, range.end);
+  const passage = before + match + (/[。！？!?；;.\n]$/u.test(match) ? "" : after);
+  if (!/^\s*>/u.test(passage)) return passage;
+  const previous = excerpt.slice(0, range.start - before.length).trimEnd().split(/\r?\n/u).at(-1);
+  return previous && isRejectedQuoteLead(previous) ? `${previous}\n${passage}` : passage;
+}
 /** A point checks itself when its quote is found in the cited original and its wording claims no more than its
  * source: a missing quote, a decision drawn from proposals, or a meaning the quote does not carry is left for the reader. */
-function attentionOf(claim: string, quote: string | undefined, source: EvidencePoint["source"], ownQuote?: string): EvidenceAttention | undefined {
-  if (!quote) return { kind: "missing" };
-  if (SETTLED.test(claim) && (source === "aiProposal" || source === "proposal")) return { kind: "settled" };
+function attentionOf(wordings: string[], quote: string | undefined, source: EvidencePoint["source"]): EvidenceAttention | undefined {
+  if (!quote) return { kind: "missing", claimExcerpt: wordings[0] };
+  if (source === "aiProposal" || source === "proposal") {
+    const settled = wordings.find(text => SETTLED.test(text));
+    if (settled) return { kind: "settled", claimExcerpt: settled };
+  }
   // Only local source checks remain. Legacy model verdicts stay in saved data
   // but no longer create review tasks after the feature's removal.
-  return localMeaningProblem(claim, ownQuote || quote);
+  for (const wording of wordings) {
+    const issue = localMeaningProblem(wording, quote);
+    if (issue) return { ...issue, claimExcerpt: issue.claimExcerpt ?? wording };
+  }
+  return undefined;
 }
 
 export function wikiEvidencePoints(section: FocusSection, evidence: FocusEvidence[], zh: boolean): Array<EvidencePoint & { phrases: string[] }> {
   if (section.userEdited || section.origin) return [];
-  return wikiEvidenceItems(section,evidence).flatMap(item => {
+  const items = wikiEvidenceItems(section, evidence);
+  if (!items.length) return [];
+  // Read the whole sentence around a bound phrase. A short claim such as “自动同步采购草稿”
+  // still locates “不要自动同步采购草稿” in the Wiki, including its qualifier.
+  const sentences = wikiDocumentBlocks(section.body).filter(block => block.kind === "paragraph" || block.kind === "list")
+    .flatMap(block => block.text.replace(/^\s*(?:[-+*]|\d+[.)])\s+/gmu, "").split(sentenceBoundary))
+    .map(text => normalized(text.replace(/\*\*|__|`/gu, "")))
+    .filter(Boolean);
+  return items.flatMap(item => {
     const references = item.sources.flatMap(source => source.refs);
     // The original holding the claim's quote opens first; the first cited one only when none holds it.
     const reference = references.find(ref => ref.id === item.userEvidenceId) ?? references.find(ref => wikiQuoteRange(ref.excerpt, item.quote)) ?? references[0];
     if (!reference) return [];
     // A confirming reply does not contain the claim's quote; highlight the reply itself.
-    const retainedQuote = wikiQuoteRange(reference.excerpt, item.quote) ? item.quote : reference.id === item.userEvidenceId ? reference.excerpt : undefined;
+    const retainedRange = wikiQuoteRange(reference.excerpt, item.quote);
+    const retainedQuote = retainedRange ? item.quote : reference.id === item.userEvidenceId ? reference.excerpt : undefined;
     const quote = retainedQuote ?? (item.quote.trim() || undefined);
     const clippedExcerpt = reference.excerpt.trim().length >= 24 && wikiQuoteRange(item.quote, reference.excerpt);
-    const attention = item.checked||item.markOnly?undefined:attentionOf(item.text, retainedQuote ?? (clippedExcerpt ? item.quote : undefined), item.source, item.quote);
+    const boundPhrases = item.phrases.map(text => normalized(text.replace(/\*\*|__|`/gu, ""))).filter(Boolean);
+    const wordings = sentences.filter(sentence => boundPhrases.some(phrase => sentence.includes(phrase)));
+    const listedItems = wordings.map(listItems).find(items => items.length);
+    const meaningQuote = retainedRange ? quoteWithSentenceContext(reference.excerpt, retainedRange) : retainedQuote ?? (clippedExcerpt ? reference.excerpt : undefined);
+    const attention = item.checked || item.markOnly || !wordings.length ? undefined
+      : attentionOf(wordings, meaningQuote, item.source);
     const identity=sourceMessageSignature(JSON.stringify([normalized(item.text),normalized(item.quote)]));
-    return [{ key: `${section.id}:${identity.replace(":","-")}`, claim: item.text, quote, source: item.source, label: wikiClaimSourceLabel(item.source, zh), reference, references, placed: false, phrases: item.phrases, unitIds:item.unitIds,...(item.holder ? { holder: item.holder, ...(item.holderMark ? { holderMark: true } : {}) } : {}), ...(attention ? { attention } : {}), ...(item.checked ? { checked: true } : {}) }];
+    return [{ key: `${section.id}:${identity.replace(":","-")}`, claim: item.text, quote, source: item.source, label: wikiClaimSourceLabel(item.source, zh), reference, references, placed: false, phrases: item.phrases, unitIds:item.unitIds,...(listedItems ? { listedItems } : {}), ...(item.holder ? { holder: item.holder, ...(item.holderMark ? { holderMark: true } : {}) } : {}), ...(attention ? { attention } : {}), ...(item.checked ? { checked: true } : {}) }];
+  });
+}
+
+export function wikiChapterEvidencePoints(section: FocusSection, evidence: FocusEvidence[], zh: boolean) {
+  const seen = new Set<string>();
+  return wikiEvidencePoints(section, evidence, zh).filter(point => {
+    const key = JSON.stringify([point.claim, point.holder]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 

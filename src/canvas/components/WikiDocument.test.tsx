@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { WikiDocument } from "./WikiDocument";
 import {WikiChapterBody} from "./WikiChapterOverview";
 import { projectSession } from "../../test/project-fixture";
-import { WorkspaceEvidenceContext } from "../workspace-evidence-context";
+import { WorkspaceEvidenceContext, type WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import { ProjectKnowledgeActions } from "../project-knowledge-actions";
 import { wikiBlocks } from "../../shared/wiki-explanations";
 import type { WikiKnowledgeUnit } from "../../shared/wiki-knowledge";
@@ -11,6 +11,7 @@ import { wikiTableSignature } from "../../shared/wiki-table-source";
 import { wikiEvidencePoints } from "../wiki-evidence";
 import { WikiDecisionCards } from "./WikiDecisionCards";
 import { projectOverviewWorkspace } from "../project-overview-workspace";
+import { documentEvidenceReview } from "../document-review";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 it("keeps chapter material in its reading order without a discussion fold", () => {
@@ -226,6 +227,18 @@ it("never attaches a source to a flow from shared terms or reordered steps",()=>
  expect(within(caption).getByText("来源待核对")).toBeVisible();
  expect(within(caption).queryByRole("link")).toBeNull();
 });
+it("locates the original ordered flow when the last step has a Wiki version annotation", () => {
+ const session = projectSession(), open = vi.fn();
+ const flow = "自然语言\n ↓\nHardware IR\n ↓\n自动生成画布\n ↓\nSimulation";
+ const basis = { ...session.evidence[0], excerpt: flow };
+ const other = { ...basis, id: "other-version", messageId: "other", excerpt: flow + " (v1)" };
+ const section = { ...session.sections[0], body: "**流程**：自然语言 → Hardware IR → 自动生成画布 → Simulation（v0）〔建议〕", evidenceIds: [basis.id, other.id], claims: [] };
+ session.sections = [section];
+ session.evidence = [other, basis];
+ render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
+ fireEvent.click(screen.getByRole("link", { name: "来源" }));
+ expect(open).toHaveBeenCalledWith(basis, expect.objectContaining({ quote: flow, references: [basis] }));
+});
 it("marks each claim in the prose and opens only that claim's originals, point by point",()=>{
  const session=projectSession(),ref=session.evidence[0],open=vi.fn();
  const first={...ref,id:"p1",messageId:"m-first",excerpt:"先在本地检索候选消息。"},second={...ref,id:"p2",messageId:"m-second",excerpt:"基础搜索不依赖付费模型。"};
@@ -381,6 +394,32 @@ it("adds a claim whose meaning the originals do not carry to the review, with th
  render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
  fireEvent.click(screen.getByRole("button",{name:"核对依据 · 1 条待确认"}));
  expect(open.mock.lastCall![1].points[0].attention).toMatchObject({kind:"tentative"});expect(open.mock.lastCall![1].mode).toBe("check");
+});
+
+it("counts only questions with visible Wiki text and highlights the active sentence before a decision is recorded", () => {
+ const session = projectSession(), open = vi.fn();
+ const visible = "已决定只加载本地消息。", hidden = "已决定上传全部对话副本。";
+ const reference = { ...session.evidence[0], excerpt: "可以考虑只加载本地消息。也可以考虑上传全部对话副本。" };
+ const section = { ...session.sections[0], body: `## 来源范围\n\n${visible}`, evidenceIds: [reference.id], claims: [
+   { text: hidden, quote: "也可以考虑上传全部对话副本。", evidenceIds: [reference.id], workStatus: "proposed" as const },
+   { text: visible, quote: "可以考虑只加载本地消息。", evidenceIds: [reference.id], workStatus: "proposed" as const, holder: "ai" as const },
+ ] };
+ session.sections = [section];
+ session.evidence = [reference];
+ expect(documentEvidenceReview(session, true)).toEqual([{ sectionId: section.id, count: 1 }]);
+ const documentView = (active?: WorkspaceEvidenceOptions) => <WorkspaceEvidenceContext.Provider value={{ open, active }}>
+   <WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/>
+ </WorkspaceEvidenceContext.Provider>;
+ const view = render(documentView());
+ fireEvent.click(screen.getByRole("button", { name: "核对依据 · 1 条待确认" }));
+ const active = open.mock.lastCall![1];
+ expect(active.points).toHaveLength(1);
+ expect(active.points[0]).toMatchObject({ claim: visible, attention: { kind: "settled", claimExcerpt: visible } });
+ view.rerender(documentView(active));
+ const marker = view.container.querySelector(".wiki-claim-marker");
+ expect(marker).toHaveClass("is-active");
+ expect(marker).toHaveAttribute("data-claim-highlighted", "true");
+ expect(screen.queryByText(hidden)).toBeNull();
 });
 it("highlights in the document the claims that cite the original the panel shows",()=>{
  const session=projectSession(),first={...session.evidence[0],id:"p1",messageId:"m1",excerpt:"先在本地检索候选消息。"},second={...session.evidence[0],id:"p2",messageId:"m2",excerpt:"基础搜索不依赖付费模型。"};

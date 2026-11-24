@@ -252,6 +252,9 @@
 .workspace-source-holder { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .workspace-source-holder > span { color: var(--text); font-size: 14px; font-weight: 600; }
 .workspace-source-holder > span small { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; font-weight: 400; }
+.workspace-source-comparison { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; margin: 0; padding: 8px 10px; max-height: 8rem; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); font-size: 13px; }
+.workspace-source-comparison dt { color: var(--muted); }
+.workspace-source-comparison dd { margin: 0; overflow-wrap: anywhere; }
 .workspace-source-holder > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .workspace-source-holder button { min-height: 32px; padding: 4px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid, transparent); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
 .workspace-source-holder button:hover { background: var(--surface-muted); }

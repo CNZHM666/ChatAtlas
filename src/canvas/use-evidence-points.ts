@@ -35,7 +35,8 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
     if (evidencePanel) evidencePanel.open(point.reference, { references: point.references, quote: point.quote, claim: point.claim, points: queue, pointIndex: queue.indexOf(point),...(pending&&needsConfirmation(point)?{mode:"check"}:{}) });
     else onLocate(point.reference);
   }, [ordered, evidencePanel, onLocate,pending]);
-  const active = evidencePanel?.active, activeKey = active?.points?.[active.pointIndex ?? -1]?.key;
+  const active = evidencePanel?.active, activePoint = active?.points?.[active.pointIndex ?? -1], activeKey = activePoint?.key;
+  const reviewExcerpt = active?.mode === "check" ? activePoint?.attention?.claimExcerpt : undefined;
   useEffect(() => {
     const keys = [...rootRef.current?.querySelectorAll<HTMLElement>("[data-claim-key]") ?? []].map(node => node.dataset.claimKey!);
     setPlacedKeys(current => current.length === keys.length && current.every((key, index) => key === keys[index]) ? current : keys);
@@ -56,7 +57,10 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
   const highlightKey = highlighted.join("|");
   useEffect(() => {
     const root = rootRef.current;
-    let ranges = paintClaimHighlights(root, highlightKey ? highlightKey.split("|") : [], key => { const point = points.find(point => point.key === key); return point ? [point.claim, ...point.phrases] : []; });
+    let ranges = paintClaimHighlights(root, highlightKey ? highlightKey.split("|") : [], key => {
+      const point = points.find(item => item.key === key);
+      return point ? [...(key === activeKey && reviewExcerpt ? [reviewExcerpt] : []), point.claim, ...point.phrases] : [];
+    });
     // Prose written in its own words (an overview) has no marker for the original: its closest sentences are marked.
     // A point whose marker and wording are not found (reworded prose, emphasis inside it) gets its closest sentences.
     if (!ranges.length) {
@@ -72,7 +76,7 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
     const timer = first ? window.setTimeout(() => revealRange(first), 120) : undefined;
     return () => { window.clearTimeout(timer); paintClaimHighlights(root, []); };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- points change with the prose, which renderKey tracks.
-  }, [highlightKey, activeKey, active?.locationRevision, renderKey, shown?.id, selectedClaim]);
+  }, [highlightKey, activeKey, active?.locationRevision, renderKey, shown?.id, selectedClaim, reviewExcerpt]);
   const pointByKey = useMemo(() => new Map(ordered.map(point => [point.key, point])), [ordered]);
   const markerContext = useMemo(() => ({ points: ordered, pointByKey, activeKey, open, zh }), [ordered, pointByKey, activeKey, open, zh]);
   return { rootRef, claimMarkers: claimMarkers.length ? claimMarkers : undefined, ordered, open, markerContext };

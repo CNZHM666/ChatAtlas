@@ -322,12 +322,12 @@ it("handles a repeated ledger suggestion only in the overview and confirms only 
    draft:{ version:1, generatedAt:1, status:"complete", chapters:[], report:{} },
  };
  let stored = session;
- const onLocate = vi.fn(), onUpdateDecisions = vi.fn();
+ const onLocate = vi.fn();
  function Harness() {
    const [value, setValue] = useState(session);
    return <ProjectKnowledgeActions.Provider value={{ read:vi.fn(), matter:vi.fn(), save:async change=>{stored=change(stored);setValue(stored);} }}>
      <KnowledgeLedger session={value} zh onLocate={onLocate}/>
-     <DocumentOverview session={value} zh onLocate={onLocate} onRead={vi.fn()} onUpdateDecisions={onUpdateDecisions}/>
+     <DocumentOverview session={value} zh onLocate={onLocate} onRead={vi.fn()}/>
    </ProjectKnowledgeActions.Provider>;
  }
  render(<Harness/>);
@@ -346,8 +346,7 @@ it("handles a repeated ledger suggestion only in the overview and confirms only 
  const plan = within(screen.getByRole("region", { name:"后续计划与验收" }));
  fireEvent.click(plan.getByText("后续计划与验收"));
  expect(await plan.findByText(text)).toBeVisible();
- fireEvent.click(queue().getByRole("button", { name:"预览正文更新" }));
- expect(onUpdateDecisions).toHaveBeenCalledOnce();
+ expect(queue().queryByRole("button", { name:"预览正文更新" })).toBeNull();
  fireEvent.click(queue().getByRole("button", { name:"撤销" }));
  await waitFor(() => expect(stored.wikiKnowledge?.decisions?.[units[0].id]).toBeUndefined());
 });

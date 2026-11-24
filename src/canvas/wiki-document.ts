@@ -9,6 +9,7 @@ import {readingEmphasisMarkdown} from "../shared/reading-emphasis";
 import {isWikiTableIntroduction} from "../shared/wiki-plan-tables";
 import {WIKI_EVIDENCE_LINK} from "../shared/wiki-evidence-link";
 import { wikiFlowParagraph } from "../shared/wiki-flow-block";
+import type { FocusEvidence, FocusSection } from "../shared/focus-session";
 
 const parser = unified().use(remarkParse).use(remarkGfm, GFM_OPTIONS);
 const nodeText = (node: RootContent): string => "value" in node ? node.value : "children" in node ? node.children.map(child => nodeText(child as RootContent)).join("") : "";
@@ -68,4 +69,12 @@ export function wikiDocument(body: string,generated=false,originalTexts:string[]
   if(generated)body=readingEmphasisMarkdown(body,{sectioned:true,phrases});
   const tree = parser.parse(body);
   return { body, overview:chapterOverview(body,tree.children,generated), headings: tree.children.flatMap((node, index) => node.type === "heading" ? [{ title: nodeText(node), depth: node.depth, headingIndex: tree.children.slice(0, index).filter(item => item.type === "heading").length }] : []) };
+}
+
+/** Both the chapter and its review consume the same reading layout. */
+export function wikiChapterPage(section: FocusSection, evidence: FocusEvidence[]) {
+  const ids = new Set(section.evidenceIds);
+  const originals = evidence.filter(ref => ids.has(ref.id)).map(ref => ref.excerpt);
+  return wikiDocument(section.body, !section.userEdited && !section.origin, originals,
+    section.claims?.flatMap(claim => [claim.text, ...claim.formulations ?? []]));
 }

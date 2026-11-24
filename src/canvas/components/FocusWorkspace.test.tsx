@@ -211,10 +211,11 @@ it("reviews a question inline and uses the sidebar only for its source", async (
   await waitFor(async()=>expect((await db.get("focusSessions",project.id))?.wikiKnowledge?.decisions?.[unit.id]).toBeUndefined());
 });
 
-it("previews a saved decision from its chapter and returns there after applying", async () => {
+it("uses the project update action from a chapter and returns there after applying a saved decision", async () => {
   const db = await getDatabase();
   const chapter = { ...session.sections[0], title: "Decision chapter" };
-  const project: FocusSession = { ...session, mode: "work", status: "ready", sections: [chapter],
+  const canvas = { id: "decision-space", name: "Decision project", createdAt: 1, updatedAt: 1 };
+  const project: FocusSession = { ...session, mode: "work", status: "ready", canvasId: canvas.id, sections: [chapter],
     sourceSignatures: { c: { m1: sourceMessageSignature("Why poles?") } },
     wikiKnowledge: { version: 1, status: "partial", generatedAt: 1, materials: 1,
       batches: [{ sourceIds: ["pending"], units: [], rejected: {}, status: "ok", uncovered: ["pending"] }],
@@ -222,12 +223,14 @@ it("previews a saved decision from its chapter and returns there after applying"
       draft: { version: 1, status: "complete", generatedAt: 1, chapters: [], report: {} },
       decisionsAt: 2, decisionArbitrations: { scope: { choice: "custom", mode: "custom", at: 2, chapterId: chapter.id, text: "Keep the new scope." } } } };
   await db.put("conversations", conversation);
+  await db.put("canvases", canvas);
   await db.put("focusSessions", project);
   const savedDraft = { ...project.wikiKnowledge!, draft: { ...project.wikiKnowledge!.draft!, generatedAt: 3 } };
   const update = vi.spyOn(focusUpdates, "generateFocusUpdate").mockResolvedValue({ ...project, id: "decision-preview", activeSectionId: chapter.id, wikiKnowledge: savedDraft });
-  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[canvas]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
   fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: /Decision chapter/ }));
-  const apply = await screen.findByRole("button", { name: "Preview article update" });
+  expect(screen.queryByRole("button", { name: "Preview article update" })).toBeNull();
+  const apply = await screen.findByRole("button", { name: "Update" });
   expect(update).not.toHaveBeenCalled();
   fireEvent.click(apply);
   fireEvent.click(await screen.findByRole("button", { name: "Save and view" }));

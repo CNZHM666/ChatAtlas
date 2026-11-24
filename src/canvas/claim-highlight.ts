@@ -208,6 +208,101 @@ export function listItemRanges(root: HTMLElement | null, items: string[]): Range
   });
 }
 
+const listItemKey = (text: string) => text.normalize("NFKC").toLowerCase()
+  .replace(/[。.!！]+$/u, "").trim().replace(/^(?:打开|使用|查看|运行)\s*/u, "")
+  .replace(/^拖(?:拽|动)?(?=节点)/u, "拖").replace(/\s+/gu, "");
+
+/** Scope enumerations can be embedded in prose or in a parenthesized example. */
+export function evidenceListGroups(claim: string) {
+  const examples = [...claim.matchAll(/[(（](?:如|例如)\s*([^）)]+)[）)]/gu)].map(match => match[1]);
+  const prose = claim.replace(/[(（][^）)]*[）)]/gu, "");
+  const positive = prose.split(/[，,；;。！？!?\n]/u)
+    .filter(part => part.includes("、") && /(?:^|版|范围)\s*(?:仅|只)(?:支持|识别|允许)/u.test(part))
+    .map(part => part.replace(/^.*?(?:仅|只)(?:支持|识别|允许)\s*/u, ""));
+  return [...examples, ...positive].map(text => text.split("、").map(item => item.trim()).filter(item => item && item.length <= 48))
+    .filter(items => items.length >= 3);
+}
+
+const compactItem = (text: string) => text.normalize("NFKC").replace(/\s/gu, "");
+const codeItem = (text: string) => text.trim().replace(/^(?:[-*+]\s+|\d+[.)]\s+)/u, "");
+type SourceListRow = { text: string; range: (item: string) => Range | undefined };
+type SourceListGroup = { scope: Range; rows: SourceListRow[] };
+
+function sourceListGroups(root: HTMLElement): SourceListGroup[] {
+  const lists = Array.from(root.querySelectorAll("ul, ol")).map(list => {
+    const scope = root.ownerDocument.createRange();
+    scope.selectNodeContents(list);
+    const rows = Array.from(list.children).flatMap(row => row instanceof HTMLElement && row.tagName === "LI" && !row.querySelector("li")
+      ? [{ text: row.textContent?.trim() ?? "", range: evidenceTextLocator(row) }] : []);
+    return { scope, rows };
+  });
+  const code = Array.from(root.querySelectorAll<HTMLElement>("pre")).flatMap(pre => {
+    const element = pre.querySelector<HTMLElement>("code") ?? pre;
+    const raw = (element.textContent ?? "").replace(/\r\n/gu, "\n");
+    const locate = evidenceTextLocator(element);
+    let offset = 0;
+    return raw.split(/\n(?:[ \t]*\n)+/u).flatMap(group => {
+      const at = offset, length = compactItem(group).length;
+      offset += length;
+      if (!length) return [];
+      if (/^\s*(?:↓|→|->|=>)\s*$/mu.test(group)) return [];
+      const scope = locate.at(at, offset);
+      if (!scope) return [];
+      const lines = group.split("\n");
+      let lineOffset = at;
+      const rows = lines.flatMap((line, index) => {
+        const next = lines[index + 1];
+        const lineStart = lineOffset;
+        lineOffset += compactItem(line).length;
+        return [line, ...(next && !/^\s*[-*+]\s/u.test(next) ? [`${line}\n${next}`] : [])].map(rawRow => {
+          const text = codeItem(rawRow);
+          const from = lineStart + compactItem(rawRow).length - compactItem(text).length;
+          return { text, range: (item: string) => {
+            const needle = compactItem(item), index = compactItem(text).indexOf(needle);
+            return index < 0 ? undefined : locate.at(from + index, from + index + needle.length);
+          } };
+        });
+      });
+      return [{ scope, rows }];
+    });
+  });
+  return [...lists, ...code];
+}
+
+/** Map an inline enumeration to one original list. Short labels are usable
+ * within a matching group, even when too short to rank as single sentences. */
+function namedSourceList(groups: SourceListGroup[], items: string[], quoted: Range[]) {
+  const wanted = new Map(items.map(item => [listItemKey(item), item]));
+  const candidates = groups.flatMap(({ scope, rows }) => {
+    const exact: Range[] = [], similar: Range[] = [], seen = new Set<string>();
+    for (const row of rows) {
+      const key = listItemKey(row.text), item = wanted.get(key);
+      if (!item || seen.has(key)) continue;
+      const literal = row.range(item), range = literal ?? row.range(row.text);
+      if (!range) continue;
+      seen.add(key);
+      (literal ? exact : similar).push(range);
+    }
+    const count = exact.length + similar.length;
+    const overlaps = (range: Range) => scope.compareBoundaryPoints(Range.END_TO_START, range) < 0
+      && scope.compareBoundaryPoints(Range.START_TO_END, range) > 0;
+    const anchored = quoted.some(overlaps);
+    return count >= 2 && (anchored || count >= 3 && count / wanted.size >= .5) ? [{ exact, similar, count, anchored, overlaps }] : [];
+  }).sort((a, b) => Number(b.anchored) - Number(a.anchored) || b.count - a.count);
+  const [best, next] = candidates;
+  return best && (!next || best.anchored !== next.anchored || best.count !== next.count) ? best : undefined;
+}
+
+export function namedSourceLists(root: HTMLElement, enumerations: string[][], quoted: Range[]) {
+  const requested = enumerations.filter(items => items.length >= 3);
+  if (!requested.length) return [];
+  const groups = sourceListGroups(root);
+  return requested.flatMap(items => {
+    const source = namedSourceList(groups, items, quoted);
+    return source ? [source] : [];
+  });
+}
+
 /** Scrolls the nearest scrolling ancestor so the range sits a third of the way down, when it is not already in view. */
 export function revealRange(range: Range): void {
   const rect = range.getBoundingClientRect?.();

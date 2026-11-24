@@ -38,14 +38,12 @@ function OverviewChoices({ question, selected, zh, working, onChoose }: {
   </>;
 }
 
-export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate, onUpdateDecisions, updateDisabled }: {
+export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate }: {
   session: FocusSession;
   data: ProjectOverviewWorkspace;
   zh: boolean;
   onRead: (id: string, heading?: string) => void;
   onLocate: Locate;
-  onUpdateDecisions?: () => void;
-  updateDisabled?: boolean;
 }) {
   const actions = useContext(ProjectKnowledgeActions);
   const activeId = useContext(WorkspaceEvidenceContext)?.active?.overviewEntryId;
@@ -155,8 +153,7 @@ export function DocumentOverviewDetails({ session, data, zh, onRead, onLocate, o
   const decisionLabel = tr("已定的关键决定", "Key decisions");
   return <>
     {feedback && <p className={feedback.error ? "overview-feedback" : "sr-only"} role={feedback.error ? "alert" : "status"}>{feedback.text}</p>}
-    <WikiDecisionCards session={session} questions={pending} deferred={deferredQuestions} zh={zh} onLocate={onLocate}
-      onUpdate={onUpdateDecisions} updateDisabled={updateDisabled}/>
+    <WikiDecisionCards session={session} questions={pending} deferred={deferredQuestions} zh={zh} onLocate={onLocate}/>
     {(plan?.personal || planCount > 0 || discussionRoadmap) && <section className="overview-fold overview-plan" aria-label={planLabel}>
       <WikiDisclosure className="overview-section-toggle" label={<>{planLabel}{planCount > 0 && <small>{planCount}</small>}</>}>
         {plan?.personal && <div className="overview-plan-group overview-personal-plan">

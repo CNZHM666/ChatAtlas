@@ -18,7 +18,14 @@ export function restoreWikiSourceNegation(section: FocusSection, session: FocusS
   const byEvidence = new Map(session.evidence.map(ref => [ref.id, ref]));
   const repairs = new Map(candidates.flatMap(({ claim, replacement }) => {
     const at = section.body.indexOf(claim.text);
-    if (at < 0 || at !== section.body.lastIndexOf(claim.text) || !blocks.some(block => block.text.includes(claim.text))) return [];
+    if (at < 0 || at !== section.body.lastIndexOf(claim.text)) return [];
+    const block = blocks.find(item => item.start <= at && item.end >= at + claim.text.length);
+    if (!block) return [];
+    const before = section.body.slice(block.start, at).split(/(?<=[。！？!?；;])|(?<=\.)\s|\n/u).at(-1) ?? "";
+    const after = section.body.slice(at + claim.text.length, block.end).replace(/^[\s*_`~]*/u, "");
+    // Never insert a negation into a phrase already governed by text outside the claim.
+    if (!/^\s*(?:(?:[-+*]|\d+[.)])\s+)?[*_`~]*$/u.test(before)
+      || !/[。！？!?；;.]$/u.test(claim.text) && after && !/^[。！？!?；;.]/u.test(after)) return [];
     const originals = claim.evidenceIds.flatMap(id => byEvidence.get(id) ?? []);
     if (!originals.length || originals.length !== claim.evidenceIds.length || originals.some(ref => {
       const live = session.sourceSignatures?.[ref.conversationId]?.[ref.messageId];

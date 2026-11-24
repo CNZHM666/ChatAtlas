@@ -5,6 +5,8 @@ import type { WikiClaimSource } from "../shared/wiki-chapter-status";
 
 /** One checkable point: a claim in the prose and only the originals that support it. */
 export interface EvidencePoint { key: string; claim: string; quote?: string; source: WikiClaimSource; label?: string; reference: FocusEvidence; references: FocusEvidence[]; placed: boolean;
+  /** Named items in the bound Wiki sentence, even when the saved conclusion paraphrases the list. */
+  listedItems?: string[];
   /** Stable source bindings survive read-time changes to the wording. */
   unitIds?: string[];
   /** Matched locally by wording overlap, not a saved claim-to-source link. */

@@ -19,15 +19,13 @@ import type { WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import "../document-overview.css";
 
 /** Saved prose and its reading order; opening this view never schedules AI work. */
-export function DocumentOverview({ session, reviewSession = session, zh, title, preview = false, onRead, onLocate, onMaintain, onRename, scope, onReview, pageReading, toolsHost, onBeginEdit, onUpdateDecisions, updateDisabled }: {
+export function DocumentOverview({ session, reviewSession = session, zh, title, preview = false, onRead, onLocate, onMaintain, onRename, scope, onReview, pageReading, toolsHost, onBeginEdit }: {
   session: FocusSession; zh: boolean; title?: string; preview?: boolean;
   reviewSession?:FocusSession;
   onRead: (id: string, heading?:string) => void; onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void;
   onMaintain?: (value: ProjectMaintenance) => Promise<void>;
   toolsHost?: HTMLElement | null;
   onBeginEdit?: () => void;
-  onUpdateDecisions?: () => void;
-  updateDisabled?: boolean;
   onRename?:(name:string)=>void;
   /** Starts checking: evidence across the workspace, chapter by chapter ("issues" is kept for callers stepping through problems). */
   onReview?:(kind:"issues"|"evidence")=>void;
@@ -87,6 +85,6 @@ export function DocumentOverview({ session, reviewSession = session, zh, title, 
       <h2>{zh ? "一页速览" : "At a glance"}</h2>
       <ul>{pages.map(chapter)}</ul>
     </section>}
-    {overview && workspace && <DocumentOverviewDetails session={session} data={workspace} zh={zh} onRead={onRead} onLocate={onLocate} onUpdateDecisions={onUpdateDecisions} updateDisabled={updateDisabled}/>}
+    {overview && workspace && <DocumentOverviewDetails session={session} data={workspace} zh={zh} onRead={onRead} onLocate={onLocate}/>}
   </article></WikiClaimMarkerContext.Provider>;
 }

@@ -10,8 +10,8 @@ import { wikiQuoteRange } from "../../shared/wiki-claims";
 import { sourceQuoteText } from "../../shared/source-quote-text";
 import { pastedMaterial } from "../../shared/source-text-display";
 import { evidenceAttentionText, listItems } from "../../shared/claim-meaning";
-import { derivedSentenceRanges, listItemRanges, meaningTerms, similarSentenceRanges } from "../claim-highlight";
-import { narrowQuotePassages } from "../narrow-quote";
+import { derivedSentenceRanges, evidenceListGroups, listItemRanges, meaningTerms, namedSourceLists, similarSentenceRanges } from "../claim-highlight";
+import { exactSourceSentence, narrowQuotePassages } from "../narrow-quote";
 import { evidenceConditionDescription, evidenceConditionDescriptionMatches, evidenceConditions, evidenceConditionsMatch } from "../evidence-conditions";
 import { ProjectExampleContext } from "../project-example-context";
 import { SourceMessageContent } from "./SourceMessageContent";
@@ -65,17 +65,22 @@ const ANSWERS: Array<[WikiHolder, string, string]> = editableHolders.map(holder 
 /** An answer keeps or sets the sentence's status, or takes the reader to rewrite it: a sentence that misstates its
  * original is fixed in the text, not by marking it 未定. */
 type Answer = [WikiHolder | "edit" | undefined, string, string];
-type Question = { ask: [string, string]; why?: [string, string]; answers: Answer[] };
+type Question = { ask: [string, string]; why?: [string, string]; comparison?: { source: string; wording: string }; answers: Answer[] };
 const clip = (text: string, size = 28) => { const chars = Array.from(text.trim()); return chars.length > size ? chars.slice(0, size).join("") + "…" : chars.join(""); };
 /** The one question a point is flagged for, worded after what was found, with the words of the original that raised it. */
 function questionOf(point: EvidencePoint, canEdit: boolean, originalLocated:boolean): Question {
   const keep = point.holder, attention = point.attention, cue = attention?.cue ? clip(attention.cue) : "";
   const fix: Answer[] = canEdit ? [["edit", "改这句", "Rewrite it"]] : [["open", "标为未定", "Mark open"]];
-  if (attention?.kind === "settled") return { ask: ["这句是你的决定吗？", "Is this your decision?"], why: ["写成了已决定，原文里只有 AI 的建议", "Written as decided; the original only has an AI proposal"], answers: [["decided", "是我的决定", "Yes, mine"], ["ai", "只是建议", "Just a suggestion"]] };
+  if (attention?.kind === "settled") return { ask: ["这句是你的决定吗？", "Is this your decision?"], why: ["写成了已决定，原文里只有 AI 的建议", "Written as decided; the original only has an AI proposal"],
+    comparison: attention.claimExcerpt ? { source: "", wording: attention.claimExcerpt } : undefined,
+    answers: [["decided", "是我的决定", "Yes, mine"], ["ai", "只是建议", "Just a suggestion"]] };
   switch (attention?.kind) {
-    case "negation": return attention.subject
-      ? { ask: [`原文把「${attention.subject}」列为 ${cue}`, `The original puts "${attention.subject}" under ${cue}`], why: ["这句把它写进了范围，请确认", "This sentence includes it; check the scope"], answers: [[keep, "没问题", "It's right"], ...fix] }
-      : { ask: [cue ? `原话说「${cue}」` : "原话里有否定", cue ? `The original says "${cue}"` : "The original says not to"], why: ["这句没有体现这个否定，意思可能反了", "This sentence drops it; the meaning may be reversed"], answers: [[keep, "没问题", "It's right"], ...fix] };
+    case "negation": return {
+      ask: attention.subject ? [`核对「${attention.subject}」的版本范围`, `Check the release scope for “${attention.subject}”`] : ["核对这项限制", "Check this restriction"],
+      why: ["这两处对适用范围的表述可能有差异。", "These passages may describe different conditions or scope."],
+      comparison: { source: attention.subject && cue ? `${attention.subject} · ${cue}` : attention.cue ?? "", wording: attention.claimExcerpt ?? point.claim },
+      answers: [[undefined, "保留正文", "Keep Wiki text"], ...(canEdit ? fix : [])],
+    };
     case "tentative": return { ask: [cue ? `原话只是在考虑：「${cue}」` : "原话只是在考虑或建议", cue ? `The original only considers it: "${cue}"` : "The original only considers it"], why: ["这句写得更肯定", "This sentence states it firmly"], answers: [["ai", "改成建议", "Make it a suggestion"], ["decided", "确实已定", "It is decided"]] };
     case "missing": return { ask: originalLocated?["已在来源中定位到引用","The quote was located in this source"]:["原文里没找到这句的原话", "This sentence's quote isn't in the original"], why: ["请确认它的来源", "Check where it comes from"], answers: [[keep, "来源没问题", "Source is fine"], ...fix] };
     case "approximate": return { ask: ["下面的原文说的是同一件事吗？", "Does the original below say the same thing?"], why: ["它是按措辞对上的，不是逐字原话", "It was matched by wording, not word for word"], answers: [[keep, "是同一件事", "Same thing"], ...fix] };
@@ -95,8 +100,12 @@ function HolderQuestion({ point, zh, asked, canEdit, originalLocated, onAnswer }
     <button type="button" className="workspace-source-holder-change" onClick={() => setOpen(true)}>{zh ? "改状态" : "Change"}</button></p>;
   const question: Question = asked&&!open ? questionOf(point, canEdit,originalLocated) : { ask: ["这句的状态", "This sentence's status"], answers: ANSWERS };
   return <div className="workspace-source-holder" role="group" aria-label={l(question.ask)}><span>{l(question.ask)}{question.why ? <small>{l(question.why)}</small> : null}</span>
+    {question.comparison?<dl className="workspace-source-comparison">
+      {question.comparison.source?<><dt>{zh?"原话线索":"Source wording"}</dt><dd>{question.comparison.source}</dd></>:null}
+      <dt>{zh?"Wiki 正文":"Wiki text"}</dt><dd>{question.comparison.wording}</dd>
+    </dl>:null}
     <div>{question.answers.map(([holder, cn, en]) => <button key={cn} type="button" aria-pressed={point.checked&&current===holder||undefined} className={`is-holder-${holder??"keep"}`} title={!holder||holder==="edit"?undefined:wikiHolderTitle(holder, zh)} onClick={() => { setOpen(false); onAnswer(holder); }}>{zh ? cn : en}</button>)}
-      {asked?<button type="button" className="workspace-source-holder-more" onClick={()=>setOpen(!open)}>{open?(zh?"返回核对":"Back to review"):(zh?"改状态":"Change")}</button>:null}
+      {asked&&point.attention?.kind!=="negation"?<button type="button" className="workspace-source-holder-more" onClick={()=>setOpen(!open)}>{open?(zh?"返回核对":"Back to review"):(zh?"改状态":"Change")}</button>:null}
     </div></div>;
 }
 /** Which mark shows where two overlap: the quote over close wording over its surrounding sentence; the lines (cue,
@@ -173,6 +182,10 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
       ref.conversationId === target.conversationId && (ref.messageId === target.id || ref.messageId === target.platformMessageId)
       && evidenceSnapshotKey(session, ref) === evidenceSnapshotKey(session, current)).map(ref => ref.id)) : undefined;
     const originals = currentIds ? sourcePassages!.filter(item => currentIds.has(item.referenceId)).map(item => item.quote) : savedQuote ? [savedQuote] : [];
+    if (claim && target && !sourcePassages && !originals.some(quote => wikiQuoteRange(target.content, quote))) {
+      const exact = exactSourceSentence(claim, target.content);
+      if (exact) return [exact];
+    }
     return [...new Set(originals.flatMap(original => {
       if (!claim) return [original];
       if (wikiQuoteAsksOnlyForFeedback(original) && !wikiQuoteRange(original, claim)) return [];
@@ -289,7 +302,10 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     const matchedProofs = (JSON.parse(proofKey) as Array<{id:string;marks:EvidenceHighlight[]}>).flatMap(proof=>{const messageRoot=messageRoots.find(item=>item.dataset.sourceContent===proof.id),message=shown.find(item=>item.id===proof.id);return messageRoot&&message?evidenceSourceRanges(messageRoot,message.content,proof.marks):[];});
     const required=evidenceConditions(claim??""),proofText=matchedProofs.filter(proof=>proof.highlight.kind==="quote").map(proof=>proof.range.toString()).join("\n");
     const proofComplete=!required.length||evidenceConditionsMatch(required,proofText)&&evidenceConditionDescriptionMatches(meaningTerms(evidenceConditionDescription(claim??"")),meaningTerms(proofText));
-    const proofs=proofComplete?matchedProofs:[];
+    const items = point?.listedItems ?? (claim ? listItems(claim) : []);
+    const savedRanges = matchedProofs.filter(proof => proof.highlight.kind === "quote").map(proof => proof.range);
+    const sourceLists = required.length ? [] : namedSourceLists(root, [items, ...evidenceListGroups(claim ?? "")], savedRanges);
+    const proofs = proofComplete ? matchedProofs.filter(proof => !sourceLists.some(source => source.overlaps(proof.range))) : [];
     // No literal quote in this original (a paraphrase, a quote cut differently): its sentences closest in wording to the
     // claims are marked instead, so the reader still lands on the passage, labelled as close in meaning.
     // Matched against the conclusion, the quote it was written from and the other conclusions citing this original; the
@@ -297,10 +313,10 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     // A conclusion opened with its own quote never borrows another conclusion's words.
     const derivedFrom=quote?quoteFits?[claim,quote]:[claim]:claim?[claim]:[current.excerpt,...sourceClaims.flatMap(item=>[item.text,item.quote])];
     // A scope claim ("涵盖计时控制、后台运行…") marks each item where the original names it, in the cited message first.
-    const items=claim?listItems(claim):[];
-    const itemMarks=items.flatMap(item=>listItemRanges(root,[item])[0]??[]);
+    const itemMarks = sourceLists.length ? sourceLists.flatMap(source => source.exact) : listItemRanges(root, items);
     // Items the original does not name word for word (a flow drawn across lines) still get their closest sentences.
-    const similar=proofs.length||items.length&&itemMarks.length===items.length?[]:derivedSentenceRanges(root,derivedFrom,Math.max(2,items.length));
+    const similar = sourceLists.length ? sourceLists.flatMap(source => source.similar) : (proofs.length || items.length && itemMarks.length === items.length
+      ? [] : derivedSentenceRanges(root, derivedFrom, Math.max(2, items.length)));
     // The rest of the turn can carry the claim too: a question quoted for "帮学生按番茄钟学习" leaves the reply's
     // "轻量、极简、无需注册" unmarked. Its sentences close to the claim are marked as close in wording.
     const directLocated=proofs.length||similar.length||itemMarks.length;
@@ -316,7 +332,8 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
     const range=!claim&&quoteFits?evidenceTextRange(root,excerpt):undefined;
     // The topmost quoted words: several quotes of one original are read from the top, and landing on the claim's own
     // quote, last in the reply, left the marks above it unseen.
-    const quoted=[...itemMarks,...proofs.filter(proof=>proof.highlight.kind==="quote"&&root.contains(proof.range.startContainer)).map(proof=>proof.range)];
+    const quoted = [...itemMarks, ...similar,
+      ...proofs.filter(proof=>proof.highlight.kind==="quote"&&root.contains(proof.range.startContainer)).map(proof=>proof.range)];
     const topmost=quoted.reduce<Range|undefined>((first,item)=>!first||item.compareBoundaryPoints(Range.START_TO_START,first)<0?item:first,undefined);
     const focusedRange=cue??topmost??similar[0]??proofs[0]?.range??support[0];
     host.toggleAttribute("data-related-focus", Boolean(!cue && !directLocated && support.length));
@@ -434,7 +451,7 @@ export function WorkspaceSourcePanel({ session, reference, references, onSelect,
         <span><i className="is-proof" aria-hidden="true"/>{zh?"原话":"Quoted"}</span>
         <span><i className="is-similar" aria-hidden="true"/>{zh?"措辞相近":"Close wording"}</span>
         <span><i className="is-support" aria-hidden="true"/>{zh?"同一轮的相关句":"Related in this exchange"}</span>
-        {mode!=="view"&&!point?.checked&&(point?.attention?.cue||point?.attention?.subject)?<span><i className="is-cue" aria-hidden="true"/>{zh?"需要确认的词":"Flagged words"}</span>:null}
+        {mode!=="view"&&!point?.checked&&(point?.attention?.cue||point?.attention?.subject)?<span><i className="is-cue" aria-hidden="true"/>{zh?"核对线索":"Review cue"}</span>:null}
       </>}
     </footer>
   </aside>;

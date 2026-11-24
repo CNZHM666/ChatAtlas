@@ -1308,8 +1308,8 @@ summary.workspace-disclosure-title:focus-visible { outline:2px solid var(--accen
 .knowledge-ledger-tools label svg { flex: none; display: block; }
 /* Sources hidden: intermediate dots and the source labels (你, 资料) go; 已定, 未定 and 此前 change how a sentence is read
    and stay. */
-.wiki-document.hides-holder-marks button.wiki-claim-marker.is-holder-quiet,
-.wiki-document.hides-holder-marks button.wiki-claim-marker.is-holder-mark:is(.is-holder-user, .is-holder-material) { display: none; }
+.wiki-document.hides-holder-marks button.wiki-claim-marker.is-holder-quiet:not(.is-active),
+.wiki-document.hides-holder-marks button.wiki-claim-marker.is-holder-mark:is(.is-holder-user, .is-holder-material):not(.is-active) { display: none; }
 .focus-workspace .holder-marks-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; font-size: 13px; }
 .focus-workspace .holder-marks-toggle[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 /* Which version holds now, in the ledger: the same option rows as the step before writing. */

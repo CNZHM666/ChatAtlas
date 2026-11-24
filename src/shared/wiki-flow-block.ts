@@ -53,14 +53,25 @@ export const wikiFlowProposal = (status?: string) => Boolean(status && /^(?:〔(
 export function wikiFlowSourceQuote(steps: readonly string[]) {
   const escape = (word: string) => word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const markup = "(?:\\*\\*|__|`)?";
-  const labels = steps.map(step => `${markup}${step.split(/\s+/u).map(escape).join("\\s*")}${markup}`);
+  const terminalVersion = steps.at(-1)?.match(/^(.+?)\s*[(（](v\d+(?:\.\d+)*)[）)]$/iu);
+  const labels = steps.map((step, index) => {
+    const version = index === steps.length - 1 ? terminalVersion : undefined;
+    const label = (version?.[1] ?? step).split(/\s+/u).map(escape).join("\\s*");
+    // A trailing Wiki version annotation can be absent from the source's node.
+    // If the source itself gives a version, it must agree.
+    const suffix = version ? `(?:\\s*[(（]\\s*${escape(version[2])}\\s*[）)]|(?!\\s*[(（]\\s*v\\d))` : "";
+    return `${markup}${label}${suffix}${markup}`;
+  });
   const sequence = new RegExp(labels.join(ARROW.source), "giu");
   return (excerpt: string) => {
     if (steps.length < 3 || !ARROW.test(excerpt)) return;
     for (const match of excerpt.matchAll(sequence)) {
-      const before = excerpt.slice(0, match.index), after = excerpt.slice(match.index + match[0].length);
+      const before = excerpt.slice(0, match.index), rest = excerpt.slice(match.index + match[0].length);
+      const trailing = terminalVersion && rest.match(/^\s*[(（]\s*(v\d+(?:\.\d+)*)\s*[）)]/iu);
+      if (trailing && trailing[1].toLowerCase() !== terminalVersion?.[2].toLowerCase()) continue;
+      const after = trailing ? rest.slice(trailing[0].length) : rest;
       if (!ARROW.test(before.trimEnd().slice(-2)) && !ARROW.test(after.trimStart().slice(0, 2))
-        && !/[\p{L}\p{N}]$/u.test(before) && !/^[\p{L}\p{N}]/u.test(after)) return match[0];
+        && !/[\p{L}\p{N}]$/u.test(before) && !/^[\p{L}\p{N}]/u.test(after)) return match[0] + (trailing?.[0] ?? "");
     }
   };
 }

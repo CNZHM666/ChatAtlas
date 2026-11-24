@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, expect, it, vi } from "vitest";
 import { WorkspaceSourcePanel } from "./WorkspaceSourcePanel";
 import { narrowQuote } from "../narrow-quote";
+import { wikiEvidencePoints } from "../wiki-evidence";
 import { readSessionSource } from "../../storage/source-versions";
 import { projectSession } from "../../test/project-fixture";
 import type { ConversationMessage } from "../../shared/types";
@@ -295,16 +296,18 @@ it("asks one question on a point to confirm, moves on when answered, and records
  view.unmount();
 });
 
-it("asks about a dropped negation with the original's words, and keeps the status when it is right",async()=>{
- const session=projectSession();vi.mocked(readSessionSource).mockResolvedValue([original]);
- const reference={...session.evidence[0],excerpt:"首版支持预览。"},onHolder=vi.fn();
+it("compares the restriction with the Wiki sentence and handles wording independently of status",async()=>{
+ const session=projectSession();vi.mocked(readSessionSource).mockResolvedValue([{...original,content:"首版先不做预览。"}]);
+ const reference={...session.evidence[0],excerpt:"首版先不做预览。"},onHolder=vi.fn(),onEditClaim=vi.fn();
  const points=[{key:"a",claim:"首版支持预览",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"user" as const,attention:{kind:"negation" as const,cue:"首版先不做预览"}},{key:"b",claim:"其他",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"open" as const}];
- render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文" points={points} pointIndex={0} onPoint={vi.fn()} onHolder={onHolder}/>);
+ render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文" points={points} pointIndex={0} onPoint={vi.fn()} onHolder={onHolder} onEditClaim={onEditClaim}/>);
  await waitFor(()=>expect(document.querySelector(".workspace-source-message.is-source-target")).toBeTruthy());
- expect(screen.getByText("原话说「首版先不做预览」")).toBeVisible();expect(screen.getByText("这句没有体现这个否定，意思可能反了")).toBeVisible();
- // Without a way to rewrite here, the other answer marks it open.
- expect(screen.getByRole("button",{name:"标为未定"})).toBeVisible();
- fireEvent.click(screen.getByRole("button",{name:"没问题"}));expect(onHolder).toHaveBeenCalledWith(points[0],"user");
+ expect(screen.getByRole("group",{name:"核对这项限制"})).toBeVisible();
+ expect(screen.getByText("原话线索").nextSibling).toHaveTextContent("首版先不做预览");
+ expect(screen.getByText("Wiki 正文").nextSibling).toHaveTextContent("首版支持预览");
+ expect(screen.queryByRole("button",{name:"标为未定"})).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"改这句"}));expect(onEditClaim).toHaveBeenCalledWith(points[0]);expect(onHolder).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole("button",{name:"保留正文"}));expect(onHolder).toHaveBeenCalledWith(points[0],undefined);
 });
 
 it("offers the status behind a quiet link on a point that needs no answer",async()=>{
@@ -468,6 +471,80 @@ it("highlights the literal workflow as well as the other supported clauses in a 
   expect(proof).toContain("不同视图");
   expect(proof).not.toContain("重要决策的简短摘要");
  });
+});
+
+it("highlights every cited capability within the matching original list even when the saved quote names one item", async () => {
+ const session = projectSession();
+ const claim = "未配置 API Key 时，用户仍可使用 Demo、拖拽节点、编辑 IR、查看 BOM、Validator、LocalInterpreter 及示例项目，仅复杂自然语言 AI 功能受限。";
+ const quote = "使用示例项目";
+ const content = "相关配置：\n\n- 编辑 IR\n- Validator\n\n不要把整个产品锁死：\n\n> “没有 API Key 就什么都不能用。”\n\n你完全可以让没 API 的人依然能够：\n\n- 打开 Demo\n- 拖节点\n- 编辑 IR\n- 查看 BOM\n- Validator\n- LocalInterpreter\n- 使用示例项目\n- 我的零件盒\n\n只有复杂自然语言 AI 需要 Key。";
+ const reference = { ...session.evidence[0], excerpt: content, sourceSignature: undefined };
+ const section = { ...session.sections[0], body: claim, claims: [{ text: "允许使用示例项目。", quote, evidenceIds: [reference.id], formulations: [claim] }] };
+ session.evidence = [reference];
+ const points = wikiEvidencePoints(section, session.evidence, true);
+ expect(points[0].attention).toBeUndefined();
+ vi.mocked(readSessionSource).mockResolvedValue([{ ...original, role: "assistant", content }]);
+ const marks = new Map<string, Set<Range>>();
+ vi.stubGlobal("CSS", { ...globalThis.CSS, highlights: marks });
+ vi.stubGlobal("Highlight", class extends Set<Range> { constructor(...ranges: Range[]) { super(ranges); } });
+ render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote} claim={points[0].claim} points={points} pointIndex={0} zh onSelect={vi.fn()} onClose={vi.fn()} onHolder={vi.fn()} />);
+ await waitFor(() => {
+   const proof = [...marks.get("atlas-original-proof") ?? []].map(range => range.toString());
+   expect(proof).toEqual(["Demo", "编辑 IR", "查看 BOM", "Validator", "LocalInterpreter", "示例项目"]);
+   expect([...marks.get("atlas-original-similar") ?? []].map(range => range.toString())).toEqual(["拖节点"]);
+ });
+ expect(screen.queryByRole("group", { name: "核对这项限制" })).toBeNull();
+});
+
+it.each([
+  {
+    claim: "第一版仅识别单个、低压、模块化电子元件/开发板，不支持整台电器。",
+    quote: "第一版只识别：\n\n单个\n低压\n模块化\n电子元件 / 开发板",
+    wanted: ["单个", "低压", "模块化\n电子元件 / 开发板"],
+    unrelated: "开发板外观示例",
+  },
+  {
+    claim: "仅支持 Component Catalog 中已存在的低压模块（如 DHT22、SSD1306 OLED、MOSFET Module、5V Fan、Active Buzzer Module）。",
+    quote: "Component Catalog 中已经存在的低压模块。\n\n例如：\n\n- ESP32 DevKit V1\n- DHT22\n- SSD1306 OLED\n- MOSFET Module\n- 5V Fan\n- Active Buzzer Module",
+    wanted: ["DHT22", "SSD1306 OLED", "MOSFET Module", "5V Fan", "Active Buzzer Module"],
+    unrelated: "ESP32 DevKit V1",
+  },
+  {
+    claim: "支持自然语言转 Hardware IR、自动生成画布及实时硬件规则检查。",
+    quote: "Hardware IR\n ↓\n自动生成画布\n ↓\n拖动 / 删除 / 替换\n ↓\n实时硬件规则检查\n ↓\nBOM",
+    wanted: ["Hardware IR", "自动生成画布", "实时硬件规则检查"],
+    unrelated: "BOM",
+  },
+])("highlights short and split lines in quoted fenced text: $claim", async ({ claim, quote, wanted, unrelated }) => {
+ const session = projectSession();
+ const content = "\x60\x60\x60text\n" + quote + "\n\n开发板外观示例\n\x60\x60\x60";
+ const reference = { ...session.evidence[0], excerpt: quote, sourceSignature: undefined };
+ session.evidence = [reference];
+ vi.mocked(readSessionSource).mockResolvedValue([{ ...original, role: "assistant", content }]);
+ const marks = new Map<string, Set<Range>>();
+ vi.stubGlobal("CSS", { ...globalThis.CSS, highlights: marks });
+ vi.stubGlobal("Highlight", class extends Set<Range> { constructor(...ranges: Range[]) { super(ranges); } });
+ render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote} claim={claim} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
+ await waitFor(() => {
+   const marked = markedRanges(marks).map(range => range.toString()).join("|");
+   for (const item of wanted) expect(marked).toContain(item);
+   expect(marked).not.toContain(unrelated);
+ });
+});
+
+it("recovers a unique intact source sentence when the saved quote no longer locates", async () => {
+ const session = projectSession();
+ const claim = "编辑完成后校验图中的所有连线。", quote = "早先版本保存的摘录";
+ const content = "在预览里先列出所有变更。\n\n**编辑完成后**校验图中的所有连线。";
+ const reference = { ...session.evidence[0], excerpt: quote, sourceSignature: undefined };
+ session.evidence = [reference];
+ vi.mocked(readSessionSource).mockResolvedValue([{ ...original, role: "assistant", content }]);
+ const marks = new Map<string, Set<Range>>();
+ vi.stubGlobal("CSS", { ...globalThis.CSS, highlights: marks });
+ vi.stubGlobal("Highlight", class extends Set<Range> { constructor(...ranges: Range[]) { super(ranges); } });
+ render(<WorkspaceSourcePanel session={session} reference={reference} quote={quote} claim={claim} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
+ await waitFor(() => expect([...marks.get("atlas-original-proof") ?? []].map(range => range.toString())).toEqual(["编辑完成后校验图中的所有连线"]));
+ expect(screen.queryByText("该来源中未定位到此结论的引文")).toBeNull();
 });
 
 it("opens long context near the cited turn and expands it in either direction on demand",async()=>{

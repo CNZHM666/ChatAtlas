@@ -1,11 +1,11 @@
 import {projectKnowledgeReading,projectKnowledgeReadingContext} from "../../shared/project-knowledge-view";
 import {useProjectReadingCache} from "../project-reading-cache";
-import { WorkspaceEvidenceContext, needsConfirmation, type EvidencePoint, type WorkspaceEvidenceOptions } from "../workspace-evidence-context";
+import { WorkspaceEvidenceContext, needsConfirmation, type WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import { EvidenceReviewButton } from "./EvidenceReviewButton";
 import { localizedWikiTitle, wikiReadingLocation } from "../../shared/wiki-navigation";
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { FocusEvidence, FocusSection, FocusSession } from "../../shared/focus-session";
-import { wikiDocument } from "../wiki-document";
+import { wikiChapterPage } from "../wiki-document";
 import { hasChapterDiagram, suggestedDiagramHeading, wikiDiagramParts } from "../wiki-diagram";
 import { ReaderGuide } from "./ReaderGuide";
 import { WikiEvidence } from "./WikiEvidence";
@@ -23,7 +23,7 @@ import { issueBlockText, issueLabel } from "../document-review";
 import { meaningTerms, paintHolderRuns } from "../claim-highlight";
 import type { WikiBlockIssue } from "../../shared/wiki-explanations";
 import { useHolderMarks } from "../use-holder-marks";
-import { wikiApproximatePoints, wikiEvidencePoints, wikiHistoryPoints } from "../wiki-evidence";
+import { wikiApproximatePoints, wikiChapterEvidencePoints, wikiHistoryPoints } from "../wiki-evidence";
 import { wikiHistoryEntries } from "../../shared/wiki-history";
 import { WikiHistoryCard } from "./WikiHistoryCard";
 import { WikiClaimMarkerContext } from "../wiki-claim-marker-context";
@@ -42,13 +42,12 @@ function structureAt(link: HTMLAnchorElement) {
   return flow ?? (next instanceof HTMLElement ? next.matches("table") ? next : next.querySelector("table") : null);
 }
 
-export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,pendingReview,readingProjection,toolsHost,decisionUpdate,persistSourceMarks,onReviewEvidence }: {
+export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,readingProjection,toolsHost,persistSourceMarks,onReviewEvidence }: {
   section: FocusSection; session: FocusSession; zh: boolean; structure: ReactNode; editor?: ReactNode;
   /** A pending problem in this chapter the overview sent the reader to: its paragraph is marked and named. */
   issue?: { issue: WikiBlockIssue; index: number; total: number }; onIssueStep?: (delta: number) => void; onIssueClose?: () => void;
   /** Sent from the overview to check evidence: the review opens on its own, once per value. */
   autoReview?: number;
-  pendingReview?:EvidencePoint[];
   /** The request to open the check is used once: coming back to the chapter or switching wikis does not reopen it. */
   onAutoReviewed?: () => void;
   onLocate: (ref: FocusEvidence, options?: WorkspaceEvidenceOptions) => void; onCurrent: () => void;
@@ -59,7 +58,6 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   scrollRef?:RefObject<HTMLElement|null>;
   readingProjection?: WikiReadingProjection;
   toolsHost?: HTMLElement | null;
-  decisionUpdate?: ReactNode;
   persistSourceMarks?: boolean;
   /** Opens the curated reading path in the read-only example. */
   onReviewEvidence?: () => void;
@@ -101,7 +99,7 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   const body=reading.body;
   const stateGraphs=useMemo(()=>!review&&!learning&&!editor&&!section.userEdited&&!section.origin
     ?wikiStateGraphs(body,reading.claims??[]):[],[review,learning,editor,section.userEdited,section.origin,body,reading.claims]);
-  const page=useMemo(()=>readingCache.get(readingSession,`chapter-page:${section.id}`,()=>wikiDocument(body,!section.userEdited&&!section.origin,sourceTexts,reading.claims?.flatMap(claim=>[claim.text,...claim.formulations??[]]))),[readingCache,readingSession,section,sourceTexts,body,reading.claims]);
+  const page=useMemo(()=>readingCache.get(readingSession,`chapter-page:${section.id}`,()=>wikiChapterPage(reading,session.evidence)),[readingCache,readingSession,section.id,reading,session.evidence]);
   const content=useRef<HTMLDivElement>(null);
   // Point-by-point evidence: each claim found in the prose gets a marker; the panel
   // steps through markers in reading order, then through claims with no position.
@@ -113,13 +111,14 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
    if(!generated||editor)return [];
    // One point per sentence and holder: a chapter saved with two claims on one sentence showed two 已定 marks after it.
    return readingCache.get(readingSession,`chapter-points:${section.id}:${zh}`,()=>{
-    const seen=new Set<string>(),claims=wikiEvidencePoints(reading,session.evidence,zh).filter(point=>{const key=`${point.claim}\u0000${point.holder??""}`;if(seen.has(key))return false;seen.add(key);return true;});
+    const claims=wikiChapterEvidencePoints({...reading,body:page.body},session.evidence,zh);
     // Chapters saved without claim records still get points, matched locally and labelled as approximate.
     const prose=claims.length?claims:wikiApproximatePoints(reading,session.evidence,reading.body,zh);
     return [...prose,...historyPoints.points];
    });
-  },[generated,editor,reading,readingCache,readingSession,session,section.id,zh,historyPoints]);
+  },[generated,editor,reading,readingCache,readingSession,session,section.id,zh,historyPoints,page.body]);
   const renderKey=useMemo(()=>[page,editor,section.wikiDiagram],[page,editor,section.wikiDiagram]);
+  const pendingReview = useMemo(() => session.mode === "work" ? points.filter(point => !point.approximate && needsConfirmation(point)) : undefined, [session.mode, points]);
   const {rootRef:articleRef,claimMarkers,ordered,open:openPoint,markerContext}=useEvidencePoints(points,onLocate,zh,renderKey,pendingReview);
   // Source marks (你, 资料) and the colour each mark tints its text with stay out of the prose until the reader turns
   // them on, checking included: the check highlights only the sentence it is on. 已定, 未定 and 此前 always show.
@@ -175,12 +174,7 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
   // Shown holders tint the text each mark covers in the mark's colour; hidden, nothing is painted.
   useEffect(()=>{const root=articleRef.current;const timer=window.setTimeout(()=>paintHolderRuns(root,hasHolders&&!marksHidden),0);return()=>{window.clearTimeout(timer);paintHolderRuns(root,false);};},[articleRef,hasHolders,marksHidden,page,ordered]);
   // Points whose quote is in the original pass on their own; the review steps only through those that need a look.
-  const attention=useMemo(()=>{
-    if(!pendingReview)return ordered.filter(needsConfirmation);
-    const pending=new Map(pendingReview.map(point=>[point.key,point]));
-    const placed=ordered.flatMap(point=>{const match=pending.get(point.key);pending.delete(point.key);return match?[{...point,attention:match.attention,checked:false}]:[];});
-    return [...placed,...pending.values()];
-  },[ordered,pendingReview]);
+  const attention=useMemo(()=>ordered.filter(needsConfirmation),[ordered]);
   const reviewEvidence=()=>{
     const first=attention[0];
     if(!first){if(ordered[0])openPoint(ordered[0].key);return;}
@@ -310,7 +304,6 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
     {editor&&!review?<WikiKnowledgeLinks editing session={session} section={section} zh={zh}/>:null}
     {!editor?review?<><WikiHistoryCard entries={history} markers={historyPoints.markers} zh={zh}/><WikiEvidence section={section} evidence={session.evidence} session={session} sourceRoles={session.sourceRoles} updatedConversationIds={updatedConversationIds} zh={zh} onLocate={onLocate}/><ProjectChangeHistory changes={changes} zh={zh} onLocate={onLocate}/></>
       :<section className="wiki-chapter-end">
-        {decisionUpdate}
         <WikiHistoryCard entries={history} markers={historyPoints.markers} zh={zh}/>
         <WikiKnowledgeLinks session={session} section={section} zh={zh}/>
         <WikiSources section={section} session={session} zh={zh} onLocate={onLocate}/>
