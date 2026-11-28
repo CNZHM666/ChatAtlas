@@ -1,4 +1,6 @@
 import { expect, it } from "vitest";
+import { projectLedgerPage } from "../canvas/project-wiki-pages";
+import { defaultProjectExportPreset } from "../export/project-export-presets";
 import { sourceMessageSignature } from "../shared/source-signature";
 import { wikiTableSignature } from "../shared/wiki-table-source";
 import { architectureChapter, demoProject } from "./project";
@@ -32,4 +34,14 @@ it.each(["en", "zh"] as const)("binds every %s demo claim to a real message in i
       }
     }
   }
+
+  expect(defaultProjectExportPreset(session)).toBe("handoff");
+  const ledger = projectLedgerPage(session);
+  expect(ledger?.chapters).toHaveLength(session.sections.length);
+  expect(ledger?.total).toBeGreaterThanOrEqual(10);
+  expect(ledger?.counts.get("confirmed")).toBeGreaterThanOrEqual(5);
+  expect(ledger?.counts.get("proposal")).toBeGreaterThanOrEqual(2);
+  expect(ledger?.counts.get("open")).toBeGreaterThanOrEqual(1);
+  expect(ledger?.counts.get("history")).toBeGreaterThanOrEqual(1);
+  expect(ledger?.counts.get("reported")).toBeGreaterThanOrEqual(1);
 });

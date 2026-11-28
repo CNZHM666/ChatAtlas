@@ -1,13 +1,13 @@
 import {expect,it} from "vitest";
-import en from "../../README.md?raw";
-import zh from "../../README.zh-CN.md?raw";
+import zh from "../../README.md?raw";
+import en from "../../README.en.md?raw";
 import principles from "../../PRODUCT_PRINCIPLES.md?raw";
 import {version} from "../../package.json";
 
 it("leads with source-checkable Markdown and states the key-free search option",()=>{
  const zhIntro = zh.split("## 安装到")[0], enIntro = en.split("## Install on")[0];
- expect(enIntro).toContain('href="README.zh-CN.md">简体中文</a>');
- expect(zhIntro).toContain('href="README.md">English</a>');
+ expect(enIntro).toContain('href="README.md">简体中文</a>');
+ expect(zhIntro).toContain('href="README.en.md">English</a>');
  expect(zhIntro).toMatch(/(?:基础|关键词)搜索[^。\n]*(?:无需|不需要) AI Key/u);
  expect(enIntro).toMatch(/(?:basic|keyword) search[^.\n]*(?:needs?|requires?) no AI key/iu);
  expect(zhIntro).toMatch(/可核对原话/u);

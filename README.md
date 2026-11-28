@@ -1,140 +1,140 @@
 <p align="center">
-  <img src="docs/images/social-preview.png" alt="ChatAtlas turns AI conversations into a project wiki" width="720">
+  <img src="docs/images/social-preview-zh.png" alt="ChatAtlas，把 AI 对话整理成项目 Wiki" width="720">
 </p>
 
 <p align="center">
-  <b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <b>v0.1.8 Alpha</b>
+  <b>简体中文</b> · <a href="README.en.md">English</a> · <b>v0.1.8 Alpha</b>
 </p>
 
 <p align="center">
-  <a href="https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans"><b>Live demo</b></a>
-  · <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.8/ChatAtlas-extension-v0.1.8.zip">Download v0.1.8 ZIP</a>
-  · <a href="#preview">Preview</a>
-  · <a href="#install-on-chrome-or-edge">Install</a>
-  · <a href="docs/en/CHANGELOG.md">Changelog</a>
-  · <a href="https://github.com/CNZHM666/ChatAtlas/issues">Feedback</a>
+  <a href="https://cnzhm666.github.io/ChatAtlas/?lang=zh#/overview"><b>在线体验</b></a>
+  · <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.8/ChatAtlas-extension-v0.1.8.zip">下载 v0.1.8 安装包</a>
+  · <a href="#效果预览">效果预览</a>
+  · <a href="#安装到-chrome-或-edge">安装</a>
+  · <a href="CHANGELOG.md">更新记录</a>
+  · <a href="https://github.com/CNZHM666/ChatAtlas/issues">反馈</a>
 </p>
 
 <p align="center">
-  <strong>Start a project in ChatGPT, continue in Claude, and keep one verifiable Markdown document.</strong><br>
-  ChatAtlas is a local-first Chrome / Edge extension. Turn multi-platform AI chats into a structured project wiki with verifiable citations, a knowledge ledger, project files, and three Markdown export modes built for teammates, <strong>Codex</strong>, or <strong>Claude Code</strong>.
+  <strong>在 ChatGPT 开始，去 Claude 接着做。把跨平台 AI 对话持续沉淀为一份可核对原话的项目 Markdown。</strong><br>
+  本地优先的 Chrome / Edge 扩展。将多平台 AI 对话整理为带原话定位的项目 Wiki、知识点账本与项目资料区，支持精简 / 开发 / 审计三种 Markdown 导出，直接交给队友、<strong>Codex</strong> 或 <strong>Claude Code</strong>。
 </p>
 
 > [!NOTE]
-> **Alpha · Chrome / Edge.** Local reading, keyword search, project files, sticky notes, and Markdown export require no AI key. Wiki generation and incremental updates use your own model connection (BYOK). Check key conclusions against their citations and back up your data before upgrading.
+> **Alpha 测试版 · Chrome / Edge** · 本地阅读、关键词搜索、项目资料、便利贴与导出均无需 AI Key。生成与增量更新采用 BYOK（自带模型 API）。请通过内置出处核对关键结论，升级前先备份本地数据。
 
-## Why use ChatAtlas?
+## 为什么用 ChatAtlas
 
-- **Native sidebar workspace beside your AI chats.** Create projects, review incremental updates from the current conversation, read chapters with an in-chapter outline and source markers, and keep **Files** (with drag, paste, and auto-saved chat uploads) and **Sticky Notes** right next to the chat—separate from formal wiki prose.
-- **Full Workbench for deep review and traceability.** Browse the one-page project **Overview**, filter **Your Decisions** vs **AI Suggestions** in the **Knowledge Ledger**, and inspect every claim side by side with the original conversation message and surrounding context.
-- **Three Markdown export modes (copy or download).** Switch between **Brief** (clean reading & quick context), **Handoff** (technical specs, confirmed decisions, and compact locators for Codex / Claude Code), and **Audit** (full overview, attribution marks, excerpts, and check details) in both the Workbench and the sidebar—without regenerating.
-- **Local-first, with BYOK AI on demand.** Conversations, the knowledge ledger, wiki versions, files, and notes stay in your browser's IndexedDB. Reading, keyword search, and export run locally. When you generate or update a wiki, only the selected material is sent directly to your configured provider.
+- **在 AI 对话旁直接工作的原生侧栏。** 在浏览器侧栏新建项目、核对本轮对话增量、按章内大纲阅读文档并核对出处；内置独立的**「资料」**（支持拖入、粘贴及自动收录当前对话上传的文件）与**「便利贴」**标签，不污染正式文档。
+- **工作台提供完整阅读、账本与来源核对。** 一页总览快速把握项目全貌与待决事项；在**「知识点账本」**中按「你的决定 / AI 建议 / 仍在讨论 / 早期方案」清晰筛选；点开任意出处标记即可并排对照原话与前后文。
+- **精简 / 开发 / 审计三种 Markdown 导出（支持复制与下载）。** 在侧栏和工作台均可直接切换 **精简（Brief）**、**开发（Handoff）** 和 **审计（Audit）** 模式，一键复制 Markdown 或下载 `.md`，无需重新生成。[查看 Markdown 模板 →](docs/examples/project-context-template.md)
+- **本地优先，按需调用 AI。** 原始对话、知识点账本、Wiki 版本、项目资料与便利贴均保存在浏览器 IndexedDB 中；阅读、关键词查找与导出完全本地运行。仅在你主动生成或更新时，将所选材料直连发往你配置的模型服务商。
 
-## Preview
+## 效果预览
 
-**[Try the English demo](https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans)** · No installation or API key required.
+**[在线体验中文示例](https://cnzhm666.github.io/ChatAtlas/?lang=zh#/overview)** · 无需安装或配置模型即可体验文档总览、知识点账本、来源核对与三模式导出。
 
 <p align="center">
-  <img src="docs/images/project-overview.png" alt="Project overview with one-page chapter cards, confirmed decisions, and open review items" width="920">
-  <br><sub>Project overview: one-page chapter cards, confirmed decisions, and items awaiting review</sub>
+  <img src="docs/images/project-overview.png" alt="项目文档总览：一页速览章节卡片、已定关键决定与待核对状态" width="920">
+  <br><sub>项目文档总览：一页速览章节卡片、已定决策数量与待核对提醒</sub>
 </p>
 
 <p align="center">
-  <img src="docs/images/evidence-review.png" alt="Review a wiki chapter side by side with the original conversation quote and surrounding context" width="920">
-  <br><sub>Evidence review: inspect attribution marks alongside the original message and surrounding context</sub>
+  <img src="docs/images/evidence-review.png" alt="在 Wiki 章节右侧并排核对原话与对话前后文" width="920">
+  <br><sub>来源核对：正文归属标注与右侧原始对话摘录、前后文并排对照</sub>
 </p>
 
 <p align="center">
-  <img src="docs/images/sidecar-project.png" alt="ChatAtlas native sidebar beside ChatGPT with Document, Files, and Sticky Notes tabs" width="920">
-  <br><sub>Native sidebar: Document, Files, and Sticky Notes tabs, writing mode selector, incremental update, and Markdown export</sub>
+  <img src="docs/images/sidecar-project.png" alt="ChatGPT 旁的 ChatAtlas 原生侧边栏，包含文档、资料与便利贴三个标签页" width="920">
+  <br><sub>原生侧边栏：文档 / 资料 / 便利贴三标签、写作模式切换、增量更新与三模式导出</sub>
 </p>
 
 <details>
-<summary>More screenshots: Workbench home, Knowledge Ledger, and Sidebar chapter reading</summary>
+<summary>查看更多界面截图：工作台首页、知识点账本与侧栏章节阅读</summary>
 
-| Project Workbench | Knowledge Ledger |
+| 项目工作台首页 | 知识点账本 |
 |:---:|:---:|
-| ![Project Workbench home](docs/images/workbench-home.png) | ![Knowledge Ledger filtering decisions and AI suggestions](docs/images/knowledge-ledger.png) |
-| **Sidebar chapter reading & source marks** | **Multi-platform sidebar workspace** |
-| ![Sidebar chapter reading with source marks](docs/images/sidecar-chapter.png) | ![Native sidebar project view](docs/images/sidecar-project.png) |
+| ![项目工作台首页](docs/images/workbench-home.png) | ![知识点账本：区分你的决定与 AI 建议](docs/images/knowledge-ledger.png) |
+| **侧栏章节阅读与出处标注** | **侧栏项目与资料工作区** |
+| ![侧栏章节阅读与出处标注](docs/images/sidecar-chapter.png) | ![原生侧边栏项目视图](docs/images/sidecar-project.png) |
 
 </details>
 
-## Quick start
+## 快速上手
 
-1. **Start a project.** Open the ChatAtlas side panel on any supported AI site and click **New** (or organize existing conversations from the **Project Workbench**). Configure a model in **Settings → AI settings** when you are ready to generate or update a wiki.
-2. **Generate or review updates.** Generate a first wiki from the current conversation in the background, or click the update icon to preview new/changed points with verbatim source quotes before saving.
-3. **Keep files & notes beside your chat.** Switch to the **Files** tab to auto-save uploads from the chat (or drop / `Ctrl+V` files directly) and drag saved assets back into another AI composer; jot quick thoughts in **Sticky Notes**.
-4. **Export in the right mode.** Open **Export** in either the sidebar or Workbench, choose **Brief**, **Handoff**, or **Audit**, and copy Markdown or download the `.md` file.
+1. **创建或整理项目。** 在支持的 AI 网页打开 ChatAtlas 原生侧栏点「新建」，或在**项目工作台**选择已有对话开始整理。首次生成前在「设置 → AI 设置」配置模型连接。
+2. **生成首版与核对增量。** 侧栏支持后台静默生成首版文档；继续讨论后点更新图标即可预览新增与变更条目，逐条核对原话后写入。
+3. **沉淀项目资料与便利贴。** 切换到侧栏「资料」标签，开启「自动收录本页上传」（或直接拖入 / `Ctrl+V` 粘贴文件），随时拖拽复用到任意 AI 输入框；零散想法记在「便利贴」。
+4. **按需导出 Markdown。** 在侧栏或工作台点击「导出」，按需切换**精简 / 开发 / 审计**模式，一键复制或下载 `.md` 交给队友、Codex 或 Claude Code。
 
-## Supported platforms and sources
+## 支持的平台与来源
 
-| Source | File import | Automatic web capture & sidebar |
+| 来源 | 文件导入 | 网页自动保存与原生侧栏 |
 | :--- | :--- | :--- |
-| **ChatGPT** | ✅ Official export | ✅ Supported, with dedicated history sync |
-| **Claude** | ✅ Official export | 🧪 Experimental |
-| **Gemini** | ✅ Google Takeout JSON | 🧪 Experimental |
-| **DeepSeek** | ✅ Official export | 🧪 Experimental |
-| **Doubao** | — | 🧪 Experimental |
-| **Kimi** | — | 🧪 Experimental |
-| **Qwen (including Qwen Intl)** | — | 🧪 Experimental |
-| **Generic Markdown / JSON** | ✅ Compatible conversation files | — |
+| **ChatGPT** | ✅ 官方导出 | ✅ 支持，另有专用历史同步 |
+| **Claude** | ✅ 官方导出 | 🧪 试用 |
+| **Gemini** | ✅ Google Takeout JSON | 🧪 试用 |
+| **DeepSeek** | ✅ 官方导出 | 🧪 试用 |
+| **豆包** | — | 🧪 试用 |
+| **Kimi** | — | 🧪 试用 |
+| **通义千问（含 Qwen 国际站）** | — | 🧪 试用 |
+| **通用 Markdown / JSON** | ✅ 兼容的对话文件 | — |
 
-Web capture runs by default once the browser grants access to a supported site. To stop capture for a site, change ChatAtlas’s site access in the browser. Experimental capture only saves messages currently loaded on the page, so older history may be incomplete.
+浏览器授予对应网站权限后，网页采集默认启用。要停止采集某个网站，可在浏览器中调整 ChatAtlas 的网站访问权限。标注「试用」的平台仅保存当前已加载的消息，更早的历史可能尚未加载。
 
-## How it works
+## 工作原理与架构
 
 ```mermaid
 flowchart LR
-  A["Create or open project in sidebar"] --> B["Sync & review chat updates"]
-  B --> C["Save decisions & citations to ledger"]
-  C --> D["Read, check sources & manage versions in Workbench"]
-  C --> E["Export Brief / Handoff / Audit Markdown"]
+  A["在侧栏创建或打开项目"] --> B["同步并核对本轮对话增量"]
+  B --> C["确认决定并带引用写入账本"]
+  C --> D["在工作台完整阅读、核对来源与管理版本"]
+  C --> E["导出精简 / 开发 / 审计版 Markdown"]
 ```
 
-- **Source material and generated prose stay separate.** Original messages, source versions, knowledge units, generated chapters, personal edits, project files, and sticky notes are stored as distinct records. Every confirmation records its question, answer, and source quote.
-- **Updates protect personal edits.** Manually edited chapters are never silently overwritten; incremental updates preview every proposed addition or revision before writing.
-- **BYOK requests go directly to your provider.** API keys stay in your browser. Generation, incremental previews, optional semantic search, and connection tests talk directly to the provider you configure.
+- **原文、整理结果与个人维护隔离存储。** 原始消息与来源版本、知识点账本、生成章节、手动编辑、项目资料和便利贴分别保存；每条确认记录完整绑定原问题、选择与依据原话。
+- **更新保护个人编辑。** 手动改过的章节不会被静默覆盖；增量更新先预览、后写入，支持撤销上次写入。
+- **BYOK 请求直连服务商。** API 密钥仅保存在本地浏览器；生成、增量预览、可选语义增强和连接测试由浏览器直接发往你配置的服务商。
 
-[Architecture](docs/en/ARCHITECTURE.md) · [AI workflow](docs/en/AI_WORKFLOWS.md) · [Privacy](docs/en/PRIVACY.md)
+[架构说明](ARCHITECTURE.md) · [AI 工作流](AI_WORKFLOWS.md) · [隐私说明](docs/PRIVACY.md)
 
-## Install on Chrome or Edge
+## 安装到 Chrome 或 Edge
 
-**[Download v0.1.8 Alpha (ZIP)](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.8/ChatAtlas-extension-v0.1.8.zip)** · [Release notes](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.8)
+**[下载 v0.1.8 Alpha 安装包（ZIP）](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.8/ChatAtlas-extension-v0.1.8.zip)** · [查看发布说明](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.8)
 
-Chrome and Edge share the same ZIP. During Alpha, the extension is distributed via GitHub and loaded manually.
+Chrome 和 Edge 共用同一个 ZIP。Alpha 测试版现阶段通过 GitHub 发布，需在浏览器中手动加载。
 
-1. Download the ZIP and extract it to a permanent folder.
-2. Open `chrome://extensions` or `edge://extensions` and enable **Developer mode**.
-3. Click **Load unpacked** and select the folder that directly contains `manifest.json`. You can open or pin **ChatAtlas** from the browser's Extensions menu.
+1. 下载并解压 ZIP 到一个**长期保留**的固定文件夹。
+2. 在地址栏打开 `chrome://extensions` 或 `edge://extensions`，启用「开发者模式」。
+3. 点击「加载已解压的扩展程序」，选中直接包含 `manifest.json` 的文件夹。安装后可从浏览器的扩展菜单打开或固定 **ChatAtlas**。
 
 <details>
-<summary>Download & unpack with Claude Code / Codex</summary>
+<summary>使用 Claude Code / Codex 一句话辅助下载与解压</summary>
 
-Paste this prompt into an AI coding agent with terminal access, then load the folder it returns in your browser.
+将下面这段提示词发给具备终端能力的 AI 助手，再按其返回的路径在浏览器中加载即可。
 
 ```text
-Download the ChatAtlas v0.1.8 Alpha extension ZIP from this URL.
+请从以下地址下载 ChatAtlas v0.1.8 Alpha 的扩展安装包。
 https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.8/ChatAtlas-extension-v0.1.8.zip
-Extract it to a folder I can keep. Verify that the folder directly contains manifest.json, then give me its absolute path and the steps to load it in Chrome or Edge.
+解压到一个长期保留的固定文件夹里，确认目录内直接包含 manifest.json，然后告诉我该文件夹的绝对路径并引导我在 Chrome 或 Edge 中加载。
 ```
 
 </details>
 
-**Upgrading an existing install.** Back up your data in **Settings → Local data**, replace the files in your existing extension folder, and click reload on the Extensions page.
+**升级旧版**。先在「设置 → 本地数据」导出备份，再用新版文件替换原安装目录中的文件，最后在扩展管理页刷新 ChatAtlas。
 
-## Build from source
+## 从源码运行
 
-Requires **Node.js 22**.
+需要 **Node.js 22**。
 
 ```sh
 npm ci
-npm run check   # Validate and build, then load dist/ as an unpacked extension
-npm run dev     # Start dev mode and load dist-dev/
+npm run check   # 检查并构建，随后在浏览器加载 dist/
+npm run dev     # 启动开发模式，在浏览器加载 dist-dev/
 ```
 
-[User guide](docs/en/GETTING_STARTED.md) · [Contributing](docs/en/CONTRIBUTING.md) · [MIT license](LICENSE) · [Third-party notices](docs/THIRD_PARTY_NOTICES.md)
+[使用指南](docs/GETTING_STARTED.md) · [贡献指南](CONTRIBUTING.md) · [MIT 许可证](LICENSE) · [第三方声明](docs/THIRD_PARTY_NOTICES.md)
 
-## Community & Contributing
+## 社区与共建
 
-Share your workflow, generated wikis, and feedback on [LINUX DO](https://linux.do) or in [GitHub Discussions](https://github.com/CNZHM666/ChatAtlas/discussions). Bug reports, feature ideas, and PRs are all welcome—see [Contributing](docs/en/CONTRIBUTING.md) to get started. Thanks to the LINUX DO community for its support.
+欢迎在 [LINUX DO](https://linux.do) 或 [GitHub Discussions](https://github.com/CNZHM666/ChatAtlas/discussions) 分享使用体验、整理出的 Wiki 或改进建议，也欢迎提交 [Issues](https://github.com/CNZHM666/ChatAtlas/issues) 与 PR 一起完善这个项目（详见[贡献指南](CONTRIBUTING.md)）。感谢 LINUX DO 社区的支持。

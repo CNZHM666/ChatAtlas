@@ -19,4 +19,4 @@ File import accepts official exports from ChatGPT, Claude, Gemini (Google Takeou
 | [Contributing](CONTRIBUTING.md) | Development, checks and feedback |
 | [Changelog](CHANGELOG.md) | Preview release changes |
 
-Each maintained guide links to its Simplified Chinese counterpart. License texts and dependency notices are shared in their original language. Local historical archives, private examples and diagnostics are not current guides or part of the public source manifest. Start from the [English README](../../README.md).
+Each maintained guide links to its Simplified Chinese counterpart. License texts and dependency notices are shared in their original language. Local historical archives, private examples and diagnostics are not current guides or part of the public source manifest. Start from the [English README](../../README.en.md).

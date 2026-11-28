@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Github, Languages, LayoutDashboard, Moon, PanelRightOpen, Settings, Sun } from "lucide-react";
+import { BookMarked, Download, Github, Languages, LayoutDashboard, Moon, PanelRightOpen, Settings, Sun } from "lucide-react";
 import { DocumentOverview } from "../canvas/components/DocumentOverview";
+import { KnowledgeLedger } from "../canvas/components/KnowledgeLedger";
 import { MapSidebar } from "../canvas/components/MapSidebar";
 import { ProjectNavigationLayout, ProjectNavigationOpen, useProjectNavigationLayout } from "../canvas/components/ProjectNavigationLayout";
 import { ProjectSourceList } from "../canvas/components/ProjectSourceList";
@@ -9,12 +10,15 @@ import { ReaderBackButton } from "../canvas/components/ReaderBackButton";
 import { ReaderConversation } from "../canvas/components/ReaderConversation";
 import { WikiDocument } from "../canvas/components/WikiDocument";
 import { WorkspaceSourcePanel } from "../canvas/components/WorkspaceSourcePanel";
+import { documentEvidenceReview } from "../canvas/document-review";
 import { ProjectExampleContext } from "../canvas/project-example-context";
+import { ProjectReadingCacheContext } from "../canvas/project-reading-cache";
 import { WorkspaceEvidenceContext, type WorkspaceEvidenceOptions } from "../canvas/workspace-evidence-context";
 import { PreferencesProvider, usePreferences, type Locale, type Theme } from "../canvas/preferences";
 import { BrandMark } from "../shared/BrandMark";
 import { OVERVIEW_CANVAS_ID } from "../shared/constants";
 import type { FocusEvidence } from "../shared/focus-session";
+import { createProjectReadingCache } from "../shared/project-reading-cache";
 import { architectureChapter, demoProject, type DemoLocale } from "./project";
 import { ContinuationDemo } from "./ContinuationDemo";
 
@@ -38,8 +42,12 @@ function initialLocale(): DemoLocale {
 }
 
 export function DemoApp() {
-  return <PreferencesProvider initialLocale={initialLocale() === "zh" ? "zh-CN" : "en"} initialTheme={readPreference("theme") === "dark" ? "dark" : "light"}
-    onLocaleChange={saveLocale} onThemeChange={saveTheme}><DemoWorkspace /></PreferencesProvider>;
+  const cache = useRef<ReturnType<typeof createProjectReadingCache>>();
+  if (!cache.current) cache.current = createProjectReadingCache();
+  return <ProjectReadingCacheContext.Provider value={cache.current}>
+    <PreferencesProvider initialLocale={initialLocale() === "zh" ? "zh-CN" : "en"} initialTheme={readPreference("theme") === "dark" ? "dark" : "light"}
+      onLocaleChange={saveLocale} onThemeChange={saveTheme}><DemoWorkspace /></PreferencesProvider>
+  </ProjectReadingCacheContext.Provider>;
 }
 
 function saveLocale(locale: Locale) {
@@ -58,7 +66,7 @@ function DemoWorkspace() {
   const [source, setSource] = useState<{ reference: FocusEvidence; options: WorkspaceEvidenceOptions }>();
   const [fullSource, setFullSource] = useState(false);
   const [toolsHost, setToolsHost] = useState<HTMLDivElement | null>(null);
-  const [navigationTab, setNavigationTab] = useState<"wiki" | "sources">("wiki");
+  const [navigationTab, setNavigationTab] = useState<"chapters" | "sources">("chapters");
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [settings, setSettings] = useState<"ai" | "data">();
@@ -67,14 +75,15 @@ function DemoWorkspace() {
   const [selectedIds, setSelectedIds] = useState(new Set<string>());
   const navigationLayout = useProjectNavigationLayout();
   const [headingTarget, setHeadingTarget] = useState<{ title: string; revision: number }>();
+  const [autoReview, setAutoReview] = useState<{ sectionId: string; revision: number }>();
   const readingBody = useRef<HTMLElement>(null);
   const readingBase = useRef<HTMLDivElement>(null);
   const zh = locale === "zh", tr = (cn: string, en: string) => zh ? cn : en;
   const { knowledge, overview } = useMemo(() => demoProject(locale), [locale]);
   const session = knowledge.session;
-  const defaultRoute = "/wiki/" + architectureChapter;
+  const defaultRoute = "/overview";
   const route = ["/search", "/workbench/history"].includes(routeHash) ? "/workbench"
-    : ["/overview", "/workbench"].includes(routeHash) || session.sections.some(section => "/wiki/" + section.id === routeHash)
+    : ["/overview", "/ledger", "/workbench"].includes(routeHash) || session.sections.some(section => "/wiki/" + section.id === routeHash)
       ? routeHash : defaultRoute;
   const canvases = useMemo(() => [
     { id: OVERVIEW_CANVAS_ID, name: "Workbench", type: "overview" as const, createdAt: session.createdAt, updatedAt: session.updatedAt },
@@ -86,7 +95,9 @@ function DemoWorkspace() {
   }), [knowledge]);
   const chapter = session.sections.find(section => route === "/wiki/" + section.id) ?? session.sections.find(section => section.id === architectureChapter)!;
   const isOverview = route === "/overview";
+  const isLedger = route === "/ledger";
   const isHome = route === "/workbench";
+  const subpageTitle = isLedger ? tr("知识点账本", "Knowledge ledger") : isOverview ? tr("文档总览", "Overview") : chapter.wikiDisplayTitle || chapter.title;
   const original = fullSource && source ? knowledge.conversations.find(chat => chat.id === source.reference.conversationId) : undefined;
   const open = (reference: FocusEvidence, options: WorkspaceEvidenceOptions = {}) => {
     setNavigationOpen(false);
@@ -104,8 +115,9 @@ function DemoWorkspace() {
     setRoute(next);
     if (location.hash.slice(1) !== next) history.pushState(null, "", "#" + next);
   };
-  const read = (id: string, heading?: string) => { setNavigationTab("wiki"); navigate("/wiki/" + id, heading); };
+  const read = (id: string, heading?: string) => { setNavigationTab("chapters"); navigate("/wiki/" + id, heading); };
   const readOverview = () => navigate("/overview");
+  const readLedger = () => navigate("/ledger");
   const readHome = () => navigate("/workbench");
   const requireExtension = () => setNeedsExtension(true);
   const readConversation = (id: string, message?: (typeof knowledge.messages)[number]) => {
@@ -115,6 +127,12 @@ function DemoWorkspace() {
     navigate("/overview");
     setNavigationTab("sources");
     open(reference, { references, reader: true });
+  };
+  const startOverviewReview = () => {
+    const chapters = documentEvidenceReview(session, zh);
+    const target = chapters[0]?.sectionId ?? architectureChapter;
+    setAutoReview({ sectionId: target, revision: performance.now() });
+    read(target);
   };
   const review = () => {
     const sourcePassages = (chapter.claims ?? []).flatMap(claim => claim.evidenceIds.map(referenceId => ({ referenceId, quote: claim.quote })));
@@ -143,7 +161,7 @@ function DemoWorkspace() {
     return () => { window.removeEventListener("hashchange", onHash); };
   }, []);
   useEffect(() => {
-    document.title = zh ? "ChatAtlas · 只读演示" : "ChatAtlas · Read-only demo";
+    document.title = zh ? "ChatAtlas · 在线演示" : "ChatAtlas · Live demo";
   }, [zh]);
   useEffect(() => {
     const base = readingBase.current;
@@ -159,9 +177,9 @@ function DemoWorkspace() {
   return <div className={`app-shell demo-shell${isHome ? " is-canvas-view" : ""}`}>
     <header className="topbar">
       <button type="button" className="brand brand-home" onClick={readHome} aria-label={tr("ChatAtlas 工作台", "ChatAtlas Workbench")}><BrandMark className="brand-mark" /><span>ChatAtlas</span></button>
-      <span className="demo-badge">{tr("只读演示", "Read-only demo")}</span>
+      <span className="demo-badge">{tr("只读演示 · v0.1.8", "Read-only demo · v0.1.8")}</span>
       <div className="topbar-actions demo-actions">
-        <button type="button" className="demo-continuation-trigger" onClick={() => setContinuationOpen(true)} aria-label={tr("体验续写", "Try continuation")} title={tr("体验续写", "Try continuation")}><PanelRightOpen size={16} aria-hidden="true"/><span>{tr("体验续写", "Try continuation")}</span></button>
+        <button type="button" className="demo-continuation-trigger" onClick={() => setContinuationOpen(true)} aria-label={tr("体验侧栏续写", "Try sidebar continuation")} title={tr("体验侧栏续写", "Try sidebar continuation")}><PanelRightOpen size={16} aria-hidden="true"/><span>{tr("体验侧栏续写", "Try continuation")}</span></button>
         <a className="demo-github" href={repository}><Github size={16} aria-hidden="true" />GitHub</a>
         <a className="demo-install" href={installUrl}>{tr("安装扩展", "Install extension")}</a>
         <button type="button" className="icon-button" onClick={() => setSettings("ai")} aria-label={tr("设置", "Settings")} title={tr("设置", "Settings")}><Settings size={17} aria-hidden="true" /></button>
@@ -198,19 +216,20 @@ function DemoWorkspace() {
                   <ReaderBackButton onClick={readHome} label={tr("返回工作台", "Back to Workbench")} />
                 </ProjectNavigationLayout>
                 <h2>{session.title}</h2>
-                <button type="button" className="outline-item" aria-current={isOverview ? "page" : undefined} onClick={readOverview}><LayoutDashboard size={18} aria-hidden="true" /><strong>{tr("文档总览", "Document overview")}</strong></button>
-                <div className="project-navigation-tabs" role="tablist" aria-label={tr("项目目录", "Project directory")} onKeyDown={event => {
+                <button type="button" className="outline-item" aria-current={isOverview ? "page" : undefined} onClick={readOverview}><LayoutDashboard size={17} aria-hidden="true" /><strong>{tr("文档总览", "Document overview")}</strong></button>
+                <button type="button" className="outline-item" aria-current={isLedger ? "page" : undefined} onClick={readLedger}><BookMarked size={17} aria-hidden="true" /><strong>{tr("知识点账本", "Knowledge ledger")}</strong></button>
+                <div className="project-navigation-tabs" role="tablist" aria-label={tr("项目目录", "Project navigation")} onKeyDown={event => {
                   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
                   event.preventDefault();
-                  const next = event.key === "Home" ? "wiki" : event.key === "End" ? "sources" : navigationTab === "wiki" ? "sources" : "wiki";
+                  const next = event.key === "Home" ? "chapters" : event.key === "End" ? "sources" : navigationTab === "chapters" ? "sources" : "chapters";
                   setNavigationTab(next);
                   event.currentTarget.querySelector<HTMLButtonElement>("#demo-tab-" + next)?.focus();
                 }}>
-                  <button type="button" role="tab" id="demo-tab-wiki" aria-controls="demo-navigation-list" aria-selected={navigationTab === "wiki"} tabIndex={navigationTab === "wiki" ? 0 : -1} onClick={() => setNavigationTab("wiki")}>Wiki</button>
+                  <button type="button" role="tab" id="demo-tab-chapters" aria-controls="demo-navigation-list" aria-selected={navigationTab === "chapters"} tabIndex={navigationTab === "chapters" ? 0 : -1} onClick={() => setNavigationTab("chapters")}>{tr("章节", "Chapters")}</button>
                   <button type="button" role="tab" id="demo-tab-sources" aria-controls="demo-navigation-list" aria-selected={navigationTab === "sources"} tabIndex={navigationTab === "sources" ? 0 : -1} onClick={() => setNavigationTab("sources")}>{tr("来源", "Sources")}<small>{knowledge.conversations.length}</small></button>
                 </div>
                 <div id="demo-navigation-list" role="tabpanel" aria-labelledby={"demo-tab-" + navigationTab} className="project-navigation-list">
-                  {navigationTab === "wiki" ? <ProjectWikiNavigation session={session} activeId={isOverview ? undefined : chapter.id} zh={zh} onRead={read} />
+                  {navigationTab === "chapters" ? <ProjectWikiNavigation session={session} activeId={isOverview || isLedger ? undefined : chapter.id} zh={zh} onRead={read} />
                     : <ProjectSourceList ids={session.sourceConversationIds} conversations={knowledge.conversations} fallbackTitle={() => undefined} zh={zh} onOpen={id => {
                       const references = session.evidence.filter(ref => ref.conversationId === id);
                       if (references[0]) open(references[0], { references });
@@ -220,17 +239,24 @@ function DemoWorkspace() {
               <div className="focus-reader-main">
                 <div className="focus-reader-toolbar">
                   <ProjectNavigationOpen layout={navigationLayout} zh={zh} navigationId="demo-project-navigation" mobile onOpenMobile={() => setNavigationOpen(true)} />
-                  <div className="focus-reader-location"><span>{session.title}</span></div>
+                  <div className="focus-reader-location">
+                    <span>{session.title}</span>
+                    <span className="focus-reader-crumb" aria-hidden="true">/</span>
+                    <small className="focus-reader-subpage">{subpageTitle}</small>
+                  </div>
                   <div className="focus-reader-toolbar-actions project-document-actions">
-                    <button type="button" aria-label={tr("导出", "Export")} title={tr("导出项目", "Export project")} onClick={() => setExportOpen(true)}><Download size={15} aria-hidden="true" /><span>{tr("导出", "Export")}</span></button>
+                    <button type="button" aria-label={tr("导出", "Export")} title={tr("导出项目（精简 / 开发 / 审计）", "Export project (Brief / Handoff / Audit)")} onClick={() => setExportOpen(true)}><Download size={15} aria-hidden="true" /><span>{tr("导出", "Export")}</span></button>
                   </div>
                 </div>
-                <main className={isOverview ? "focus-reading-body" : "focus-reading-body is-chapter-view"} ref={readingBody} key={route}>
+                <main className={isOverview || isLedger ? "focus-reading-body" : "focus-reading-body is-chapter-view"} ref={readingBody} key={route}>
                   <div className="reader-content"><div className="project-reading-document">
-                    {isOverview ? <DocumentOverview session={session} zh={zh} onLocate={open} onRead={read} toolsHost={source ? toolsHost : null} pageReading={{ workspace: overview }} />
-                      : <WikiDocument key={locale + chapter.id} section={chapter} session={session} zh={zh} structure={null}
-                        onLocate={open} onReviewEvidence={review} onCurrent={readOverview} persistSourceMarks={false}
-                        toolsHost={source ? toolsHost : null} scrollRef={readingBody} headingTarget={headingTarget} />}
+                    {isLedger ? <KnowledgeLedger key={locale} session={session} zh={zh} onLocate={open} />
+                      : isOverview ? <DocumentOverview key={locale} title={session.title} session={session} reviewSession={session} zh={zh} onLocate={open} onRead={read} onReview={startOverviewReview} toolsHost={source ? toolsHost : null} pageReading={{ workspace: overview }} />
+                        : <WikiDocument key={locale + chapter.id} section={chapter} session={session} zh={zh} structure={null}
+                          autoReview={autoReview?.sectionId === chapter.id ? autoReview.revision : undefined}
+                          onAutoReviewed={() => setAutoReview(undefined)}
+                          onLocate={open} onReviewEvidence={review} onCurrent={readOverview} persistSourceMarks={false}
+                          toolsHost={source ? toolsHost : null} scrollRef={readingBody} headingTarget={headingTarget} />}
                   </div></div>
                 </main>
               </div>

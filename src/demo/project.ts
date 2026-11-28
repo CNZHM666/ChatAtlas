@@ -4,6 +4,7 @@ import type { FocusSession } from "../shared/focus-session";
 import { sourceMessageSignature } from "../shared/source-signature";
 import type { Conversation, ConversationMessage } from "../shared/types";
 import type { WikiClaim } from "../shared/wiki-claims";
+import type { WikiKnowledgeLedger, WikiKnowledgeUnit, WikiUnitAdoption, WikiUnitKind } from "../shared/wiki-knowledge";
 
 export const architectureChapter = "operation-plans";
 export type DemoLocale = "zh" | "en";
@@ -212,11 +213,141 @@ export function demoProject(locale: DemoLocale) {
       ["release-2", ["需要确定匹配准确率和低置信度时的处理方式。", "We still need an accuracy threshold and a plan for low-confidence matches."], "open"],
     ]),
   ];
+  const messageById = new Map(messages.map(message => [message.id, message]));
+  const unit = (
+    id: string,
+    messageId: string,
+    subject: Localized,
+    statement: Localized,
+    kind: WikiUnitKind,
+    adoption: WikiUnitAdoption,
+    delivery: WikiKnowledgeUnit["delivery"] = "planned",
+  ): WikiKnowledgeUnit => {
+    const message = messageById.get(messageId)!;
+    const ref = byMessage.get(messageId)!;
+    return {
+      id,
+      subject: translate(subject),
+      statement: translate(statement),
+      kind,
+      details: [],
+      adoption: { status: adoption },
+      delivery,
+      evidence: {
+        evidenceId: ref.id,
+        conversationId: message.conversationId,
+        messageId: message.id,
+        messageIndex: message.messageIndex,
+        role: message.role,
+        pasted: false,
+        quote: ref.excerpt.split("\n\n", 1)[0],
+        sourceSignature: message.contentHash,
+        discussedAt: message.createdAt,
+      },
+    };
+  };
+  const ledgerUnits: WikiKnowledgeUnit[] = [
+    unit("u-scope-esp32", "scope-2", ["首版范围", "First-release scope"],
+      ["首版只做 ESP32 方案预览和基础校验，暂不控制实物，也不提供自动采购。", "Ship ESP32 plan previews and basic validation first; leave physical device control and automatic purchasing out."],
+      "decision", "user_decision"),
+    unit("u-workflow-clarify", "workflow-0", ["需求澄清", "Requirement clarification"],
+      ["以「温度过高就提醒」为例，先向用户确认阈值与提醒方式，再进入项目画布。", "For a vague request like 'alert me when it gets hot', ask for threshold and alert method before opening the canvas."],
+      "plan", "user_decision"),
+    unit("u-workflow-preview", "workflow-2", ["预览内容", "Plan preview contents"],
+      ["预览同时列出连线和行为变化，出错时说明失败项、原因和可修改位置。", "The preview lists both wiring and behavior changes, and errors identify what failed, why, and what to edit."],
+      "decision", "user_decision"),
+    unit("u-data-legacy", "data-0", ["项目数据模型", "Project data model"],
+      ["历史原型在画布和零件清单中各存一份项目数据，撤销后容易不同步。", "The prototype stored project data separately in the canvas and parts list, causing desync after undo."],
+      "history", "unknown"),
+    unit("u-data-single", "data-2", ["项目数据模型", "Project data model"],
+      ["画布与零件清单从同一份项目数据生成，预览绑定项目版本，版本变化时要求重新预览。", "Derive canvas and parts list from one project model, bind previews to a project revision, and refresh when it changes."],
+      "decision", "user_decision"),
+    unit("u-data-op-id", "data-3", ["操作追踪与导出", "Operation IDs & export"],
+      ["建议为每个操作保留稳定 ID 以便校验回指，导出是否附带失败记录留待后续评估。", "Give each operation a stable ID for validation pointers; evaluate including failure records in exports later."],
+      "plan", "proposal"),
+    unit("u-arch-legacy", "architecture-0", ["画布修改方式", "How edits reach the canvas"],
+      ["早期原型让 AI 直接修改画布，出现错误引脚时难以定位具体出错步骤。", "The early prototype let AI edit the canvas directly, making invalid-pin failures hard to trace."],
+      "history", "unknown"),
+    unit("u-arch-plan", "architecture-2", ["画布修改方式", "How edits reach the canvas"],
+      ["采用结构化操作计划：AI 只提出修改建议，用户确认后再由确定性执行器应用到画布。", "Use structured operation plans: AI proposes edits, and a deterministic executor applies them only after user confirmation."],
+      "decision", "user_decision"),
+    unit("u-val-rollback", "validation-2", ["校验与失败恢复", "Validation and rollback"],
+      ["仅当整组操作通过校验才提交；失败时丢弃临时副本，保留原项目并定位到失败步骤。", "Commit only when every operation passes validation; on failure discard the temporary copy, keep the original, and locate the failed step."],
+      "constraint", "user_decision"),
+    unit("u-val-tests", "validation-3", ["回归测试覆盖", "Regression coverage"],
+      ["建议回归测试覆盖无效引脚、引脚重复占用和执行中断三类失败场景，实物接线单独验证。", "Cover invalid pins, duplicate assignments, and execution interruption in regression tests; validate physical wiring separately."],
+      "plan", "proposal"),
+    unit("u-rel-report", "release-0", ["已报告进展", "Reported verification"],
+      ["软件夹具已验证预览、提交和回滚（含无效引脚定位），但实物接线尚未验证。", "Preview, commit, and rollback passed software fixture checks (including invalid-pin targeting), while physical wiring is still untested."],
+      "report", "user_decision", "user_reported"),
+    unit("u-rel-photo-proposal", "release-1", ["照片识别评估", "Photo matching proposal"],
+      ["下一阶段可先将照片匹配到已有元件目录并由用户确认，自定义元件单独评估。", "A future step can match photos against the existing parts catalog with user confirmation, evaluating custom components separately."],
+      "plan", "proposal"),
+    unit("u-rel-photo-open", "release-2", ["照片识别评估", "Photo matching criteria"],
+      ["照片匹配暂未排入首版，仍需确定匹配准确率阈值与低置信度处理方式。", "Photo matching stays outside the first release until an accuracy threshold and low-confidence fallback are settled."],
+      "question", "unknown"),
+  ];
+  const wikiKnowledge: WikiKnowledgeLedger = {
+    version: 1,
+    generatedAt: timestamp(12),
+    status: "complete",
+    writingMode: "handoff",
+    materials: messages.length,
+    sources: Object.fromEntries(conversations.map(chat => [chat.id, {
+      platform: chat.platform,
+      title: chat.title,
+      start: chat.updatedAt,
+      end: chat.updatedAt + (chat.messageCount ?? 0) * 60_000,
+    }])),
+    batches: [{
+      sourceIds: messages.map(message => message.id),
+      status: "ok",
+      units: ledgerUnits,
+      rejected: {},
+    }],
+    decisions: {
+      "u-scope-esp32": { verdict: "confirmed", at: timestamp(1) },
+      "u-workflow-preview": { verdict: "confirmed", at: timestamp(5) },
+      "u-data-single": { verdict: "confirmed", at: timestamp(7) },
+      "u-arch-plan": { verdict: "confirmed", at: timestamp(4) },
+      "u-val-rollback": { verdict: "confirmed", at: timestamp(8) },
+      "u-rel-photo-open": { verdict: "open", at: timestamp(12) },
+    },
+    organization: {
+      version: 1,
+      generatedAt: timestamp(12),
+      status: "complete",
+      projectName: "Circuit Studio",
+      subjects: [
+        { id: "sub-scope", name: translate(["首版功能边界", "First-release scope"]), aliases: [], unitIds: ["u-scope-esp32"] },
+        { id: "sub-workflow", name: translate(["需求澄清与预览", "Clarification & preview"]), aliases: [], unitIds: ["u-workflow-clarify", "u-workflow-preview"] },
+        { id: "sub-data", name: translate(["共享数据模型", "Shared project model"]), aliases: [], unitIds: ["u-data-legacy", "u-data-single", "u-data-op-id"] },
+        { id: "sub-arch", name: translate(["操作计划与执行器", "Operation plans & executor"]), aliases: [], unitIds: ["u-arch-legacy", "u-arch-plan"] },
+        { id: "sub-val", name: translate(["校验与失败恢复", "Validation & recovery"]), aliases: [], unitIds: ["u-val-rollback", "u-val-tests"] },
+        { id: "sub-verify", name: translate(["测试进展与后续评估", "Verification & next steps"]), aliases: [], unitIds: ["u-rel-report", "u-rel-photo-proposal", "u-rel-photo-open"] },
+      ],
+      merged: [],
+      relations: [
+        { older: "u-arch-legacy", newer: "u-arch-plan", kind: "replaces", status: "resolved", evidence: translate(discussions[1].messages[2]) },
+        { older: "u-data-legacy", newer: "u-data-single", kind: "replaces", status: "resolved", evidence: translate(discussions[5].messages[2]) },
+      ],
+      chapters: [
+        { id: "release-scope", title: translate(["首版功能边界", "First-release scope"]), question: "", group: translate(["产品范围", "Scope"]), subtopics: [{ title: translate(["交付范围", "Delivery scope"]), subjectIds: ["sub-scope"] }] },
+        { id: "user-workflow", title: translate(["用户流程与反馈", "User workflow and feedback"]), question: "", group: translate(["产品范围", "Scope"]), subtopics: [{ title: translate(["交互流程", "Workflow"]), subjectIds: ["sub-workflow"] }] },
+        { id: "project-data", title: translate(["项目数据与画布", "Project data and canvas"]), question: "", group: translate(["技术架构", "Architecture"]), subtopics: [{ title: translate(["数据职责", "Data model"]), subjectIds: ["sub-data"] }] },
+        { id: architectureChapter, title: translate(["操作计划与校验", "Operation plans and validation"]), question: "", group: translate(["技术架构", "Architecture"]), subtopics: [{ title: translate(["执行与恢复", "Execution & recovery"]), subjectIds: ["sub-arch", "sub-val"] }] },
+        { id: "verification", title: translate(["测试与后续评估", "Verification and open work"]), question: "", group: translate(["验证与规划", "Verification"]), subtopics: [{ title: translate(["验证与下一阶段", "Verification & roadmap"]), subjectIds: ["sub-verify"] }] },
+      ],
+      report: {},
+    },
+  };
   const session: FocusSession = {
     id: "circuit-studio-demo", title: "Circuit Studio", mode: "work", locale: locale === "zh" ? "zh-CN" : "en",
+    sidecarWritingMode: "handoff",
     goal: translate(["整理首版设计、执行约束和测试进展", "Document the first release, execution constraints, and test progress"]),
     sourceConversationIds: conversations.map(chat => chat.id), evidence, sections, activeSectionId: architectureChapter,
     completedSectionIds: [], notes: "", createdAt: timestamp(1), updatedAt: timestamp(12),
+    wikiKnowledge,
     sourceSignatures: Object.fromEntries(conversations.map(chat => [chat.id, Object.fromEntries(messages.filter(message => message.conversationId === chat.id).map(message => [message.id, message.contentHash]))])),
     sourceRoles: Object.fromEntries(conversations.map(chat => [chat.id, Object.fromEntries(messages.filter(message => message.conversationId === chat.id).map(message => [message.id, message.role]))])),
     sourceMessageOrder: Object.fromEntries(conversations.map(chat => [chat.id, messages.filter(message => message.conversationId === chat.id).map(message => message.id)])),
