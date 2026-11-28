@@ -49,6 +49,7 @@ export async function providerResponse<T>(url: string, init: RequestInit, read: 
   init.signal?.addEventListener("abort", abort, { once: true });
   if (init.signal?.aborted) abort();
   const execute = async () => {
+    options.onDiagnostics?.({ ...diagnostics });
     controller.signal.throwIfAborted();
     response = await fetch(url, { ...init, signal: controller.signal });
     if (controller.signal.aborted) {
@@ -58,6 +59,7 @@ export async function providerResponse<T>(url: string, init: RequestInit, read: 
     diagnostics.responseHeadersMs = Math.round(performance.now() - started);
     diagnostics.requestId = response.headers?.get("x-request-id") ?? response.headers?.get("request-id") ?? undefined;
     phase = options.streaming ? "first_token" : "response_body";
+    options.onDiagnostics?.({ ...diagnostics });
     armIdle(90_000);
     if (!response.ok) {
       // Do not let a stuck error body hide the HTTP status or trigger a schema repair.

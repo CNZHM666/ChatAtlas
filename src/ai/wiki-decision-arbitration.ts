@@ -1,6 +1,7 @@
 import { knowledgeOwner, knowledgeStage } from "../shared/knowledge-subject";
 import { sourceMessageSignature } from "../shared/source-signature";
 import type { WikiKnowledgeLedger, WikiKnowledgeUnit, WikiUnitStatus, WikiUserAnswer } from "../shared/wiki-knowledge";
+import { wikiQuestionUsesExternalAlternative } from "./wiki-question-parse";
 
 const ALL = /(?:所有|全部|各)(?:风险)?等级|(?:所有|全部)用户|\ball (?:risk )?(?:levels|users)\b/iu;
 const NARROW = /(?:仅|只)(?:限)?(?:适用(?:于)?)?\s*((?:高|中|低)(?:风险)?)(?:等级|用户)?|\bonly (high|medium|low)(?:[- ]risk)?\b/iu;
@@ -53,6 +54,7 @@ export function wikiDecisionConflicts(ledger: WikiKnowledgeLedger, units: readon
   const axes = new Map<string, Choice[]>();
   for (const receipt of ledger.userAnswers ?? []) {
     const question=questions.get(receipt.questionId);
+    if (question && wikiQuestionUsesExternalAlternative(question, id => byId.get(id))) continue;
     const option = question?.options.find(item => item.id === receipt.optionId);
     const alternatives=question?.options.filter(item=>!UNSETTLED.test(item.label))??[];
     const binary=option&&alternatives.includes(option)&&alternatives.length===2&&/还是|二选一|\b(?:either|versus)\b/iu.test(receipt.question)

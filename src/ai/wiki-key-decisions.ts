@@ -1,4 +1,4 @@
-import { DECIDING_KINDS, aboutNameKey, wikiLedgerUnits, wikiUnitConditions, type WikiScopeAnswer, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus, type WikiUserDecision } from "../shared/wiki-knowledge";
+import { DECIDING_KINDS, aboutNameKey, wikiExternalResearch, wikiLedgerUnits, wikiUnitConditions, type WikiScopeAnswer, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus, type WikiUserDecision } from "../shared/wiki-knowledge";
 import { roadmaps, wikiUnitStatuses } from "./wiki-knowledge-write";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
 import { wikiByDiscussion } from "../shared/wiki-sources";
@@ -9,6 +9,7 @@ import { distinctWikiStageScopes } from "../shared/wiki-roadmap-scope";
 import { factTextKey } from "../shared/project-fact-state";
 import type { FocusSection } from "../shared/focus-session";
 import { wikiQuoteRange } from "../shared/wiki-claims";
+import { withoutStaleWikiDecisionReceipts } from "../shared/wiki-decision-receipts";
 
 /** A key point the user can confirm as a decision or set aside: one point however often it was restated. */
 export interface WikiDecisionCandidate {
@@ -37,7 +38,7 @@ function decisionClusters(ledger: WikiKnowledgeLedger): DecisionCluster[] {
   const subjectById = new Map(organization.subjects.map(subject => [subject.id, subject]));
   for (const chapter of organization.chapters) for (const topic of chapter.subtopics) for (const subjectId of topic.subjectIds) for (const id of subjectById.get(subjectId)?.unitIds ?? []) chapterOf.set(id, chapter.title);
   // Judged by what the conversation shows, before any verdict: a judged point stays listed so it can be undone.
-  const open = units.filter(unit => !unit.about && DECIDING_KINDS.includes(unit.kind) && ["proposal", "relayed", "open"].includes(plain.get(unit.id)!)).sort((a, b) => wikiByDiscussion(b, a));
+  const open = units.filter(unit => !unit.about && !wikiExternalResearch(unit) && DECIDING_KINDS.includes(unit.kind) && ["proposal", "relayed", "open"].includes(plain.get(unit.id)!)).sort((a, b) => wikiByDiscussion(b, a));
   const pairs = new Map(open.map(unit => [unit.id, bigramsOf(unit.statement)])), names = new Map(open.map(unit => [unit.id, namesOf(unit.statement)]));
   const conditions = new Map(open.map(unit => [unit.id, JSON.stringify(wikiUnitConditions(unit).map(factTextKey).sort())]));
   // One restates the other: most of its character pairs are there, and every number or Latin name too.
@@ -89,11 +90,14 @@ export function withDecision(ledger: WikiKnowledgeLedger, unitIds: string[], ver
 
 /** Decisions applied in place already appear in the document. A withdrawal can have no surviving decision row. */
 export function pendingLedgerDecisions(ledger: WikiKnowledgeLedger | undefined, sections: readonly FocusSection[] = []) {
+  if (ledger) ledger = withoutStaleWikiDecisionReceipts(ledger);
   if (!ledger?.draft || !ledger.decisionsAt || ledger.decisionsAt <= ledger.draft.generatedAt) return;
   const since = ledger.draft.generatedAt;
   const receipts = Object.entries(ledger.decisionArbitrations ?? {}).filter(([, entry]) => entry.at > since);
   const local = receipts.filter(([, entry]) => entry.locallyApplied);
-  const unapplied = receipts.filter(([, entry]) => !entry.locallyApplied).map(([, entry]) => entry);
+  const unapplied = [...receipts.filter(([, entry]) => !entry.locallyApplied).map(([, entry]) => entry),
+    ...Object.values(ledger.publishedDecisionRevisions ?? {}).filter(previous => previous.draftAt === since)
+      .map(previous => ({ ...previous.receipt, at: previous.at }))];
   // Before inline edits had a receipt, a reviewed visible claim was the
   // only record that its status was already applied to the article.
   const unappliedIds = new Set(unapplied.flatMap(entry => entry.unitIds ?? []));
@@ -172,7 +176,7 @@ export function wikiVersionQuestions(ledger: WikiKnowledgeLedger | undefined, zh
   if (!questions) {
     questions = [];
     const merged = new Set(organization.merged.flatMap(row => row.from));
-    const units = wikiLedgerUnits(ledger).filter(unit => !merged.has(unit.id) && !unit.about), byId = new Map(units.map(unit => [unit.id, unit]));
+    const units = wikiLedgerUnits(ledger).filter(unit => !merged.has(unit.id) && !unit.about && !wikiExternalResearch(unit)), byId = new Map(units.map(unit => [unit.id, unit]));
     const subjects = new Map(organization.subjects.map(subject => [subject.id, subject]));
     const scopeOf = new Map(organization.subjects.flatMap(subject => subject.unitIds.map(id => [id, subject.name] as const)));
     const planned = new Set<string>();
@@ -217,8 +221,12 @@ export function wikiVersionQuestions(ledger: WikiKnowledgeLedger | undefined, zh
         .flatMap(({ id, tag }) => byId.get(id) ? [{ id, label: byId.get(id)!.statement, unitIds: [id], tag }] : []).slice(0, ROADMAP_OPTIONS);
       if (options.length < 2) continue;
       members.forEach(unit => asked.add(unit.id));
+      // Older version chains cut generated topic names at 24 characters.
+      const legacyLimit = topic.name.length === 24 && /(?:集成|设计|实现|部署|验证|交互)方$/u.test(topic.name);
+      const named = legacyLimit && !members.some(unit => [unit.subject, unit.statement, unit.evidence.quote].some(text => text.includes(topic.name)))
+        ? members.find(unit => topic.current.includes(unit.id))?.subject ?? topic.name : topic.name;
       questions.push({ id: `topic:${options.map(option => option.id).join("|")}`, kind: "topic", impact: TOPIC_IMPACT + (topic.open ? OPEN_IMPACT : 0) + chapters.length + (own ? OWN_IMPACT : 0), ...(chapters[0] ? { chapter: chapters.join("、") } : {}),
-        question: zh ? `「${topic.name}」现在按哪一个？` : `Which holds now for “${topic.name}”?`, options });
+        question: zh ? `「${named}」现在按哪一个？` : `Which holds now for “${named}”?`, options });
     }
     const pairs = organization.relations.filter(relation => (relation.kind === "replaces" || relation.kind === "rejects") && relation.status === "unresolved")
       .flatMap(relation => { const older = byId.get(relation.older), newer = byId.get(relation.newer); return older && newer && exclusiveWikiVersions(older, newer) && !planned.has(older.id) && !planned.has(newer.id) && older.kind !== "question" && newer.kind !== "question" ? [{ older, newer }] : []; })

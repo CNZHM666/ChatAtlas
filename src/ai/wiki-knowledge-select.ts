@@ -1,14 +1,15 @@
 import { illustrativeWikiFlow } from "../shared/wiki-plain-block";
 import { currentBaseline, laterTakenUp } from "./wiki-knowledge-state";
-import { assistantRequest, exactDetail, personalDirection, similarStatements, wikiBlockedUnitIds, wikiLedgerUnits, wikiUnitDetails, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
+import { aboutNameKey, assistantRequest, exactDetail, personalDirection, similarStatements, wikiBlockedUnitIds, wikiLedgerUnits, wikiResearchRole, wikiResearchSelection, wikiResearchUse, wikiUnitDetails, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { wikiDecidedTopics } from "../shared/wiki-decided-topics";
 import { englishText } from "../shared/wiki-sentences";
 import { wikiDiscussionPrompt } from "./wiki-reading-voice";
-import { wikiProcessOnly } from "../shared/wiki-editorial-cleanup";
+import { wikiIsProjectAside, wikiProcessOnly } from "../shared/wiki-editorial-cleanup";
 import { wikiQuoteAsksOnlyForFeedback } from "../shared/wiki-said-in-quote";
 import { wikiUnitAssertionIssues } from "./wiki-unit-fidelity";
 import { wikiSaidLater } from "../shared/wiki-sources";
+import { instructionUnitBoost } from "../shared/wiki-instruction";
 
 /** Characters of English that say what one character of Chinese does: the length budgets below were set on Chinese
  * runs, and counted as written they cut an English run's subtopics to a third (one run left 49 points out, among them
@@ -95,7 +96,12 @@ const LEARNING_SUBTOPIC = 3;
 
 /** Advice to the person, not knowledge of the project: what the developer should learn, a career direction. One run
  * put "开发者需掌握嵌入式、控制理论、ROS2……" under the technical architecture. It stays in the ledger. */
-const PERSONAL = { test: personalDirection };
+const PERSONAL_TRACK = /学习路线|大学学习|大学生涯|个人发展|个人(?:技术)?方向|个人战略|专业方向|职业(?:路线|规划|发展|方向)|实习(?:方向|岗位|准备)|求职|就业|\b(?:career path|career advice|study plan|job search|internship)\b/iu;
+const PERSONAL_CONTEXT = /大[一二三四]|大学期间|大学阶段|毕业|专业课|专业主线|专业衔接|(?:我的|你的|你目前的|我目前的)专业|实习|求职|就业|\b(?:internship|graduation|your major|career)\b/iu;
+const PROJECT_AUDIENCE = /目标用户|用户群体|产品面向|目标市场|核心用户|\b(?:target audience|target users|user segment)\b/iu;
+export const wikiProjectPersonalAside = (unit: WikiKnowledgeUnit) => !unit.about && !PROJECT_AUDIENCE.test(unit.statement)
+  && (personalDirection(unit.statement) || /^(?:你的|我的|个人)?(?:最终)?(?:学习路线|个人技术方向|职业规划)$/u.test(unit.evidence.section?.trim()??"")
+    || PERSONAL_TRACK.test([unit.subject, unit.facet, unit.evidence.section].join(" ")) && PERSONAL_CONTEXT.test(unit.evidence.quote));
 const messageOf = (unit: WikiKnowledgeUnit) => unit.evidence.messageId || unit.evidence.evidenceId;
 /** Separate messages saying a point: repeated discussion, not two units read from one message. */
 const mentionsOf = (units: WikiKnowledgeUnit[]) => new Set(units.map(messageOf)).size;
@@ -129,10 +135,13 @@ export function echoedStatements(units: WikiKnowledgeUnit[], rank: (unit: WikiKn
 }
 
 /** One point to explain: an explanation group, or a unit in no group. */
-interface Point { members: WikiKnowledgeUnit[]; home: string; text: string; length: number; must: boolean; value: number; order: number }
+interface Point { members: WikiKnowledgeUnit[]; home: string; text: string; length: number; tier: 0 | 1 | 2; value: number; order: number }
 export interface WikiCuratedView {
   /** Every unit the draft shows, all members of each chosen group included. */
   selected: Set<string>;
+  /** Representatives of the requested comparison and reference coverage. */
+  requiredResearch?: Set<string>;
+  requiredConclusions?: Set<string>;
   /** The subject each selected unit is written under: a group's members all sit at its home. */
   home: Map<string, string>;
   /** Groups explained at a home outside a subject holding some of their members: subject → group cores. */
@@ -154,6 +163,7 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
   // is for are its matter, not advice beside a project or another product's points. One run left out the whole first
   // week of Git, tagged as about GitHub, and every 学习路线 point.
   const learning = ledger.documentType === "learning";
+  const research = wikiResearchSelection(ledger, [...units.values()]);
   const mode = learning ? undefined : ledger.writingMode;
   const handoff = mode === "handoff", concise = mode === "concise", audit = mode === "audit";
   const blocked = wikiBlockedUnitIds(ledger);
@@ -164,8 +174,9 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
     && illustrativeWikiFlow(unit.statement);
   const shown = (unit: WikiKnowledgeUnit | undefined): unit is WikiKnowledgeUnit => Boolean(unit) && subjectOf.has(unit!.id) && !assistantRequest(unit!.statement)
     && !blocked.has(unit!.id) && !wikiProcessOnly(unit!.statement) && !wikiQuoteAsksOnlyForFeedback(unit!.evidence.quote)
+    && ledger.decisions?.[unit!.id]?.verdict !== "rejected" && ledger.scopeAnswers?.[aboutNameKey(unit!.about?.name ?? "")] !== "exclude"
     && !wikiUnitAssertionIssues(unit!).length
-    && (learning || unit!.about?.role !== "other_project" && !PERSONAL.test(unit!.statement) && (audit || !demoWithoutCriterion(unit!))
+    && (learning || unit!.about?.role !== "other_project" && !wikiProjectPersonalAside(unit!) && (!wikiIsProjectAside(unit!) || statuses.get(unit!.id) === "confirmed") && (audit || !demoWithoutCriterion(unit!))
       && (!wikiDiscussionPrompt(unit!) || ["confirmed", "open", "contested"].includes(statuses.get(unit!.id) ?? "")));
   // Repetition and recency from P2: a point folded from several mentions, or the newer side of a narrowing.
   const repeated = new Map(organization.merged.map(row => [row.id, row.from.length]));
@@ -181,10 +192,31 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
   // the best-ranked copy counts the others like folded mentions; the copies themselves gain nothing.
   const echoes = echoedStatements([...units.values()].filter(unit => subjectOf.has(unit.id)), unit =>KIND_WEIGHT[unit.kind] + (repeated.get(unit.id) ?? 0), order);
   if (echoes.size) report.echoed_points = echoes.size;
+  const instruction = ledger.organizationInstruction;
+  if (instruction) report.instruction_guided = 1;
+  const instructionDelta = (unit: WikiKnowledgeUnit) => instructionUnitBoost(instruction, unit, statuses.get(unit.id));
   const technical = (unit: WikiKnowledgeUnit) => !unit.about && (Boolean(unit.evidence.code)
     || TECHNICAL.test(unit.statement) || SPEC_IDENTIFIER.test(unit.statement) || wikiUnitDetails(unit).some(exactDetail));
   const score = (unit: WikiKnowledgeUnit) => KIND_WEIGHT[unit.kind] + Math.min(2, (repeated.get(unit.id) ?? 0) + (echoes.get(unit.id) ?? 0)) +(bonus.get(unit.id) ?? 0) + (wikiUnitDetails(unit).some(exactDetail) ? 1 : 0) + (unit.evidence.pasted && !unit.about ? PASTED_BONUS : 0)
-    + (handoff && technical(unit) ? 4 : 0);
+    + (handoff && technical(unit) ? 4 : 0)
+    + instructionDelta(unit);
+  const researchByName = new Map<string, WikiKnowledgeUnit>();
+  const excludedNames = new Set([...(ledger.explicitProjectExclusions ?? []).map(aboutNameKey), ...Object.entries(ledger.scopeAnswers ?? {}).filter(([, answer]) => answer === "exclude").map(([name]) => name)]);
+  if (research) for (const unit of units.values()) {
+    if (!wikiResearchRole(unit) || blocked.has(unit.id) || ledger.decisions?.[unit.id]?.verdict === "rejected"
+      || statuses.get(unit.id) === "history" || excludedNames.has(aboutNameKey(unit.about!.name))
+      || !subjectOf.has(unit.id) && organization.merged.some(row => row.from.includes(unit.id))) continue;
+    const key = `${unit.about!.role}:${aboutNameKey(unit.about!.name)}`, prior = researchByName.get(key);
+    if (!prior || Number(shown(unit)) > Number(shown(prior)) || shown(unit) === shown(prior) && score(unit) > score(prior)) researchByName.set(key, unit);
+  }
+  const requiredResearch = new Set([...researchByName.values()].map(unit => unit.id));
+  const requiredConclusions = new Set<string>();
+  if (research) for (const unit of units.values()) {
+    if (wikiResearchUse(unit) !== "conclusion" || blocked.has(unit.id) || ledger.decisions?.[unit.id]?.verdict === "rejected"
+      || statuses.get(unit.id) === "history" || !subjectOf.has(unit.id) && organization.merged.some(row => row.from.includes(unit.id))) continue;
+    requiredConclusions.add(unit.id);
+    requiredResearch.add(unit.id);
+  }
   // Also always shown: a point said in three or more messages (one copy; "Service Worker 可能终止" was said in five and
   // shown in none), a rule or target giving a measure ("正文宽度控制在 720–850px"), and a point naming something exact
   // (an error code, an address, a resolution: each run kept a different few of "LOAD_REQUIRES_DRIVER", "0x3C", "1440x900").
@@ -208,9 +240,11 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
     if (!concise && !handoff) return true;
     const status = statuses.get(unit.id);
     if (status === "history") return false;
+    if (requiredResearch.has(unit.id)) return true;
     if (status === "confirmed" || status === "contested" || status === "open") return true;
-    if (unit.about) return concise && retainedReferences.has(unit.id);
+    if (unit.about) return wikiResearchRole(unit) || retainedReferences.has(unit.id);
     if (wikiSafetyRule(unit) || status === "reported" && (!handoff || technical(unit))) return true;
+    if (instruction && instructionDelta(unit) >= 2 && !unit.about) return true;
     if (handoff) return context.has(unit.id) || technical(unit) || unit.kind === "constraint" && !unit.evidence.pasted && unit.evidence.role === "user";
     return context.has(unit.id) || status === "stated" || status === "relayed" || !unit.evidence.pasted && unit.evidence.role === "user";
   };
@@ -225,10 +259,14 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
     return best ? [best.id] : [];
   }));
   const eligible = (unit: WikiKnowledgeUnit | undefined): unit is WikiKnowledgeUnit => Boolean(unit && (inMode(unit) || fallback.has(unit.id)));
-  const required = (unit: WikiKnowledgeUnit) => audit || (concise || handoff ? MUST.includes(statuses.get(unit.id)!)
-    || wikiSafetyRule(unit) || context.has(unit.id) || fallback.has(unit.id)
-    || handoff && ((statuses.get(unit.id) === "reported" && technical(unit))
-      || unit.kind === "constraint" && unit.evidence.role === "user" && !unit.evidence.pasted) : must(unit));
+  const tierOf = (unit: WikiKnowledgeUnit): Point["tier"] => {
+    const state = statuses.get(unit.id);
+    if (audit || !mode && must(unit) || requiredResearch.has(unit.id) || MUST.includes(state!) || wikiSafetyRule(unit) || carriers.has(unit.id)
+      || retainedReferences.has(unit.id) || baseline.has(unit.id) || holdsNow.has(unit.id)
+      || RULE_KINDS.includes(unit.kind) && MEASURE.test(unit.statement)
+      || unit.kind === "constraint" && unit.evidence.role === "user" && !unit.evidence.pasted) return 0;
+    return must(unit) || context.has(unit.id) || fallback.has(unit.id) || Boolean(instruction && instructionDelta(unit) >= 2) || handoff && state === "reported" && technical(unit) ? 1 : 2;
+  };
   if (concise) { budget = Math.min(120, budget); lengthBudget = Math.min(9000, lengthBudget); subtopicLength = Math.min(420, subtopicLength); }
   if (handoff) { budget = Math.min(250, budget); lengthBudget = Math.min(18500, lengthBudget); subtopicLength = Math.min(780, subtopicLength); }
   const points: Point[] = [], grouped = new Set<string>(), elsewhere = new Map<string, Array<{ core: string; home: string }>>();
@@ -243,28 +281,30 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
     // without split-off conditions keeps its own support as what it adds.
     const roles = new Map(group.members.map(member => [member.unitId, member]));
     const length = group.core.length + members.reduce((sum, unit) => { const member = roles.get(unit.id)!; return sum + (member.role === "restates" ? 0 : member.adds.length ? member.adds.join("").length : member.support.length || unit.statement.length); }, 0);
-    points.push({ members, home, text: group.core, length: cost(group.core, length), must: members.some(required), value: Math.max(...members.map(score)) + Math.min(GROUP_EVIDENCE_CAP, GROUP_EVIDENCE * (mentionsOf(members) - 1)), order: Math.min(...members.map(unit => order.get(unit.id)!)) });
+    const tier = members.reduce<Point["tier"]>((best, unit) => tierOf(unit) < best ? tierOf(unit) : best, 2);
+    points.push({ members, home, text: group.core, length: cost(group.core, length), tier, value: Math.max(...members.map(score)) + Math.min(GROUP_EVIDENCE_CAP, GROUP_EVIDENCE * (mentionsOf(members) - 1)), order: Math.min(...members.map(unit => order.get(unit.id)!)) });
     for (const subject of new Set(members.map(unit => subjectOf.get(unit.id)!))) if (subject !== home) elsewhere.set(subject, [...elsewhere.get(subject) ?? [], { core: group.core, home }]);
   }
   for (const subject of organization.subjects) for (const id of subject.unitIds) {
     const unit = units.get(id);
-    if (eligible(unit) && !grouped.has(id)) points.push({ members: [unit], home: subject.id, text: unit.statement, length: cost(unit.statement), must: required(unit), value: score(unit), order: order.get(id)! });
+    if (eligible(unit) && !grouped.has(id)) points.push({ members: [unit], home: subject.id, text: unit.statement, length: cost(unit.statement), tier: tierOf(unit), value: score(unit), order: order.get(id)! });
   }
   const bySubject = organization.subjects.map(subject => {
     const own = points.filter(point => point.home === subject.id), members = own.flatMap(point => point.members);
     // Read to review: every point of a lesson is shown, not the best few.
     return { own, quota: learning ? own.length : wikiSubjectQuota(own.length, aboutSubject(members)) };
   });
-  const picked = new Set<Point>(points.filter(point => point.must));
+  const preferred = (a: Point, b: Point) => a.tier - b.tier || b.value - a.value || a.order - b.order;
+  const picked = new Set<Point>(points.filter(point => point.tier === 0));
   // The whole draft stays within the point budget: quotas shrink in proportion, each subject keeping at least one point.
-  const room = Math.max(0, budget - picked.size), wanted = bySubject.reduce((sum, { own, quota }) => sum + Math.min(quota, own.filter(point => !point.must).length), 0);
+  const room = Math.max(0, budget - picked.size), wanted = bySubject.reduce((sum, { own, quota }) => sum + Math.min(quota, own.filter(point => point.tier !== 0).length), 0);
   const scale = wanted > room ? room / wanted : 1;
   for (const { own, quota: full } of bySubject) {
     // Ties keep discussion order, so a rerun selects the same points.
     // The quota goes to distinct points: a near-repeat of a point already picked is skipped.
-    const chosen = own.filter(point => point.must), quota = scale < 1 && full ? Math.max(1, Math.round(full * scale)) : full;
+    const chosen = own.filter(point => point.tier === 0), quota = scale < 1 && full ? Math.max(1, Math.round(full * scale)) : full;
     let taken = 0;
-    for (const point of own.filter(point => !point.must).sort((a, b) => b.value - a.value || a.order - b.order)) {
+    for (const point of own.filter(point => point.tier !== 0).sort(preferred)) {
       if (taken >= quota || handoff && picked.size >= budget) break;
       if (chosen.some(other => similarStatements(point.text, other.text))) continue;
       chosen.push(point); picked.add(point); taken++;
@@ -272,8 +312,8 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
   }
   // The length budget: the lowest-valued optional points leave first, whole; a group's conditions are never cut.
   let length = [...picked].reduce((sum, point) => sum + point.length, 0);
-  for (const point of [...picked].filter(point => !point.must).sort((a, b) => a.value - b.value || b.order - a.order)) {
-    if (length <= lengthBudget) break;
+  for (const point of [...picked].filter(point => point.tier !== 0).sort((a, b) => preferred(b, a))) {
+    if (length <= lengthBudget && picked.size <= budget) break;
     picked.delete(point); length -= point.length; report.length_dropped = (report.length_dropped ?? 0) + 1;
   }
   // A subtopic reads in one sitting: past SUBTOPIC_LENGTH characters of material, its lowest-valued optional points
@@ -283,7 +323,7 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
   for (const point of picked) { const key = subtopicOf.get(point.home) ?? point.home; bySubtopic.set(key, [...bySubtopic.get(key) ?? [], point]); }
   for (const own of bySubtopic.values()) {
     let size = own.reduce((sum, point) => sum + point.length, 0);
-    for (const point of own.filter(point => !point.must).sort((a, b) => a.value - b.value || b.order - a.order)) {
+    for (const point of own.filter(point => point.tier !== 0).sort((a, b) => preferred(b, a))) {
       if (size <= (learning ? subtopicLength * LEARNING_SUBTOPIC : subtopicLength)) break;
       picked.delete(point); size -= point.length; length -= point.length; report.subtopic_dropped = (report.subtopic_dropped ?? 0) + 1;
     }
@@ -300,8 +340,9 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
       let size = sizes.get(key) ?? 0;
       if (size >= floor) continue;
       const chosen = [...picked].filter(point => chapterOf(point) === key);
-      for (const point of points.filter(point => !picked.has(point) && chapterOf(point) === key).sort((a, b) => b.value - a.value || a.order - b.order)) {
-        if (size >= floor || handoff && (picked.size >= budget || length + point.length > lengthBudget)) break;
+      for (const point of points.filter(point => !picked.has(point) && chapterOf(point) === key).sort(preferred)) {
+        if (size >= floor || picked.size >= budget) break;
+        if (length + point.length > lengthBudget) continue;
         // A near-repeat of a point the chapter shows adds nothing to read.
         if (chosen.some(other => similarStatements(point.text, other.text))) continue;
         picked.add(point); chosen.push(point); size += point.length; length += point.length; report.chapter_filled = (report.chapter_filled ?? 0) + 1;
@@ -310,9 +351,12 @@ export function curateWikiUnits(ledger: WikiKnowledgeLedger, statuses: Map<strin
   }
   const selected = new Set<string>(), home = new Map<string, string>();
   for (const point of picked) for (const unit of point.members) { selected.add(unit.id); home.set(unit.id, point.home); }
-  if (handoff) Object.assign(report, { required_points: points.filter(point => point.must).length, point_budget_overflow: Math.max(0, picked.size - budget), length_budget_overflow: Math.max(0, length - lengthBudget) });
+  Object.assign(report, { required_points: points.filter(point => point.tier === 0).length,
+    preferred_points: [...picked].filter(point => point.tier === 1).length,
+    point_budget_overflow: Math.max(0, picked.size - budget), length_budget_overflow: Math.max(0, length - lengthBudget) });
   Object.assign(report, { points: picked.size, group_points: [...picked].filter(point => point.members.length > 1).length, length });
-  return { selected, home, elsewhere, report };
+  if (research) Object.assign(report, { research_entities: researchByName.size, research_conclusions: requiredConclusions.size, research_selected: [...requiredResearch].filter(id => selected.has(id)).length });
+  return { selected, home, elsewhere, report, requiredResearch, requiredConclusions };
 }
 
 /** The selected unit IDs alone. */

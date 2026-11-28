@@ -23,7 +23,7 @@ beforeEach(async () => {
   vi.mocked(createAtlasAI).mockReturnValue({ decide, modelId: "fixture" } as unknown as ReturnType<typeof createAtlasAI>);
 });
 it("audits the actual original topic after generation and keeps earlier answers as background only", async () => {
-  const response = await answerHomeRecall("硬件AI", [source], found(), ["AI 产品留存"], true, new AbortController().signal, undefined, { runId:"shared-search-run", history: [{ question: "之前的问题", answer: "旧回答" }] });
+  const response = await answerHomeRecall("硬件AI", [source], found(), ["AI 产品留存"], true, new AbortController().signal, { runId:"shared-search-run", history: [{ question: "之前的问题", answer: "旧回答" }] });
   expect(response.evidence[0].messageId).toBe("m");
   expect(vi.mocked(generateFocusSession).mock.calls[0][7]).toBe("shared-search-run");
   expect(vi.mocked(generateFocusSession).mock.calls[0][9]).toMatchObject({ querySearchQueries: ["硬件AI"], homeRecallIntent: "find", queryHistory: [{question:"之前的问题",answer:"旧回答"}] });
@@ -39,4 +39,22 @@ it("rejects changed or unrelated original material before generation", async () 
   const db = await getDatabase(); const original = (await db.get("messages", "m"))!;
   await db.put("messages", { ...original, content: "戒色AI 日活与留存。" }); const selection = found(); selection.scope.blocks[0].messageSignatures.m = sourceMessageSignature("戒色AI 日活与留存。");
   await expect(answerHomeRecall("硬件AI", [source], selection, ["AI 产品"], true, new AbortController().signal)).rejects.toThrow("指定的主题"); expect(generateFocusSession).not.toHaveBeenCalled();
+});
+
+it("returns an exact reviewed source for a simple lookup without asking the answer model", async () => {
+  const material = { ...found(), quotes: [{ conversationId: source.id, messageIds: ["m"], quote: text, relation: "direct" as const }] };
+  const onSources = vi.fn();
+  const answer = await answerHomeRecall("查找硬件AI", [source], material, ["硬件AI"], true, new AbortController().signal, { onSources });
+  expect(onSources).toHaveBeenCalledWith([expect.objectContaining({ excerpt: text, messageId: "m" })]);
+  expect(answer.sections[0].body).toBe("> " + text);
+  expect(generateFocusSession).not.toHaveBeenCalled();
+  expect(decide).not.toHaveBeenCalled();
+});
+
+it("pins the admitted quotation for follow-up answers before verification", async () => {
+  const material = { ...found(), quotes: [{ conversationId: source.id, messageIds: ["m"], quote: text, relation: "direct" as const }] };
+  await answerHomeRecall("硬件AI", [source], material, ["硬件AI"], true, new AbortController().signal,
+    { history: [{ question: "上一步是什么？", answer: "查找了硬件AI。" }] });
+  expect(vi.mocked(generateFocusSession).mock.calls[0][9]?.queryReferences?.[0].excerpt).toBe(text);
+  expect(decide).toHaveBeenCalledOnce();
 });

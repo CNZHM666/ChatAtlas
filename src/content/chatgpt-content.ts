@@ -4,12 +4,13 @@ import { findQuestionBlock, looseText, pageRoots, shadowOf } from "./question-te
 import type { AtlasMessage, CaptureCommandResponse } from "../shared/messages";
 import { buildConversationCapture } from "./capture-builder";
 import { PageCapture } from "./page-capture";
-import { DOMChatGPTAdapter, usesCurrentChatGPTMarkup } from "./chatgpt-adapter";
+import { chatGPTComposer, DOMChatGPTAdapter, usesCurrentChatGPTMarkup } from "./chatgpt-adapter";
 import { ChatGPTSyncAdapter, ChatGPTSyncError } from "../sync/chatgpt-sync-adapter";
 import { ConversationNavigator } from "./conversation-navigator";
 import { pageTheme, watchPageTheme } from "./page-theme";
 import { locateDiscussion } from "./locate-discussion";
 import { clearProjectComposer, fillProjectComposer } from "./project-handoff";
+import { watchComposerFiles } from "./project-files";
 
 const adapter = new DOMChatGPTAdapter();
 const syncAdapter = new ChatGPTSyncAdapter();
@@ -19,8 +20,11 @@ const pageCapture = new PageCapture(() => usesCurrentChatGPTMarkup() ? Promise.r
 });
 const persistCurrentConversation = (force = false) => pageCapture.capture(force);
 const scheduleCapture = (delay = 650) => pageCapture.schedule(delay);
+const projectFiles = watchComposerFiles(() => adapter.detectConversation()?.id ?? "", chatGPTComposer, extensionAlive);
 
 chrome.runtime.onMessage.addListener((message: AtlasMessage, _sender, sendResponse) => {
+  if (message.type === "ATLAS_PROJECT_FILE_RECEIVE") { sendResponse(projectFiles.receive(message)); return false; }
+  if (message.type === "ATLAS_PROJECT_FILE_DRAG_READY") { sendResponse(projectFiles.arm(message)); return false; }
   if (message.type === "ATLAS_FILL_COMPOSER") {
     void (message.undo ? clearProjectComposer(message.text, message.conversationId) : fillProjectComposer(message.text, message.conversationId)).then(sendResponse).catch(error => { console.warn("[ChatAtlas] insert", "error", error); sendResponse({ ok: false, reason: "failed" }); });
     return true;
@@ -58,8 +62,8 @@ ${error.stack ?? ""}` : String(error)); sendResponse({ ok: false, error: "本次
 const navigator = new ConversationNavigator(adapter);
 // After the extension is reloaded or updated, this copy of the script can no longer reach it: stop instead of
 // failing on every page change. The new copy takes over.
-const retired = () => { if (extensionAlive()) return false; observer.disconnect(); pageCapture.pause(); navigator.stop(); return true; };
-const observer = new MutationObserver(() => { if (retired()) return; scheduleCapture(); navigator.syncPage(); navigator.ensureTrigger(); });
+const retired = () => { if (extensionAlive()) return false; observer.disconnect(); pageCapture.pause(); navigator.stop(); projectFiles.dispose(); return true; };
+const observer = new MutationObserver(() => { if (retired()) return; scheduleCapture(); navigator.syncPage(); navigator.ensureTrigger(); projectFiles.pageChanged(); });
 let active = false;
 /** CRXJS calls this even when a reinjected loader reuses its cached module. */
 export function onExecute(): void {

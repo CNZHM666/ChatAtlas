@@ -15,6 +15,7 @@ export interface CaptureCommandResponse {
   ok: boolean;
   summary?: CaptureSummary;
   error?: string;
+  code?: string;
 }
 
 export interface NavigationResponse {
@@ -27,8 +28,6 @@ export type { NavigatorDataResponse };
 export type AtlasMessage =
   | { type: "ATLAS_NATIVE_IMPORT_START"; sources: import("./native-import").NativeImportSource[] }
   | { type: "ATLAS_NATIVE_IMPORT_RESUME" }
-  | { type: "ATLAS_WEB_CAPTURE_STATUS" }
-  | { type: "ATLAS_WEB_CAPTURE_SET"; platform: import("./web-capture").WebCapturePlatform; enabled: boolean }
   | { type: "ATLAS_WEB_CAPTURE_TABS"; platform: import("./web-capture").WebCapturePlatform }
   | { type: "ATLAS_WEB_CAPTURE_TAB"; platform: import("./web-capture").WebCapturePlatform; tabId: number; conversationId: string }
   | { type: "ATLAS_WEB_PAGE_INSPECT" }
@@ -36,7 +35,8 @@ export type AtlasMessage =
   | { type: "ATLAS_WEB_HISTORY_LIST"; platform: import("./web-capture").WebCapturePlatform; tabId:number }
   | { type: "ATLAS_WEB_HISTORY_IMPORT"; platform: import("./web-capture").WebCapturePlatform; url:string; conversationId:string }
   | { type: "ATLAS_OPEN_SIDEPANEL" }
-  | { type: "ATLAS_OPEN"; prepareId?:string }
+  | { type: "ATLAS_OPEN"; prepareId?:string; home?: true }
+  | { type: "ATLAS_FOCUS_HOME" }
   | { type: "ATLAS_OPEN_CONVERSATION"; conversationId: string; messageId?: string; sourceRange?: MessageSourceRange; search?: ReaderSearchContext }
   | { type: "ATLAS_FOCUS_CONVERSATION"; conversationId: string; messageId?: string; sourceRange?: MessageSourceRange; search?: ReaderSearchContext }
   | { type: "ATLAS_OPEN_REVIEW"; sessionId: string; sectionId?: string; query?: boolean }
@@ -47,11 +47,25 @@ export type AtlasMessage =
   | { type: "ATLAS_SIDECAR_LOCATE"; conversationId: string; messageId: string; platformMessageId?:string }
   | { type: "ATLAS_LOCATE_MESSAGE"; conversationId: string; identity: NativeMessageIdentity }
   | { type: "ATLAS_SIDECAR_SYNC"; conversationId: string }
+  | { type: "ATLAS_FIRST_WIKI_START" | "ATLAS_FIRST_WIKI_EXECUTE" | "ATLAS_FIRST_WIKI_PAUSE" | "ATLAS_FIRST_WIKI_STOP_EXECUTION"; draftId: string }
+  | { type: "ATLAS_FIRST_WIKI_CHANGED"; projectId: string; savedSessionId?: string }
+  | { type: "ATLAS_PROJECT_VERSION_SAVED" }
+  | { type: "ATLAS_PROJECT_RESTORED"; projectId: string }
+  | { type: "ATLAS_PROJECT_TRASHED"; projectId: string }
   | { type: "ATLAS_SIDECAR_CAPTURE"; conversationId: string }
   /** undo: clear the input box again, only while it still holds exactly this text. */
   | { type: "ATLAS_SIDECAR_HANDOFF"; conversationId: string; text: string; undo?: boolean }
   | { type: "ATLAS_FILL_COMPOSER"; conversationId: string; text: string; undo?: boolean }
   | { type: "ATLAS_SIDECAR_DATA"; conversationId: string }
+  | { type: "ATLAS_PROJECT_FILE_CONTEXT"; conversationId: string }
+  | { type: "ATLAS_PROJECT_FILE_START"; conversationId: string; projectId: string; info: import("./project-files").ProjectFileInfo; manual: boolean }
+  | { type: "ATLAS_PROJECT_FILE_CHUNK"; token: string; offset: number; data: string }
+  | { type: "ATLAS_PROJECT_FILE_FINISH"; token: string }
+  | { type: "ATLAS_PROJECT_FILE_REUSE"; conversationId: string; projectId: string; fileId: string; tabId?: number; token?: string }
+  | { type: "ATLAS_PROJECT_FILE_DROP"; conversationId: string; token: string }
+  | { type: "ATLAS_PROJECT_FILE_DRAG_READY"; conversationId: string; token: string; info: import("./project-files").ProjectFileInfo }
+  | { type: "ATLAS_PROJECT_FILE_RECEIVE"; conversationId: string; token: string; offset: number; data: string; info?: import("./project-files").ProjectFileInfo }
+  | { type: "ATLAS_PROJECT_FILES_CHANGED"; projectId: string }
   | { type: "ATLAS_NAVIGATOR_DATA"; conversationId: string }
   | { type: "ATLAS_PING" }
   /** Asks an AI page for its light or dark theme; the page also announces a change, for the side panel to match. */

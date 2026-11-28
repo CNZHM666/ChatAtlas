@@ -1,5 +1,6 @@
 import {ChatGPTFileImport} from "./ChatGPTFileImport";
 import { AIPlatformFilter } from "./AIPlatformFilter";
+import { AIPlatformIcon } from "./AIPlatformIcon";
 import { conversationPlatformGroup, platformName } from "../../shared/platforms";
 import { BookOpen, CheckCircle2, CircleAlert, FolderPlus, LoaderCircle, Pause, RefreshCw, Search, SearchX, Square, SquareCheck, SquareMinus, Upload, X } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -48,21 +49,27 @@ const WorkbenchSourceList = memo(function WorkbenchSourceList({ visible, selecte
   const projectSlot = Boolean(related && visible.some(conversation => related.get(conversation.id)?.length)), readSlot = Boolean(onOpen && visible.some(conversation => conversation.messageCount != null));
   return <div className="workbench-sync-list" role="group" aria-label={zh ? "选择本次使用的对话" : "Choose conversations for this task"}>
     {visible.map((conversation) => {
-      // A row selects; reading the original and opening a project it belongs to are small actions at its end.
-      const match = matches?.get(conversation.id), projects = related?.get(conversation.id) ?? [], state = showSyncStatus ? hydrationLabel(conversation) : undefined;
+      // A row selects; synced rows show Read in the same fixed slot where unsynced rows show sync state, keeping the platform column flush right.
+      const match = matches?.get(conversation.id), projects = related?.get(conversation.id) ?? [], isReady = readyIds.has(conversation.id);
+      const canRead = Boolean(onOpen && conversation.messageCount != null), state = showSyncStatus ? hydrationLabel(conversation) : undefined;
       return <div key={conversation.id} className={`workbench-sync-item ${selectedIds.has(conversation.id) ? "is-selected" : ""}`}><label><input type="checkbox" checked={selectedIds.has(conversation.id)} disabled={disabled} onChange={() => toggle(conversation.id)} /><span className="workbench-sync-copy"><span title={conversation.title}>{conversation.title}</span>{match ? <span className="workbench-sync-match">{match.summary}</span> : null}</span></label>
         {projects.length ? <button type="button" className="workbench-source-projects" title={projects.map(project => project.title).join("、")} onClick={() => onOpenProject?.(projects[0].id)} disabled={!onOpenProject}>{zh ? `${projects.length} 个项目` : `${projects.length} ${projects.length > 1 ? "projects" : "project"}`}</button> : projectSlot ? <span className="workbench-source-projects" aria-hidden="true" /> : null}
-        {state && <small className={`workbench-source-state ${readyIds.has(conversation.id) ? "is-ready" : "is-pending"}${state === (zh ? "待同步" : "Pending") ? " workbench-pending-dot" : ""}`}>{state}</small>}
-        <small className="workbench-source-platform">{platformName(conversation.platform,zh?"zh-CN":"en")}</small>
-        {onOpen && conversation.messageCount != null ? <button type="button" className="workbench-source-read" aria-label={zh ? `阅读原文：${conversation.title}` : `Read: ${conversation.title}`} title={zh ? "阅读原文" : "Read original"} onClick={() => onOpen(conversation.id, match?.message, match?.sourceRange)}><BookOpen size={15} aria-hidden="true" /></button> : readSlot ? <span className="workbench-source-read" aria-hidden="true" /> : null}
+        {canRead && (!showSyncStatus || isReady)
+          ? <button type="button" className="workbench-source-read" aria-label={zh ? `阅读原文：${conversation.title}` : `Read: ${conversation.title}`} title={zh ? "阅读原文" : "Read original"} onClick={() => onOpen!(conversation.id, match?.message, match?.sourceRange)}><BookOpen size={17} aria-hidden="true" /><span>{zh ? "阅读" : "Read"}</span></button>
+          : state
+            ? <small className={`workbench-source-state ${isReady ? "is-ready" : "is-pending"}${state === (zh ? "待同步" : "Pending") ? " workbench-pending-dot" : ""}`}>{state}</small>
+            : readSlot ? <span className="workbench-source-read" aria-hidden="true" /> : null}
+        <small className="workbench-source-platform"><AIPlatformIcon platform={conversationPlatformGroup(conversation.platform)} />{platformName(conversation.platform,zh?"zh-CN":"en")}</small>
       </div>;
     })}
     {!visible.length ? <div className="workbench-sync-empty"><div className="workbench-sync-empty-icon" aria-hidden="true"><SearchX size={20} /></div><strong>{emptyMessage}</strong><span>{emptyHint}</span></div> : null}
   </div>;
 });
 
-export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversations, importJob: suppliedImportJob, importSource, selectedIds, onSelectedIds, onScan, onHydrate, onZip, onPause, onResume, onConnect, heading, onToggle, expanded = true, compact = false, initialImport = false, controlsHost,statusHost, sessions, onOpen, onOpenProject, onLinkProject, onUseSources, onPreviewAction }: {
+export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversations, importJob: suppliedImportJob, importSource, selectedIds, onSelectedIds, onScan, onHydrate, onZip, onPause, onResume, onConnect, heading, onToggle, expanded = true, compact = false, initialImport = false, forceIntroductory = false, controlsHost,statusHost, sessions, onOpen, onOpenProject, onLinkProject, onUseSources, onPreviewAction, titleOnly = false }: {
   onPreviewAction?: () => void;
+  titleOnly?: boolean;
+  forceIntroductory?: boolean;
   onUseSources?: (ids: string[]) => void;
   /** Saved projects: each row says which ones it belongs to, and selected rows can join one. */
   sessions?: FocusSession[];
@@ -150,7 +157,7 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
   const error = importJob && (["auth_required", "unavailable", "failed"].includes(importJob.status) || ["partial", "completed_with_warnings"].includes(importJob.status) && importJob.failed > 0 || needsConnection || importJob.native?.sources.some(source => source.error));
   // Titles match at once; message text is searched too, among the conversations the filters leave.
   const inFilter = useMemo(() => titleRows.filter(({ item }) => (!platform || conversationPlatformGroup(item.platform) === platform) && (filter === "all" || (filter === "ready") === readyIds.has(item.id))), [titleRows, filter, readyIds, platform]);
-  const bodyQuery = normalizeSearch(deferredQuery.trim());
+  const bodyQuery = titleOnly ? "" : normalizeSearch(deferredQuery.trim());
   const [bodySearch, setBodySearch] = useState<{ query: string; matches: Map<string, MessageSearchHit> }>();
   useEffect(() => {
     if (import.meta.env.VITE_ATLAS_STATIC_DEMO || !bodyQuery || !onOpen || onPreviewAction) return;
@@ -209,7 +216,7 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
     onSelectedIds(next);
   };
 
-  const introductory=initialImport&&!conversations.length&&!active&&!error&&!paused&&!complete;
+  const introductory=initialImport&&(forceIntroductory||(!conversations.length&&!complete))&&!active&&!error&&!paused;
   const Header = heading ? "summary" : "div";
   const controls=<div className={`workbench-sync-controls${introductory?" is-import-choice":""}`} onClick={heading ? (event) => event.stopPropagation() : undefined}>
         {showSync && <button type="button" className={!introductory&&!conversations.length&&!needsConnection?"primary":undefined} onClick={onScan} disabled={Boolean(active) || submitting}
@@ -224,13 +231,13 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
       </div>;
   const syncStatus=active || error || paused || !compact && complete ? <div className="workbench-sync-status-slot"><div className={`workbench-sync-status ${active ? "workbench-sync-activity" : "workbench-sync-notice"}`} role="status">{active ? <LoaderCircle className="workbench-sync-spinner" size={14} aria-hidden="true" /> : error ? <CircleAlert size={14} aria-hidden="true" /> : paused ? <Pause size={14} aria-hidden="true" /> : <CheckCircle2 size={14} aria-hidden="true" />}<span>{compact ? [active || error || paused ? status : "", selectedCount > 0 ? zh ? `已选 ${selectedCount} 条` : `${selectedCount} selected` : ""].filter(Boolean).join(" · ") : status}</span>{active && !scanning && importJob && importJob.retryScope !== "selected" && importJob.discovered > 0 ? <progress value={importJob.completed} max={Math.max(1, importJob.discovered)} aria-label={zh ? "同步进度" : "Sync progress"} /> : null}</div></div>:null;
   const top = <Header className="workbench-sync-top" onClick={onToggle ? (event) => { event.preventDefault(); onToggle(); } : undefined}><div className="workbench-sync-heading">{heading}{statusHost?null:syncStatus?syncStatus : !heading && !compact ? <strong>{conversations.length ? zh ? "对话材料" : "Conversation sources" : zh ? "添加对话" : "Add conversations"}</strong> : null}</div>
-      {controlsHost?createPortal(controls,controlsHost):controls}
+      {!titleOnly || expanded ? controlsHost ? createPortal(controls, controlsHost) : controls : null}
     </Header>;
 
   const content = <section className="workbench-sync" aria-label={showSync ? (zh ? "同步与选择对话" : "Sync and choose conversations") : (zh ? "来源材料" : "Source materials")}>
     {statusHost?createPortal(syncStatus,statusHost):null}
     {!heading ? top : null}
-    {expanded && conversations.length > 0 ? <>
+    {expanded && !introductory && conversations.length > 0 ? <>
       <div className="workbench-platform-row"><AIPlatformFilter conversations={conversations} value={platform} zh={zh} onChange={value=>{setPlatform(value);setVisibleCount(8);setSearchLayout(undefined);if(listRef.current)listRef.current.scrollTop=0;}}/></div>
       <div className="workbench-sync-toolbar">
       {showSync && <div className="workbench-sync-tabs" role="tablist" aria-label={zh ? "对话同步状态" : "Conversation sync status"}>{([
@@ -238,12 +245,15 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
         { id: "ready", label: zh ? "已同步" : "Synced", count: platformReady },
         { id: "pending", label: zh ? "待同步" : "Pending", count: platformSources.length - platformReady },
       ] as const).map((tab) => <button key={tab.id} type="button" role="tab" aria-selected={filter === tab.id} onClick={() => { setFilter(tab.id); setVisibleCount(8); if (listRef.current) listRef.current.scrollTop = 0; }}><span>{tab.label}</span> <span className="source-count">{tab.count}</span></button>)}</div>}
-      <div className="workbench-sync-selection-actions"><label className="workbench-sync-search"><Search size={14} aria-hidden="true" /><span className="sr-only">{zh ? "搜索对话标题" : "Search conversation titles"}</span><input value={query} onBlur={() => {if(!query.trim())setSearchLayout(undefined);}} onChange={(event) => { preserveSearchLayout(); setQuery(event.target.value); setVisibleCount(8); if (listRef.current) listRef.current.scrollTop = 0; }} placeholder={showSync && onOpen ? zh ? "搜索标题或内容" : "Search titles or content" : zh ? "搜索对话标题" : "Search conversation titles"} /></label></div>
+      <div className="workbench-sync-selection-actions"><label className="workbench-sync-search"><Search size={14} aria-hidden="true" /><span className="sr-only">{zh ? "搜索对话标题" : "Search conversation titles"}</span><input value={query} onBlur={() => {if(!query.trim())setSearchLayout(undefined);}} onChange={(event) => { preserveSearchLayout(); setQuery(event.target.value); setVisibleCount(8); if (listRef.current) listRef.current.scrollTop = 0; }} placeholder={!titleOnly && showSync && onOpen ? zh ? "搜索标题或内容" : "Search titles or content" : zh ? "搜索对话标题" : "Search conversation titles"} /></label></div>
+      </div>
+      <div className="workbench-sync-list-header">
+        <button className="workbench-match-selection" title={selectionLabel} aria-label={selectionLabel} aria-pressed={allMatchingSelected ? true : someMatchingSelected ? "mixed" : false} type="button" onClick={toggleMatching} disabled={!listed.length || searchPending}><SelectionIcon size={15} aria-hidden="true" />{zh ? "全选" : "Select all"}</button>
+        <span className="workbench-list-col-meta">{zh ? `共 ${listed.length} 条对话` : `${listed.length} conversations`}</span>
       </div>
       <div className={`workbench-sync-list-viewport ${listed.length <= 8 ? "is-short" : ""} ${!listed.length ? "is-empty" : ""}`} style={searchLayout ? {height:searchLayout.list,minHeight:searchLayout.list,maxHeight:searchLayout.list} : undefined} ref={listRef}><WorkbenchSourceList showSyncStatus={showSync} visible={visible} selectedIds={selectedIds} readyIds={readyIds} activeIds={activeIds} retryingIds={retryingIds} disabled={false} emptyMessage={!showSync ? (zh ? "没有找到相关对话" : "No matching conversations") : query.trim() ? zh ? "没有找到相关对话" : "No matching conversations" : platform && !platformSources.length ? zh ? "该平台暂无对话" : "No conversations from this AI yet" : filter === "ready" ? zh ? "暂无已同步的对话" : "No synced conversations yet" : zh ? "暂无待同步的对话" : "No pending conversations"} emptyHint={!showSync ? (zh ? "试试其他关键词或 AI 平台。" : "Try another keyword or AI platform.") : query.trim() ? zh ? "试试其他关键词，或切换 AI 分类与同步状态。" : "Try another keyword, AI platform or sync filter." : platform && !platformSources.length ? zh ? "导入该平台的对话文件后，就会显示在这里。" : "Import a conversation file from this AI to see it here." : zh ? "切换同步状态查看其他对话。" : "Switch the sync filter to see other conversations."} onSelectedIds={changeSelection} zh={zh} matches={matches} related={related} onOpen={onOpen} onOpenProject={onOpenProject} />{listed.length > visibleCount ? <button type="button" className="workbench-sync-more" onClick={() => setVisibleCount((count) => count + 40)}>{zh ? `加载更多（已显示 ${visible.length}/${listed.length} 条）` : `Load more (${visible.length}/${listed.length} shown)`}</button> : null}</div>
-      <div ref={footerRef} className="workbench-sync-footer" style={searchLayout?.footer ? { minHeight: searchLayout.footer } : undefined}>
+      {(selectedCount > 0 || (showSync && matchingPendingIds.length > 0)) ? <div ref={footerRef} className={`workbench-sync-footer${selectedCount > 0 ? " has-selection" : ""}`} style={searchLayout?.footer ? { minHeight: searchLayout.footer } : undefined}>
         <div className="workbench-selection-buttons">
-          <button className="workbench-match-selection" title={selectionLabel} aria-label={selectionLabel} aria-pressed={allMatchingSelected ? true : someMatchingSelected ? "mixed" : false} type="button" onClick={toggleMatching} disabled={!listed.length || searchPending}><SelectionIcon size={15} aria-hidden="true" />{zh ? "全选" : "Select all"}</button>
           {selectedCount ? <div className="workbench-selection-summary"><span>{zh ? `已选 ${selectedCount} 条` : `${selectedCount} selected`}</span><button className="workbench-footer-icon" type="button" aria-label={zh ? `清空已选 ${selectedCount} 条` : `Clear all ${selectedCount} selected`} title={zh ? "清空选择" : "Clear selection"} onClick={() => onSelectedIds(new Set())}><X size={14} aria-hidden="true" /></button></div> : null}
         </div>
         <div className="workbench-footer-actions">
@@ -254,7 +264,7 @@ export const WorkbenchSyncPanel = memo(function WorkbenchSyncPanel({ conversatio
           {showSync && selectedSyncedIds.length > 0 && !selectedPendingIds.length && !active ? <button type="button" disabled={scanning || importingFile || submitting} title={zh ? "从 AI 平台重新读取所选对话的正文，替换已保存的内容" : "Read the selected conversations again from their AI and replace the saved copy"} onClick={() => void requestSync(selectedSyncedIds, true)}><RefreshCw size={14} aria-hidden="true" />{submitting ? zh ? "提交中…" : "Requesting…" : zh ? `重新同步 ${selectedSyncedIds.length} 条` : `Sync ${selectedSyncedIds.length} again`}</button> : null}
           {showSync && selectedPendingIds.length > 0 && !(active && selectedAccepted) ? <button type="button" className="primary" disabled={scanning || importingFile || submitting} aria-label={submitting ? zh ? "正在提交同步…" : "Requesting sync…" : active ? zh ? `优先同步所选 ${selectedPendingIds.length} 条` : `Prioritize ${selectedPendingIds.length} selected` : zh ? `同步所选 ${selectedPendingIds.length} 条` : `Sync ${selectedPendingIds.length} selected`} onClick={() => void requestSync(selectedPendingIds)}>{submitting ? zh ? "提交中…" : "Requesting…" : active ? zh ? "优先同步" : "Sync first" : zh ? "同步所选" : "Sync selected"}</button> : null}
         </div>
-      </div>
+      </div> : null}
     </> : null}
     {joining && selectedCount && onLinkProject ? <form className="workbench-sync-join" onSubmit={event => { event.preventDefault(); void join(); }}><select aria-label={zh ? "加入哪个项目" : "Choose a project"} value={target} onChange={event => setTarget(event.target.value)}><option value="">{zh ? "选择项目" : "Choose project"}</option>{projects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}</select><button type="submit" className="primary" disabled={!target || submitting}>{zh ? `加入 ${selectedCount} 条` : `Add ${selectedCount}`}</button><button type="button" onClick={() => setJoining(false)}>{zh ? "取消" : "Cancel"}</button></form> : null}
     {joined ? <p className="workbench-sync-joined" role="status">{joined.already ? zh ? `所选对话已在「${joined.title}」中。` : `The selected conversations are already in "${joined.title}".` : zh ? `已加入「${joined.title}」，在项目里点更新即可整理进来。` : `Added to "${joined.title}". Update the project to organize them.`}{onOpenProject ? <button type="button" onClick={() => onOpenProject(joined.id)}>{zh ? "查看项目" : "View project"}</button> : null}</p> : null}

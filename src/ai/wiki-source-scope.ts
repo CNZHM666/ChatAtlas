@@ -147,11 +147,3 @@ export function sourceScopeConflict(text: string, units: readonly WikiKnowledgeU
     return matching.length > 0 && matching.every(scope => scope.conflict);
   });
 }
-
-export function sourceScopedUnit(unit: WikiKnowledgeUnit): WikiKnowledgeUnit {
-  if (unit.evidence.role !== "assistant" || unit.evidence.pasted || unit.about || !["proposal", "unknown"].includes(unit.adoption.status)) return unit;
-  if (/[；;]\s*\S/u.test(unit.statement)) return unit;
-  const scope = measuredSourceScope(unit.statement, unit.evidence.quote);
-  if (!scope?.conflict || !scope.excerpt || scope.excerpt.length > 300) return unit;
-  return { ...unit, statement: scope.excerpt, details: unit.details.filter(detail => !measuredSourceScope(detail, unit.evidence.quote)?.conflict) };
-}

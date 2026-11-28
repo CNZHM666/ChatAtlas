@@ -9,6 +9,7 @@ import {nativePanelTabId} from "../shared/sidecar-scope";
 import { installBrandFavicon } from "../shared/brand-assets";
 import "../canvas/styles.css";
 import "../canvas/reading-workspace.css";
+import "../canvas/wiki-holder-marks.css";
 import "katex/dist/katex.min.css";
 import "./sidecar.css";
 
@@ -19,7 +20,7 @@ const zh = params.has("lang")?params.get("lang")==="zh":preferredOutputLocale()=
 document.documentElement.lang = zh ? "zh-CN" : "en";
 function EmbeddedSidecar() {
   const [chinese,toggleLanguage]=useSidecarLocale(zh);
-  return <SidecarProject onToggleLanguage={toggleLanguage} canInsert conversationId={params.get("conversation") ?? ""} conversationTitle={params.get("title") ?? ""} zh={chinese}/>;
+  return <SidecarProject onToggleLanguage={toggleLanguage} conversationId={params.get("conversation") ?? ""} conversationTitle={params.get("title") ?? ""} zh={chinese}/>;
 }
 export function SidecarPage() {
   useEffect(() => {

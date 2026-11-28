@@ -1,4 +1,5 @@
 import type { LearningRole, WikiDocumentType } from "./wiki-document-type";
+import { sourceMessageSignature } from "./source-signature";
 import { knowledgeTerms } from "./knowledge-subject";
 import { wikiProposalTargetsProject } from "./wiki-scope-identity";
 /** Knowledge-unit ledger (redesign P1). Produced next to the Wiki behind a
@@ -8,6 +9,7 @@ export type WikiUnitKind = "mechanism" | "decision" | "constraint" | "fact" | "q
 /** user_decision: the user states the choice; user_adopted: the user accepts an
  * assistant proposal in a later reply; proposal: only the assistant proposes. */
 export type WikiUnitAdoption = "user_decision" | "user_adopted" | "rejected" | "proposal" | "unknown";
+export type WikiResearchUse = "landscape" | "comparison" | "reference" | "conclusion";
 
 export interface WikiKnowledgeUnit {
   /** Stable across runs: original message, quotation and subject, never wording. */
@@ -16,22 +18,26 @@ export interface WikiKnowledgeUnit {
   facet?: string;
   statement: string;
   kind: WikiUnitKind;
+  /** Role in a research answer, independent of the assertion kind and adoption. */
+  researchUse?: WikiResearchUse;
   /** Numbers, versions, modes, identifiers and exceptions copied from the original. */
   details: string[];
   /** Literal prerequisites and applicability limits from the unit's own quote. */
   conditions?: string[];
   /** discussedAt is the platform's message time, when known. conversationSpan is the fallback range. */
-  evidence: { evidenceId: string; conversationId: string; messageId: string; messageIndex: number; role: "user" | "assistant"; pasted: boolean; quote: string; discussedAt?: number; conversationSpan?: WikiConversationSpan; /** The heading its quote stands under in its message (首页 Header), when the statement does not name it. */ section?: string; /** The code block its quote stands in or introduces (a file tree, a schema), as written. */ code?: { language: string; text: string }; /** A learning record's exercise: code the learner wrote, in their message or quoted back by the AI marking it. */ learnerCode?: true; /** The AI's review of that exercise, from the message quoting it: what it said of the code, and the code it gave instead. */ review?: { said: string; code?: { language: string; text: string }; /** A block the AI's words lead into ("这样不行，因为："). */ shows?: { language: string; text: string } }; /** The task the exercise answers, as the AI set it: its rule, and the data it gave. */ task?: { said: string; code?: { language: string; text: string } } };
+  evidence: { evidenceId: string; conversationId: string; messageId: string; messageIndex: number; role: "user" | "assistant"; pasted: boolean; quote: string; sourceVersionId?: string; sourceSignature?: string; discussedAt?: number; conversationSpan?: WikiConversationSpan; /** The heading its quote stands under in its message (首页 Header), when the statement does not name it. */ section?: string; /** The code block its quote stands in or introduces (a file tree, a schema), as written. */ code?: { language: string; text: string }; codeRef?: string; /** A learning record's exercise: code the learner wrote, in their message or quoted back by the AI marking it. */ learnerCode?: true; /** The AI's review of that exercise, from the message quoting it: what it said of the code, and the code it gave instead. */ review?: { said: string; code?: { language: string; text: string }; codeRef?: string; /** A block the AI's words lead into ("这样不行，因为："). */ shows?: { language: string; text: string } }; /** The task the exercise answers, as the AI set it: its rule, and the data it gave. */ task?: { said: string; code?: { language: string; text: string } } };
   adoption: { status: WikiUnitAdoption; approval?: { evidenceId: string; messageId: string; quote: string } };
   delivery: "unknown" | "planned" | "user_reported";
-  relation?: { kind: "replaces" | "narrows" | "supplements" | "coexists" | "rejects"; hint: string };
+  relation?: { kind: "replaces" | "narrows" | "supplements" | "coexists" | "rejects"; hint: string; target?: string };
   /** Set when the knowledge describes something other than this project: a competitor, a
    * reference product or technology, or another project of the user. Absent on older ledgers. */
   about?: { name: string; role: WikiUnitAboutRole };
 }
 /** Where a ledger step is: requests done of the stage's total, for a progress bar. */
-export interface WikiProgress { stage: "extract" | "cover" | "verify" | "name" | "attach" | "split" | "same" | "merge" | "group" | "plan" | "write" | "proofread"; done: number; total: number; coverage?: ReturnType<typeof wikiCoverageCounts> }
+export interface WikiProgress { stage: "extract" | "cover" | "verify" | "name" | "attach" | "split" | "same" | "merge" | "group" | "plan" | "write" | "proofread"; done: number; total: number; coverage?: ReturnType<typeof wikiCoverageCounts>; detail?: { chapterId: string; chapter: string; part?: { done: number; total: number } } }
 export type WikiProgressFn = (progress: WikiProgress) => void;
+export type WikiWritingEvent = { kind: "chapter" | "rewrite"; chapter: string; chapterId: string;
+  reasons?: string[]; code?: string; scope?: "part" | "chapter" | "paragraph" };
 export type WikiUnitAboutRole = "competitor" | "reference" | "other_project";
 export const ABOUT_ROLES: WikiUnitAboutRole[] = ["competitor", "reference", "other_project"];
 
@@ -73,7 +79,7 @@ export interface WikiUnitBatch {
    * a figure, a length) were asked to be told in the source's terms once. */
   fidelityChecked?: number;
   /** Successful statement checks survive failures of other requests in this batch. */
-  fidelityResults?: Record<string, { version: number; signature: string; remaining?: number; blocked?: true }>;
+  fidelityResults?: Record<string, { version: number; signature: string; remaining?: number; blocked?: true; reasons?: string[] }>;
   /** Such sentences still without a unit after that request, counted. */
   uncoveredSentences?: number;
 }
@@ -81,11 +87,25 @@ export interface WikiUnitBatch {
 export type WikiWritingMode = "concise" | "handoff" | "audit";
 
 export interface WikiKnowledgeLedger {
+  startedAt?: number;
+  extraction?: { elapsedMs: number; requests: number; reusedBatches: number; blockedUnits: number; recoveredTableRows: number; duplicatesRemoved: number; recoveredReferenceItems?: number; duplicateSources?: number };
+  /** Selection intent inherited from the original request or the selected discussion. */
+  selectionIntent?: "research";
+  /** Original tables and code stored once per source message and exact block. */
+  sourceBlocks?: Record<string, NonNullable<WikiKnowledgeUnit["evidence"]["code"]>>;
   /** The purpose chosen before drafting. Older ledgers keep their original presentation. */
   writingMode?: WikiWritingMode;
+  /** Optional user-authored organization focus that guides selection, directory planning and chapter writing. */
+  organizationInstruction?: string;
   /** A decision about which saved, scoped receipt applies now. All receipts remain available. */
   decisionArbitrations?: Record<string, { choice: string; at: number; chapterId?: string; heading?: string; text?: string; question?: string; locallyApplied?: boolean;
-    optionTexts?: string[]; unitIds?: string[]; evidenceIds?: string[]; mode?: "choose" | "defer" | "custom" | "merge" }>;
+    optionTexts?: string[]; unitIds?: string[]; evidenceIds?: string[]; mode?: "choose" | "defer" | "custom" | "merge";
+    deferredToDraft?: true; scope?: WikiDecisionOverride; previousVerdicts?: Record<string, WikiUserDecision | null>;
+    addedPairs?: string[]; alternatives?: string[][] }>;
+  /** Previous published decision preserved until the user adopts an updated draft. */
+  publishedDecisionRevisions?: Record<string, { draftAt: number; at: number;
+    receipt: NonNullable<WikiKnowledgeLedger["decisionArbitrations"]>[string];
+    verdicts: Record<string, WikiUserDecision | null>; answer?: WikiUserAnswer }>;
   version: 1;
   generatedAt: number;
   status: "complete" | "partial";
@@ -144,13 +164,54 @@ export type WikiAnswerAction = { do: "confirm" | "reject" | "open"; units: strin
 /** A question about the material, asked in the writer's own words: what it is about, the question, the points it
  * concerns and the answers to choose from. organization: the organization it was asked of (its generatedAt). */
 /** stage: writing when the writer asked it while writing a chapter, after which only that chapter is written again. */
-export interface WikiWritingQuestion { id: string; about: string; ask: string; unitIds: string[]; options: Array<{ id: string; label: string; actions: WikiAnswerAction[] }>; organization: number; stage?: "writing" }
+export interface WikiWritingQuestion { id: string; about: string; ask: string; unitIds: string[]; options: Array<{ id: string; label: string; actions: WikiAnswerAction[] }>; organization: number; stage?: "writing"; scoped?: true }
+export interface WikiDecisionOverride {
+  subject: string;
+  targets: Array<{ unitId: string; conversationId: string; messageId: string; claim: string; quote: string }>;
+}
 /** An answer: the option chosen, or what the user wrote instead. */
-export interface WikiUserAnswer { questionId: string; unitIds: string[]; question: string; answer: string; optionId?: string; at: number; previousChoices?: Array<{ answer: string; at: number }>; roadmap?: import("./wiki-confirmed-roadmap").WikiConfirmedRoadmap }
+export interface WikiUserAnswer { questionId: string; unitIds: string[]; question: string; answer: string; optionId?: string; at: number; previousChoices?: Array<{ answer: string; at: number }>; roadmap?: import("./wiki-confirmed-roadmap").WikiConfirmedRoadmap; scope?: WikiDecisionOverride }
 /** project: part of this project, left where it is; related: the user's other project, a chapter of its own;
  * reference: an outside product, beside the competitors; exclude: left out of the Wiki. */
 export type WikiScopeAnswer = "project" | "related" | "reference" | "exclude";
 export const aboutNameKey = (name: string) => name.normalize("NFKC").toLocaleLowerCase().replace(/\s+/gu, "");
+export const wikiResearchRequest = (text: string) => /竞品|竞争对手|行业调研|赛道调研|市场调研|市场格局|开源(?:项目|方案|参考)|\b(?:competitors?|competitive (?:analysis|landscape)|market (?:research|survey)|open[- ]source (?:projects?|alternatives?))\b/iu.test(text);
+export const wikiResearchRole = (unit: WikiKnowledgeUnit) => unit.about?.role === "competitor" || unit.about?.role === "reference";
+export const wikiExternalResearch = (unit: WikiKnowledgeUnit) => wikiResearchRole(unit) || unit.researchUse === "reference" || unit.researchUse === "comparison";
+
+/** The opening of a study can state what someone wants to explore without
+ * settling the scope or adopting an implementation. */
+export function wikiExploratoryIntent(unit: WikiKnowledgeUnit) {
+  const quote = unit.evidence.quote.trim();
+  return unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about
+    && wikiResearchRequest(quote)
+    && /^(?:我(?:们)?(?:想|考虑|打算|希望)(?:先|尝试)?(?:做|开发|构建|制作|设计|打造)|(?:i|we)\s+(?:(?:want|would like) to|(?:am|are) considering)\s+(?:build(?:ing)?|mak(?:e|ing)|develop(?:ing)?|design(?:ing)?))/iu.test(quote)
+    && !/决定|拍板|已经确定|就这样定|就做这个|\b(?:decided|settled on|confirmed|final decision)\b/iu.test(quote);
+}
+
+const RESEARCH_CONCLUSION = /设计(?:原则|启示|建议)|实施(?:建议|原则)|关键启示|(?:design|implementation) (?:principles?|implications?|recommendations?)|(?:key|practical) takeaways/iu;
+const RESEARCH_LANDSCAPE = /赛道(?:格局|概况|切面)|领域(?:特性|对比)|行业格局|(?:market|competitive|industry) landscape|subdomains? of/iu;
+
+/** Derive the role from the bound source, with compatibility for earlier ledgers. */
+export function wikiResearchUse(unit: WikiKnowledgeUnit): WikiResearchUse | undefined {
+  if (unit.about) {
+    if (unit.about.role === "competitor") return "comparison";
+    if (unit.about.role === "reference") return "reference";
+    return;
+  }
+  if (unit.kind === "question" || unit.kind === "history") return;
+  if (unit.researchUse === "conclusion" || RESEARCH_CONCLUSION.test(`${unit.evidence.section ?? ""} ${unit.facet ?? ""} ${unit.subject}`)) return "conclusion";
+  if (unit.researchUse === "landscape" || RESEARCH_LANDSCAPE.test(unit.evidence.section ?? "")) return "landscape";
+}
+
+export function wikiResearchSelection(ledger: WikiKnowledgeLedger, units: readonly WikiKnowledgeUnit[]) {
+  if (ledger.documentType === "learning") return false;
+  if (ledger.selectionIntent === "research") return true;
+  const blocked = wikiBlockedUnitIds(ledger);
+  const live = units.filter(unit => !blocked.has(unit.id) && ledger.decisions?.[unit.id]?.verdict !== "rejected");
+  return (ledger.materials <= 10 && live.some(unit => unit.evidence.role === "user" && !unit.evidence.pasted && wikiResearchRequest(unit.evidence.quote)))
+    || live.filter(wikiResearchRole).length * 2 > live.length;
+}
 /** The ledger without answers that make the project itself another project: a writing question offered "exclude" for
  * two outside suggestions with Pocket Ledger as their owner, and the whole project left its own Wiki. Read-time only:
  * the stored answers stay. */
@@ -276,12 +337,14 @@ export interface WikiDraftChapter {
   problems: string[];
   /** The chapter's inputs and the writing rules; an update keeps the chapter while it is unchanged. */
   signature?: string;
+  /** Offsets and rendered text are derived; these signatures compare the inputs to each subtopic. */
+  subtopicSignatures?: Record<string, string>;
 }
 /** markOnly: added only so the sentence's holder mark has a place; not a statement of its own. */
 export interface WikiDraftClaim { text: string; unitIds: string[]; markOnly?: true }
 /** Three separate answers: did every request run (status), was the material complete, did the checks pass. */
 /** uncovered: the user's own messages no unit was extracted from; a warning, since some hold no project content. */
-export interface WikiDraftQuality { sources: "complete" | "partial"; failedBatches: number; uncovered?: number; organization: "complete" | "partial"; critical: number; problems: number; passed: boolean }
+export interface WikiDraftQuality { sources: "complete" | "partial"; failedBatches: number; uncovered?: number; criticalCoverage?: number; organization: "complete" | "partial"; critical: number; problems: number; passed: boolean }
 /** Coverage material IDs end in message index and part index. A split message
  * contributes one unresolved message to the document's quality summary. */
 export function wikiUncoveredMessageCount(batches: WikiUnitBatch[]) {
@@ -312,7 +375,7 @@ export interface WikiBaselineItem { part: "now" | "notNow" | "done"; text: strin
 /** A document-wide check that failed: a point written without part of it, an earlier version told as current, the
  * user's words told as the assistant's (or the reverse), one point told in two chapters. */
 export interface WikiInvariantIssue { kind: "coverage" | "missing" | "earlier_as_current" | "user_as_ai" | "ai_as_user" | "rejected_as_current" | "declined_overstated" | "repeat"; chapterId: string; unitIds: string[]; text: string }
-export interface WikiUnitDraft { version: 1; writingMode?: WikiWritingMode; generatedAt: number; status: "complete" | "partial"; chapters: WikiDraftChapter[]; report: Record<string, number>; quality?: WikiDraftQuality; baseline?: WikiBaselineItem[]; invariants?: WikiInvariantIssue[] }
+export interface WikiUnitDraft { version: 1; writingMode?: WikiWritingMode; generatedAt: number; status: "complete" | "partial"; chapters: WikiDraftChapter[]; omittedChapters?: string[]; report: Record<string, number>; quality?: WikiDraftQuality; baseline?: WikiBaselineItem[]; invariants?: WikiInvariantIssue[] }
 
 /** Planned chapters that failed writing remain visible in completeness reporting,
  * even though empty prose never becomes a saved Wiki page. */
@@ -321,7 +384,7 @@ export function wikiDraftCompleteness(ledger: WikiKnowledgeLedger | undefined) {
   const written = new Set(draft?.chapters.filter(chapter => chapter.paragraphs.length && chapter.body.trim()).map(chapter => chapter.id));
   // A chapter left out on purpose was not planned to be written: "写作未完成：缺少「个人方向与学习路线」" read a learning
   // record's route, told in its overview, as lost.
-  const leftOut = new Set(draft?.chapters.filter(chapter => chapter.leftOut).map(chapter => chapter.id));
+  const leftOut = new Set([...draft?.omittedChapters ?? [], ...draft?.chapters.filter(chapter => chapter.leftOut).map(chapter => chapter.id) ?? []]);
   const planned = plans.filter(chapter => !leftOut.has(chapter.id));
   const missing = planned.filter(chapter => !written.has(chapter.id)).map(chapter => ({ id: chapter.id, title: chapter.title }));
   return { planned: planned.length, written: planned.length - missing.length, missing };
@@ -372,17 +435,27 @@ export function scopedWikiDraft(source: WikiKnowledgeLedger): WikiUnitDraft | un
     const keepOpening = !namesExcluded(opening) && !chapter.openingUnitIds?.some(id => removed.has(id));
     if (!keepOpening && opening) filtered++;
     if (!changed && keepOpening) return [chapter];
-    if (!paragraphs.length) return [];
+    // The saved opening can cite two claims, one of which was quarantined.
+    // Restore independently confirmed survivors from their own source, without keeping the mixed prose.
+    const confirmedOpening = !keepOpening && opening ? [...new Set(chapter.openingUnitIds ?? [])].flatMap(id => {
+      const unit = units.get(id), verdict = answered.decisions?.[id]?.verdict;
+      if (!unit || removed.has(id) || verdict === "rejected" || !(verdict === "confirmed" || !unit.evidence.pasted
+        && (unit.adoption.status === "user_decision" || unit.adoption.status === "user_adopted" && unit.adoption.approval))) return [];
+      const text = wikiStatementWithConditions(unit, /\p{Script=Han}/u.test(opening));
+      return namesExcluded(text) ? [] : [{ id, text }];
+    }) : [];
+    const safeOpening = keepOpening ? opening.trim() : confirmedOpening.map(item => item.text).join(" ");
+    if (!paragraphs.length && !safeOpening) return [];
     const topics = [...new Set(paragraphs.map(paragraph => paragraph.subtopic))];
-    const body = [...keepOpening && opening ? [opening.trim()] : [], ...topics.map(title => `### ${title}\n\n${paragraphs.filter(paragraph => paragraph.subtopic === title).map(paragraph => paragraph.text).join("\n\n")}`)].join("\n\n");
-    return [{ ...chapter, body, paragraphs, openingUnitIds: keepOpening ? chapter.openingUnitIds : [] }];
+    const body = [...safeOpening ? [safeOpening] : [], ...topics.map(title => `### ${title}\n\n${paragraphs.filter(paragraph => paragraph.subtopic === title).map(paragraph => paragraph.text).join("\n\n")}`)].join("\n\n");
+    return [{ ...chapter, body, paragraphs, openingUnitIds: keepOpening ? chapter.openingUnitIds : confirmedOpening.map(item => item.id) }];
   });
   const baseline = draft.baseline?.filter(item => !item.unitIds.some(id => removed.has(id)) && !namesExcluded(item.text));
   if (!filtered && baseline?.length === draft.baseline?.length) return draft;
   return { ...draft, status: "partial", chapters, baseline, report: { ...draft.report, scope_filtered: filtered }, ...(draft.quality ? { quality: { ...draft.quality, passed: false } } : {}) };
 }
 /** A local check failure that makes a claim unreliable: a borrowed decision, a wrong holder, a number or change no source states. */
-export const CRITICAL_PROBLEM = /says 已决定|borrows|credits the user|states as decided|(?:numbers|identifiers) its units do not state|states the range|drops the negation of|drops a source condition|done what only|tells a change|has no claim|claim .* not in the paragraph|has no supported source|has incomplete generated prose|changes the counted object|could not be written|a project you left out|you confirmed is not written|required source block is missing/u;
+export const CRITICAL_PROBLEM = /says 已决定|borrows|credits the user|states as decided|(?:numbers|identifiers) its units do not state|states the range|drops the negation of|drops a source condition|done what only|tells a change|has no claim|claim .* not in the paragraph|has no supported source|has incomplete generated prose|changes the counted object|could not be written|a project you left out|you confirmed is not written|required (?:source block|research point) is missing|ledger placeholder instead of finished prose/u;
 
 /** ChatGPT's inline markers, kept by its export: U+E200 kind U+E202 argument … U+E201. A link (url, entity)
  * reads as its name; a search citation or any other marker says nothing to a reader and goes. */
@@ -552,6 +625,8 @@ export interface WikiKnowledgeOrganization {
   /** Only source clusters from failed grouping jobs, for the next update. */
   groupRetryClusters?: string[][];
   layoutContext?: true;
+  /** The stable source-only placement has been applied to this directory. */
+  placementVersion?: 1;
   unitSignatures?: Record<string, string>;
   unitOrganizationSignatures?: Record<string, string>;
   unitSubjectNames?: Record<string, string>;
@@ -629,7 +704,17 @@ export function quotedDetails(quote: string, own: string, identifiers = false, c
 }
 /** A unit's details for writing: what extraction copied, and the identifiers and counts its
  * own statement states. A quote's other code and numbers may belong to a different point. */
-export const wikiUnitDetails = (unit: WikiKnowledgeUnit) => [...new Map([...unit.details.filter(detail => !foreignDetail(unit, detail)), ...quotedDetails(unit.statement, unit.details.join(" "), true), ...quoteCodes(unit)].map(value => [detailKey(value), value])).values()].slice(0, 8);
+export const wikiUnitDetails = (unit: WikiKnowledgeUnit) => {
+  const own = unit.details.filter(detail => {
+    const value = detail.normalize("NFKC").trim();
+    if (keepsDetail(unit.statement, value)) return true;
+    if (!/[\p{L}\p{N}]/u.test(value) || (value.match(/\(/gu)?.length ?? 0) !== (value.match(/\)/gu)?.length ?? 0)
+      || !keepsDetail(unit.evidence.quote, value) || foreignDetail(unit, value)) return false;
+    // A noun copied from an exclusion list carries no action or polarity on its own.
+    return !unit.evidence.quote.split(/[。；;\n]/u).some(clause => NEGATION.test(clause) && keepsDetail(clause, value) && !NEGATION.test(value) && !WIKI_EXCEPTION.test(value));
+  });
+  return [...new Map([...own, ...quotedDetails(unit.statement, own.join(" "), true), ...quoteCodes(unit)].map(value => [detailKey(value), value])).values()].slice(0, 8);
+};
 /** Codes a short quote about this one point gives in plain text ("应该：error: LOAD_REQUIRES_DRIVER", "两个设备声明 0x3C"):
  * the error code or address a reader looks up, which the statement summed up as 负载驱动 or 地址冲突. Only from the quote's
  * own section, at most two. A long quote spans other points and gives none. */
@@ -670,7 +755,11 @@ const MODALITY: Array<[string, RegExp]> = [
 ];
 const modality = (text: string) => MODALITY.filter(([, pattern]) => pattern.test(text)).map(([name]) => name).join(",");
 /** One statement requires what the other forbids: never the same point, nor one explanation. */
-export const modalityConflict = (first: string, second: string) => { const a = modality(first).split(","), b = modality(second).split(","); return a.includes("must") && b.includes("never") || a.includes("never") && b.includes("must"); };
+export const modalityConflict = (first: string, second: string) => {
+  if (first.trim() === second.trim()) return false;
+  const a = modality(first).split(","), b = modality(second).split(",");
+  return a.includes("must") && b.includes("never") || a.includes("never") && b.includes("must");
+};
 const figures = (text: string) => [...new Set(text.match(/\d+(?:\.\d+)?/gu) ?? [])].sort().join(",");
 // Names and versions written in Latin letters (Orama, SQLite, v0.2, GPT-4o), lowercased; the product's own
 // name and generic words (AI, LLM) say nothing about which option a statement takes.
@@ -860,11 +949,66 @@ const readableDetail = (text: string) => text.split(/(`[^`]*`)/u).map(part => pa
 export const keepsDetail = (text: string, detail: string) => detailKey(readableDetail(text)).includes(detailKey(readableDetail(detail)));
 
 export function wikiLedgerUnits(ledger: WikiKnowledgeLedger | undefined): WikiKnowledgeUnit[] {
-  return ledger?.batches.flatMap(batch => batch.units) ?? [];
+  if (!ledger) return [];
+  const units = new Map<string, WikiKnowledgeUnit>();
+  for (const batch of ledger.batches) for (const unit of batch.units) {
+    const prior = units.get(unit.id);
+    if (!prior || prior.adoption.status === "unknown" && unit.adoption.status !== "unknown") {
+      const code = wikiLedgerSourceBlock(ledger, unit);
+      if (code && !unit.evidence.code) {
+        const { codeRef: _ref, ...evidence } = unit.evidence;
+        void _ref;
+        units.set(unit.id, { ...unit, evidence: { ...evidence, code } });
+      } else units.set(unit.id, unit);
+    }
+  }
+  return [...units.values()];
+}
+
+export function wikiLedgerSourceBlock(ledger: WikiKnowledgeLedger, unit: WikiKnowledgeUnit) {
+  return unit.evidence.code ?? (unit.evidence.codeRef ? ledger.sourceBlocks?.[unit.evidence.codeRef] : undefined);
+}
+
+export function compactWikiSourceBlocks(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  const sourceBlocks: NonNullable<WikiKnowledgeLedger["sourceBlocks"]> = {};
+  const payloads = new Map<WikiKnowledgeUnit, { key: string; code: NonNullable<WikiKnowledgeUnit["evidence"]["code"]> }>();
+  const repeated = new Map<string, number>();
+  for (const batch of ledger.batches) for (const unit of batch.units) {
+    const code = wikiLedgerSourceBlock(ledger, unit);
+    if (!code) continue;
+    const key = JSON.stringify([code.language, code.text]);
+    payloads.set(unit, { key, code });
+    repeated.set(key, (repeated.get(key) ?? 0) + 1);
+  }
+  let changed = false;
+  const batches = ledger.batches.map(batch => {
+    const units = batch.units.map(unit => {
+      const payload = payloads.get(unit);
+      if (!payload) return unit;
+      const { key: content, code } = payload;
+      if (repeated.get(content) === 1 && !unit.evidence.codeRef) return unit;
+      const key = `block:${sourceMessageSignature(content)}`;
+      let ref = key, collision = 0;
+      while (sourceBlocks[ref] && (sourceBlocks[ref].language !== code.language || sourceBlocks[ref].text !== code.text)) ref = `${key}:${++collision}`;
+      sourceBlocks[ref] = code;
+      if (!unit.evidence.code && ref === unit.evidence.codeRef) return unit;
+      changed = true;
+      const { code: _inline, ...evidence } = unit.evidence;
+      void _inline;
+      return { ...unit, evidence: { ...evidence, codeRef: ref } };
+    });
+    return { ...batch, units };
+  });
+  return changed ? { ...ledger, batches, sourceBlocks } : ledger;
 }
 
 export function wikiBlockedUnitIds(ledger: WikiKnowledgeLedger): Set<string> {
-  return new Set(ledger.batches.flatMap(batch => Object.entries(batch.fidelityResults ?? {}).flatMap(([id, item]) => item.blocked ? [id] : [])));
+  const knownSources = new Set(ledger.batches.flatMap(batch => batch.sourceIds));
+  return new Set(ledger.batches.flatMap(batch => {
+    const own = new Set(batch.sourceIds);
+    return batch.units.filter(unit => batch.fidelityResults?.[unit.id]?.blocked
+      || knownSources.has(unit.evidence.evidenceId) && !own.has(unit.evidence.evidenceId)).map(unit => unit.id);
+  }));
 }
 
 /** An exception limiting a rule: 除非, 仅当, 只有……才, unless. */

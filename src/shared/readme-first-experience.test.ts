@@ -15,7 +15,8 @@ it("leads with source-checkable Markdown and states the key-free search option",
  expect(enIntro).toMatch(/verifiable citations/iu);
  expect(enIntro).toMatch(/export[^.\n]*Markdown/iu);
  for(const text of [zh,en]){
-  expect(text).toContain("docs/images/wiki-chapter-light.png");
+  expect(text).toContain("docs/images/project-overview.png");
+  expect(text).toContain("docs/images/evidence-review.png");
   expect(text).toContain("https://linux.do");
  }
 });

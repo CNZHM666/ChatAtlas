@@ -3,17 +3,16 @@ import {useProjectReadingCache} from "../project-reading-cache";
 import { WorkspaceEvidenceContext, needsConfirmation, type WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import { EvidenceReviewButton } from "./EvidenceReviewButton";
 import { localizedWikiTitle, wikiReadingLocation } from "../../shared/wiki-navigation";
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { FocusEvidence, FocusSection, FocusSession } from "../../shared/focus-session";
+import { wikiLedgerUnits } from "../../shared/wiki-knowledge";
 import { wikiChapterPage } from "../wiki-document";
-import { hasChapterDiagram, suggestedDiagramHeading, wikiDiagramParts } from "../wiki-diagram";
 import { ReaderGuide } from "./ReaderGuide";
 import { WikiEvidence } from "./WikiEvidence";
 import { ProjectChangeHistory } from "./ProjectChangeHistory";
 import { WikiKnowledgeLinks } from "./WikiKnowledgeLinks";
 import { WorkspaceDisclosureTitle } from "./WorkspaceDisclosureTitle";
 import { RecordDetailDrawer } from "./RecordDetailDrawer";
-import { WikiDiagram } from "./WikiDiagram";
 import { WikiSources } from "./WikiSources";
 import { WikiSectionLocator } from "./WikiSectionLocator";
 import {wikiTitleReviewIncomplete} from "../../shared/wiki-title-review";
@@ -23,14 +22,13 @@ import { issueBlockText, issueLabel } from "../document-review";
 import { meaningTerms, paintHolderRuns } from "../claim-highlight";
 import type { WikiBlockIssue } from "../../shared/wiki-explanations";
 import { useHolderMarks } from "../use-holder-marks";
-import { wikiApproximatePoints, wikiChapterEvidencePoints, wikiHistoryPoints } from "../wiki-evidence";
+import { wikiApproximatePoints, wikiChapterEvidencePoints, wikiHistoryPoints, wikiStatusGroups } from "../wiki-evidence";
 import { wikiHistoryEntries } from "../../shared/wiki-history";
 import { WikiHistoryCard } from "./WikiHistoryCard";
 import { WikiClaimMarkerContext } from "../wiki-claim-marker-context";
 import { useEvidencePoints } from "../use-evidence-points";
-import { wikiHolderReadingLabel, wikiHolderTitle, type WikiHolder } from "../../shared/wiki-holder";
+import { wikiHolderReadingLabel, wikiHolderTitle } from "../../shared/wiki-holder";
 import type { WikiReadingProjection } from "../wiki-reading-worker";
-import { createPortal } from "react-dom";
 import { WIKI_EVIDENCE_LINK, availableWikiEvidence, currentWikiEvidence, wikiEvidenceTarget } from "../../shared/wiki-evidence-link";
 import { wikiFlowSourceQuote } from "../../shared/wiki-flow-block";
 import { wikiStateGraphs } from "../../shared/wiki-state-graph";
@@ -42,8 +40,8 @@ function structureAt(link: HTMLAnchorElement) {
   return flow ?? (next instanceof HTMLElement ? next.matches("table") ? next : next.querySelector("table") : null);
 }
 
-export function WikiDocument({ section, session, zh, structure, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,readingProjection,toolsHost,persistSourceMarks,onReviewEvidence }: {
-  section: FocusSection; session: FocusSession; zh: boolean; structure: ReactNode; editor?: ReactNode;
+export const WikiDocument = memo(function WikiDocument({ section, session, zh, editor, onLocate, onCurrent, onFinishEdit, onEdit, updatedConversationIds,headingTarget,scrollRef,issue,onIssueStep,onIssueClose,autoReview,onAutoReviewed,readingProjection,persistSourceMarks,onReviewEvidence }: {
+  section: FocusSection; session: FocusSession; zh: boolean; structure?: ReactNode; editor?: ReactNode;
   /** A pending problem in this chapter the overview sent the reader to: its paragraph is marked and named. */
   issue?: { issue: WikiBlockIssue; index: number; total: number }; onIssueStep?: (delta: number) => void; onIssueClose?: () => void;
   /** Sent from the overview to check evidence: the review opens on its own, once per value. */
@@ -76,11 +74,11 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
     const current=currentWikiEvidence(session);
     const ids=new Set(sources.map(ref=>ref.id));
     const refByQuote=new Map(current.filter(ref=>ids.has(ref.id)).map(ref=>[JSON.stringify([ref.conversationId,ref.messageId,ref.excerpt.trim()]),ref]));
-    const saved=session.wikiKnowledge?.batches.flatMap(batch=>batch.units.flatMap(unit=>{
+    const saved=wikiLedgerUnits(session.wikiKnowledge).flatMap(unit=>{
       const {conversationId,messageId,quote,code}=unit.evidence;
       const ref=code&&/[→↓]|->|=>/u.test(code.text)&&refByQuote.get(JSON.stringify([conversationId,messageId,quote.trim()]));
       return ref&&code?[{...ref,excerpt:code.text}]:[];
-    }))??[];
+    });
     return [...refByQuote.values(),...saved];
   },[session,sources]);
   const location=review?section.origin==="user"?zh?"我的理解":"My understanding":section.kind==="proposal"?zh?"AI 建议":"AI proposal":section.kind==="open_question"?zh?"待确认":"Open question":zh?"复习章节":"Review chapter":wikiReadingLocation(section,zh);
@@ -135,44 +133,40 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
     node.setAttribute("data-wiki-structure-active","true");
     return ()=>node.removeAttribute("data-wiki-structure-active");
   },[articleRef,structureTarget,activeRevision,page]);
-  const statusGroups=([
-    ["decided",false],["open",false],["user",true],["user",false],["material",false],["earlier",false],["ai",false],["corrected",false],
-  ] as Array<[WikiHolder,boolean]>).flatMap(([holder,reported])=>{
-    const points=ordered.filter(point=>point.holder===holder&&(holder!=="user"||(point.source==="report")===reported));
-    return points.length?[{holder,reported,points}]:[];
-  });
-  const statusId=useId(),statusControl=useRef<HTMLDivElement>(null),statusPanel=useRef<HTMLDivElement>(null);
+  const statusGroups=wikiStatusGroups(ordered,learning);
+  const statusId=useId(),statusPanel=useRef<HTMLDivElement>(null);
   const statusCursors = useRef(new Map<string, string>()), locationRevision = useRef(0);
+  const [focusedStatus, setFocusedStatus] = useState<string>();
   const showStatuses=!editor&&hasHolders&&holderMarks;
+  useEffect(()=>{if(!showStatuses)setFocusedStatus(undefined);},[showStatuses,section.id]);
+  useEffect(()=>{
+    setUpdatesOpen(false);
+    setStructureTarget(undefined);
+    statusCursors.current.clear();
+  },[section.id]);
+  const phrasesByKey = useMemo(() => new Map(points.map(point => [point.key, [point.claim, ...point.phrases]])), [points]);
+  const holderRunsPainted = useRef(false);
+  // Shown holders tint only the exact sentence/phrase of each claim; update synchronously before paint
+  // without wiping existing highlights between renders so verifying an evidence point never flashes.
   useLayoutEffect(()=>{
-    const control=statusControl.current,panel=statusPanel.current;
-    if(toolsHost||!showStatuses||!control||!panel)return;
-    const scroller=scrollRef?.current??control.closest<HTMLElement>(".focus-reading-body");
-    const place=()=>{
-      const anchor=control.getBoundingClientRect(),bounds=scroller?.getBoundingClientRect();
-      const edge=(bounds?.left??0)+(scroller?.clientLeft??0);
-      const left=Math.max(0,edge),right=Math.min(window.innerWidth,scroller?.clientWidth?edge+scroller.clientWidth:bounds?.right??window.innerWidth);
-      const gap=14,inset=8;
-      panel.style.setProperty("--wiki-status-width",`${Math.max(0,right-left-2*inset)}px`);
-      const width=panel.getBoundingClientRect().width;
-      const horizontalRail=control.parentElement&&getComputedStyle(control.parentElement).flexDirection==="row";
-      if(!horizontalRail&&right-anchor.right>=width+gap+inset)panel.dataset.placement="right";
-      else if(!horizontalRail&&anchor.left-left>=width+gap+inset)panel.dataset.placement="left";
-      else {
-        panel.dataset.placement="below";
-        const offset=Math.max(left+inset,Math.min(anchor.right-width,right-width-inset))-anchor.left;
-        panel.style.setProperty("--wiki-status-offset",`${offset}px`);
+    const root=articleRef.current;
+    const shouldPaint = hasHolders && !marksHidden;
+    if (!shouldPaint) {
+      if (holderRunsPainted.current) {
+        holderRunsPainted.current = false;
+        paintHolderRuns(root, false);
       }
-    };
-    place();
-    const observer=typeof ResizeObserver==="undefined"?undefined:new ResizeObserver(place);
-    if(scroller)observer?.observe(scroller);
-    observer?.observe(panel);
-    window.addEventListener("resize",place);
-    return ()=>{observer?.disconnect();window.removeEventListener("resize",place);};
-  },[showStatuses,scrollRef,toolsHost]);
-  // Shown holders tint the text each mark covers in the mark's colour; hidden, nothing is painted.
-  useEffect(()=>{const root=articleRef.current;const timer=window.setTimeout(()=>paintHolderRuns(root,hasHolders&&!marksHidden),0);return()=>{window.clearTimeout(timer);paintHolderRuns(root,false);};},[articleRef,hasHolders,marksHidden,page,ordered]);
+      return;
+    }
+    holderRunsPainted.current = true;
+    paintHolderRuns(root,true,key=>phrasesByKey.get(key)??[],focusedStatus);
+  },[articleRef,hasHolders,marksHidden,page,ordered,phrasesByKey,focusedStatus]);
+  useEffect(()=>()=>{
+    if (holderRunsPainted.current) {
+      holderRunsPainted.current = false;
+      paintHolderRuns(null, false);
+    }
+  },[]);
   // Points whose quote is in the original pass on their own; the review steps only through those that need a look.
   const attention=useMemo(()=>ordered.filter(needsConfirmation),[ordered]);
   const reviewEvidence=()=>{
@@ -222,44 +216,54 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
       .find(node=>node.textContent?.trim()===headingTarget.title);
     if(target){target.scrollIntoView?.({block:"start",behavior:"auto"});target.tabIndex=-1;target.focus({preventScroll:true});}
   },[headingTarget,editor,page.body]);
-  // Wiki reads prose directly. Only an already saved, current, visible diagram
-  // belongs here; topic keywords must not inject a generation suggestion card.
-  const hasDiagram=!review&&hasChapterDiagram(section,session)&&!section.wikiDiagram?.hidden;
   const readingBody=!review?page.overview?.readingBody??page.body:page.body;
-  const parts=useMemo(()=>wikiDiagramParts(readingBody,section.wikiDiagram?.afterHeading??suggestedDiagramHeading(section)),[readingBody,section]);
   const read=(body:string)=>body.trim()?<div className="chapter-guide"><ReaderGuide hideCitationAnnotations content={body} sourceTexts={sourceTexts} flowSources={flowSources} zh={zh} complete hideEvidenceMarkers={!section.userEdited&&section.origin!=="user"} claimMarkers={claimMarkers}/></div>:null;
   const reviewLabel = onReviewEvidence ? (zh ? "核对依据" : "Check evidence") : undefined;
-  const tools = !editor ? <nav className="wiki-tool-rail" aria-label={zh?"文档工具":"Document tools"}>
-      {onReviewEvidence||ordered.length||attention.length?<button type="button" className={`wiki-tool evidence-review-button${!onReviewEvidence&&attention.length?" has-attention":""}`} aria-label={reviewLabel??(attention.length?zh?`核对依据 · ${attention.length} 条待确认`:`Check evidence · ${attention.length} to confirm`:zh?"来源已定位":"Sources located")} title={reviewLabel??(attention.length?zh?`核对依据：${attention.length} 处需要你确认，逐条带你看`:`Check evidence: ${attention.length} points need your look`:zh?"点开查看来源":"Open sources")} onClick={onReviewEvidence??reviewEvidence}><Quote size={17} aria-hidden="true"/>{!onReviewEvidence&&attention.length?<span className="wiki-tool-badge" aria-hidden="true">{attention.length}</span>:null}</button>:<EvidenceReviewButton iconOnly sources={sources} zh={zh} onLocate={onLocate} historical={Boolean(section.userEdited||section.origin)}/>}
-      {hasHolders?<div className="wiki-status-control" ref={statusControl} onKeyDown={event=>{
-        if(event.key!=="Escape"||!holderMarks)return;
-        event.stopPropagation();
-        setHolderMarks(false);
-        statusControl.current?.querySelector<HTMLButtonElement>("button")?.focus();
-      }}>
-        <button type="button" className="wiki-tool holder-marks-toggle" aria-pressed={holderMarks} aria-expanded={holderMarks} aria-controls={statusId} aria-label={holderMarks?zh?"收起出处":"Hide sources":zh?"显示出处":"Show sources"} title={holderMarks?zh?"收起出处":"Hide sources":zh?"显示出处和状态筛选":"Show sources and status filters"} onClick={()=>setHolderMarks(!holderMarks)}><Tags size={17} aria-hidden="true"/></button>
-        <div id={statusId} ref={statusPanel} className="wiki-status-panel" role="group" aria-label={zh?"按状态查阅依据":"Find evidence by status"} hidden={!showStatuses}>
-          {statusGroups.map(({holder,reported,points})=>{
-            const filter = `${holder}:${reported}`, active = evidencePanel?.active;
-            const selected = active?.statusFilter === filter;
-            const basis = reported ? zh ? "用户报告，代码或测试尚未核验" : "User report, code or tests unverified" : wikiHolderTitle(holder,zh);
-            return <button type="button" key={filter} className={`wiki-status-key is-holder-${holder}${reported?" is-report":""}`} aria-pressed={selected}
-              title={points.length>1 ? `${basis} · ${zh ? "再次点击定位下一处" : "Click again to find the next occurrence"}` : basis}
-              onClick={()=>{
-                const last = selected ? active.points?.[active.pointIndex ?? -1]?.key : statusCursors.current.get(filter);
-                const pointIndex = (points.findIndex(point=>point.key===last)+1)%points.length;
-                const point = points[pointIndex];
-                statusCursors.current.set(filter, point.key);
-                if(evidencePanel)evidencePanel.open(point.reference,{sectionId:section.id,references:point.references,quote:point.quote,claim:point.claim,points,pointIndex,mode:"view",statusFilter:filter,locationRevision:++locationRevision.current});
-                else openPoint(point.key);
-              }}>{wikiHolderReadingLabel(holder,zh,reported,learning)} <span>{points.length}</span></button>;
-          })}
-        </div>
-      </div>:null}
-      {onEdit?<button type="button" className="wiki-tool" aria-label={zh?"编辑":"Edit"} title={zh?"编辑本章（从你正在读的地方开始）":"Edit this chapter, from where you are reading"} onClick={()=>onEdit(paragraphInView())}><PencilLine size={17} aria-hidden="true"/></button>:null}
-      {changes.length?<button type="button" className="wiki-tool" aria-label={zh?"当前方案":"Current plan"} title={zh?"当前方案":"Current plan"} onClick={onCurrent}><Layers size={17} aria-hidden="true"/></button>:null}
-      {!review&&(changes.length||session.wikiSuggestions?.[section.id])?<button type="button" className="wiki-tool" aria-label={zh?"相关更新":"Related updates"} title={zh?"相关更新":"Related updates"} onClick={()=>setUpdatesOpen(true)}><History size={17} aria-hidden="true"/></button>:null}
+  const headerTools = !editor ? <nav className="wiki-chapter-toolbar" aria-label={zh?"文档工具":"Document tools"}>
+      {onReviewEvidence||ordered.length||attention.length?<button type="button" className={`wiki-chapter-tool evidence-review-button${!onReviewEvidence&&attention.length?" has-attention":""}`} aria-label={reviewLabel??(attention.length?zh?`核对依据 · ${attention.length} 条待确认`:`Check evidence · ${attention.length} to confirm`:zh?"来源已定位":"Sources located")} title={reviewLabel??(attention.length?zh?`核对依据：${attention.length} 处需要你确认，逐条带你看`:`Check evidence: ${attention.length} points need your look`:zh?"点开查看来源":"Open sources")} onClick={onReviewEvidence??reviewEvidence}><Quote size={14} aria-hidden="true"/><span>{!onReviewEvidence&&attention.length?(zh?`待核对 ${attention.length}`:`${attention.length} to check`):(zh?"核对":"Sources")}</span></button>:<EvidenceReviewButton iconOnly sources={sources} zh={zh} onLocate={onLocate} historical={Boolean(section.userEdited||section.origin)}/>}
+      {hasHolders?<button type="button" className="wiki-chapter-tool holder-marks-toggle" aria-pressed={holderMarks} aria-expanded={holderMarks} aria-controls={statusId} aria-label={holderMarks?zh?"收起出处":"Hide sources":zh?"显示出处":"Show sources"} title={holderMarks?zh?"收起出处与状态筛选":"Hide sources and status filters":zh?"显示出处和状态筛选":"Show sources and status filters"} onClick={()=>setHolderMarks(!holderMarks)}><Tags size={14} aria-hidden="true"/><span>{zh?"状态":"Status"}</span></button>:null}
+      {onEdit?<button type="button" className="wiki-chapter-tool" aria-label={zh?"编辑":"Edit"} title={zh?"编辑本章（从你正在读的地方开始）":"Edit this chapter, from where you are reading"} onClick={()=>onEdit(paragraphInView())}><PencilLine size={14} aria-hidden="true"/><span>{zh?"编辑":"Edit"}</span></button>:null}
+      {changes.length?<button type="button" className="wiki-chapter-tool is-icon-only" aria-label={zh?"当前方案":"Current plan"} title={zh?"当前方案":"Current plan"} onClick={onCurrent}><Layers size={15} aria-hidden="true"/></button>:null}
+      {!review&&(changes.length||session.wikiSuggestions?.[section.id])?<button type="button" className="wiki-chapter-tool is-icon-only" aria-label={zh?"相关更新":"Related updates"} title={zh?"相关更新":"Related updates"} onClick={()=>setUpdatesOpen(true)}><History size={15} aria-hidden="true"/></button>:null}
     </nav> : null;
+  const statusBar = !editor && hasHolders ? <div id={statusId} ref={statusPanel} className="wiki-status-strip" role="group" aria-label={zh?"按状态查阅依据":"Find evidence by status"} hidden={!showStatuses} onKeyDown={event=>{
+    if(event.key!=="Escape"||!holderMarks)return;
+    event.stopPropagation();
+    setHolderMarks(false);
+    articleRef.current?.querySelector<HTMLButtonElement>(".holder-marks-toggle")?.focus();
+  }}>
+    <span className="wiki-status-strip-label">{zh ? "状态筛选" : "Filter"}</span>
+    <div className="wiki-status-strip-items">
+      {statusGroups.map(({holder,reported,points})=>{
+        const filter = `${holder}:${reported}`, active = evidencePanel?.active;
+        const selected = focusedStatus === holder || active?.statusFilter === filter;
+        const basis = reported ? zh ? "用户报告，代码或测试尚未核验" : "User report, code or tests unverified" : wikiHolderTitle(holder,zh);
+        return <button type="button" key={filter} className={`wiki-status-key is-holder-${holder}${reported?" is-report":""}`} aria-pressed={selected}
+          title={points.length>1 ? `${basis} · ${zh ? "再次点击定位下一处" : "Click again to find the next occurrence"}` : basis}
+          onClick={()=>{
+            setFocusedStatus(holder);
+            const last = (active?.statusFilter === filter ? active.points?.[active.pointIndex ?? -1]?.key : undefined) ?? statusCursors.current.get(filter);
+            let pointIndex = -1;
+            if (last) {
+              pointIndex = (points.findIndex(point=>point.key===last)+1)%points.length;
+            } else {
+              const viewTop = scrollRef?.current?.getBoundingClientRect().top ?? 0;
+              const nearest = points.findIndex(point => {
+                const el = articleRef.current?.querySelector<HTMLElement>(`[data-claim-key=${JSON.stringify(point.key)}]`);
+                if (!el) return false;
+                const rect = el.getBoundingClientRect();
+                return rect.height > 0 && rect.top >= viewTop - 40;
+              });
+              pointIndex = nearest >= 0 ? nearest : 0;
+            }
+            const point = points[pointIndex];
+            statusCursors.current.set(filter, point.key);
+            if(evidencePanel)evidencePanel.open(point.reference,{sectionId:section.id,references:point.references,quote:point.quote,claim:point.claim,points,pointIndex,mode:"view",statusFilter:filter,locationRevision:++locationRevision.current});
+            else openPoint(point.key);
+          }}><i className="wiki-status-dot" aria-hidden="true"/><span className="wiki-status-name">{wikiHolderReadingLabel(holder,zh,reported,learning)}</span><span className="wiki-status-count">{points.length}</span></button>;
+      })}
+    </div>
+  </div> : null;
   return <WorkspaceEvidenceContext.Provider value={evidencePanel?{...evidencePanel,open:(ref,options)=>evidencePanel.open(ref,options?.points?options:{...options,sectionId:section.id,references:sources})}:undefined}><WikiClaimMarkerContext.Provider value={claimContext}><article ref={articleRef} className={`wiki-document${marksHidden?" hides-holder-marks":""}`} data-reading-edition={compact?"compact":undefined} aria-label={review?zh?"复习文档":"Review document":zh?"Wiki 文档":"Wiki document"} onClick={event=>{
     const link=event.target instanceof Element?event.target.closest<HTMLAnchorElement>(evidenceLinks):null;
     if(!link)return;
@@ -282,8 +286,7 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
     if(evidencePanel)evidencePanel.open(ref,options);
     else onLocate(ref,options);
   }}>
-    {toolsHost && tools ? createPortal(tools, toolsHost) : tools}
-    <header className="wiki-document-heading"><div className="wiki-document-location"><span>{location}</span>{editor&&onFinishEdit?<div><button type="button" onClick={onFinishEdit}>{zh?"保存并结束编辑":"Save and finish editing"}</button></div>:null}</div><h1 title={section.title}>{localizedWikiTitle(section,zh)}</h1>{section.userEdited?<small className="muted">{zh?"个人编辑内容":"Your edited content"}</small>:null}</header>
+    <header className="wiki-document-heading"><div className="wiki-document-location"><span>{location}</span>{editor&&onFinishEdit?<div><button type="button" onClick={onFinishEdit}>{zh?"保存并结束编辑":"Save and finish editing"}</button></div>:headerTools}</div><h1 title={section.title}>{localizedWikiTitle(section,zh)}</h1>{section.userEdited?<small className="muted">{zh?"个人编辑内容":"Your edited content"}</small>:null}{statusBar}</header>
     {!editor&&wikiTitleReviewIncomplete(section.wikiTitleReview)?<p className="muted" role="status">{zh?"标题未整理完成，已保留原名和正文。":"Title editing could not finish. The original name and prose are preserved."}</p>:null}
     {issue?<div className="wiki-issue-bar" role="status"><span>{zh?`待处理 ${issue.index+1}/${issue.total}`:`To review ${issue.index+1}/${issue.total}`}</span><strong>{issueLabel(issue.issue,zh)}</strong>
       <span className="wiki-issue-actions"><button type="button" aria-label={zh?"上一处":"Previous"} disabled={!issue.index} onClick={()=>onIssueStep?.(-1)}><ChevronLeft size={15} aria-hidden="true"/></button><button type="button" aria-label={zh?"下一处":"Next"} disabled={issue.index>=issue.total-1} onClick={()=>onIssueStep?.(1)}><ChevronRight size={15} aria-hidden="true"/></button>
@@ -291,8 +294,7 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
     {!review&&!editor?<WikiChapterOverview overview={page.overview} zh={zh} emphasize={!section.userEdited&&section.origin!=="user"} claimMarkers={claimMarkers}/>:null}
     {!editor?<WikiSectionLocator headings={page.headings} contentRef={content} scrollRef={scrollRef} zh={zh}/>:null}
     {section.reviewIssue?<p className="wiki-review-warning" role="status">{zh?"本章为待核验草稿。":"This chapter is a draft awaiting review."}</p>:null}
-    {review?<div className="wiki-document-structure">{structure}</div>:null}
-    <div ref={content} className="wiki-chapter-content">{editor??(hasDiagram?<>{read(parts[0])}<WikiDiagram session={session} section={section} zh={zh} onLocate={onLocate}/>{read(parts[1])}</>:read(readingBody))}
+    <div ref={content} className="wiki-chapter-content">{editor??read(readingBody)}
     {stateGraphs.map((edges,index)=><figure key={index} className="wiki-flow">
       <figcaption>{zh?"状态转换":"State transitions"}</figcaption>
       <ul>{edges.map(edge=>{
@@ -313,4 +315,4 @@ export function WikiDocument({ section, session, zh, structure, editor, onLocate
     {!editor&&review&&session.wikiSuggestions?.[section.id]?<details className="wiki-update-suggestion"><WorkspaceDisclosureTitle label={zh?"相关讨论更新":"Updated discussions"}/><ReaderGuide content={session.wikiSuggestions[section.id].body} zh={zh} complete hideEvidenceMarkers/><WikiEvidence section={session.wikiSuggestions[section.id]} evidence={session.evidence} zh={zh} onLocate={onLocate}/></details>:null}
     {updatesOpen?<RecordDetailDrawer session={session} title={section.title} label={zh?"变更与相关讨论":"Changes and related discussions"} zh={zh} onClose={()=>setUpdatesOpen(false)}><ProjectChangeHistory changes={changes} preview zh={zh} onLocate={ref=>{setUpdatesOpen(false);onLocate(ref);}}/>{session.wikiSuggestions?.[section.id]?<><h3>{zh?"待采用更新":"Proposed update"}</h3><ReaderGuide content={session.wikiSuggestions[section.id].body} zh={zh} complete hideEvidenceMarkers/><WikiEvidence section={session.wikiSuggestions[section.id]} evidence={session.evidence} zh={zh} onLocate={ref=>{setUpdatesOpen(false);onLocate(ref);}}/></>:null}</RecordDetailDrawer>:null}
   </article></WikiClaimMarkerContext.Provider></WorkspaceEvidenceContext.Provider>;
-}
+});

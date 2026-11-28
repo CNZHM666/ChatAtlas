@@ -23,6 +23,15 @@ describe("organization usage analysis", () => {
     expect(complete.retryRecovery).toMatchObject({ requests: 2, recoveredOperations: 1, successRate: 1 });
     expect(organizationAnalysisCsv([complete])).toContain('"execution_status","stage_budget_metrics","retry_recovery_metrics","complete_wiki_ms"');
   });
+  it("separates late question snapshots and reports the calibrated estimate",()=>{
+    const task={...run,pipelineSpans:[{id:"generation",feature:"wiki" as const,phase:"wiki:generation",status:"completed" as const,startedAt:1000,durationMs:2000}]};
+    const rows=analyzeOrganizationRuns([task],[
+      event("write",{taskType:"other",stage:"wiki_chapter_write",requestStartedAt:1200,createdAt:2600,estimatedInputTokens:190,budgetedInputTokens:115,inputBudgetScale:.6}),
+      event("background",{requestStartedAt:4500,createdAt:5000,inputTokens:1000}),
+    ],[]);
+    expect(rows.find(row=>row.run.id===run.id)).toMatchObject({requests:1,inputTokens:100,estimateRatio:1.9,budgetedEstimateRatio:1.15});
+    expect(rows.find(row=>row.relatedRunId===run.id)).toMatchObject({requests:1,inputTokens:1000});
+  });
   it("snapshots pipeline spans so a later live update cannot disagree with exported attempt counts",()=>{
     const input={...run,pipelineSpans:[{id:"generation-1",feature:"wiki" as const,phase:"wiki:generation",startedAt:1000,durationMs:100,status:"failed" as const,reason:"PROVIDER_SCHEMA_invalid_wiki_claim"}]};
     const rows=analyzeOrganizationRuns([input],[],[]);
@@ -47,6 +56,14 @@ describe("organization usage analysis", () => {
     const [row] = analyzeOrganizationRuns([task], [], []);
     expect(row).toMatchObject({ elapsedMs: 5000, latestGenerationMs: 5000 });
     expect(row.firstReadableMs).toBeUndefined();
+  });
+  it("uses the generation span when run metadata was stamped after the generation finished", () => {
+    const task = { ...run, startedAt: 1000, executionStartedAt: 98500, readyAt: 98581, pipelineSpans: [
+      { id: "generation", feature: "wiki" as const, phase: "wiki:generation", status: "completed" as const, startedAt: 1000, durationMs: 47515 },
+    ] };
+    const [row] = analyzeOrganizationRuns([task], [], []);
+    expect(row).toMatchObject({ elapsedMs: 47515, latestGenerationMs: 47515 });
+    expect(row.queueMs).toBeUndefined();
   });
   it("does not report a failed writing batch as completed when an unrelated in-flight batch finishes later",()=>{
     const failed=event("failed-write",{taskType:"focus_session",stage:"synthesis:final",operationId:"failed-batch",status:"failed",createdAt:2000});
@@ -190,11 +207,11 @@ describe("organization usage analysis", () => {
     ]};
     const rows=analyzeOrganizationRuns([task],[
       event("read",{stage:"reading",estimatedInputTokens:2000,inputTokens:1000,cachedInputTokens:0}),
-      event("write",{stage:"synthesis:final",estimatedInputTokens:3000,inputTokens:1500,cachedInputTokens:1200}),
+      event("write",{stage:"synthesis:final",estimatedInputTokens:3000,budgetedInputTokens:1800,inputTokens:1500,cachedInputTokens:1200}),
       event("estimated-only",{stage:"synthesis:final",estimatedInputTokens:900,inputTokens:900,tokenSource:"estimated"}),
     ],[]);
     expect(rows[0]).toMatchObject({cachedInputTokens:1200,estimateRatio:2,preflightBlocks:1,writingInputScale:0.55});
-    expect(rows[0].estimateRatioByStage).toEqual([{stage:"reading",requests:1,estimated:2000,actual:1000,ratio:2},{stage:"synthesis:final",requests:1,estimated:3000,actual:1500,ratio:2}]);
+    expect(rows[0].estimateRatioByStage).toEqual([{stage:"reading",requests:1,estimated:2000,actual:1000,ratio:2},{stage:"synthesis:final",requests:1,estimated:3000,actual:1500,ratio:2,budgetedRatio:1.2}]);
     const csv=organizationAnalysisCsv(rows);
     for(const header of ["cached_input_tokens","estimate_to_actual_input_ratio","estimate_ratio_by_stage","preflight_blocks","writing_input_scale"])expect(csv).toContain(header);
     // Without provider cache reports the field stays unknown rather than zero.

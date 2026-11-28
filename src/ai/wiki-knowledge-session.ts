@@ -36,7 +36,7 @@ export async function reextractSessionKnowledge(session: FocusSession, ai: AI, s
   const passages = session.scope ? scopedFocusPassages(loaded.passages, session.scope) : loaded.passages;
   const included = new Set(passages.map(passage => passage.document.conversationId));
   const report: Partial<WikiKnowledgeReport> = {};
-  const work = async () => { const result = await extractWikiKnowledge({ runId: session.runId, materials: coverageMaterials(passages, sources.filter(source => included.has(source.id))).materials, sharedCache: true, locale: session.locale ?? "zh-CN", signal, ai, previous, project: session.wikiProjectBoundary?.name ?? session.title, progress }); Object.assign(report, result.report); return result.ledger; };
+  const work = async () => { const result = await extractWikiKnowledge({ runId: session.runId, materials: coverageMaterials(passages, sources.filter(source => included.has(source.id))).materials, sharedCache: true, locale: session.locale ?? "zh-CN", signal, ai, previous, project: session.wikiProjectBoundary?.name ?? session.title, goal: session.goal, progress }); Object.assign(report, result.report); return result.ledger; };
   const ledger = await (session.runId ? measureAILocalStep(session.runId, "wiki", "wiki:knowledge-units", work, () => ({ ...report } as Record<string, number>)) : work());
   // Each source named and dated: the document tells conversations apart, and which came later.
   return withWikiSources(ledger, datedWikiSources(sources, loaded.messagesBySource.flatMap(([,messages]) => messages)));

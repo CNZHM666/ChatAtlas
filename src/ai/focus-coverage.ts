@@ -15,6 +15,7 @@ import { GENERATED_PROSE_INSTRUCTIONS } from "./wiki-instructions";
 import type { AnalysisMode } from "./semantic-analysis";
 import type { FocusBrief, FocusEvidence, FocusMode, FocusSection, FocusSourceOutline } from "../shared/focus-session";
 import { sourceMessageSignature } from "../shared/source-signature";
+import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
 import type { TranscriptPassage } from "../search/transcript-index";
 import type { AtlasAI } from "./atlas-ai";
 import type {StructuredAIRequest} from "./provider";
@@ -160,6 +161,12 @@ function textParts(text: string): string[] {
       else trailingHeading = undefined;
     }
   }
+  if (text.includes("|")) for (const table of wikiDocumentBlocks(text).filter(block => block.kind === "table")) {
+    sections.add(table.start);
+    sections.add(table.end);
+    code.push([table.start, table.end]);
+  }
+  code.sort(([first], [second]) => first - second);
   const boundaries = [...sections].sort((a, b) => a - b), lineEnds = [...lines].sort((a, b) => a - b);
   let sectionIndex = 0, lineIndex = 0, codeIndex = 0;
   for (let start = 0; start < text.length;) {

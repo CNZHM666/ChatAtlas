@@ -35,19 +35,19 @@ function ChatGPTExportGuide({zh,disabled,onClose,onChoose}:{zh:boolean;disabled:
   return()=>{document.body.style.overflow=overflow;if(previous?.isConnected)previous.focus({preventScroll:true});};
  },[]);
  return createPortal(<div className="file-import-guide-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
-  <div ref={panel} className="file-import-guide" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={event=>{
+  <div ref={panel} className="file-import-guide is-split-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={event=>{
    if(event.key==="Escape"){event.stopPropagation();onClose();return;}
    if(event.key!=="Tab")return;
    const items=[...panel.current!.querySelectorAll<HTMLElement>('button:not(:disabled):not([tabindex="-1"]),a[href],summary')].filter(element=>!Array.from(panel.current!.querySelectorAll("details:not([open])")).some(details=>details.contains(element)&&element!==details.querySelector("summary")));
    const first=items[0],last=items.at(-1),index=items.indexOf(document.activeElement as HTMLElement);
    if(index<0||event.shiftKey&&document.activeElement===first||!event.shiftKey&&document.activeElement===last){event.preventDefault();(event.shiftKey?last:first)?.focus();}
   }}>
-   <header className="file-import-guide-header"><div><span className="file-import-guide-eyebrow">ChatAtlas</span><h2 ref={title} id={titleId} tabIndex={-1}>{l("导入 AI 对话","Import AI conversations")}</h2></div><button type="button" className="file-import-guide-close" aria-label={l("关闭导入教程","Close import guide")} onClick={onClose}><X size={20}/></button></header>
+   <header className="file-import-guide-header"><div><h2 ref={title} id={titleId} tabIndex={-1}>{l("导入 AI 对话","Import AI conversations")}</h2></div><button type="button" className="file-import-guide-close" aria-label={l("关闭导入教程","Close import guide")} onClick={onClose}><X size={18}/></button></header>
+   <div className="file-import-guide-tabs" role="tablist" aria-label={l("对话来源","Conversation source")}>{GUIDE_PLATFORMS.map((item,index)=><button key={item.id} type="button" role="tab" id={`${tabsId}-${item.id}`} tabIndex={platform===item.id?0:-1} aria-selected={platform===item.id} aria-controls={`${tabsId}-panel`} onClick={()=>{setPlatform(item.id);if(body.current)body.current.scrollTop=0;}} onKeyDown={event=>{
+    const next=event.key==="ArrowRight"||event.key==="ArrowDown"?(index+1)%GUIDE_PLATFORMS.length:event.key==="ArrowLeft"||event.key==="ArrowUp"?(index+GUIDE_PLATFORMS.length-1)%GUIDE_PLATFORMS.length:event.key==="Home"?0:event.key==="End"?GUIDE_PLATFORMS.length-1:undefined;
+    if(next===undefined)return;event.preventDefault();setPlatform(GUIDE_PLATFORMS[next].id);document.getElementById(`${tabsId}-${GUIDE_PLATFORMS[next].id}`)?.focus();if(body.current)body.current.scrollTop=0;
+   }}>{l(item.zh,item.en)}</button>)}</div>
    <div ref={body} className="file-import-guide-body">
-    <div className="file-import-guide-tabs" role="tablist" aria-label={l("对话来源","Conversation source")}>{GUIDE_PLATFORMS.map((item,index)=><button key={item.id} type="button" role="tab" id={`${tabsId}-${item.id}`} tabIndex={platform===item.id?0:-1} aria-selected={platform===item.id} aria-controls={`${tabsId}-panel`} onClick={()=>{setPlatform(item.id);if(body.current)body.current.scrollTop=0;}} onKeyDown={event=>{
-     const next=event.key==="ArrowRight"?(index+1)%GUIDE_PLATFORMS.length:event.key==="ArrowLeft"?(index+GUIDE_PLATFORMS.length-1)%GUIDE_PLATFORMS.length:event.key==="Home"?0:event.key==="End"?GUIDE_PLATFORMS.length-1:undefined;
-     if(next===undefined)return;event.preventDefault();setPlatform(GUIDE_PLATFORMS[next].id);document.getElementById(`${tabsId}-${GUIDE_PLATFORMS[next].id}`)?.focus();if(body.current)body.current.scrollTop=0;
-    }}>{l(item.zh,item.en)}</button>)}</div>
     <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-${platform}`}>
     {platform!=="chatgpt"?<OtherPlatformGuide platform={platform} l={l}/>:<>
     <div className="file-import-guide-path" aria-label={l("导出入口","Export location")}><span>{l("设置","Settings")}</span><span aria-hidden="true">›</span><span>{l("数据控制","Data controls")}</span><span aria-hidden="true">›</span><strong>{l("导出数据","Export data")}</strong></div>

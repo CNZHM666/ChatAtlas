@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { pendingWriterQuestions, pendingWritingQuestions, wikiNamedProjects, withAnswersFrom, withWriterQuestions, withExcludedProject, withWritingAnswer, withWritingQuestions, withAnswersRevisited, answerLiftedLimits } from "./wiki-writing-questions";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
-import { reviseForAnswers, writeWikiDraft } from "./wiki-knowledge-write";
+import { writeWikiDraft } from "./wiki-knowledge-write";
 import type { StructuredAIRequest } from "./provider";
 import type { WikiKnowledgeLedger, WikiKnowledgeUnit, WikiWritingQuestion } from "../shared/wiki-knowledge";
 import { readQuestions, wikiLocalAnswer } from "./wiki-question-parse";
@@ -12,6 +12,7 @@ const unit = (index: number, statement: string, extra: Partial<WikiKnowledgeUnit
 const earlier = unit(1, "可选“在此设备记住”时把 API Key 存 localStorage。"), later = unit(2, "API Key 仅保存在内存，禁止写入 localStorage。");
 const atlas = unit(3, "需识别新决定替代旧决定的关系，避免保留冲突方案。", { subject: "决策演变" });
 const header = unit(4, "Header 不显示 Provider 连接状态。", { subject: "界面", details: ["除非用户正在进行需要 Provider 的任务。"] });
+header.evidence.quote = "Header 不显示 Provider 连接状态。除非用户正在进行需要 Provider 的任务。";
 const book = (): WikiKnowledgeLedger => ({ version: 1, generatedAt: 0, status: "complete", materials: 4, batches: [{ sourceIds: [], status: "ok", units: [earlier, later, atlas, header], rejected: {} }],
   organization: { version: 1, generatedAt: 7, status: "complete", subjects: [{ id: "s", name: "密钥", aliases: [], unitIds: [earlier.id, later.id, atlas.id, header.id] }], merged: [], report: {},
     relations: [{ older: earlier.id, newer: later.id, kind: "replaces", status: "unresolved" }], chapters: [{ id: "c", title: "安全", question: "", group: "", subtopics: [{ title: "密钥", subjectIds: ["s"] }] }] } });
@@ -22,6 +23,48 @@ function asking(answer: (prompt: { chapters: Array<{ subtopics: Array<{ units: A
   return { prompts, ai: { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => { const data = JSON.parse(request.prompt); prompts.push(data); return request.validate(answer(data)); } } };
 }
 const idOf = (prompt: Parameters<Parameters<typeof asking>[0]>[0], statement: string) => prompt.chapters.flatMap(chapter => chapter.subtopics.flatMap(topic => topic.units)).find(item => item.statement === statement)!.id;
+
+it("omits external implementations from decision material and rejects answers from a stale mixed question", async () => {
+  const reference = unit(5, "Reflow 并行生成固件和 PCB。", { kind: "plan", researchUse: "reference" });
+  const ledger = book();
+  ledger.batches[0].units.push(reference);
+  ledger.organization!.subjects[0].unitIds.push(reference.id);
+  const question: WikiWritingQuestion = { id: "mixed", organization: 7, about: "生成范围", ask: "先做单一方向，还是并行做固件和 PCB？",
+    unitIds: [atlas.id, reference.id], options: [
+      { id: "one", label: "先做单一方向", actions: [{ do: "reject", units: [reference.id] }] },
+      { id: "parallel", label: "并行做固件和 PCB", actions: [{ do: "confirm", units: [reference.id] }] },
+    ] };
+  const model = asking(() => ({ questions: [] }));
+  await withWritingQuestions(ledger, { ai: model.ai, signal, locale: "zh-CN" });
+  expect(model.prompts).toHaveLength(1);
+  expect(JSON.stringify(model.prompts[0])).not.toContain("Reflow");
+  expect(JSON.stringify(model.prompts[0])).toContain(later.statement);
+  const stale = { ...ledger, writingQuestions: [question] };
+  expect(pendingWritingQuestions(stale)).toEqual([]);
+  expect(withWritingAnswer(stale, question, "one")).toBe(stale);
+});
+
+it("records the scope of a compound choice and retains its receipt when generation finds changed evidence", async () => {
+  const ledger = book();
+  const compound = unit(42, "首版密钥只存在内存；界面框架使用 React。", { kind: "plan" });
+  ledger.batches[0].units.push(compound);
+  ledger.organization!.subjects[0].unitIds.push(compound.id);
+  const question: WikiWritingQuestion = { id: "scope", scoped: true, organization: 7, about: "首版密钥", ask: "首版密钥存在哪里？",
+    unitIds: [compound.id], options: [
+      { id: "memory", label: "首版密钥只存在内存", actions: [{ do: "confirm", units: [compound.id] }] },
+      { id: "open", label: "暂不定", actions: [{ do: "open", units: [compound.id] }] },
+    ] };
+  const saved = withWritingAnswer(ledger, question, "memory", undefined, 9);
+  expect(saved.decisions?.[compound.id]).toBeUndefined();
+  expect(saved.userAnswers?.[0].scope?.targets[0]).toMatchObject({ unitId: compound.id, messageId: compound.evidence.messageId });
+  expect(resolveWikiReading(saved).units.find(unit => unit.id === "answer:scope:memory")?.statement).toContain("首版密钥只存在内存");
+  const changed = structuredClone(saved);
+  changed.batches[0].units.find(unit => unit.id === compound.id)!.statement = "首版密钥存入系统凭据库；界面框架使用 React。";
+  expect(resolveWikiReading(changed).units.some(unit => unit.id === "answer:scope:memory")).toBe(false);
+  const refreshed = await withWritingQuestions(changed, { ai: asking(() => ({ questions: [] })).ai, signal, locale: "zh-CN" });
+  expect(withWriterQuestions(refreshed).ledger.userAnswers?.[0].answer).toBe("首版密钥只存在内存");
+  expect(resolveWikiReading(refreshed).report.scoped_answers_pending_review).toBe(1);
+});
 
 it("projects the selected release without rejecting a different release or confirming extras", () => {
   const first = unit(5, "V0 阶段不包含拖拽画布，仅提供“一句话需求 -> AI分析 -> 输出推荐方案/BOM/接线/代码”的静态结果页，用于验证核心价值。", { subject: "V0 MVP" });
@@ -202,13 +245,10 @@ it("lists the other products and projects the material names, and leaves out the
   expect(live(typed).has(review[2].id)).toBe(false);
 });
 
-it("passes on what a chapter's writer asks as soon as it is written, and revises only the paragraphs an answer concerns", async () => {
-  const raised: string[][] = [];
-  const sent: string[] = [];
+it("ignores new writer questions while keeping a saved writer question answerable", async () => {
   const writer = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
-    const data = JSON.parse(request.prompt); sent.push(data.presentation);
+    const data = JSON.parse(request.prompt);
     if (data.presentation === "wiki_unit_propositions") return request.validate({ same: [] });
-    if (data.presentation === "wiki_paragraph_revise") return request.validate({ text: data.paragraph.includes("localStorage") ? "API Key 仅保存在内存，禁止写入 localStorage。" : data.paragraph });
     const ids = data.subtopics[0].units.map((item: { id: string }) => item.id);
     const key = (statement: string) => data.subtopics[0].units.find((item: { statement: string }) => item.statement === statement).id;
     return request.validate({ opening: "密钥只在本地。", openingUnitIds: [], subtopics: data.subtopics.map((topic: { title: string }) => ({ title: topic.title, paragraphs: [
@@ -217,29 +257,21 @@ it("passes on what a chapter's writer asks as soon as it is written, and revises
     ] })), questions: [{ about: "API Key 存储", ask: "允许存 localStorage 还是一律禁止？", unitIds: [key(earlier.statement), key(later.statement)], options: [{ label: "一律禁止", actions: [{ do: "confirm", units: [key(later.statement)] }, { do: "reject", units: [key(earlier.statement)] }] }, { label: "允许可选保存", actions: [] }] }, { about: "空", ask: "?", unitIds: ids, options: [] }] });
   } };
   const ledger = book();
-  const draft = await writeWikiDraft({ ledger, ai: writer, locale: "zh-CN", signal, onQuestions: questions => raised.push(questions.map(question => question.about)) });
-  // Asked as soon as the part came back; a question with no answers to choose is not one.
-  expect(raised).toEqual([["API Key 存储"]]);
-  const written = { ...ledger, draft };
-  const { ledger: asked, added } = withWriterQuestions(written);
+  const draft = await writeWikiDraft({ ledger, ai: writer, locale: "zh-CN", signal });
+  expect(draft.chapters.some(chapter => chapter.questions?.length)).toBe(false);
+  const previousQuestion: WikiWritingQuestion = { id: "prior-writer", organization: 7, stage: "writing",
+    scoped: true, about: "API Key 存储", ask: "允许存 localStorage 还是一律禁止？", unitIds: [earlier.id, later.id], options: [
+      { id: "o1", label: "一律禁止", actions: [{ do: "confirm", units: [later.id] }, { do: "reject", units: [earlier.id] }] },
+      { id: "o2", label: "允许可选保存", actions: [] },
+    ] };
+  const stored = { ...draft, chapters: draft.chapters.map((chapter, index) => index === 0 ? { ...chapter, questions: [previousQuestion] } : chapter) };
+  const { ledger: asked, added } = withWriterQuestions({ ...ledger, draft: stored });
   expect(pendingWriterQuestions(asked).map(question => question.about)).toEqual(["API Key 存储"]);
-  // Answered on another copy while writing: only the answers are taken.
   const answeredCopy = withWritingAnswer(asked, added[0], "o1");
   const answered = withAnswersFrom(asked, answeredCopy);
   expect(answered.draft).toBe(asked.draft);
-  sent.length = 0;
-  const revised = await reviseForAnswers(answered, added, { ai: writer, locale: "zh-CN", signal });
-  // One small request, for the one paragraph the answer concerns; the other keeps its text and its exception.
-  expect(sent).toEqual(["wiki_paragraph_revise"]);
-  const paragraphs = revised.draft!.chapters[0].paragraphs;
-  expect(paragraphs[0].text).toBe("API Key 仅保存在内存，禁止写入 localStorage。");
-  expect(paragraphs[0].claims?.length).toBeGreaterThan(0);
-  expect(paragraphs[1].text).toBe(draft.chapters[0].paragraphs[1].text);
-  expect(revised.draft!.chapters[0].body).toContain("禁止写入 localStorage");
-  // Nothing answered: nothing revised, no request.
-  sent.length = 0;
-  expect(await reviseForAnswers(asked, added, { ai: writer, locale: "zh-CN", signal })).toBe(asked);
-  expect(sent).toEqual([]);
+  expect(answered.userAnswers?.[0].scope?.targets.map(target => target.unitId)).toEqual([earlier.id, later.id]);
+  expect(pendingWriterQuestions(answered)).toEqual([]);
 });
 
 it("drops a question or an answer that shows an id the model was sent", () => {

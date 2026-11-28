@@ -2,14 +2,15 @@ import {afterEach,expect,it,vi} from "vitest";
 import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import {ProjectExportDialog} from "./ProjectExportDialog";
 import {contextKnowledge} from "../../test/context-fixture";
-import {workspaceLayoutExample} from "../workspace-layout-example";
+import {evolutionKnowledge} from "../../test/evolution-fixture";
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it("offers saved legacy records only when present and never includes them by default",()=>{
- const {unmount}=render(<ProjectExportDialog session={workspaceLayoutExample()} zh onClose={vi.fn()}/>);
+ const withLegacy={...contextKnowledge().session,projectEvolutionAnalysis:evolutionKnowledge().session.projectHistoryAnalysis};
+ const {unmount}=render(<ProjectExportDialog session={withLegacy} zh onClose={vi.fn()}/>);
  const legacy=screen.getByText("以前保存的记录").closest("details")!;
  expect(legacy.open).toBe(false);fireEvent.click(screen.getByText("以前保存的记录"));
  expect(screen.getByRole("checkbox",{name:/历史事项/})).not.toBeChecked();expect(screen.getByRole("checkbox",{name:/历史演进/})).not.toBeChecked();
- unmount();const empty={...workspaceLayoutExample(),brief:undefined,projectState:undefined,projectMaintenance:undefined,projectHistoryAnalysis:undefined,projectEvolutionAnalysis:undefined,projectChanges:undefined};
+ unmount();const empty={...withLegacy,brief:undefined,projectState:undefined,projectMaintenance:undefined,projectHistoryAnalysis:undefined,projectEvolutionAnalysis:undefined,projectChanges:undefined};
  render(<ProjectExportDialog session={empty} zh onClose={vi.fn()}/>);
  expect(screen.queryByText("以前保存的记录")).toBeNull();
 });
@@ -115,4 +116,32 @@ it("exports this project's generation record as a CSV when ticked",async()=>{
  await screen.findByText("文件和生成记录已导出");
  expect(names.some(name=>name.endsWith("-analysis.csv"))).toBe(true);
  expect(terminate).toHaveBeenCalledOnce();
+});
+
+it("offers brief, handoff, and audit presets for drafted wikis regardless of writingMode and defaults to the draft mode",async()=>{
+ const create=vi.fn().mockReturnValue("blob:fixture");
+ vi.stubGlobal("URL",class extends URL{static createObjectURL=create;static revokeObjectURL=vi.fn();});
+ vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{});
+ const base=contextKnowledge().session;
+ const session={
+  ...base,
+  wikiKnowledge:{
+   version:1,generatedAt:0,status:"complete",materials:1,batches:[],writingMode:"handoff",
+   draft:{version:1,generatedAt:0,status:"complete",writingMode:"handoff",chapters:[],report:{}},
+  },
+ } as Parameters<typeof ProjectExportDialog>[0]["session"];
+ render(<ProjectExportDialog session={session} zh onClose={vi.fn()}/>);
+ const brief=screen.getByRole("button",{name:"精简"});
+ const handoff=screen.getByRole("button",{name:"开发"});
+ const audit=screen.getByRole("button",{name:"审计"});
+ expect(handoff).toHaveAttribute("aria-pressed","true");
+ expect(screen.getByRole("combobox",{name:"对话来源"})).toHaveValue("locators");
+ fireEvent.click(brief);
+ expect(brief).toHaveAttribute("aria-pressed","true");
+ expect(screen.getByRole("combobox",{name:"对话来源"})).toBeDisabled();
+ expect(screen.getByRole("checkbox",{name:"项目 Wiki"})).toBeChecked();
+ fireEvent.click(audit);
+ expect(audit).toHaveAttribute("aria-pressed","true");
+ expect(screen.getByRole("combobox",{name:"对话来源"})).toHaveValue("excerpts");
+ expect(screen.getByRole("combobox",{name:"对话来源"})).not.toBeDisabled();
 });

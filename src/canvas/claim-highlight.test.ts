@@ -138,18 +138,21 @@ it("finds an English original for a Chinese conclusion by the names and numbers 
   root.remove();
 });
 
-it("tints the text each holder mark covers, back to the previous mark, and clears it when hidden", () => {
+it("tints each holder mark's own sentence accurately, supports AI suggestions and single-status focus, and clears when hidden", () => {
   const marks = new Map<string, { ranges: Range[] }>();
   vi.stubGlobal("CSS", { highlights: { set: (name: string, value: { ranges: Range[] }) => marks.set(name, value), delete: (name: string) => marks.delete(name) } });
   vi.stubGlobal("Highlight", class { ranges: Range[]; priority = 0; constructor(...ranges: Range[]) { this.ranges = ranges; } });
   const root = document.createElement("div");
-  root.innerHTML = '<p>前言没有标记。<button class="wiki-claim-marker is-holder is-holder-ai"></button>第一版只做导入。<button class="wiki-claim-marker is-holder is-holder-open"></button>首页只留<strong>搜索</strong>。<button class="wiki-claim-marker is-holder is-holder-material"></button>尾巴没有标记。</p>';
+  root.innerHTML = '<p>前言没有标记。<button class="wiki-claim-marker is-holder is-holder-ai"></button>第一版只做导入。<button class="wiki-claim-marker is-holder is-holder-open"></button>首页只留<strong>搜索</strong>。<button class="wiki-claim-marker is-holder is-holder-decided"></button>尾巴没有标记。</p>';
   document.body.append(root);
-  expect(paintHolderRuns(root, true)).toBe(2);
-  // The assistant's run, the default, is not tinted; a status run is, back to the previous mark.
-  expect(marks.has("atlas-holder-ai")).toBe(false);
+  expect(paintHolderRuns(root, true)).toBe(3);
+  expect(marks.get("atlas-holder-ai")!.ranges.map(range => range.toString())).toEqual(["前言没有标记。"]);
   expect(marks.get("atlas-holder-open")!.ranges.map(range => range.toString())).toEqual(["第一版只做导入。"]);
-  expect(marks.get("atlas-holder-material")!.ranges.map(range => range.toString())).toEqual(["首页只留搜索。"]);
+  expect(marks.get("atlas-holder-decided")!.ranges.map(range => range.toString())).toEqual(["首页只留搜索。"]);
+  // Focusing one status highlights only that status category.
+  expect(paintHolderRuns(root, true, undefined, "open")).toBe(1);
+  expect(marks.has("atlas-holder-decided")).toBe(false);
+  expect(marks.get("atlas-holder-open")!.ranges.map(range => range.toString())).toEqual(["第一版只做导入。"]);
   paintHolderRuns(root, false);
   expect(marks.size).toBe(0);
   root.remove(); vi.unstubAllGlobals();

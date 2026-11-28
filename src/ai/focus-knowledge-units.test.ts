@@ -10,8 +10,11 @@ vi.mock("./provider", async original => ({ ...await original<typeof import("./pr
 // The document pipeline has its own tests; here it returns a fixed Wiki so only the switch is observed.
 vi.mock("./focus-coverage", async original => ({ ...await original<typeof import("./focus-coverage")>(), synthesizeCoveredFocus }));
 import { generateFocusSession } from "./focus-session";
+import { generateFocusUpdate } from "./focus-update";
 import { WIKI_LEGACY_PIPELINE_FLAG } from "./wiki-ledger-document";
 import { sourceMessageSignature } from "../shared/source-signature";
+import { wikiTableSignature } from "../shared/wiki-table-source";
+import { projectDocument } from "../export/project-document";
 
 afterEach(() => { vi.unstubAllGlobals(); generateStructured.mockReset(); synthesizeCoveredFocus.mockReset(); });
 const extractions = () => generateStructured.mock.calls.filter(([request]) => JSON.parse(request.prompt).presentation === "wiki_unit_extract").length;
@@ -66,6 +69,89 @@ it("writes a new project document from the knowledge-unit ledger, keeping the le
   expect(result.title).toBe("硬件项目");
   expect(result.wikiKnowledge!.organization!.projectName).toBe("Orama 检索器");
   expect(units).toHaveLength(1);
+});
+
+async function firstWikiFixture(id: string, contents: string[]) {
+  const db = await getDatabase();
+  const source: Conversation = { id, title: "AI 硬件版 Cursor 调研", platform: "deepseek", url: "", messageCount: contents.length, updatedAt: 1,
+    importState: "complete", hydrationState: "hydrated" };
+  await db.put("conversations", source);
+  const messages = contents.map((content, i): ConversationMessage => ({
+    id: `${id}-${i}`, conversationId: id, messageIndex: i, role: i % 2 ? "assistant" : "user",
+    content, preview: content, contentHash: sourceMessageSignature(content), createdAt: 1, updatedAt: 1,
+  }));
+  for (const message of messages) await db.put("messages", message);
+  return { source, messages };
+}
+
+it("previews a single research answer in one request and exports its original six-row comparison and references", async () => {
+  const table = [
+    "| 公司/产品 | 目标领域 | 核心定位与模式 | 关键信号 |",
+    "| :-- | :-- | :-- | :-- |",
+    "| Schematik | 泛硬件 | 物料清单、购买链接和组装步骤 | 460 万美元 |",
+    "| Flux | PCB | 浏览器端 eCAD | 3700 万美元 |",
+    "| CopperPilot | PCB | KiCad、Altium、LTspice | 39 万美元 |",
+    "| Hestus | 机械 CAD | 预测草图约束 | YC 孵化 |",
+    "| Embedder | 嵌入式固件 | 真实板子烧录和测试 | 50 万美元 |",
+    "| Phinity Labs | RTL/芯片 | 从提示设计芯片 | 520 万美元 |",
+  ].join("\n");
+  const { source, messages } = await firstWikiFixture("first-hardware-research", [
+    "我想做 AI 硬件版 Cursor，有哪些竞品或开源项目值得参考？",
+    ["硬件设计有多个相对独立的方向。", "### 赛道格局", "包括 PCB、机械 CAD、嵌入式固件和 RTL/芯片。",
+      "### 商业竞品", table, "### 开源参考", "- **Copperhead** 用 KiCad CLI 验证 ERC 和 DRC。\n- **Forma** 提供 MCP 接口。\n- **SchGen** 以 Python 作为原理图中间表示。\n- **Reflow** 和 **circuit-agent** 约束生成。",
+      "### 切入建议", "可以先比较 PCB 和嵌入式固件，方向还需要选择。"].join("\n\n"),
+  ]);
+  const partial = vi.fn(), writing = vi.fn();
+  generateStructured.mockImplementation(async (request: StructuredAIRequest<unknown>) => {
+    expect(JSON.parse(request.prompt).presentation).toBe("wiki_first_draft");
+    return request.validate({ needsFull: false, selected: [9999] });
+  });
+  const runId = "test-first-hardware-research";
+  const result = await generateFocusSession("研究竞品和开源项目", "work", [source], "zh-CN", new AbortController().signal,
+    undefined, undefined, runId, undefined, { firstDocument: true, complete: true, initialWritingMode: "handoff",
+      onPartial: partial, onWritingEvent: writing });
+
+  expect(generateStructured).toHaveBeenCalledOnce();
+  expect(result.sections.map(section => section.title)).toEqual(["赛道格局", "商业竞品", "开源参考", "切入建议"]);
+  expect(partial).toHaveBeenCalledOnce();
+  expect(writing).toHaveBeenCalledTimes(4);
+  const ref = result.evidence.find(item => item.excerpt === table)!;
+  expect(ref).toMatchObject({ messageId: messages[1].id, sourceSignature: sourceMessageSignature(messages[1].content), sourceVersionId: expect.any(String) });
+  expect(result.sections[1].body).toContain(table);
+  expect(result.sections[1].body).toContain(`/table/${wikiTableSignature(table)}`);
+  expect(result.sections.flatMap(section => section.claims ?? []).some(claim => claim.userDecided || claim.holder === "decided")).toBe(false);
+  const exported = projectDocument(result, { overview: true, wikiIds: result.sections.map(section => section.id),
+    matters: false, history: false, sources: false, sourceMode: "locators" }, "md", true).text;
+  for (const name of ["赛道格局", "Schematik", "Flux", "CopperPilot", "Hestus", "Embedder", "Phinity Labs", "Copperhead", "Forma", "SchGen", "Reflow", "circuit-agent"])
+    expect(exported).toContain(name);
+  const run = await (await getDatabase()).get("organizationRuns", runId);
+  expect(run?.firstReadableAt).toBeGreaterThanOrEqual(run!.startedAt);
+  const noChange = await generateFocusUpdate(result, [source], "zh-CN", new AbortController().signal);
+  expect(noChange.sections).toEqual(result.sections);
+  expect(generateStructured).toHaveBeenCalledOnce();
+});
+
+it("keeps a short first note flat and does not include messages outside the confirmed scope", async () => {
+  const { source, messages: [message] } = await firstWikiFixture("first-short-note", ["先验证本地保存，再做同步。", "不要读到这个未选择的回复。"]);
+  generateStructured.mockImplementation(async (request: StructuredAIRequest<unknown>) => {
+    expect(request.prompt).not.toContain("未选择的回复");
+    return request.validate({ needsFull: false, selected: [1] });
+  });
+  const result = await generateFocusSession("写首版", "work", [source], "zh-CN", new AbortController().signal,
+    undefined, undefined, undefined, undefined, { firstDocument: true, scope: { kind: "goal", blocks: [{
+      conversationId: source.id, title: "本地保存", messageIds: [message.id], messageSignatures: { [message.id]: sourceMessageSignature(message.content) },
+    }] } });
+  expect(result.sections).toHaveLength(1);
+  expect(result.sections[0].body).toContain(message.content);
+  expect(result.evidence.map(ref => ref.messageId)).toEqual([message.id]);
+  expect(generateStructured).toHaveBeenCalledOnce();
+});
+
+it("uses full organization when the existing dialogue already contains a proposal and an adoption", async () => {
+  const result = await generate("first-full-adoption", { firstDocument: true });
+  expect(extractions()).toBeGreaterThan(0);
+  expect(result.wikiKnowledge?.draft?.status).toBe("complete");
+  expect(generateStructured.mock.calls.some(([request]) => JSON.parse(request.prompt).presentation === "wiki_first_draft")).toBe(false);
 });
 
 it("regenerates a document with zero extraction requests when its saved batches still match", async () => {

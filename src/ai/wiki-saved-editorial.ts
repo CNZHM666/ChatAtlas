@@ -12,6 +12,7 @@ import {placeWikiChoices} from "./wiki-choice-placement";
 import {wikiBoundClosedListChoices} from "./wiki-number-diagnostics";
 import {wikiStatesClosedList} from "../shared/wiki-closed-list";
 import {withStop} from "../shared/wiki-sentences";
+import {trimWikiEditorialRepeats} from "./wiki-editorial-repetitions";
 
 /** Apply the same answer reconciliation to saved generated prose as to new
  * drafts. All receipts must still belong to this chapter's selected sources.
@@ -204,6 +205,47 @@ export function reviewSavedWikiEditorial(section:FocusSection,ledger:WikiKnowled
    }
   }
  }
+ body=compactWikiDecisionHeadings(body);
+ const patched=body===section.body&&claims.length===(section.claims?.length??0)?section:{...section,body,claims:claims.filter(claim=>claim.text)};
+ return polishSavedWikiParagraphs(patched,ledger,sourceOf,units,storedClaims);
+}
+
+export function polishSavedWikiParagraphs(section:FocusSection,ledger:WikiKnowledgeLedger,sourceOf:(unit:WikiKnowledgeUnit)=>FocusEvidence|undefined,
+ units=new Map(wikiLedgerUnits(ledger).map(unit=>[unit.id,unit])),
+ storedClaims=ledger.draft?.chapters.find(chapter=>chapter.id===section.id)?.paragraphs.flatMap(paragraph=>paragraph.claims??[])??[]){
+ if(section.userEdited||section.origin||ledger.documentType==="learning")return section;
+ let body=section.body;
+ const claims=[...section.claims??[]],eligible=new Map([...units].filter(([,unit])=>sourceOf(unit)));
+ if(!eligible.size)return section;
+ let title="";
+ const projection=wikiDocumentBlocks(body,claims),checked=claims.filter(claim=>claim.checked);
+ const article:WikiDraftChapter={id:section.id,title:section.title,group:"",question:"",problems:[],body,paragraphs:projection.flatMap(block=>{
+  if(block.kind==="heading"){title=block.text.replace(/^#+\s+/u,"");return [];}
+  if(checked.some(claim=>block.text.includes(claim.text)))return [];
+  const points=claims.flatMap(claim=>claim.checked||!claim.unitIds?.length||!claim.unitIds.every(id=>eligible.has(id))?[]
+   :[claim.text,...claim.formulations??[]].filter(form=>form&&block.text.includes(form)).map(text=>({text,unitIds:claim.unitIds!})));
+  const saved = storedClaims.filter(claim=>claim.unitIds.length&&claim.unitIds.every(id=>eligible.has(id))
+   &&block.text.includes(claim.text)&&!points.some(point=>point.text===claim.text));
+  points.push(...saved.map(claim=>({...claim,unitIds:[...claim.unitIds]})));
+  return [{text:block.text,subtopic:title,claims:points,unitIds:[...new Set(points.flatMap(point=>point.unitIds))]}];
+ })};
+ trimWikiEditorialRepeats([article],ledger,eligible,checked.map(claim=>claim.text));
+ if(article.body===body)return section;
+ const supported=article.paragraphs.flatMap(paragraph=>paragraph.claims??[]);
+ for(let index=claims.length-1;index>=0;index--){
+  const claim=claims[index],forms=[claim.text,...claim.formulations??[]].filter(Boolean);
+  if(claim.checked||!forms.some(form=>body.includes(form))||forms.some(form=>article.body.includes(form)))continue;
+  const split=supported.filter(point=>forms.some(form=>form.includes(point.text))&&point.unitIds.every(id=>claim.unitIds?.includes(id)));
+  claims.splice(index,1,...split.map(point=>({...claim,text:point.text,unitIds:point.unitIds,formulations:undefined,sourceReading:undefined,
+   evidenceIds:[...new Set(point.unitIds.flatMap(id=>{const unit=eligible.get(id), ref=unit&&sourceOf(unit);return ref?[ref.id]:[];}))]})));
+ }
+ for(const point of supported){
+  if(body.includes(point.text)||!article.body.includes(point.text)||claims.some(claim=>claim.text===point.text))continue;
+  const unit=eligible.get(point.unitIds[0]),ref=unit&&sourceOf(unit);
+  if(!unit||!ref||!wikiLocalAnswer(ledger,unit.id)||ledger.decisions?.[unit.id]?.verdict!=="confirmed"||point.text!==unit.statement)continue;
+  claims.push({text:point.text,quote:unit.evidence.quote,unitIds:[unit.id],evidenceIds:[ref.id],holder:"decided",holderMark:true,userDecided:true,verification:"supported"});
+ }
+ body=article.body;
  body=compactWikiDecisionHeadings(body);
  return body===section.body&&claims.length===(section.claims?.length??0)?section:{...section,body,claims:claims.filter(claim=>claim.text)};
 }

@@ -21,7 +21,7 @@ export function wikiCannotFit(error: unknown) {
   if (error instanceof AIProviderResponseError && code === "PROVIDER_OUTPUT_TRUNCATED"
     && error.outputDiagnostics?.receivedCharacters === 0
     && (error.outputDiagnostics.reasoningTokens || error.outputDiagnostics.reasoningCharacters)) return false;
-  return code === "LOCAL_INPUT_BUDGET" || code === "LOCAL_INPUT_CHARACTERS"
+  return code === "LOCAL_INPUT_BUDGET" || code === "LOCAL_INPUT_CHARACTERS" || code === "TASK_INPUT_LIMIT"
     || code === "PROVIDER_OUTPUT_TRUNCATED" || error instanceof AIProviderHttpError && error.status === 413;
 }
 

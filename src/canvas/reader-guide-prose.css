@@ -31,44 +31,102 @@
   border-radius: 0; color: var(--muted); background: transparent;
 }
 .reader-guide-prose .reader-table-scroll {
-  width: 100%; max-width: 100%; overflow-x: auto; margin: 14px 0 18px;
-  border: 0; border-radius: 0; background: transparent; overscroll-behavior-x: contain;
+  width: 100%; max-width: 100%; overflow-x: auto; margin: 16px 0 20px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid);
+  overscroll-behavior-x: contain; scrollbar-width: thin;
 }
 .reader-guide-prose .reader-table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .reader-guide-prose .wiki-table-heading {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 16px 0 4px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 18px 0 8px;
 }
-.reader-guide-prose .wiki-table-heading-title { min-width: 0; }
+.reader-guide-prose .wiki-table-heading-title { min-width: 0; font-size: 13.5px; color: var(--muted); }
 .reader-guide-prose .wiki-table-heading-title > p { margin: 0; }
-.reader-guide-prose .wiki-table-heading > :is(a,details) { flex: none; margin-inline-start: auto; font-size: 13px; }
-.reader-guide-prose .wiki-table-heading-sources { position: relative; color: var(--accent); }
-.reader-guide-prose .wiki-table-heading-sources summary { cursor: pointer; }
-.reader-guide-prose .wiki-table-heading-sources > div {
-  position: absolute; inset-inline-end: 0; z-index: 2; display: grid; gap: 4px; min-width: max-content;
-  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid);
+.reader-guide-prose .wiki-table-heading-title strong { font-size: 14px; font-weight: 600; color: var(--text); }
+.reader-guide-prose .wiki-table-heading > :is(a,details) { flex: none; margin-inline-start: auto; font-size: 12px; }
+.conversation-answer-markdown.reader-guide-prose a[href^="#atlas-original-"] {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  min-width: 0; height: 21px; margin: 0 2px 0 4px; padding: 0 7px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-solid); color: var(--muted);
+  font-size: 11px; font-weight: 550; line-height: 1; text-decoration: none;
+  vertical-align: 0.08em; cursor: pointer;
+  transition: background-color .14s ease, border-color .14s ease, color .14s ease;
 }
-.reader-guide-prose .wiki-table-heading + .reader-table-scroll { margin-top: 4px; }
+.conversation-answer-markdown.reader-guide-prose a[href^="#atlas-original-"]::after {
+  content: "↗"; font-size: 9.5px; line-height: 1; opacity: .72;
+}
+.conversation-answer-markdown.reader-guide-prose a[href^="#atlas-original-"]:hover {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: var(--accent-soft); color: var(--accent); text-decoration: none;
+}
+.reader-guide-prose .wiki-table-heading > a,
+.reader-guide-prose .wiki-table-heading-sources > summary,
+.reader-guide-prose .wiki-flow-sources > a,
+:is(.wiki-document,.document-overview) .reader-guide-prose .wiki-flow-sources > button.wiki-claim-marker.is-flow-source {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 0; min-height: 24px; height: 24px; margin: 0; padding: 0 9px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-solid); color: var(--muted);
+  font-size: 11.5px; font-weight: 550; line-height: 1; text-decoration: none;
+  vertical-align: middle; list-style: none; cursor: pointer;
+  transition: background-color .14s ease, border-color .14s ease, color .14s ease;
+}
+.reader-guide-prose .wiki-table-heading-sources > summary::-webkit-details-marker { display: none; }
+.reader-guide-prose .wiki-table-heading > a::after,
+.reader-guide-prose .wiki-flow-sources > a::after,
+:is(.wiki-document,.document-overview) .reader-guide-prose .wiki-flow-sources > button.wiki-claim-marker.is-flow-source::after {
+  content: "↗"; font-size: 10px; line-height: 1; opacity: .72;
+}
+.reader-guide-prose .wiki-table-heading > a:hover,
+.reader-guide-prose .wiki-table-heading-sources > summary:hover,
+.reader-guide-prose .wiki-flow-sources > a:hover,
+:is(.wiki-document,.document-overview) .reader-guide-prose .wiki-flow-sources > button.wiki-claim-marker.is-flow-source:hover {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: var(--accent-soft); color: var(--accent); text-decoration: none;
+}
+:is(.wiki-document,.document-overview) .reader-guide-prose .wiki-flow-sources > button.wiki-claim-marker.is-flow-source.is-active {
+  border-color: var(--accent); background: var(--accent); color: #fff;
+}
+.reader-guide-prose .wiki-table-heading-sources { position: relative; }
+.reader-guide-prose .wiki-table-heading-sources > summary::after { content: "▾"; font-size: 10px; line-height: 1; opacity: .72; }
+.reader-guide-prose .wiki-table-heading-sources > div {
+  position: absolute; inset-inline-end: 0; top: calc(100% + 5px); z-index: 4; display: grid; gap: 2px; min-width: 110px;
+  padding: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid);
+  box-shadow: 0 10px 26px rgb(15 23 42 / .12);
+}
+.conversation-answer-markdown.reader-guide-prose .wiki-table-heading-sources > div a {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  height: auto; min-height: 28px; margin: 0; padding: 4px 9px;
+  border: 0; border-radius: 7px; background: transparent;
+  color: var(--text); font-size: 12.5px; font-weight: 500; line-height: 1.4; text-decoration: none;
+}
+.conversation-answer-markdown.reader-guide-prose .wiki-table-heading-sources > div a:hover {
+  background: var(--accent-soft); color: var(--accent);
+}
+.reader-guide-prose .wiki-table-heading + .reader-table-scroll { margin-top: 6px; }
 :is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .reader-table-scroll > table,
 .reader-guide-prose .reader-table-scroll > table {
   display: table; width: 100%; max-width: none; margin: 0; border: 0;
-  border-collapse: collapse; background: transparent; font-size: 15px; line-height: 1.65;
+  border-collapse: collapse; background: transparent; font-size: 14.5px; line-height: 1.62;
 }
 .reader-guide-prose .reader-table-scroll :is(th,td) {
-  padding: 9px 12px; border: 0; border-bottom: 1px solid var(--border);
-  text-align: left; vertical-align: top; min-width: 120px; overflow-wrap: anywhere;
+  padding: 10px 14px; border: 0; border-bottom: 1px solid var(--border);
+  text-align: left; vertical-align: top; min-width: 104px; overflow-wrap: anywhere;
 }
-.reader-guide-prose .reader-table-scroll th { background: transparent; color: var(--text); font-weight: 600; }
+.reader-guide-prose .reader-table-scroll th {
+  background: var(--surface-muted); color: var(--text); font-size: 13px; font-weight: 600;
+  letter-spacing: .01em;
+}
+.reader-guide-prose .reader-table-scroll td:first-child { font-weight: 550; color: var(--text); }
 .reader-guide-prose .reader-table-scroll tr:last-child td { border-bottom: 0; }
-.reader-guide-prose .reader-table-scroll :is(tr,td),
-.reader-guide-prose .reader-table-scroll tbody tr:hover { background: transparent; }
-.reader-guide-prose .reader-table-scroll :is(th,td):first-child { padding-left: 0; }
-.reader-guide-prose .reader-table-scroll :is(th,td):last-child { padding-right: 0; }
+.reader-guide-prose .reader-table-scroll tbody tr { transition: background-color .12s ease; }
+.reader-guide-prose .reader-table-scroll tbody tr:hover { background: color-mix(in srgb, var(--surface-muted) 65%, transparent); }
 @media(max-width:620px) {
   :is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose :is(h1,h2) { font-size: 21px; margin-top: 30px; }
-  .reader-guide-prose .reader-table-scroll :is(th,td) { padding: 10px 12px; }
+  .reader-guide-prose .reader-table-scroll :is(th,td) { padding: 9px 11px; }
 }
 
-.reader-guide-prose .reader-table-scroll table:has(th:nth-child(3)) { min-width: 560px; }
+.reader-guide-prose .reader-table-scroll table:has(th:nth-child(4)) { min-width: 560px; }
 
 /* The article title sits above Markdown's own hierarchy without heavy display type. */
 :is(.focus-workspace,.focus-preview) .wiki-document .wiki-document-heading h1 {
@@ -115,69 +173,159 @@
 .conversation-answer-markdown p:has(> .wiki-block-caption):has(+ .reader-table-scroll) .wiki-block-caption { padding: 0 0 6px; border: 0; border-radius: 0; background: transparent; }
 
 /* Generated reference material is one quiet subsection attachment, not a sequence of empty cards. */
-.reader-guide-prose .wiki-source-supplement { margin: 8px 0 18px; padding: 0; color: var(--muted); font-size: 13px; }
+.reader-guide-prose .wiki-source-supplement {
+  margin: 12px 0 20px; padding: 0; color: var(--muted); font-size: 13px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted);
+  overflow: hidden;
+}
 .wiki-source-supplement > summary {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  min-height: 36px; box-sizing: border-box; padding: 6px 8px; border-radius: 6px;
-  list-style: none; cursor: pointer; font-weight: 500; line-height: 1.5;
-  overflow-wrap: anywhere;
+  min-height: 38px; box-sizing: border-box; padding: 8px 13px; border-radius: 0;
+  list-style: none; cursor: pointer; font-weight: 550; line-height: 1.5; color: var(--text);
+  overflow-wrap: anywhere; transition: background-color .12s ease;
 }
 .wiki-source-supplement > summary::-webkit-details-marker { display: none; }
-.wiki-source-supplement > summary:hover { color: var(--text); background: var(--surface-muted); }
-.wiki-source-supplement > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wiki-source-supplement > summary:hover { color: var(--text); background: color-mix(in srgb, var(--surface-solid) 65%, transparent); }
+.wiki-source-supplement > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .wiki-supplement-chevron {
-  flex: 0 0 6px; width: 6px; height: 6px; margin-inline: 4px;
+  flex: 0 0 6px; width: 6px; height: 6px; margin-inline: 4px; color: var(--muted);
   border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
+  transition: transform .15s ease;
 }
+.wiki-source-supplement[open] > summary { border-bottom: 1px solid var(--border); }
 .wiki-source-supplement[open] > summary > .wiki-supplement-chevron { transform: rotate(225deg); }
-.wiki-source-supplement > .wiki-supplement-content { padding: 4px 8px 0; }
-.reader-guide-prose .wiki-source-supplement h4 { font-size: 14px; font-weight: 600; margin: 16px 0 8px; color: var(--text); }
-.reader-guide-prose .wiki-source-supplement pre { margin: 8px 0 14px; }
-.reader-color-swatch { display: inline-block; width: .8em; height: .8em; border: 1px solid #8885; border-radius: 2px; margin-right: 6px; vertical-align: -.03em; }
-/* Short ordered stages keep reading order while wrapping between whole items. */
-.reader-guide-prose .reading-stage-flow-frame { margin: 12px 0 18px; padding: 0; }
-.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact {
- --stage-card-padding: 2px 0; display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 0; margin: 0; min-width: 0; list-style: none;
+.wiki-source-supplement > .wiki-supplement-content { padding: 12px 14px 14px; background: var(--surface-solid); }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .wiki-source-supplement .wiki-supplement-content > :first-child,
+.reader-guide-prose .wiki-source-supplement .wiki-supplement-content > :first-child { margin-top: 0; }
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .wiki-source-supplement :is(h3,h4,h5,h6),
+.reader-guide-prose .wiki-source-supplement :is(h3,h4,h5,h6) {
+  font-size: 14px; font-weight: 600; line-height: 1.45; margin: 14px 0 8px; color: var(--text);
 }
-.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li {
- display: inline-flex; align-items: baseline; gap: 6px; flex: 0 1 auto; max-width: 100%;
- padding: 2px 0; margin: 0; border: 0; border-radius: 0; background: transparent; min-height: 0; box-shadow: none;
-}
-.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li::before {
- position: static; display: inline; width: auto; height: auto; margin: 0; padding: 0; border: 0;
- border-radius: 0; background: none; color: var(--muted); font-size: 12px; line-height: inherit;
- content: counter(atlas-stage) ".";
-}
-.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li:not(:last-child)::after {
- position: static; flex: none; content: "→" / ""; width: auto; height: auto; margin: 0 0 0 3px;
- background: none; color: var(--muted); border: 0;
-}
-.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li > p { display: inline; margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled { --stage-card-labelled-padding: 5px 0; display: block; padding: 0; margin: 0; }
-.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled > li {
- padding: 5px 0; margin: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+:is(.focus-workspace,.focus-preview) .wiki-document .chapter-guide .reader-guide-prose .wiki-source-supplement :is(h3,h4,h5,h6):first-child,
+.reader-guide-prose .wiki-source-supplement :is(h3,h4,h5,h6):first-child { margin-top: 0; }
+.reader-guide-prose .wiki-source-supplement .wiki-table-heading { margin: 0 0 8px; }
+.reader-guide-prose .wiki-source-supplement .reader-table-scroll { margin: 8px 0 4px; }
+.reader-guide-prose .wiki-source-supplement pre { margin: 8px 0 12px; }
+.reader-color-swatch {
+  display: inline-block; width: 13px; height: 13px; border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  border-radius: 3.5px; margin-right: 6px; vertical-align: -2px; flex: none;
 }
 
-/* Color values remain readable text, with a compact visual reference beside them. */
-.reader-guide-prose .reader-color-code { white-space: nowrap; }
-.reader-guide-prose .reader-palette { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,210px),1fr)); gap: 12px 24px; margin: 14px 0 18px; padding: 0; }
-.reader-guide-prose .reader-palette-entry { min-width: 0; padding: 0 0 8px; border-bottom: 1px solid var(--border); }
-.reader-guide-prose .reader-palette-entry dt { color: var(--muted); font-size: 13px; margin: 0 0 2px; }
-.reader-guide-prose .reader-palette-entry dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+/* Short ordered stages & flows: clean node pills with subtle arrows and timeline accents. */
+.reader-guide-prose .reading-stage-flow-frame { margin: 14px 0 20px; padding: 0; }
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow {
+  list-style: none; padding: 0; margin: 0;
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact {
+  --stage-card-padding: 6px 11px;
+  display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px 22px;
+  padding: 12px 14px; margin: 0; min-width: 0;
+  border: 1px solid var(--border); border-radius: 11px; background: var(--surface-muted);
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li {
+  position: relative; display: inline-flex; align-items: center; gap: 7px; flex: 0 1 auto; max-width: 100%;
+  padding: var(--stage-card-padding); margin: 0; min-height: 30px; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid);
+  font-size: 13.5px; line-height: 1.45; color: var(--text);
+  counter-increment: atlas-stage;
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li::before {
+  flex: none; display: inline-grid; place-items: center; min-width: 19px; height: 19px; padding: 0 4px;
+  border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+  font-size: 11px; font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums;
+  content: counter(atlas-stage);
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li:not(:last-child)::after {
+  position: absolute; inset-inline-start: calc(100% + 5px); top: 50%; transform: translateY(-50%);
+  content: "→" / ""; color: var(--muted); font-size: 12px; line-height: 1; pointer-events: none;
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-compact > li > p { display: inline; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.reading-flow-step-body { display: inline-flex; flex-direction: column; gap: 1px; min-width: 0; }
+.reading-flow-step-title { font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.4; }
+.reading-flow-step-detail { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-steps {
+  --stage-card-padding: 10px 14px;
+  display: grid; gap: 8px; padding: 0; margin: 0;
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-steps > li {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; gap: 10px;
+  padding: var(--stage-card-padding); margin: 0;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid);
+  font-size: 14px; line-height: 1.6; counter-increment: atlas-stage;
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-steps > li::before {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; margin-top: 1px;
+  border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+  font-size: 11.5px; font-weight: 650; font-variant-numeric: tabular-nums;
+  content: counter(atlas-stage);
+}
+
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled {
+  --stage-card-labelled-padding: 10px 14px 10px 16px;
+  position: relative; display: grid; gap: 10px; padding: 2px 0 2px 18px; margin: 0;
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled::before {
+  content: ""; position: absolute; inset-block: 14px; inset-inline-start: 6px;
+  width: 2px; border-radius: 2px; background: var(--border);
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled > li {
+  position: relative; padding: var(--stage-card-labelled-padding); margin: 0;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid);
+  font-size: 14.5px; line-height: 1.62; counter-increment: atlas-stage;
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled > li::before {
+  content: ""; position: absolute; inset-inline-start: -16px; top: 16px;
+  width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box;
+  border: 2px solid var(--accent); background: var(--surface-solid);
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled > li > p > strong:first-child,
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled > li > strong:first-child {
+  display: inline-block; margin-inline-end: 8px; color: var(--text); font-weight: 650;
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow > li[data-stage-status="current"] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-solid));
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled > li[data-stage-status="current"]::before {
+  background: var(--accent);
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow > li[data-stage-status="deferred"] {
+  background: var(--surface-muted); color: var(--muted);
+}
+.conversation-answer-markdown.reader-guide-prose .reading-stage-flow.is-labelled > li[data-stage-status="deferred"]::before {
+  border-color: var(--muted);
+}
+
+/* Color values remain readable text, with clean token cards beside them. */
+.reader-guide-prose .reader-color-code { white-space: nowrap; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: .9em; }
+.reader-guide-prose .reader-palette {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 10px; margin: 16px 0 20px; padding: 0;
+}
+.reader-guide-prose .reader-palette-entry {
+  min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface-solid);
+}
+.reader-guide-prose .reader-palette-entry dt { color: var(--muted); font-size: 12px; margin: 0 0 4px; font-weight: 550; }
+.reader-guide-prose .reader-palette-entry dd { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin: 0; font-size: 13.5px; overflow-wrap: anywhere; }
 .reader-guide-prose .reader-palette-head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Long technical names wrap at semantic boundaries without injected text or a forced new line. */
 .reader-guide-prose .reader-token { display: inline; white-space: normal; overflow-wrap: break-word; word-break: normal; }
 .conversation-answer-markdown.reader-guide-prose p { text-wrap: wrap; }
 .reader-guide-prose .wiki-flow {
-  margin: 1.25rem 0;
+  margin: 16px 0 20px;
 }
 .reader-guide-prose .wiki-flow figcaption {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
 }
 .reader-guide-prose .wiki-flow figcaption > p {
   min-inline-size: 0;
@@ -187,7 +335,8 @@
 .reader-guide-prose .wiki-flow figcaption em {
   display: inline-block;
   margin-inline-start: 8px;
-  font-size: .8em;
+  font-size: .85em;
+  font-weight: 400;
   font-style: normal;
   color: var(--muted);
 }
@@ -197,13 +346,14 @@
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: .8em;
+  font-size: .82em;
+  font-weight: 400;
 }
 .reader-guide-prose .wiki-flow-card {
   min-width: 0;
-  padding: 12px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 11px;
   background: var(--surface-muted, var(--surface));
 }
 .reader-guide-prose .wiki-flow:is([data-wiki-structure-active],:has(.is-flow-source.is-active,[data-claim-highlighted="true"])) .wiki-flow-card {
@@ -212,14 +362,18 @@
 }
 .reader-guide-prose .wiki-flow:is([data-wiki-structure-active],:has(.is-flow-source.is-active)) [data-claim-highlighted],
 .reader-guide-prose table[data-wiki-structure-active] [data-claim-highlighted] { background: transparent; }
-.reader-guide-prose table[data-wiki-structure-active] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.reader-guide-prose .reader-table-scroll:has(> table[data-wiki-structure-active]) {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.reader-guide-prose table[data-wiki-structure-active] { outline: none; }
 .reader-guide-prose .wiki-flow-card > ol {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 10px 14px;
+  align-items: center;
+  gap: 10px 22px;
   list-style: none;
-  padding: 0;
+  padding: 0 18px 0 0;
   margin: 0;
 }
 .reader-guide-prose .wiki-flow-card > ol > li {
@@ -227,8 +381,12 @@
   box-sizing: border-box;
   min-inline-size: 0;
   max-inline-size: 100%;
-  padding: 0;
+  padding: 6px 11px;
   margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-solid);
+  font-size: 13.5px;
   line-height: 1.5;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -237,14 +395,75 @@
   margin: 0;
   min-inline-size: 0;
 }
-.reader-guide-prose .wiki-flow-card > ol > li + li {
-  padding-inline-start: 1.4em;
-}
-.reader-guide-prose .wiki-flow-card > ol > li + li::before {
+.reader-guide-prose .wiki-flow-card > ol > li:not(:last-child)::after {
   content: "→" / "";
   position: absolute;
-  inset-block-start: 0;
-  inset-inline-start: 0;
-  line-height: inherit;
+  inset-block-start: 50%;
+  inset-inline-start: calc(100% + 5px);
+  transform: translateY(-50%);
+  font-size: 12px;
+  line-height: 1;
   color: var(--muted);
+  pointer-events: none;
 }
+
+/* Native themed Mermaid flowchart & ER diagrams. */
+.reader-guide-prose .reader-mermaid-card {
+  margin: 16px 0 20px; border: 1px solid var(--border); border-radius: 11px;
+  background: var(--surface-solid); overflow: hidden;
+}
+.reader-mermaid-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--surface-muted);
+}
+.reader-mermaid-kind {
+  font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .01em;
+}
+.reader-mermaid-actions { display: flex; align-items: center; gap: 4px; }
+.reader-mermaid-actions > button {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 8px;
+  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+}
+.reader-mermaid-actions > button:hover {
+  border-color: var(--border); background: var(--surface-solid); color: var(--text);
+}
+.reader-mermaid-canvas {
+  overflow-x: auto; padding: 14px 12px; text-align: center;
+  background: var(--surface-solid); overscroll-behavior-x: contain; scrollbar-width: thin;
+}
+.reader-mermaid-svg { display: block; margin: 0 auto; max-width: 100%; height: auto; font-family: inherit; }
+.reader-mermaid-edge { fill: none; stroke: color-mix(in srgb, var(--muted) 62%, var(--border)); stroke-width: 1.5; }
+.reader-mermaid-edge.is-dashed { stroke-dasharray: 5 4; }
+.reader-mermaid-arrowhead { fill: color-mix(in srgb, var(--muted) 72%, var(--border)); }
+.reader-mermaid-edge-label rect { fill: var(--surface-solid); stroke: var(--border); stroke-width: 1; }
+.reader-mermaid-edge-label text { fill: var(--muted); font-size: 11px; }
+.reader-mermaid-node rect { fill: var(--surface-solid); stroke: var(--border); stroke-width: 1.25; }
+.reader-mermaid-node.is-round rect { fill: color-mix(in srgb, var(--accent) 8%, var(--surface-solid)); stroke: color-mix(in srgb, var(--accent) 42%, var(--border)); }
+.reader-mermaid-node.is-diamond rect { fill: color-mix(in srgb, #d97706 7%, var(--surface-solid)); stroke: color-mix(in srgb, #d97706 38%, var(--border)); stroke-dasharray: 3 2; }
+.reader-mermaid-node text { fill: var(--text); font-size: 12.5px; font-weight: 550; }
+.reader-mermaid-entity-box { fill: var(--surface-solid); stroke: var(--border); stroke-width: 1.25; }
+.reader-mermaid-entity-divider { stroke: var(--border); stroke-width: 1; }
+.reader-mermaid-entity-title { fill: var(--text); font-size: 12.5px; font-weight: 650; }
+.reader-mermaid-entity-field { fill: var(--muted); font-size: 11.5px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.reader-mermaid-modal {
+  position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 20px;
+  background: rgb(15 23 42 / .44); backdrop-filter: blur(2px);
+}
+.reader-mermaid-modal-panel {
+  display: flex; flex-direction: column; width: min(920px, 100%); max-height: min(84vh, 100%);
+  border: 1px solid var(--border); border-radius: 14px; background: var(--surface-solid);
+  box-shadow: 0 20px 50px rgb(0 0 0 / .22); overflow: hidden;
+}
+.reader-mermaid-modal-panel > header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.reader-mermaid-modal-panel > header > strong { font-size: 14px; font-weight: 600; color: var(--text); }
+.reader-mermaid-modal-panel > header > button {
+  display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.reader-mermaid-modal-panel > header > button:hover { background: var(--surface-muted); color: var(--text); }
+.reader-mermaid-modal-body { flex: 1; min-height: 0; overflow: auto; padding: 22px; text-align: center; }
+.reader-mermaid-modal-body .reader-mermaid-svg { max-width: none; }

@@ -1,5 +1,5 @@
 import type { ProjectKnowledge } from "../context/types";
-import type { OverviewBasis, ProjectOverviewWorkspace } from "../canvas/project-overview-workspace";
+import { overviewChapterCards, type OverviewBasis, type ProjectOverviewWorkspace } from "../canvas/project-overview-workspace";
 import type { FocusSession } from "../shared/focus-session";
 import { sourceMessageSignature } from "../shared/source-signature";
 import type { Conversation, ConversationMessage } from "../shared/types";
@@ -228,8 +228,7 @@ export function demoProject(locale: DemoLocale) {
   const knowledge: ProjectKnowledge = { session, conversations, messages, sourcesStale: false, signature: "circuit-studio-" + locale };
   const basis = (message: string): OverviewBasis => {
     const ref = byMessage.get(message)!;
-    return { ref, quote: ref.excerpt.split("\n\n", 1)[0], text: ref.excerpt.split("\n\n", 1)[0],
-      userAuthored: messages.find(item => item.id === message)?.role === "user" };
+    return { ref, quote: ref.excerpt.split("\n\n", 1)[0], text: ref.excerpt.split("\n\n", 1)[0] };
   };
   const photoQuestion = translate(["照片识别进入下一阶段时，首轮支持哪些元件？", "Which components should the first photo-matching trial support?"]);
   const overview: ProjectOverviewWorkspace = {
@@ -241,14 +240,11 @@ export function demoProject(locale: DemoLocale) {
       ],
     }],
     decisions: sections.flatMap(chapter => chapter.claims.filter(claim => claim.userDecided).map((claim, index) => ({
-      id: chapter.id + "-" + index, text: claim.text, chapter: { id: chapter.id }, choice: undefined,
+      id: chapter.id + "-" + index, text: claim.text, chapter: { id: chapter.id }, choice: undefined, receiptId: undefined,
       basis: claim.evidenceIds.map(id => basis(id.slice("source-".length))),
     }))),
-    plan: undefined, planChoices: {}, planChapters: {},
-    followup: [
-      { id: "physical-validation", text: translate(["单独验证实物接线并记录结果", "Verify physical wiring and record the result separately"]), part: "done", standing: "proposed", choice: undefined, chapter: { id: "verification" }, basis: [basis("release-0"), basis("validation-3")] },
-      { id: "regression-cases", text: translate(["补测引脚冲突与执行中断", "Add regression coverage for pin conflicts and interrupted execution"]), part: "now", standing: "proposed", choice: undefined, chapter: { id: "verification" }, basis: [basis("validation-3")] },
-    ],
+    plan: undefined, planChoices: {}, planChapters: {}, chapterCards: overviewChapterCards(session, locale === "zh"),
+
   };
   return { knowledge, overview };
 }

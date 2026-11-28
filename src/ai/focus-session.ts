@@ -1,5 +1,5 @@
 import {savedWikiProjectBoundary,wikiProjectTitleFromLedger,type WikiProjectBoundary} from "../shared/wiki-project-boundary";
-import { measureAILocalStep,startAIRun } from "./pipeline-timing";
+import { markAIFirstReadable, measureAILocalStep, recordAISkippedStep, startAIRun } from "./pipeline-timing";
 import { PROJECT_KNOWLEDGE_POLICY } from "../shared/project-knowledge-policy";
 import { groundWikiClaims, MAX_WIKI_SECTION_CLAIMS, validateWikiClaims } from "../shared/wiki-claims";
 import type { Conversation, ConversationMessage } from "../shared/types";
@@ -44,6 +44,7 @@ import { writeFocusWikiDraft, type FocusWikiDraftCallbacks } from "./focus-wiki-
 import {consolidateWikiExplanations} from "./wiki-explanation-repair";
 import {extractWikiKnowledge,type WikiKnowledgeReport} from "./wiki-knowledge-units";
 import { datedWikiSources, withWikiSources } from "../shared/wiki-sources";
+import { withWikiSections } from "../shared/wiki-sections";
 import {organizeLedger} from "./wiki-knowledge-organize";
 import {coverageMaterials} from "./focus-coverage";
 import {ledgerDocument,ledgerPipelineEnabled} from "./wiki-ledger-document";
@@ -52,6 +53,8 @@ import type {WikiKnowledgeLedger,WikiKnowledgeUnit,WikiProgress,WikiWritingMode}
 import { projectKnowledgeSignature, projectKnowledgeScopeSignature } from "./project-knowledge";
 import { learningChapterOrder, learningRoles } from "./wiki-learning";
 import { wikiLedgerUnits } from "../shared/wiki-knowledge";
+import { normalizeOrganizationInstruction } from "../shared/wiki-instruction";
+import { firstWikiMaterial, writeFirstWiki } from "./wiki-first-draft";
 
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
@@ -123,7 +126,7 @@ export async function generateFocusSession(...args:Parameters<typeof generateFoc
   return measureAILocalStep(runId,"wiki","wiki:generation",()=>generateFocusSessionWork(...args));
 }
 
-async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: Conversation[], locale: string, signal: AbortSignal, revision?: { instruction: string; sections: FocusSection[]; evidence: FocusEvidence[]; sectionId?: string; title?: string; completedSectionIds?: string[]; locale?: "zh-CN" | "en" }, onRequestState?: AIRequestStateListener, taskRunId?: string, onCoverageProgress?: (completed: number, total: number, stage: "reading" | "synthesis", detail?: FocusAnalysisProgress) => void, options?: FocusWikiDraftCallbacks & { initialWritingMode?: WikiWritingMode; wikiProjectBoundary?:WikiProjectBoundary; wikiPreviousLedger?:WikiKnowledgeLedger; wikiPreviousDirectory?:import("./wiki-topic-plan").WikiPreviousChapter[]; wikiScopeIncludeKeys?:string[];wikiScopeExcludeKeys?:string[];wikiScopeIgnoredKeys?:string[]; complete?: boolean; scope?: FocusScope; query?: boolean; queryHistory?: Array<{ question: string; answer: string }>; queryTerms?: string; querySearchQueries?: string[]; queryReferences?: FocusEvidence[]; queryContext?: string; queryCompact?: boolean; homeRecallIntent?: "find" | "summarize" | "answer"; skipProjectState?: boolean; onResponseText?: (text: string) => void; priorityOwner?: () => string | undefined }): Promise<FocusSession> {
+async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: Conversation[], locale: string, signal: AbortSignal, revision?: { instruction: string; sections: FocusSection[]; evidence: FocusEvidence[]; sectionId?: string; title?: string; completedSectionIds?: string[]; locale?: "zh-CN" | "en" }, onRequestState?: AIRequestStateListener, taskRunId?: string, onCoverageProgress?: (completed: number, total: number, stage: "reading" | "synthesis", detail?: FocusAnalysisProgress) => void, options?: FocusWikiDraftCallbacks & { firstDocument?: boolean; initialWritingMode?: WikiWritingMode; organizationInstruction?: string; wikiProjectBoundary?:WikiProjectBoundary; wikiPreviousLedger?:WikiKnowledgeLedger; wikiPreviousDirectory?:import("./wiki-topic-plan").WikiPreviousChapter[]; wikiScopeIncludeKeys?:string[];wikiScopeExcludeKeys?:string[];wikiScopeIgnoredKeys?:string[]; complete?: boolean; scope?: FocusScope; query?: boolean; queryHistory?: Array<{ question: string; answer: string }>; queryTerms?: string; querySearchQueries?: string[]; queryReferences?: FocusEvidence[]; queryContext?: string; queryCompact?: boolean; homeRecallIntent?: "find" | "summarize" | "answer"; skipProjectState?: boolean; onResponseText?: (text: string) => void; priorityOwner?: () => string | undefined }): Promise<FocusSession> {
   if(mode==="review")throw new Error(locale==="zh-CN"?"复习模式已移除，已有内容仍可阅读。请从项目工作创建新的整理。":"Review mode has been removed. Saved content remains readable; use Project work for new organization.");
   const startedAt = performance.now();
   const runId = taskRunId ?? `focus-${crypto.randomUUID()}`;
@@ -165,12 +168,57 @@ async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: 
     // The knowledge-unit ledger writes the document: every passage is read into knowledge units, organized into a
     // directory and written by chapter; the ledger stays with the document for its updates and review.
     const zh = locale === "zh-CN", project = options?.wikiProjectBoundary?.name, materials = coverageMaterials(passages, sources).materials;
+    const organizationInstruction = normalizeOrganizationInstruction(options?.organizationInstruction ?? goal);
     const originals = sourceMessages.flatMap(([, messages]) => messages);
     // Each step reports its own count; passages read are estimated from the extraction batches done.
     const progress = (next: WikiProgress) => {
       const detail = focusWikiProgress(next, sources.map(source => source.id), startedAt, materials.length);
       onCoverageProgress?.(detail.completed, detail.total, detail.stage === "reading" ? "reading" : "synthesis", detail);
     };
+    if (options?.firstDocument && sources.length === 1 && scope?.documentType !== "learning" && !options.wikiPreviousLedger &&
+        !options.wikiPreviousDirectory?.length && !options.wikiScopeIncludeKeys?.length && !options.wikiScopeExcludeKeys?.length && !options.wikiScopeIgnoredKeys?.length &&
+        options.initialWritingMode !== "audit") {
+      const selectedIds = scope?.kind === "goal" ? new Set(scope.blocks?.filter(block => block.conversationId === sources[0].id)
+        .flatMap(block => block.messageIds)) : undefined;
+      const selected = originals.filter(message => message.conversationId === sources[0].id && (!selectedIds || selectedIds.has(message.id)));
+      const material = firstWikiMaterial(selected);
+      if (material) {
+        const writingMode = await (options.onWritingMode?.(options.initialWritingMode ?? "concise") ?? options.initialWritingMode ?? "concise");
+        signal.throwIfAborted();
+        options = { ...options, initialWritingMode: writingMode, onWritingMode: undefined };
+        if (writingMode !== "audit") {
+          progress({ stage: "write", done: 0, total: 1 });
+          let restoredGroups = 0;
+          const first = await measureAILocalStep(runId, "wiki", "wiki:first-draft", async () => {
+            const result = await writeFirstWiki({ material, source: sources[0], goal, mode: writingMode, instruction: organizationInstruction, zh, ai, signal });
+            restoredGroups = result?.restoredGroups ?? 0;
+            return result;
+          }, () => ({ sourceBlocks: material.blockCount, restoredGroups }));
+          if (first) {
+            const now = Date.now();
+            const draft = prepareManualWikiReview({
+              id: crypto.randomUUID(), runId, goal, mode, scope, strategy, title: wikiTitle, locale: zh ? "zh-CN" : "en",
+              sections: first.sections, evidence: first.evidence.map(ref => ({ ...ref, sourceVersionId: sourceVersionIds[ref.conversationId],
+                sourceSignature: sourceSignatures[ref.conversationId]?.[ref.messageId] })),
+              sourceVersionIds, sourceRoles, sourceSignatures, sourceMessageOrder, sourceConversationIds: [sources[0].id],
+              wikiProjectBoundary: options.wikiProjectBoundary ?? { name: wikiTitle }, sidecarWritingMode: writingMode,
+              wikiEdition: "current-v2", wikiMainlineVersion: 1,
+              activeSectionId: first.sections[0].id, completedSectionIds: [], notes: "", createdAt: now, updatedAt: now,
+              coverage: { method: "full_direct", sourceCount: 1, processedSegments: material.blockCount, totalSegments: material.blockCount,
+                sourceCharacters: material.characters, batchCount: 1, elapsedMs: Math.round(performance.now() - startedAt) },
+            }, selected);
+            await verifyFocusSources(draft, signal);
+            for (const chapter of draft.sections) options.onWritingEvent?.({ kind: "chapter", chapter: chapter.title, chapterId: chapter.id });
+            options.onPartial?.({ ...draft, id: `partial:${runId}`, status: "preview" });
+            await markAIFirstReadable(runId);
+            progress({ stage: "write", done: 1, total: 1 });
+            signal.throwIfAborted();
+            return draft;
+          }
+          await recordAISkippedStep(runId, "wiki", "wiki:first-draft-fallback", "manual scope or conflicting evidence requires the full draft");
+        }
+      } else await recordAISkippedStep(runId, "wiki", "wiki:first-draft-fallback", "source size, message count or Markdown structure requires the full draft");
+    }
     const unitReport: Partial<WikiKnowledgeReport> = {};
     // A first look while reading goes on: the topics read so far, largest first, until the real directory replaces them.
     const roughDirectory = options?.onPartial ? (units: WikiKnowledgeUnit[]) => {
@@ -181,43 +229,32 @@ async function generateFocusSessionWork(goal: string, mode: FocusMode, sources: 
       const now = Date.now(), sections: FocusSection[] = top.map(([subject, members]) => ({ id: `rough:${subject}`, title: subject, kind: "finding", transition: "", evidenceIds: [], wikiOutline: true,
         body: [zh ? `已读到 ${members.length} 条相关内容。` : `${members.length} points read so far.`, ...members.slice(0, 2).map(unit => `- ${unit.statement}`)].join("\n") }));
       if (!sections.length) return;
-      options.onPartial!({ id: `partial:${runId}`, runId, goal, mode, scope, status: "preview", locale: zh ? "zh-CN" : "en", title: wikiTitle, wikiProjectBoundary: options.wikiProjectBoundary, sourceConversationIds: sources.map(source => source.id), sourceVersionIds, sourceSignatures, sourceRoles, sourceMessageOrder,
+      options?.onPartial?.({ id: `partial:${runId}`, runId, goal, mode, scope, status: "preview", locale: zh ? "zh-CN" : "en", title: wikiTitle, wikiProjectBoundary: options.wikiProjectBoundary, sourceConversationIds: sources.map(source => source.id), sourceVersionIds, sourceSignatures, sourceRoles, sourceMessageOrder,
         evidence: [], sections, activeSectionId: sections[0].id, completedSectionIds: [], notes: "", createdAt: now, updatedAt: now,
         // Written from the ledger: no separate scope review runs for it, so none is shown as pending.
         wikiKnowledge: { version: 1, generatedAt: now, status: "partial", materials: materials.length, batches: [] } });
     } : undefined;
-    const extracted = await measureAILocalStep(runId, "wiki", "wiki:knowledge-units", async () => { const result = await extractWikiKnowledge({ materials, runId, sharedCache: true, locale, signal, ai, previous: options?.wikiPreviousLedger, project: project ?? goal, progress, onUnits: roughDirectory }); Object.assign(unitReport, result.report); return result.ledger; }, () => ({ ...unitReport } as Record<string, number>));
+    const extracted = await measureAILocalStep(runId, "wiki", "wiki:knowledge-units", async () => { const result = await extractWikiKnowledge({ materials, runId, sharedCache: true, locale, signal, ai, previous: options?.wikiPreviousLedger, project: project ?? goal, goal, progress, onUnits: roughDirectory }); Object.assign(unitReport, result.report); return result.ledger; }, () => ({ ...unitReport } as Record<string, number>));
     // Regenerating keeps what the user decided: one run lost four confirmed decisions (18-25岁, 先深耕戒色, 左侧布局) and wrote
     // them as suggestions again. A verdict carries over to the same point read again; one on a point no longer read goes.
     const liveIds = new Set(wikiLedgerUnits(extracted).map(unit => unit.id));
     const kept = Object.fromEntries(Object.entries(extracted.decisions ?? {}).filter(([id]) => liveIds.has(id)));
-    const answers = (extracted.userAnswers ?? []).filter(answer => answer.unitIds.every(id => liveIds.has(id)));
-    const questions = (options?.wikiPreviousLedger?.writingQuestions ?? []).filter(question => (answers.some(answer => answer.questionId === question.id) || extracted.writingQuestionRun?.questionIds.includes(question.id)) && question.unitIds.every(id => liveIds.has(id)));
+    const answers = (extracted.userAnswers ?? []).filter(answer => answer.scope || answer.unitIds.every(id => liveIds.has(id)));
+    const questions = (options?.wikiPreviousLedger?.writingQuestions ?? []).filter(question => answers.some(answer => answer.questionId === question.id)
+      || extracted.writingQuestionRun?.questionIds.includes(question.id) && question.unitIds.every(id => liveIds.has(id)));
     const carried: WikiKnowledgeLedger = { ...extracted, decisions: Object.keys(kept).length ? kept : undefined, userAnswers: answers, writingQuestions: questions };
-    const typed: WikiKnowledgeLedger = { ...carried, ...(options?.initialWritingMode ? { writingMode: options.initialWritingMode } : {}), documentType: "project", documentTypeBy: "auto" };
+    const typed: WikiKnowledgeLedger = { ...carried, ...(options?.initialWritingMode ? { writingMode: options.initialWritingMode } : {}), ...(organizationInstruction ? { organizationInstruction } : {}), documentType: "project", documentTypeBy: "auto" };
     // Each source named and dated: the document tells conversations apart, and which came later.
-    type Placement = { ledger: WikiKnowledgeLedger; stable?: ReadonlySet<string> };
-    let showPlacement: (placement: Placement) => void = () => undefined;
-    const firstPlacement = new Promise<Placement>(resolve => { showPlacement = resolve; });
-    const organization = organizeLedger(withWikiSources(typed, datedWikiSources(sources, loaded.messagesBySource?.flatMap(([, messages]) => messages) ?? originals)), {
+    const named = withWikiSources(typed, datedWikiSources(sources, loaded.messagesBySource?.flatMap(([, messages]) => messages) ?? originals));
+    const planned = await organizeLedger(withWikiSections(named, originals), {
       ai, ...embeddingsFor(settings, runId), locale, signal, runId, conversations: sources.length,
       names: [project, goal.length <= 32 ? goal : undefined, ...sources.map(source => source.title)],
+      ...(organizationInstruction ? { instruction: organizationInstruction } : {}),
       progress, previous: options?.wikiPreviousLedger?.organization,
-      onPlacement: (ledger, stable) => {
-        if (stable.size) showPlacement({ ledger, stable });
-      },
     });
-    let checkingPlacement = true;
-    const ready = organization.then(ledger => {
-      checkingPlacement = false;
-      requireLedgerDirectory(ledger, locale);
-      return ledger;
-    });
-    const placement = await Promise.race([ready.then((ledger): Placement => ({ ledger })), firstPlacement]);
-    const planned = placement.ledger;
+    requireLedgerDirectory(planned, locale);
     const { ledger, title } = await writeFocusWikiDraft(planned, {
       ...options, ai, locale, signal, runId, project, progress, previous: options?.wikiPreviousLedger?.draft, originals, sources,
-      placement: placement.stable ? { ready, stable: placement.stable, pending: () => checkingPlacement } : undefined,
       title: ledger => project || wikiProjectTitleFromLedger(ledger, sources.map(source => source.title)) || wikiTitle,
       preview: { goal, mode, scope, locale: zh ? "zh-CN" : "en", wikiProjectBoundary: options?.wikiProjectBoundary,
         sourceConversationIds: sources.map(source => source.id), sourceVersionIds, sourceSignatures, sourceRoles, sourceMessageOrder },

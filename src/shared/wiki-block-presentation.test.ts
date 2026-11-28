@@ -43,16 +43,18 @@ it("keeps one literal with a known version and preserves the unlabelled occurren
  expect(wikiBlockPresentation(ambiguous,{zh:false}).body.split(payload)).toHaveLength(4);
 });
 
-it("updates old preview captions while retaining the complete example",()=>{
+it("suppresses mock dialogue previews, single-line endpoints and respects writingMode admission",()=>{
  const preview=fence("AI 助手             ● 已连接\nDeepSeek Chat\n\n准备修改设计\n↑ 温度阈值 → 32℃\n\n[撤销]");
  const saved='<details data-atlas="atlas-wiki-supplement">\n<summary>原文与示例 · 流程示例 · AI 助手 ● 已连接</summary>\n\n'+preview+'\n\n</details>';
- const revised=wikiBlockPresentation(saved).body;
- expect(revised).toContain("<summary>AI 修改方案预览</summary>");
- expect(revised).toContain(preview);
- expect(wikiBlockPresentation(revised).body).toBe(revised);
+ expect(wikiBlockPresentation(saved).body).not.toContain(preview);
+ expect(wikiBlockPresentation(saved,{writingMode:"audit"}).body).toContain(preview);
+ expect(planWikiSourceBlock({language:"text",text:"POST /api/generate"}).mode).toBe("source_only");
+ expect(planWikiSourceBlock({language:"text",text:"tests/hardware-bench/"}).mode).toBe("source_only");
  const status="AI 助手 ● 已连接\nDeepSeek Chat";
  expect(planWikiSourceBlock({language:"text",text:status},"",[unit(status)]).mode).toBe("source_only");
- expect(planWikiSourceBlock({language:"text",text:status},"",[]).mode).toBe("supplement");
+ expect(planWikiSourceBlock({language:"ts",text:"interface Payload {\n  id: string;\n}"},"",[],"### 架构\n\n描述契约。","concise").mode).toBe("source_only");
+ expect(planWikiSourceBlock({language:"ts",text:"interface Payload {\n  id: string;\n}"},"",[],"### 架构\n\n描述契约。","handoff").mode).toBe("supplement");
+ expect(planWikiSourceBlock({language:"mermaid",text:"flowchart TD\n  A --> B"},"",[],"","concise").mode).toBe("verbatim");
 });
 
 it("reformats short UI copy, explicit field pairs and unbranched flows without inventing steps", () => {

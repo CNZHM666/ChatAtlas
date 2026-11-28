@@ -103,7 +103,7 @@ it("reads retained real messages even if conversation metadata is missing",async
   vi.spyOn(await import("../../search/home-history"),"findHistory").mockResolvedValue({matches:[{conversation:{...conversations[0],id:"orphan"},messages:[message],excerpt:message.content,score:1}],capped:false});const onRead=vi.fn();render(<HomeTaskWorkspace {...props()} goal="Orama" requestedAction="answer" localSearch onRead={onRead}/>);
   fireEvent.click(await screen.findByRole("button",{name:"阅读对话：硬件"}));const reader=await screen.findByRole("region",{name:"对话阅读"});expect(reader).toHaveTextContent("本地保留的原始消息");expect(reader.querySelector(".reader-conversation")).toHaveTextContent(message.content);expect(onRead).not.toHaveBeenCalled();expect(screen.queryByRole("link",{name:/前往原平台/})).not.toBeInTheDocument();
 });
-it("answers in the task workspace with exact message evidence and streams prose without creating a project", async () => {
+it("shows exact source evidence while the answer is verified without creating a project", async () => {
   const db = await getDatabase();
   const message = { id: "answer-message", conversationId: "one", role: "assistant" as const, messageIndex: 7, content: "先学习控制理论，再做实验。", contentHash: "", preview: "", createdAt: 1, updatedAt: 1 };
   await db.put("messages", message);
@@ -111,9 +111,16 @@ it("answers in the task workspace with exact message evidence and streams prose 
   const scope = { kind: "goal" as const, blocks: [{ conversationId: "one", title: "控制学习", messageIds: [message.id], messageSignatures: { [message.id]: sourceMessageSignature(message.content) } }] };
   vi.mocked(retrieveHomeTask).mockResolvedValue({ ids: ["one"], scope, pending: [], limited: false });
   let finish!: (value: ReturnType<typeof projectSession>) => void;
-  vi.mocked(answerHomeRecall).mockImplementation(async (...args) => { args[6]?.('{"sections":[{"title":"学习路线","body":"先学习控制'); return new Promise(resolve => { finish = resolve; }); });
+  vi.mocked(answerHomeRecall).mockImplementation(async (...args) => {
+    args[6]?.onSources?.([{ id: "e", conversationId: "one", messageId: message.id, title: "控制学习",
+      excerpt: message.content, sourceSignature: sourceMessageSignature(message.content) }]);
+    args[6]?.onVerifying?.();
+    return new Promise(resolve => { finish = resolve; });
+  });
   const callbacks = props(), onRead = vi.fn(); render(<HomeTaskWorkspace {...callbacks} goal="之前的控制学习路线是什么？" requestedAction="answer" onRead={onRead} />);
-  await screen.findByText("正在生成 · 待核对"); expect(screen.getByText("先学习控制")).toBeInTheDocument();
+  const sources = await screen.findByRole("heading", { name: "已找到的原话" });
+  expect(within(sources.parentElement!).getByRole("button", { name: /控制学习/ })).toHaveTextContent(message.content);
+  expect(screen.queryByRole("article", { name: "历史回答" })).not.toBeInTheDocument();
   expect(screen.queryByText(/sections|evidenceIds/u)).not.toBeInTheDocument();
   await act(async () => finish({ ...projectSession(), sourceConversationIds: ["one"], sections: [{ id: "s", title: "学习路线", body: message.content, transition: "", kind: "finding", evidenceIds: ["e"] }], evidence: [{ id: "e", conversationId: "one", messageId: message.id, title: "控制学习", excerpt: message.content, sourceSignature: sourceMessageSignature(message.content) }] }));
   await screen.findByRole("article", { name: "历史回答" });

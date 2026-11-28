@@ -3,10 +3,8 @@ import {ContextHandoffDialog} from "./components/ContextHandoffDialog";
 import {readContextHandoff,removeContextHandoff,type ContextHandoff} from "../storage/context-handoff";
 import { parseMessageSourceRange, parseReaderSearchContext, readerSearchContext, type MessageSourceRange, type ReaderSearchContext } from "../shared/message-location";
 import { deleteProject, restoreProject, listDeletedProjects, isDeletedProject, emptyProjectTrash } from "../storage/project-deletion";
-import { useAtlasSearch } from "./hooks/useAtlasSearch";
 import { observeMessageSearchEvents } from "../search/message-search-events";
-import type { SearchResult } from "../search/search-index";
-import { groupFocusVersions,workspaceFocusVersions } from "./focus-versions";
+import { workspaceFocusVersions } from "./focus-versions";
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AtlasMessage } from "../shared/messages";
 import { OVERVIEW_CANVAS_ID } from "../shared/constants";
@@ -39,6 +37,7 @@ import { invalidateReaderMessages, readerMessages } from "./reader-message-cache
 import { useReadingHistory } from "./hooks/useReadingHistory";
 import { useImportCommands } from "./hooks/useImportCommands";
 import type { FocusMode, FocusScope, FocusSession } from "../shared/focus-session";
+import type { WikiWritingMode } from "../shared/wiki-knowledge";
 import { listDeletedFocusSessions, listFocusSessions, setFocusSessionDeleted } from "../storage/focus-sessions";
 import type { GoalRequest } from "./components/FocusWorkspace";
 import { ReviewHome } from "./components/ReviewHome";
@@ -50,7 +49,6 @@ import { OrganizationHistory } from "./components/OrganizationHistory";
 import { recommendedReadingPath } from "./reader-path";
 import { reconcileConversations } from "./conversation-refresh";
 
-const SearchPalette = lazy(() => import("./components/SearchPalette").then((module) => ({ default: module.SearchPalette })));
 const FlowProvider = lazy(() => import("./components/FlowProvider"));
 const GlobalCanvas = lazy(() => import("./views/GlobalCanvas").then((module) => ({ default: module.GlobalCanvas })));
 
@@ -85,10 +83,7 @@ function AtlasApp() {
     void recoverLegacyFocusTasks().then(load).catch(load); window.addEventListener("atlas-focus-tasks-changed", load);
     return () => { live = false; window.removeEventListener("atlas-focus-tasks-changed", load); };
   }, []);
-  const atlasSearch = useAtlasSearch();
-  const showSearch = atlasSearch.show;
   const [searchChapter, setSearchChapter] = useState<{ sessionId: string; sectionId: string; note: boolean; nonce: number }>();
-  useEffect(() => { const shortcut = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); showSearch(); } }; window.addEventListener("keydown", shortcut); return () => window.removeEventListener("keydown", shortcut); }, [showSearch]);
   const [workbenchSelectedIds, setWorkbenchSelectedIds] = useState<Set<string>>(() => {
     try {
       const stored = JSON.parse(window.localStorage.getItem("atlas-workbench-project-sources") ?? "[]") as unknown;
@@ -98,7 +93,7 @@ function AtlasApp() {
   const [syncSelectedIds, setSyncSelectedIds] = useState<Set<string>>(() => {
     try { const saved: unknown = JSON.parse(localStorage.getItem("atlas-workbench-selected-conversations") ?? "[]"); return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string") : []); } catch { return new Set(); }
   });
-  const workbenchDraft = useRef<{ goal: string; mode: FocusMode }>({ goal: "", mode: "work" });
+  const workbenchDraft = useRef<{ goal: string; mode: FocusMode; writingMode?: WikiWritingMode }>({ goal: "", mode: "work", writingMode: "concise" });
   const workbenchResumeTask = useRef<FocusGenerationTask>();
   const projectOpenRevision = useRef(0);
   const [projectOpening, setProjectOpening] = useState(false);
@@ -144,7 +139,6 @@ function AtlasApp() {
   const [organizeStage, setOrganizeStage] = useState<AutoOrganizeStage | null>(null);
   const [taskWorkspaceId, setTaskWorkspaceId] = useState<string | null>(null);
   const [taskHistoryOpen, setTaskHistoryOpen] = useState(false);
-  const [workbenchHistoryOpen, setWorkbenchHistoryOpen] = useState(false);
   const [workbenchHomeRequest, setWorkbenchHomeRequest] = useState(0);
   const [taskSourceRefs, setTaskSourceRefs] = useState<SourceRef[] | null>(null);
   const [autoOrganizeUndo, setAutoOrganizeUndo] = useState<{ historyVersion: number; plan: OrganizationPlan } | null>(null);
@@ -214,12 +208,12 @@ function AtlasApp() {
   }, []);
 
   useEffect(() => {
-    if (!atlasSearch.open && !discoverView && !readingHistory.recent.length) return;
+    if (!discoverView && !readingHistory.recent.length) return;
     let live = true;
     searchableCardsLoaded.current = true;
     void listSearchableKnowledgeCards().then((cards) => { if (live) setSearchableCards(cards); }).catch(() => undefined);
     return () => { live = false; };
-  }, [atlasSearch.open, discoverView, readingHistory.recent]);
+  }, [discoverView, readingHistory.recent]);
 
   const tasks = useOrganizationTasks({
     conversations: capturedConversations, conversationsReady, canvases,
@@ -287,6 +281,7 @@ function AtlasApp() {
     setDiscoverView(false);
     setActiveCanvasId(OVERVIEW_CANVAS_ID);
     setView("canvas");
+    setSourcesRequest(Date.now());
     if (conversation) setSyncSelectedIds((current) => new Set([...current, id]));
     if (typeof chrome !== "undefined" && chrome.runtime?.id) {
       void chrome.runtime.sendMessage({ type: "ATLAS_IMPORT_PRIORITY", conversationId: id } satisfies AtlasMessage).catch(() => undefined);
@@ -731,16 +726,22 @@ function AtlasApp() {
     setGoalRequest(undefined); setFocusSessionId(undefined); setStructureView(false); setDiscoverView(false);
     setActiveCanvasId(id); setView("canvas"); setGlobalMode("browse"); setKnowledgeCreateRequest(null);
     setTaskWorkspaceId(null); setTaskHistoryOpen(false); setSelectedCardId(null); setSelectedEdgeId(null);
-    setWorkbenchHistoryOpen(false);
   };
-  const openWorkbenchHistory = () => {
+  const openWorkbenchHome = useStableCallback(() => {
     openSpace(OVERVIEW_CANVAS_ID);
-    setWorkbenchHistoryOpen(true);
-  };
-  const openWorkbenchHome = () => {
-    openSpace(OVERVIEW_CANVAS_ID);
+    setSourcesRequest(0);
     setWorkbenchHomeRequest(previous => previous + 1);
-  };
+  });
+  useEffect(() => {
+    const openHomeLink = () => {
+      if (new URLSearchParams(location.hash.slice(1)).get("home") !== "1") return;
+      window.history.replaceState(window.history.state, "", location.pathname + location.search);
+      openWorkbenchHome();
+    };
+    openHomeLink();
+    window.addEventListener("hashchange", openHomeLink);
+    return () => window.removeEventListener("hashchange", openHomeLink);
+  }, [openWorkbenchHome]);
   const openProject = async (id: string, created?: AtlasCanvas) => {
     if (id === OVERVIEW_CANVAS_ID) { openSpace(id); return; }
     const project = created ?? canvases.find(canvas => canvas.id === id);
@@ -759,10 +760,11 @@ function AtlasApp() {
   };
   const continueProject = useStableCallback((id: string) => void openProject(id));
   const returnGoalToWorkbench = (goal: string, mode: FocusMode, sourceIds: string[] = [], resume?: FocusGenerationTask) => {
-    workbenchDraft.current = { goal, mode:mode==="review"?"work":mode };
+    workbenchDraft.current = { goal: resume?.organizationInstruction ?? goal, mode:mode==="review"?"work":mode, writingMode: resume?.writingMode ?? workbenchDraft.current.writingMode ?? "concise" };
     setWorkbenchSelectedIds(new Set(sourceIds));
     openSpace(OVERVIEW_CANVAS_ID);
     workbenchResumeTask.current = resume;
+    setSourcesRequest(Date.now());
   };
   const selectWorkbenchSources = (ids: Set<string>) => {
     setWorkbenchSelectedIds(ids);
@@ -775,17 +777,19 @@ function AtlasApp() {
     setSyncSelectedIds(current => new Set([...current, id]));
     return commandHydrate([id]);
   };
-  const startGoal = (goal: string, mode: FocusMode, sourceIds?: string[], scopeCanvasId?: string, scope?: FocusScope, resume?: FocusGenerationTask, sourcePoolIds?: string[],validatedSources?:Conversation[]) => {
+  const startGoal = (goal: string, mode: FocusMode, sourceIds?: string[], scopeCanvasId?: string, scope?: FocusScope, resume?: FocusGenerationTask, sourcePoolIds?: string[], validatedSources?:Conversation[], options?: { writingMode?: WikiWritingMode; organizationInstruction?: string }) => {
     if(mode==="review"){returnGoalToWorkbench(goal,"work",sourceIds);return;}
     projectOpenRevision.current++; setProjectOpening(false);
     if (!sourceIds?.length || sourceIds.some((id) => !(validatedSources??capturedConversations).some((item) => item.id === id && isCurrentHydrationComplete(item)))) {
       returnGoalToWorkbench(goal, mode, sourceIds, resume);
       return;
     }
-    workbenchDraft.current = { goal, mode };
+    const writingMode = options?.writingMode ?? resume?.writingMode;
+    const organizationInstruction = options?.organizationInstruction ?? resume?.organizationInstruction;
+    workbenchDraft.current = { goal: organizationInstruction ?? goal, mode, writingMode: writingMode ?? workbenchDraft.current.writingMode ?? "concise" };
     workbenchResumeTask.current = undefined;
     const requestScope: FocusScope = scope ?? { kind: "all", sourceConversationIds: [...sourceIds] };
-    setGoalRequest({ id: resume?.id ?? crypto.randomUUID(), ...(resume ? { runId: resume.runId } : {}), goal, mode, sourceIds: [...sourceIds], sourcePoolIds, scopeCanvasId, scope: requestScope }); setFocusSessionId(undefined);
+    setGoalRequest({ id: resume?.id ?? crypto.randomUUID(), ...(resume ? { runId: resume.runId } : {}), goal, mode, sourceIds: [...sourceIds], sourcePoolIds, scopeCanvasId, scope: requestScope, ...(writingMode ? { writingMode } : {}), ...(organizationInstruction ? { organizationInstruction } : {}) }); setFocusSessionId(undefined);
     setView("canvas"); setKnowledgeCreateRequest(null); setTaskWorkspaceId(null); setTaskHistoryOpen(false); setSelectedCardId(null); setGlobalMode("browse");
   };
   const [contextHandoff,setContextHandoff]=useState<ContextHandoff>();
@@ -802,10 +806,19 @@ function AtlasApp() {
   // goes there, to its source list.
   const [sourcesRequest, setSourcesRequest] = useState(0);
   const openSourceList = useStableCallback(() => { openSpace(OVERVIEW_CANVAS_ID); setSourcesRequest(Date.now()); });
-  const refreshLibraryProjects = async () => {
-    setFocusSessions(await listFocusSessions());
+  const projectListRevision = useRef(0);
+  const refreshLibraryProjects = useStableCallback(async () => {
+    const revision = ++projectListRevision.current;
+    const sessions = await listFocusSessions();
+    if (projectListRevision.current !== revision) return;
+    setFocusSessions(sessions);
     refreshCanvases();
-  };
+  });
+  const syncTrashedProject = useStableCallback((id: string) => {
+    deletedProjectIds.current.add(id);
+    if (activeCanvasId === id || (activeFocus?.canvasId ?? activeFocus?.rootSessionId ?? activeFocus?.id) === id) openSpace(OVERVIEW_CANVAS_ID);
+    void refreshLibraryProjects().catch(() => undefined);
+  });
   const [focusRevisionRequest, setFocusRevisionRequest] = useState<{ sessionId: string; nonce: number; instruction: string; poolIds?: string[] }>();
   const openLinkedReview = useStableCallback(async (sessionId: string, sectionId?: string) => {
     const revision = ++projectOpenRevision.current;
@@ -823,22 +836,37 @@ function AtlasApp() {
       if (sectionId && session.sections.some(section => section.id === sectionId)) setSearchChapter({ sessionId, sectionId, note: false, nonce: Date.now() });
     } catch { if (revision === projectOpenRevision.current) flash(locale === "zh-CN" ? "读取成果失败，请重试。" : "Unable to load saved reading. Try again."); }
   });
+  const syncFirstWikiSaved = useStableCallback(async (projectId: string, savedId: string) => {
+    const current = focusSessions.find(item => item.id === focusSessionId);
+    if (current && !current.sections.length && (current.canvasId ?? current.rootSessionId ?? current.id) === projectId && !goalRequest) {
+      await openLinkedReview(savedId);
+      const params = new URLSearchParams(location.hash.slice(1));
+      if (params.get("review") === current.id) {
+        params.set("review", savedId);
+        window.history.replaceState(null, "", `${location.pathname}${location.search}#${params}`);
+      }
+    } else await refreshLibraryProjects();
+  });
   useEffect(() => {
     const linked = () => { const params = new URLSearchParams(window.location.hash.slice(1)); const id = params.get("review"); if (id) void openLinkedReview(id, params.get("section") ?? undefined); };
     linked(); window.addEventListener("hashchange", linked);
-    const listener = (message: AtlasMessage) => { if (message.type === "ATLAS_FOCUS_REVIEW") void openLinkedReview(message.sessionId, message.sectionId); };
+    const listener = (message: AtlasMessage) => {
+      if (message.type === "ATLAS_FOCUS_HOME") {
+        if (location.hash) window.history.replaceState(window.history.state, "", location.pathname + location.search);
+        openWorkbenchHome();
+      }
+      if (message.type === "ATLAS_FOCUS_REVIEW") void openLinkedReview(message.sessionId, message.sectionId);
+      if (message.type === "ATLAS_FIRST_WIKI_CHANGED" && message.savedSessionId) void syncFirstWikiSaved(message.projectId, message.savedSessionId).catch(() => undefined);
+      if (message.type === "ATLAS_PROJECT_VERSION_SAVED") void refreshLibraryProjects().catch(() => undefined);
+      if (message.type === "ATLAS_PROJECT_TRASHED") syncTrashedProject(message.projectId);
+      if (message.type === "ATLAS_PROJECT_RESTORED") {
+        deletedProjectIds.current.delete(message.projectId);
+        void refreshLibraryProjects().catch(() => undefined);
+      }
+    };
     if (typeof chrome !== "undefined" && chrome.runtime?.id) chrome.runtime.onMessage.addListener(listener);
     return () => { window.removeEventListener("hashchange", linked); if (typeof chrome !== "undefined" && chrome.runtime?.id) chrome.runtime.onMessage.removeListener(listener); };
-  }, [openLinkedReview]);
-  const selectSearchResult = (result: SearchResult) => {
-    atlasSearch.close();
-    setTaskWorkspaceId(null); setTaskHistoryOpen(false); setKnowledgeCreateRequest(null);
-    if (result.kind === "section" || result.kind === "note") { openFocus(result.sessionId); setSearchChapter({ sessionId: result.sessionId, sectionId: result.sectionId, note: result.kind === "note", nonce: Date.now() }); }
-    else if (result.kind === "message") { selectConversationFromUser(result.message.conversationId, "reader"); setConversationFocusRequest({ message: result.message, excerpt: result.excerpt, sourceRange: result.sourceRange, nonce: Date.now() }); setView("conversations"); setSelectedCardId(null); }
-    else if (result.kind === "conversation") { selectConversationFromUser(result.id, "reader"); setView("conversations"); setSelectedCardId(null); }
-    else if (result.kind === "anchor") { const anchor = atlasSearch.anchors.find((item) => item.id === result.id); if (anchor) void openAnchor(anchor); }
-    else if (result.kind === "card" || result.kind === "mark") { const cardId = result.kind === "mark" ? result.cardId : result.id; const canvasId = result.canvasId; if (canvasId) { setGoalRequest(undefined); setFocusSessionId(undefined); setActiveCanvasId(canvasId); setView("canvas"); setDiscoverView(false); setStructureView(false); setSelectedCardId(cardId); setGlobalMode("browse"); setReaderTargetMessageId(result.kind === "mark" ? result.messageId : undefined); } }
-  };
+  }, [openLinkedReview, openWorkbenchHome, refreshLibraryProjects, syncFirstWikiSaved, syncTrashedProject]);
   const saveFocus = (session: FocusSession) => {
     // A pending write from a reader that just closed must not resurrect its deleted project.
     if (session.canvasId && deletedProjectIds.current.has(session.canvasId)) return;
@@ -853,6 +881,13 @@ function AtlasApp() {
     if (view === "canvas" && !isOverview && !focusOpen && !projectOpening && !knowledgeCreateRequest && !activeTask && !taskHistoryOpen && !isPreviewCanvas && !selectedCard && !structureView) continueProject(activeCanvasId);
   }, [view, isOverview, focusOpen, projectOpening, knowledgeCreateRequest, activeTask, taskHistoryOpen, isPreviewCanvas, selectedCard, structureView, activeCanvasId, continueProject]);
   const showMapSidebar = view === "canvas" && !focusOpen && !knowledgeCreateRequest && !activeTask && !taskHistoryOpen && !selectedCard && (isOverview || structureView || isPreviewCanvas);
+  const refreshWorkbench = useStableCallback(() => {
+    if (showMapSidebar && isOverview || activeFocus?.mode === "work") void refreshLibraryProjects().catch(() => undefined);
+  });
+  useEffect(() => {
+    window.addEventListener("focus", refreshWorkbench);
+    return () => window.removeEventListener("focus", refreshWorkbench);
+  }, [refreshWorkbench]);
   const graphToolbarVisible = structureView && !focusOpen && !knowledgeCreateRequest && !activeTask && !taskHistoryOpen && !selectedCard
     && view === "canvas" && !isOverview;
   const canSwitchStructure = !focusOpen && !projectOpening && !knowledgeCreateRequest && !activeTask && !taskHistoryOpen && !selectedCard
@@ -874,8 +909,6 @@ function AtlasApp() {
         syncStatus={<BackgroundSyncStatus job={importJob} source={importSource} onPause={() => void pauseImport()} onResume={() => void resumeImport()} onConnect={() => void openChatGPTForImport()} />}
         view={view}
         onHome={openWorkbenchHome}
-        onWorkbenchHistory={showMapSidebar ? openWorkbenchHistory : undefined}
-        workbenchHistoryActive={isOverview && !discoverView && workbenchHistoryOpen}
         structureView={structureView}
         onStructureChange={canSwitchStructure ? (next) => { setStructureView(next); setGlobalMode("browse"); setSelectedCardId(null); } : undefined}
         onNewCard={() => setNewCardOpen(true)}
@@ -889,7 +922,7 @@ function AtlasApp() {
           flash(mode === "edit" ? t("editModeToast") : t("browseModeToast"));
         }}
         minimal={false}
-        onSettings={() => openSettings("data")}
+        onSettings={() => openSettings("ai")}
         allowEdit={graphToolbarVisible}
         organizeProgress={null}
       />
@@ -905,8 +938,6 @@ function AtlasApp() {
           tasks={tasks.runs}
           activeTaskId={taskWorkspaceId}
           onSelectTask={openTask}
-          onWorkbenchHistory={openWorkbenchHistory}
-          workbenchHistoryActive={isOverview && !discoverView && workbenchHistoryOpen}
         /> : null}
         <div className={`workspace ${!structureView && !isOverview && view === "canvas" && !focusOpen && !knowledgeCreateRequest ? "contents-workspace" : ""} ${selectedCard && view === "canvas" && !taskWorkspaceId && !taskHistoryOpen && !focusOpen ? globalMode === "browse" && selectedCard.kind !== "conversation" && selectedCard.kind !== "portal" ? "reader-open" : "detail-open" : ""}`}>
         <Suspense fallback={<div className="workspace-loading" role="status">{locale === "zh-CN" ? "正在打开…" : "Opening…"}</div>}>
@@ -923,7 +954,7 @@ function AtlasApp() {
           queuedBehindReview={activeTask.status === "queued" && activeTask.targetType !== "conversation" && tasks.runs.some((run) => run.id !== activeTask.id && run.status === "waiting_review" && run.targetType !== "conversation")}
           onOpenConversation={(id, message) => { selectConversationFromUser(id, message ? "reader" : "map"); setConversationFocusRequest(message ? { message, nonce: Date.now() } : null); setView("conversations"); setTaskWorkspaceId(null); setTaskSourceRefs(null); }}
         /> : taskHistoryOpen ? <OrganizationHistory runs={tasks.runs} onBack={() => setTaskHistoryOpen(false)} onSelect={(id) => openTask(id, true)} /> : view === "canvas" ? (isOverview ? (
-          !discoverView ? <ReviewHome onReadConversation={(id, message, sourceRange, search) => { selectConversationFromUser(id, "reader"); setConversationFocusRequest(message ? { message, sourceRange, search, nonce: Date.now() } : null); setView("conversations"); setTaskWorkspaceId(null); setTaskSourceRefs(null); }} canvases={canvases} sessions={focusSessions} projectsReady={focusSessionsReady} conversations={capturedConversations} organizationRuns={tasks.runs} focusTasks={focusTasks} onContinueTask={(task) => task.needsConfirmation ? returnGoalToWorkbench("", task.mode, task.sourceIds, task) : startGoal(task.goal, task.mode, task.sourceIds, task.scopeCanvasId, task.scope, task)} onTask={openTask} importJob={importJob} importSource={importSource} selectedIds={workbenchSelectedIds} onSelectedIds={selectWorkbenchSources} syncSelectedIds={syncSelectedIds} onSyncSelectedIds={setSyncSelectedIds} onPrioritize={prioritizeWorkbenchSource} draft={workbenchDraft.current} onDraft={(next) => { workbenchDraft.current = next; }} recentReading={recentReading} resumeTask={workbenchResumeTask.current} onContinueProject={(session, instruction, poolIds) => { openFocus(session.id); setFocusRevisionRequest({ sessionId: session.id, nonce: Date.now(), instruction, poolIds }); }} onStart={(goal, mode, sourceIds, scope, poolIds) => startGoal(goal, mode, sourceIds, workbenchResumeTask.current?.scopeCanvasId, scope, workbenchResumeTask.current, poolIds)} onSession={openFocus} onOpenChapter={(sessionId, sectionId) => { openFocus(sessionId); setSearchChapter({ sessionId, sectionId, note: false, nonce: Date.now() }); }} historyOpen={workbenchHistoryOpen} homeRequest={workbenchHomeRequest} onHistoryChange={setWorkbenchHistoryOpen} onResume={resumeReading} onSpace={openSpace} onScan={() => void commandImport("titles")} onHydrate={hydrateWorkbenchSources} onZip={importWorkbenchFile} onPause={() => void pauseImport()} onResumeImport={() => void resumeImport()} onConnect={() => void openChatGPTForImport()} onDiscover={() => setDiscoverView(true)} onConfigureAI={() => openSettings("ai")} onProjectsChanged={refreshLibraryProjects} sourcesRequest={sourcesRequest} /> : <KnowledgeOverview
+          !discoverView ? <ReviewHome projectFirst libraryReady={conversationsReady && focusSessionsReady} onReadConversation={(id, message, sourceRange, search) => { selectConversationFromUser(id, "reader"); setConversationFocusRequest(message ? { message, sourceRange, search, nonce: Date.now() } : null); setView("conversations"); setTaskWorkspaceId(null); setTaskSourceRefs(null); }} canvases={canvases} sessions={focusSessions} projectsReady={focusSessionsReady} conversations={capturedConversations} organizationRuns={tasks.runs} focusTasks={focusTasks} onContinueTask={(task) => task.needsConfirmation ? returnGoalToWorkbench("", task.mode, task.sourceIds, task) : startGoal(task.goal, task.mode, task.sourceIds, task.scopeCanvasId, task.scope, task)} onTask={openTask} importJob={importJob} importSource={importSource} selectedIds={workbenchSelectedIds} onSelectedIds={selectWorkbenchSources} syncSelectedIds={syncSelectedIds} onSyncSelectedIds={setSyncSelectedIds} onPrioritize={prioritizeWorkbenchSource} draft={workbenchDraft.current} onDraft={(next) => { workbenchDraft.current = next; }} recentReading={recentReading} resumeTask={workbenchResumeTask.current} onContinueProject={(session, instruction, poolIds) => { openFocus(session.id); setFocusRevisionRequest({ sessionId: session.id, nonce: Date.now(), instruction, poolIds }); }} onStart={(goal, mode, sourceIds, scope, poolIds, options) => startGoal(goal, mode, sourceIds, workbenchResumeTask.current?.scopeCanvasId, scope, workbenchResumeTask.current, poolIds, undefined, options)} onSession={openFocus} onOpenChapter={(sessionId, sectionId) => { openFocus(sessionId); setSearchChapter({ sessionId, sectionId, note: false, nonce: Date.now() }); }} homeRequest={workbenchHomeRequest} onHistoryChange={() => undefined} onResume={resumeReading} onSpace={openSpace} onScan={() => void commandImport("titles")} onHydrate={hydrateWorkbenchSources} onZip={importWorkbenchFile} onPause={() => void pauseImport()} onResumeImport={() => void resumeImport()} onConnect={() => void openChatGPTForImport()} onDiscover={() => setDiscoverView(true)} onConfigureAI={() => openSettings("ai")} onProjectsChanged={refreshLibraryProjects} sourcesRequest={sourcesRequest} /> : <KnowledgeOverview
             canvases={sidebarCanvases}
             recentReading={readingHistory.recent.flatMap((entry) => {
               const card = searchableCards.find((item) => item.id === entry.cardId);
@@ -1002,7 +1033,6 @@ function AtlasApp() {
         </Suspense>
         </div>
       </div>
-      {atlasSearch.open ? <Suspense fallback={null}><SearchPalette cards={searchableCards} conversations={capturedConversations} sessions={groupFocusVersions(focusSessions).map((group) => group.latest)} anchors={atlasSearch.anchors} marks={atlasSearch.marks} onClose={atlasSearch.close} onSelect={selectSearchResult} /></Suspense> : null}
       {contextHandoff?<ContextHandoffDialog request={contextHandoff} zh={locale==="zh-CN"} onClose={closeContextHandoff} onSync={commandHydrate} onStart={(goal,sources)=>{const scope=contextHandoff.scope;const ids=scope.blocks!.map(block=>block.conversationId);setCapturedConversations(current=>[...current.filter(item=>!ids.includes(item.id)),...sources]);closeContextHandoff();startGoal(goal,"work",ids,undefined,scope,undefined,undefined,sources);}}/>:null}
       {importChoices ? <NativeImportDialog sources={importChoices} zh={locale === "zh-CN"} onChoose={sources => void chooseImportSources(sources)} onClose={closeImportChoices}/> : null}
       {newCardOpen ? <NewCardDialog onClose={() => setNewCardOpen(false)} onCreate={createCard} /> : null}

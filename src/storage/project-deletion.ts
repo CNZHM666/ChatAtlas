@@ -1,5 +1,6 @@
 import type { AtlasCanvas } from "../shared/types";
 import { OVERVIEW_CANVAS_ID } from "../shared/constants";
+import { notifyProjectChange } from "../shared/project-change-notification";
 import { getDatabase } from "./db";
 
 type StoredProject = AtlasCanvas & { deletedAt?: number };
@@ -12,24 +13,34 @@ export async function listDeletedProjects(): Promise<AtlasCanvas[]> {
 
 /** Keep project contents and shared source material recoverable; hide all its saved versions. */
 export async function deleteProject(id: string): Promise<void> {
-  const db = await getDatabase(), project = await db.get("canvases", id);
-  if (!project || id === OVERVIEW_CANVAS_ID || project.type === "overview") throw new Error("无法删除工作台首页。");
-  await db.put("canvases", { ...project, deletedAt: Date.now() } as StoredProject);
+  const tx = (await getDatabase()).transaction("canvases", "readwrite");
+  const project = await tx.store.get(id);
+  if (!project || id === OVERVIEW_CANVAS_ID || project.type === "overview") {
+    await tx.done;
+    throw new Error("无法删除工作台首页。");
+  }
+  if (isDeletedProject(project)) { await tx.done; return; }
+  await tx.store.put({ ...project, deletedAt: Date.now() } as StoredProject);
+  await tx.done;
+  notifyProjectChange({type:"ATLAS_PROJECT_TRASHED", projectId:id});
 }
 
 export async function restoreProject(id: string): Promise<void> {
-  const db = await getDatabase(), project = await db.get("canvases", id) as StoredProject | undefined;
-  if (!project || !isDeletedProject(project)) return;
+  const tx = (await getDatabase()).transaction("canvases", "readwrite");
+  const project = await tx.store.get(id) as StoredProject | undefined;
+  if (!project || !isDeletedProject(project)) { await tx.done; return; }
   const restored = { ...project };
   delete restored.deletedAt;
-  await db.put("canvases", restored);
+  await tx.store.put(restored);
+  await tx.done;
+  notifyProjectChange({type:"ATLAS_PROJECT_RESTORED", projectId:id});
 }
 
 /** Permanently remove only trashed projects/versions. Shared originals and cards
  * used by surviving projects remain; all removals commit together. */
 export async function emptyProjectTrash(): Promise<void> {
   const db = await getDatabase();
-  const tx = db.transaction(["canvases", "focusSessions", "canvasMemberships", "knowledgeCards", "knowledgeRelations", "sourceRelations", "cards", "edges", "viewports", "readingProgress", "reviewMarks", "projectQueryThreads", "projectHistoryTasks", "focusGenerationTasks", "homeResults"], "readwrite");
+  const tx = db.transaction(["canvases", "focusSessions", "canvasMemberships", "knowledgeCards", "knowledgeRelations", "sourceRelations", "cards", "edges", "viewports", "readingProgress", "reviewMarks", "projectQueryThreads", "projectHistoryTasks", "focusGenerationTasks", "homeResults", "projectDesks", "projectFiles", "sidecarUpdateDrafts"], "readwrite");
   const projects = (await tx.objectStore("canvases").getAll()).filter(item => item.id !== OVERVIEW_CANVAS_ID && item.type !== "overview" && isDeletedProject(item));
   const projectIds = new Set(projects.map(item => item.id));
   const sessions = await tx.objectStore("focusSessions").getAll();
@@ -37,10 +48,23 @@ export async function emptyProjectTrash(): Promise<void> {
   const sessionIds = new Set(removed.map(item => item.id));
   const removedRoots = new Set(removed.map(item => item.rootSessionId ?? item.id));
   const keptRoots = new Set(sessions.filter(item => !sessionIds.has(item.id)).map(item => item.rootSessionId ?? item.id));
-  for (const id of projectIds) await tx.objectStore("canvases").delete(id);
+  for (const id of projectIds) {
+    await tx.objectStore("canvases").delete(id);
+    await tx.objectStore("projectDesks").delete(id);
+    const files = tx.objectStore("projectFiles");
+    for (const file of await files.index("by-project").getAll(id)) {
+      const projectIds = file.projectIds.filter(projectId => projectId !== id);
+      if (projectIds.length) await files.put({ ...file, projectIds });
+      else await files.delete(file.id);
+    }
+  }
   for (const id of sessionIds) {
     await tx.objectStore("focusSessions").delete(id);
     for (const kind of ["history", "evolution"]) await tx.objectStore("projectHistoryTasks").delete(`${kind}:${id}`);
+  }
+  for (const id of new Set([...projectIds, ...[...removedRoots].filter(id => !keptRoots.has(id))])) {
+    const drafts = tx.objectStore("sidecarUpdateDrafts");
+    for (const key of await drafts.index("by-project").getAllKeys(id)) await drafts.delete(key);
   }
   const memberships = await tx.objectStore("canvasMemberships").getAll();
   const touchedCards = new Set(memberships.filter(item => projectIds.has(item.canvasId)).map(item => item.cardId));
@@ -64,5 +88,6 @@ export async function emptyProjectTrash(): Promise<void> {
   for (const task of await tx.objectStore("focusGenerationTasks").getAll()) if (task.sessionId && sessionIds.has(task.sessionId) || task.scopeCanvasId && projectIds.has(task.scopeCanvasId)) await tx.objectStore("focusGenerationTasks").delete(task.id);
   for (const record of await tx.objectStore("homeResults").getAll()) if ("answer" in record && (sessionIds.has(record.answer.id) || record.answer.canvasId && projectIds.has(record.answer.canvasId))) await tx.objectStore("homeResults").delete(record.id);
   await tx.done;
+  if (projectIds.size || sessionIds.size) notifyProjectChange({type:"ATLAS_PROJECT_VERSION_SAVED"});
   if (typeof window !== "undefined") window.dispatchEvent(new Event("atlas-focus-tasks-changed"));
 }

@@ -95,8 +95,8 @@ export function chatGPTEntryVisible(element:HTMLElement):boolean {
   for(let parent=element.parentElement;parent;parent=parent.parentElement){const style=getComputedStyle(parent),bounds=parent.getBoundingClientRect();if(!bounds.width||!bounds.height)continue;if(/hidden|clip|auto|scroll/u.test(style.overflowX||style.overflow)&& (rect.left>=bounds.right||rect.right<=bounds.left))return false;if(/hidden|clip|auto|scroll/u.test(style.overflowY||style.overflow)&&(rect.top>=bounds.bottom||rect.bottom<=bounds.top))return false;}
   return true;
 }
-/** Keep host selectors here. Navigation and an edge control cover header-less layouts. */
-export function chatGPTEntryAnchor(conversation: boolean): { anchor: HTMLElement; placement: "before" | "after" | "prepend"; variant?: "toolbar" | "navigation" | "edge" } | undefined {
+/** Use the host's right-side actions when available; preserve the same corner during hydration. */
+export function chatGPTEntryAnchor(conversation: boolean): { anchor: HTMLElement; placement: "before" | "prepend"; variant: "toolbar" | "edge" } | undefined {
   if (!conversation && window.location.pathname !== "/" && !/^\/g\/[^/]+(?:\/|$)/u.test(window.location.pathname)) return undefined;
   // The current host can put Share in a toolbar without a semantic header.
   // Prefer its left neighbour; never match a share action inside a message or menu.
@@ -104,36 +104,17 @@ export function chatGPTEntryAnchor(conversation: boolean): { anchor: HTMLElement
     if(button.classList.contains("atlas-navigator-trigger")||button.closest('nav, aside, #stage-slideover-sidebar, #stage-sidebar, [data-testid="sidebar"], [role="dialog"], [role="menu"], form, article, [data-message-author-role], [data-testid^="conversation-turn-"]'))return false;
     const labels=[button.getAttribute("aria-label"),button.getAttribute("title"),button.textContent];
     if(!button.matches('[data-testid="share-chat-button"], [data-testid="share-conversation-button"]')&&!labels.some(label=>/^(?:分享(?:聊天|对话)?|share(?: chat| conversation)?)$/iu.test(label?.trim()??"")))return false;
-    const rect=button.getBoundingClientRect();return rect.top>=0&&rect.top<100&&chatGPTEntryVisible(button);
+    const rect=button.getBoundingClientRect();return rect.top>=0&&rect.top<100&&(!rect.width||rect.right>=window.innerWidth*.65)&&chatGPTEntryVisible(button);
   });
   if(share)return {anchor:share,placement:"before",variant:"toolbar"};
-  const toolbar = 'header button, #page-header button, [data-testid="conversation-header"] button, [data-testid="page-header"] button, button[data-testid="share-chat-button"], button[data-testid="temporary-chat-button"]';
-  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(conversation ? toolbar : `${toolbar}, main button`))
-    .filter(button => !button.classList.contains("atlas-navigator-trigger") && !button.closest('nav, aside, #stage-slideover-sidebar, #stage-sidebar, [data-testid="sidebar"], [role="dialog"]') && (conversation || !button.closest("form")) && chatGPTEntryVisible(button));
-  const model = buttons.find(button => button.getBoundingClientRect().top < 100 && (
-    button.matches('[data-testid="model-switcher-dropdown-button"], #model-switcher-dropdown-button') || /^ChatGPT(?:\s+[\w.-]+)?$/iu.test(button.textContent?.trim() ?? "")
-  ));
-  if (model) return {anchor:model,placement:"after"};
-  const action = conversation ? buttons.find(button => {
-    const label = `${button.getAttribute("aria-label") ?? ""} ${button.getAttribute("title") ?? ""} ${button.textContent ?? ""}`.trim();
-    return (/(^|\s)(分享|Share)(\s|$)/iu.test(label) || button.matches('[data-testid="share-chat-button"]')) && button.getBoundingClientRect().top < 180;
-  }) : buttons.filter(button => {
-    const rect = button.getBoundingClientRect(), style = getComputedStyle(button);
-    return rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.top < 100 && rect.left >= window.innerWidth * .6 && style.display !== "none" && style.visibility !== "hidden";
-  }).sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right)[0];
-  // Without a model control, use the start of the main header, not the crowded share group.
-  const header=action?.closest<HTMLElement>('header, #page-header, [data-testid="conversation-header"], [data-testid="page-header"]');
-  if(header)return {anchor:header,placement:"prepend"};
-  const newChat=Array.from(document.querySelectorAll<HTMLElement>('a[href="/"], button[data-testid="create-new-chat-button"], [data-testid="create-new-chat-button"]')).find(element=>{
-    const label=element.getAttribute("aria-label") || element.textContent?.trim() || "";
-    return /^(?:新聊天|新对话|new chat|new conversation)(?:\s|$)/iu.test(label) && !element.closest('[role="dialog"]') && chatGPTEntryVisible(element);
-  });
-  if(newChat){
-    const parent=newChat.parentElement;
-    const anchor=parent?.childElementCount===1&&!parent.matches('nav, aside, main, body, #stage-sidebar, #stage-slideover-sidebar, [data-testid="sidebar"]')?parent:newChat;
-    return {anchor,placement:"after",variant:"navigation"};
-  }
-  // Keep the side-panel launch reachable even when host navigation is collapsed/replaced.
+  const toolbar = 'header button, #page-header button, [data-testid="conversation-header"] button, [data-testid="page-header"] button, button[data-testid="temporary-chat-button"], button[aria-label="临时聊天"], button[aria-label="Temporary Chat" i]';
+  const action = [...document.querySelectorAll<HTMLButtonElement>(toolbar)].flatMap(button => {
+    if (button.matches('.atlas-navigator-trigger, [data-testid="model-switcher-dropdown-button"], #model-switcher-dropdown-button') ||
+      button.closest('nav, aside, form, article, [role="dialog"], [role="menu"], #stage-sidebar, #stage-slideover-sidebar, [data-testid="sidebar"]')) return [];
+    const rect = button.getBoundingClientRect();
+    return rect.width && rect.top >= 0 && rect.top < 90 && rect.left >= window.innerWidth * .6 && chatGPTEntryVisible(button) ? [{button, rect}] : [];
+  }).sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left)[0];
+  if (action) return {anchor:action.button,placement:"before",variant:"toolbar"};
   return document.body?{anchor:document.body,placement:"prepend",variant:"edge"}:undefined;
 }
 

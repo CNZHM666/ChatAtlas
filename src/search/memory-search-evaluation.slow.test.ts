@@ -5,7 +5,7 @@ import {getDatabase} from "../storage/db";
 import {invalidateStoredMessageSearchIndex} from "../storage/messages";
 import {messageFullTextSearch,MessageFullTextSearch} from "./message-fulltext";
 import {historyRequest} from "./history-request";
-import {searchMemory} from "../sidecar/context-engine";
+import {rankedMessages} from "./ranked-messages";
 
 it("compares baseline and expanded local retrieval on 38 labelled synthetic questions",async()=>{
  const db=await getDatabase();for(const name of ["messages","conversations"] as const)await db.clear(name);
@@ -21,8 +21,8 @@ it("compares baseline and expanded local retrieval on 38 labelled synthetic ques
   for(const item of cases){
    const before=await messageFullTextSearch.search(historyRequest(item.query).query,{requireBodyMatch:true,proximity:120,limit:5,conversationIds:[conversation.id]});
    if(item.expected&&before.hits.some(hit=>hit.messageId===item.expected))baseline++;
-   const at=performance.now(),after=await searchMemory(item.query,[conversation]);latencies.push(performance.now()-at);
-   const ids=after.hits.slice(0,5).map(hit=>hit.id),rank=ids.indexOf(item.expected);
+   const at=performance.now(),after=await rankedMessages(item.query,{requireBodyMatch:true,proximity:120,limit:24,conversationIds:[conversation.id]});latencies.push(performance.now()-at);
+   const ids=after.hits.slice(0,5).map(hit=>hit.messageId),rank=ids.indexOf(item.expected);
    if(item.expected&&rank>=0){current++;mrr+=1/(rank+1);}else if(item.expected)failures.push({...item,actual:ids});
    if(!item.expected)negativeHits+=after.hits.length;
    for(const hit of after.hits){totalCitations++;if(hit.sourceRange&&hit.message.content.slice(hit.sourceRange.start,hit.sourceRange.end)===hit.sourceRange.excerpt)citations++;}

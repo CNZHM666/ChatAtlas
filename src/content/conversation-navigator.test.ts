@@ -31,17 +31,19 @@ it("finds the top Share action outside semantic headers and ignores message shar
  const entry=document.querySelector(".atlas-navigator-trigger")!;
  expect(document.querySelector("#top-share")!.previousElementSibling).toBe(entry);expect(entry.closest("article")).toBeNull();
 });
-it("adds a labelled shortcut below New chat in layouts without a recognized header",()=>{
- navigator.stop();document.body.innerHTML='<div id="stage-sidebar"><div id="new"><a href="/">新聊天</a></div><a href="/tasks">定时任务</a></div><main><article><button>分享</button></article></main>';navigator.start();
- const entry=document.querySelector<HTMLButtonElement>(".atlas-navigator-trigger")!;expect(document.querySelector("#new")!.nextElementSibling).toBe(entry);expect(entry).toHaveClass("atlas-navigator-trigger--navigation");expect(entry.textContent).toBe("ChatAtlas");expect(entry.querySelector(".atlas-trigger-mark img")).toHaveAttribute("alt", "");
+it("keeps the upper-right shortcut when only the left model and navigation controls are present",()=>{
+ navigator.stop();document.body.innerHTML='<header><button data-testid="model-switcher-dropdown-button">ChatGPT</button></header><div id="stage-sidebar"><div id="new"><a href="/">新聊天</a></div><a href="/tasks">定时任务</a></div><main><article><button>分享</button></article></main>';navigator.start();
+ const entry=document.querySelector<HTMLButtonElement>(".atlas-navigator-trigger")!;expect(entry.parentElement).toBe(document.body);expect(entry).toHaveClass("atlas-navigator-trigger--edge");expect(entry.textContent).toBe("ChatAtlas");expect(entry.querySelector(".atlas-trigger-mark img")).toHaveAttribute("alt", "");
  navigator.ensureTrigger();expect(document.querySelectorAll(".atlas-navigator-trigger")).toHaveLength(1);
 });
-it("keeps one working edge shortcut when navigation is hidden, and restores it after a layout change",async()=>{
+it("keeps one working edge shortcut and moves it beside Share when the toolbar appears",async()=>{
  navigator.stop();document.body.innerHTML='<div id="stage-sidebar" style="display:none"><a href="/">New chat</a></div><div style="display:none"><header><button data-testid="model-switcher-dropdown-button">ChatGPT</button></header></div><main></main>';navigator.start();
  const entry=document.querySelector<HTMLButtonElement>(".atlas-navigator-trigger")!;expect(entry).toHaveClass("atlas-navigator-trigger--edge");
  entry.click();await vi.waitFor(()=>expect(sendMessage).toHaveBeenCalledWith({type:"ATLAS_OPEN_SIDEPANEL"}));
  (document.querySelector("#stage-sidebar") as HTMLElement).style.display="block";window.dispatchEvent(new Event("resize"));
- await vi.waitFor(()=>expect(entry).toHaveClass("atlas-navigator-trigger--navigation"));expect(document.querySelectorAll(".atlas-navigator-trigger")).toHaveLength(1);
+ document.body.insertAdjacentHTML("beforeend",'<header><button id="hydrated-share">分享</button></header>');
+ await vi.waitFor(()=>expect(document.querySelector("#hydrated-share")?.previousElementSibling).toBe(entry));
+ expect(entry).toHaveClass("atlas-navigator-trigger--toolbar");expect(document.querySelectorAll(".atlas-navigator-trigger")).toHaveLength(1);
 });
 it("uses the browser native panel without mounting an overlay when it is supported",async()=>{
  sendMessage.mockResolvedValueOnce({ok:true,unsupported:false});await navigator.open();
@@ -149,7 +151,7 @@ it("restores the page entry immediately on return and replaces a stale entry fro
  vi.useFakeTimers();navigator.stop();
  document.body.insertAdjacentHTML("beforeend",'<button class="atlas-navigator-trigger">Old ChatAtlas</button><style id="atlas-navigator-trigger-style">.atlas-trigger-label{display:none}</style>');
  navigator.start();expect(document.querySelectorAll(".atlas-navigator-trigger")).toHaveLength(1);
- expect(document.getElementById("atlas-navigator-trigger-style")).toHaveTextContent(".atlas-trigger-label{display:inline;");
+ expect(document.getElementById("atlas-navigator-trigger-style")).toHaveTextContent("top: max(9px, env(safe-area-inset-top));");
  document.querySelector(".atlas-navigator-trigger")!.remove();
  window.dispatchEvent(new Event("focus"));vi.advanceTimersByTime(20);
  expect(document.querySelectorAll(".atlas-navigator-trigger")).toHaveLength(1);

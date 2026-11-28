@@ -49,7 +49,8 @@ export function AIPlatformFilter({ conversations, value, onChange, zh }: { conve
     <div className="ai-platform-tabs">
       {["",...PRIMARY].map(id => {
         const label=id ? platformName(id,zh?"zh-CN":"en") : zh?"全部 AI":"All AIs", count=id ? counts.get(id) ?? 0 : conversations.length;
-        return <button type="button" key={id} aria-label={`${label} ${count}`} aria-pressed={value===id} onClick={()=>{onChange(id);close();}}><AIPlatformIcon platform={id}/><span>{label}</span>{count ? <small aria-hidden="true">{count}</small> : null}</button>;
+        const empty = Boolean(id && count === 0 && value !== id);
+        return <button type="button" key={id} className={empty ? "is-empty" : undefined} aria-label={`${label} ${count}`} aria-pressed={value===id} onClick={()=>{onChange(id);close();}}><AIPlatformIcon platform={id}/><span>{label}</span>{count ? <small aria-hidden="true">{count}</small> : null}</button>;
       })}
     </div>
     <div className={`ai-platform-more${moreSelected ? " is-active" : ""}`}>

@@ -27,9 +27,8 @@ it("collects examples after their subsection text without crossing headings, los
 it("derives recognizable names and keeps historical status outside the literal source",()=>{
  expect(wikiSupplementTitle({language:"text",text:"src/\n├ components/\n└ lib/"},"*界面草图*",true)).toContain("目录结构");
  expect(wikiSupplementTitle({language:"ts",text:"interface Candidate {\n  id: string;\n}"},"*代码 · 早期方案，已被替换*",true)).toBe("Candidate 接口 · 早期方案，已被替换");
+ expect(wikiSupplementTitle({language:"sql",text:"CREATE TABLE projects (id TEXT PRIMARY KEY);"},"",true)).toBe("projects 数据表结构");
  expect(wikiSupplementTitle({language:"text",text:"A\n↓\nB"},"",false)).toContain("Flow example");
- expect(wikiSupplementTitle({language:"text",text:"OLED → GPIO21\nDHT22 → GPIO21"},"",true)).toBe("GPIO 引脚冲突示例");
- expect(wikiSupplementTitle({language:"text",text:"缺件清单\n复制采购清单"},"",true,"用户旅程")).toBe("缺件提示与采购清单");
  expect(wikiSupplementTitle({language:"text",text:"标题里的第一句\n另一个标签"},"",true,"库存确认")).toBe("库存确认的参考示例");
  const diagram={language:"text",text:"Release v2.4\nCapture\n↓\nProcess\n↓\nPublish"};
  expect(wikiSupplementTitle(diagram,"*Flow · v2 · AI suggestion*",false,"Delivery plan")).toBe("Flow example for Delivery plan · Source diagram v2.4, scope unverified · AI suggestion");

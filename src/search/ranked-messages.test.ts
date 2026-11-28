@@ -3,11 +3,11 @@ import { beforeEach, expect, it } from "vitest";
 import { getDatabase } from "../storage/db";
 import { invalidateStoredMessageSearchIndex } from "../storage/messages";
 import { findHistory } from "./home-history";
-import { searchMemory } from "../sidecar/context-engine";
+import { rankedMessages } from "./ranked-messages";
 
 beforeEach(async () => { const db = await getDatabase(); await db.clear("messages"); await db.clear("conversations"); invalidateStoredMessageSearchIndex(); });
 
-it("finds the same messages in the same order in the workbench and the sidebar", async () => {
+it("uses the shared message ranking in the workbench search", async () => {
   const db = await getDatabase();
   const sources = ["a", "b", "c"].map(id => ({ id, title: `对话 ${id}`, platform: "chatgpt", url: "", updatedAt: 1, messageCount: 2 }));
   for (const source of sources) await db.put("conversations", source);
@@ -20,9 +20,9 @@ it("finds the same messages in the same order in the workbench and the sidebar",
   for (const [index, [conversationId, id, content]] of messages.entries()) await db.put("messages", { id, conversationId, role: "assistant", content, messageIndex: index, createdAt: 1, updatedAt: 1, contentHash: id, preview: content });
   invalidateStoredMessageSearchIndex();
   const workbench = (await findHistory("Orama 索引", sources)).matches.flatMap(match => match.messages.map(message => message.id));
-  const sidebar = (await searchMemory("Orama 索引", sources)).hits.map(hit => hit.id);
-  expect(sidebar).toHaveLength(3);
+  const ranked = (await rankedMessages("Orama 索引", { limit: 24, requireBodyMatch: true, conversationIds: sources.map(source => source.id) })).hits.map(hit => hit.messageId);
+  expect(ranked).toHaveLength(3);
   // The workbench groups by conversation; within that, the order is the shared one.
-  expect([...workbench].sort((x, y) => sidebar.indexOf(x) - sidebar.indexOf(y))).toEqual(sidebar);
-  expect(new Set(workbench)).toEqual(new Set(sidebar));
+  expect([...workbench].sort((x, y) => ranked.indexOf(x) - ranked.indexOf(y))).toEqual(ranked);
+  expect(new Set(workbench)).toEqual(new Set(ranked));
 });

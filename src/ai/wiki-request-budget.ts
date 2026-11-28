@@ -11,7 +11,7 @@ export function wikiStructuredOutput(rows: number, tokensPerRow: number, ceiling
   return Math.min(ceiling, Math.max(floor, Math.ceil(240 + rows * tokensPerRow)));
 }
 
-export function wikiRequestFits(request: Parameters<typeof requestBudget>[0] & Pick<StructuredAIRequest<never>, "maxOutputTokens">, { modelId, capabilities }: WikiBudgetModel, expectedOutput: number, inputScale = 1) {
+export function wikiRequestFits(request: Parameters<typeof requestBudget>[0] & Pick<StructuredAIRequest<never>, "maxOutputTokens" | "inputBudgetScale">, { modelId, capabilities }: WikiBudgetModel, expectedOutput: number, inputScale = request.inputBudgetScale ?? 1) {
   if (!modelId) return true;
   const budget = requestBudget(request, modelId);
   const input = Math.ceil(budget.inputTokens * inputScale);

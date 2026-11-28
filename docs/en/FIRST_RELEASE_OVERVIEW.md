@@ -2,7 +2,7 @@
 
 [简体中文](../FIRST_RELEASE_OVERVIEW.md) · **English**
 
-Version **0.1.6 Alpha** for Chrome and Edge. This describes available features and limits.
+Version **0.1.8 Alpha** for Chrome and Edge. This describes available features and limits.
 
 ## Supported platform
 

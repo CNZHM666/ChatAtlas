@@ -14,7 +14,7 @@ export function classifyImportError(error: unknown): ImportFailureCategory {
   if (/bridge|content script|reach the chatgpt page|receiver/i.test(message)) return "bridge_error";
   if (/parse|format|unexpected.*response|normaliz/i.test(message)) return "parse_error";
   if (/indexeddb|database|persist|storage|quota/i.test(message)) return "storage_error";
-  if (/network|timeout|fetch|50\d/i.test(message)) return "network";
+  if (/network|timed?\s*out|timeouterror|abort|fetch|50\d|读取超时|连接超时/iu.test(message)) return "network";
   return "unknown";
 }
 

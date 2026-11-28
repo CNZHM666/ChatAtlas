@@ -20,7 +20,7 @@ const base = (overrides: Partial<ComponentProps<typeof ReviewHome>> = {}): Compo
   canvases: [], sessions: [], conversations: [], importJob: null, importSource: "web", selectedIds: new Set(), onSelectedIds: vi.fn(), onPrioritize: vi.fn(), recentReading: [], onStart: vi.fn(), onSession: vi.fn(), onResume: vi.fn(), onSpace: vi.fn(), onScan: vi.fn(), onHydrate: vi.fn(), onZip: vi.fn(), onPause: vi.fn(), onConnect: vi.fn(), onDiscover: vi.fn(), onHistoryChange: vi.fn(), ...overrides,
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); localStorage.removeItem("atlas-workbench-onboarding-v1"); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); localStorage.removeItem("atlas-workbench-onboarding-v1"); localStorage.removeItem("atlas-workbench-welcome-completed"); });
 const openMaterials = () => { if (!screen.queryByRole("group", { name: "选择本次使用的对话" })) fireEvent.click(screen.getByText("来源材料与同步")); };
 
 it("keeps diagnostic-only Wiki records and completed runs out of Continue while preserving History",()=>{
@@ -224,7 +224,7 @@ describe("workbench sync", () => {
     expect(screen.getByRole("button",{name:"导入对话文件"})).toHaveTextContent("ZIP / JSON / Markdown / TXT");
     fireEvent.click(screen.getByRole("button",{name:"同步"})); expect(props.onScan).toHaveBeenCalledOnce();
     rerender(<PreferencesProvider><ReviewHome {...props} conversations={[pending]} importJob={{...job,status:"inventory_ready",retryScope:"titles"}} /></PreferencesProvider>);
-    expect(screen.getByText(/同步正文后即可全文搜索/)).toBeVisible();
+    expect(screen.getByText(/同步正文后即可整理为项目章节/)).toBeVisible();
     rerender(<PreferencesProvider><ReviewHome {...props} conversations={[pending]} importJob={{...job,status:"syncing",phase:"syncing",retryScope:"selected",activeIds:[pending.id]}} /></PreferencesProvider>);
     const status=screen.getByRole("status");
     expect(status.closest(".home-import-meta")).not.toBeNull();
@@ -373,5 +373,46 @@ it("opens the task workspace with the candidate pool without auto-saving", async
   expect(await screen.findByRole("heading", { name: "帮我整理成一个项目：海报设计" })).toBeInTheDocument();
   expect(onSelectedIds).toHaveBeenCalledWith(new Set(["candidate-0", "candidate-1"]));
   await waitFor(() => expect(onStart).toHaveBeenCalledWith("帮我整理成一个项目：海报设计", "work", ["candidate-0", "candidate-1"], { kind: "all", sourceConversationIds: ["candidate-0", "candidate-1"] }, ["candidate-0", "candidate-1"]));
+});
 
+it("keeps showing the welcome screen when only passive page captures exist, and lets users jump straight to the workbench", () => {
+  localStorage.setItem("atlas-locale", "zh-CN");
+  const captured: Conversation = {
+    id: "deepseek:abc",
+    platform: "deepseek",
+    source: "deepseek_dom",
+    title: "AI硬件版Cursor竞品开源",
+    url: "https://chat.deepseek.com/a/chat/s/abc",
+    updatedAt: 100,
+    messageCount: 4,
+    importState: "complete",
+    hydrationState: "hydrated",
+  };
+  const onSelectedIds = vi.fn();
+  const { unmount } = render(<PreferencesProvider><ReviewHome {...base({ projectFirst: true, libraryReady: true, projectsReady: true, conversations: [captured], onSelectedIds })} /></PreferencesProvider>);
+  expect(screen.getByRole("heading", { name: "让过去的 AI 对话，重新发挥价值" })).toBeVisible();
+  expect(screen.getByText("已自动捕获当前网页的 1 条对话")).toBeVisible();
+  expect(screen.getByRole("button", { name: "同步" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "导入对话文件" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "直接进入工作台" }));
+  expect(onSelectedIds).toHaveBeenCalledWith(new Set(["deepseek:abc"]));
+  expect(screen.getByRole("heading", { name: "项目工作台" })).toBeVisible();
+  unmount();
+  // Persisted completion keeps returning users in the workbench.
+  render(<PreferencesProvider><ReviewHome {...base({ projectFirst: true, libraryReady: true, projectsReady: true, conversations: [captured] })} /></PreferencesProvider>);
+  expect(screen.getByRole("heading", { name: "项目工作台" })).toBeVisible();
+});
+
+it("skips the welcome screen once explicit sync or file import is present", () => {
+  localStorage.setItem("atlas-locale", "zh-CN");
+  const imported: Conversation = {
+    ...ready,
+    id: "deepseek:synced",
+    platform: "deepseek",
+    source: "deepseek_history",
+    nativeHistorySourceId: "deepseek",
+  };
+  render(<PreferencesProvider><ReviewHome {...base({ projectFirst: true, libraryReady: true, projectsReady: true, conversations: [imported] })} /></PreferencesProvider>);
+  expect(screen.getByRole("heading", { name: "项目工作台" })).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "让过去的 AI 对话，重新发挥价值" })).toBeNull();
 });

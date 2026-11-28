@@ -48,10 +48,19 @@ describe("data privacy settings", () => {
     fireEvent.click(screen.getByRole("button", { name: /保存/ }));
     await waitFor(async () => expect(await getAISettings()).toMatchObject({ model: "Vendor/Qwen3.8-Flash", baseUrl: "https://gateway.example/v1" }));
   });
+  it("defaults to the AI connection tab when opened without an explicit initialTab", () => {
+    localStorage.setItem("atlas-locale", "zh-CN");
+    render(<PreferencesProvider><SettingsPanel onClose={vi.fn()} /></PreferencesProvider>);
+    expect(screen.getByRole("button", { name: "AI 连接" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { name: "连接服务商" })).toBeVisible();
+  });
+
   it("shows a compact privacy summary with the full explanation on demand", () => {
     localStorage.setItem("atlas-locale", "en");
-    render(<PreferencesProvider><SettingsPanel onClose={vi.fn()} /></PreferencesProvider>);
+    render(<PreferencesProvider><SettingsPanel initialTab="data" onClose={vi.fn()} /></PreferencesProvider>);
     expect(screen.getByRole("heading", { name: "Data & Privacy", level: 3 })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Local data" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("heading", { name: "Automatic page capture" })).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Settings" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Settings", level: 2 })).toBeVisible();
     expect(screen.getByText("This browser on this device")).toBeVisible();
@@ -159,7 +168,7 @@ it("keeps unsaved fields across tabs and supports closing with Escape",async()=>
  localStorage.setItem("atlas-locale","en");const close=vi.fn();
  render(<PreferencesProvider><SettingsPanel initialTab="ai" onClose={close}/></PreferencesProvider>);
  fireEvent.change(screen.getByLabelText("API Key"),{target:{value:"unsaved-fixture"}});
- fireEvent.click(screen.getByRole("button",{name:"Capture & data"}));
+ fireEvent.click(screen.getByRole("button",{name:"Local data"}));
  expect(screen.queryByRole("button",{name:"Save"})).not.toBeInTheDocument();
  fireEvent.click(screen.getByRole("button",{name:"AI connection"}));
  expect(screen.getByLabelText("API Key")).toHaveValue("unsaved-fixture");

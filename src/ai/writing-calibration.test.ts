@@ -49,6 +49,6 @@ it("sizes writing batches by the provider's real token counts and freezes the sc
   for (let index = 0; index < 3; index++) recordTokenSample("calibration-on", 10_000, 5_000);
   const calibrated = await organize("calibration-on");
   expect(calibrated.writes).toBeLessThan(plain.writes);
-  expect(calibrated.checkpoint?.writingScale).toBe(0.55);
+  expect(calibrated.checkpoint?.writingScale).toBe(0.58);
   expect(calibrated.result.result.sections.map(section => section.title)).toEqual(["消息检索"]);
 });

@@ -8,13 +8,14 @@ import {clearProjectComposer,fillProjectComposer} from "./project-handoff";
 import {webChatEntry} from "./web-chat-entry";
 import {readWebChatHistory} from "./web-chat-history";
 import {pageTheme,watchPageTheme} from "./page-theme";
+import { watchComposerFiles } from "./project-files";
 
 const site = webCaptureSite(location.href);
 if (site) {
   const host = window as Window & { __chatAtlasWebCaptureDispose?: () => void };
-  host.__chatAtlasWebCaptureDispose?.();
+  try { host.__chatAtlasWebCaptureDispose?.(); } catch { /* A previous extension context may already be invalid. */ }
   const adapter = new WebChatAdapter(site.id);
-  const entry=webChatEntry();
+  const entry=webChatEntry(site.id);
   const capture = new PageCapture(async () => {
     if (adapter.isStreaming()) return null;
     const address = location.href, batch = await buildConversationCapture(adapter);
@@ -23,8 +24,17 @@ if (site) {
     return await chrome.runtime.sendMessage({ type: "ATLAS_CAPTURE_BATCH", capture: batch } satisfies AtlasMessage) as CaptureCommandResponse;
   });
   let enabled = false, disposed = false, address = location.href, settingsRevision = 0;
+  const projectFiles = watchComposerFiles(() => adapter.detectConversation()?.id ?? "", () => adapter.composer(), () => enabled && !disposed);
   capture.pause();
-  const schedule = () => { if (enabled) {capture.schedule();entry.ensure();} };
+  let entryFrame: number | undefined;
+  const scheduleEntry = () => {
+    if (!enabled || entryFrame !== undefined) return;
+    entryFrame = requestAnimationFrame(() => {
+      entryFrame = undefined;
+      if (enabled) entry.ensure();
+    });
+  };
+  const schedule = () => { if (enabled) {capture.schedule();scheduleEntry();} };
   const observer = new MutationObserver(schedule);
   const apply = (value: unknown) => {
     if (disposed) return;
@@ -36,6 +46,8 @@ if (site) {
   };
   const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => { if (area === "local" && changes[WEB_CAPTURE_KEY]) { settingsRevision++; apply(changes[WEB_CAPTURE_KEY].newValue); } };
   const message = (value: AtlasMessage, _sender: chrome.runtime.MessageSender, reply: (response: unknown) => void) => {
+    if(value.type==="ATLAS_PROJECT_FILE_RECEIVE"){reply(projectFiles.receive(value));return false;}
+    if(value.type==="ATLAS_PROJECT_FILE_DRAG_READY"){reply(projectFiles.arm(value));return false;}
     if(value.type==="ATLAS_PAGE_THEME"){reply({theme:pageTheme()});return false;}
     if(value.type==="ATLAS_PING"){reply({ready:enabled,conversation:adapter.detectConversation()});return false;}
     if(value.type==="ATLAS_WEB_HISTORY_PAGE"){reply(enabled?readWebChatHistory():{entries:[],scope:"loaded"});return false;}
@@ -49,16 +61,27 @@ if (site) {
     if (value.conversationId && value.conversationId !== adapter.detectConversation()?.id) { reply({ok:false,error:"Conversation changed. Refresh the open conversations list."}); return false; }
     void capture.capture(true).then(reply).catch(error => reply({ok:false,error:String(error)})); return true;
   };
-  const navigation = setInterval(() => { if (location.href !== address) { address = location.href; schedule(); } }, 1000);
+  const navigation = setInterval(() => { if (location.href !== address) { address = location.href; projectFiles.pageChanged(); schedule(); } }, 1000);
   const hidden = () => capture.pause(), restored = () => { if (enabled) { capture.resume(); schedule(); } };
   window.addEventListener("pagehide", hidden); window.addEventListener("pageshow", restored);
+  window.addEventListener("resize", scheduleEntry);
+  window.addEventListener("focus", scheduleEntry);
+  document.addEventListener("transitionend", scheduleEntry);
   chrome.storage.onChanged.addListener(changed); chrome.runtime.onMessage.addListener(message);
   // The side panel matches the site's light or dark theme as it changes.
-  const unwatchTheme = watchPageTheme(theme => { void chrome.runtime.sendMessage({ type: "ATLAS_PAGE_THEME_CHANGED", theme } satisfies AtlasMessage).catch(() => undefined); });
+  const unwatchTheme = watchPageTheme(theme => {
+    scheduleEntry();
+    void chrome.runtime.sendMessage({ type: "ATLAS_PAGE_THEME_CHANGED", theme } satisfies AtlasMessage).catch(() => undefined);
+  });
   void chrome.storage.local.get(WEB_CAPTURE_KEY).then(value => { if(settingsRevision===0)apply(value[WEB_CAPTURE_KEY]); }).catch(() => {if(settingsRevision===0)capture.pause();});
   host.__chatAtlasWebCaptureDispose = () => {
+    projectFiles.dispose();
     disposed = true; enabled = false; observer.disconnect(); unwatchTheme(); capture.pause();entry.remove(); clearInterval(navigation);
     chrome.storage.onChanged.removeListener(changed); chrome.runtime.onMessage.removeListener(message);
     window.removeEventListener("pagehide", hidden); window.removeEventListener("pageshow", restored);
+    window.removeEventListener("resize", scheduleEntry);
+    window.removeEventListener("focus", scheduleEntry);
+    document.removeEventListener("transitionend", scheduleEntry);
+    if (entryFrame !== undefined) cancelAnimationFrame(entryFrame);
   };
 }

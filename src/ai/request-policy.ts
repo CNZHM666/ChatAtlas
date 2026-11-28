@@ -60,6 +60,8 @@ export function requestBudget(request: Pick<StructuredAIRequest<unknown>, "promp
     ? { maxInputTokens: 4000, maxOutputTokens: 400 }
     : request.taskType === "other" && data?.presentation === "sidecar_recall_answer"
     ? { maxInputTokens: 16000, maxOutputTokens: 3200 }
+    : request.taskType === "other" && data?.presentation === "sidecar_project_update"
+    ? { maxInputTokens: 16000, maxOutputTokens: 3000 }
     : request.taskType === "other" && data?.presentation === "project_context_composer"
     ? { maxInputTokens: 14000, maxOutputTokens: 2800 }
     : request.taskType === "other" && data?.presentation === "home_task_review"
@@ -71,9 +73,9 @@ export function requestBudget(request: Pick<StructuredAIRequest<unknown>, "promp
     : request.taskType === "other" && data?.presentation === "wiki_paragraph_revise"
     ? { maxInputTokens: 6000, maxOutputTokens: 1500 }
     : request.taskType === "other" && data?.presentation === "wiki_chapter_fit"
-    ? { maxInputTokens: 14000, maxOutputTokens: 1600 }
+    ? { maxInputTokens: 14000, maxOutputTokens: 3200 }
     : request.taskType === "other" && data?.presentation === "wiki_topic_chains"
-    ? { maxInputTokens: 12000, maxOutputTokens: 2400 }
+    ? { maxInputTokens: 12000, maxOutputTokens: 3600 }
     // A chapter's missing opening: its question, subtopic first sentences and decisions in, 1-3 sentences out.
     : request.taskType === "other" && data?.presentation === "wiki_chapter_opening"
     ? { maxInputTokens: 4000, maxOutputTokens: 600 }

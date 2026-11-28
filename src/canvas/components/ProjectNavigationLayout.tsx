@@ -5,11 +5,11 @@ const layoutKey = "atlas-project-navigation-layout";
 const minimum = 190, maximum = 340, defaultWidth = 250;
 const clamp = (width: number) => Math.min(maximum, Math.max(minimum, Math.round(width)));
 
-function initialLayout(): { side: "left" | "right"; width?: number; collapsed: boolean } {
+function initialLayout(): { width?: number; collapsed: boolean } {
   try {
     const saved = JSON.parse(localStorage.getItem(layoutKey) ?? "null");
-    return { side: saved?.side === "right" ? "right" : "left", width: Number.isFinite(saved?.width) ? clamp(saved.width) : undefined, collapsed: saved?.collapsed === true };
-  } catch { return { side: "left", collapsed: false }; }
+    return { width: Number.isFinite(saved?.width) ? clamp(saved.width) : undefined, collapsed: saved?.collapsed === true };
+  } catch { return { collapsed: false }; }
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -24,11 +24,6 @@ export function useProjectNavigationLayout() {
     ...layout,
     style: layout.width ? { "--project-navigation-width": `${layout.width}px` } as CSSProperties : undefined,
     update,
-    moveAction(zh: boolean) {
-      const side = layout.side === "left" ? "right" : "left";
-      const label = side === "right" ? (zh ? "将项目侧栏移到右侧" : "Move project sidebar right") : (zh ? "将项目侧栏移到左侧" : "Move project sidebar left");
-      return { label, run: () => update({ side }) };
-    },
   };
 }
 
@@ -44,10 +39,10 @@ export function ProjectNavigationOpen({ layout, zh, navigationId, mobile, onOpen
     focusNavigation(navigationId + "-close");
   };
   return mobile
-    ? <ReaderSidebarToggle id={navigationId + "-open"} controls={navigationId} zh={zh} side={layout.side} collapsed
+    ? <ReaderSidebarToggle id={navigationId + "-open"} controls={navigationId} zh={zh} collapsed
         className="project-navigation-mobile" onToggle={open} />
     : layout.collapsed ? <div className="project-navigation-rail">
-        <ReaderSidebarToggle id={navigationId + "-expand"} controls={navigationId} zh={zh} side={layout.side} collapsed onToggle={open} />
+        <ReaderSidebarToggle id={navigationId + "-expand"} controls={navigationId} zh={zh} collapsed onToggle={open} />
       </div> : null;
 }
 
@@ -55,7 +50,6 @@ export function ProjectNavigationLayout({ layout, zh, navigationId, onCloseMobil
   const stopDrag = useRef<() => void>();
   useEffect(() => () => stopDrag.current?.(), []);
   const navActions = useRef<HTMLDivElement>(null);
-  const right = layout.side === "right";
   const currentWidth = () => navActions.current?.closest("nav")?.offsetWidth || layout.width || defaultWidth;
   const resizeLabel = zh ? "调整项目侧栏宽度" : "Resize project sidebar";
   const close = () => {
@@ -66,7 +60,7 @@ export function ProjectNavigationLayout({ layout, zh, navigationId, onCloseMobil
   };
   return <div className="project-navigation-actions" ref={navActions}>
     {children}
-    <ReaderSidebarToggle id={navigationId + "-close"} controls={navigationId} zh={zh} side={layout.side} onToggle={close} />
+    <ReaderSidebarToggle id={navigationId + "-close"} controls={navigationId} zh={zh} onToggle={close} />
     <div className="project-navigation-resize" role="separator" tabIndex={0} aria-label={resizeLabel} aria-orientation="vertical"
       aria-valuemin={minimum} aria-valuemax={maximum} aria-valuenow={layout.width ?? defaultWidth}
       title={zh ? "拖动调整宽度，双击恢复默认" : "Drag to resize, double-click to reset"}
@@ -81,7 +75,7 @@ export function ProjectNavigationLayout({ layout, zh, navigationId, onCloseMobil
         let next: number | undefined;
         const move = (pointer: PointerEvent) => {
           if (pointer.pointerId !== pointerId) return;
-          next = clamp(width + (pointer.clientX - clientX) * (right ? -1 : 1));
+          next = clamp(width + pointer.clientX - clientX);
           root.style.setProperty("--project-navigation-width", `${next}px`);
         };
         const finish = (pointer: PointerEvent) => {
@@ -105,7 +99,7 @@ export function ProjectNavigationLayout({ layout, zh, navigationId, onCloseMobil
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
         const width = event.key === "Home" ? minimum : event.key === "End" ? maximum
-          : clamp(currentWidth() + (event.key === "ArrowRight" ? 16 : -16) * (right ? -1 : 1));
+          : clamp(currentWidth() + (event.key === "ArrowRight" ? 16 : -16));
         layout.update({ width });
       }} />
   </div>;

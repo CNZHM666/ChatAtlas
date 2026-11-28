@@ -5,6 +5,11 @@ const cache = new Map<string, ReaderCacheEntry>();
 const MAX_ENTRIES = 12;
 const MAX_CHARACTERS = 8_000_000;
 let characters = 0;
+let revision = 0;
+
+export function messageReadCacheRevision(): number {
+  return revision;
+}
 
 function remove(id: string): void {
   characters -= cache.get(id)?.characters ?? 0;
@@ -39,6 +44,7 @@ export function cachedReaderMessages(conversationId: string, load: () => Promise
 }
 
 export function invalidateMessageReadCache(conversationId?: string): void {
+  revision++;
   if (conversationId) remove(conversationId);
   else { cache.clear(); characters = 0; }
 }

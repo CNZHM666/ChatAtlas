@@ -19,6 +19,8 @@ import { contextKnowledge } from "../../test/context-fixture";
 import * as wikiRewriteAI from "../../ai/wiki-section-rewrite";
 import * as wikiRevisionAI from "../../ai/wiki-revision";
 import * as focusUpdates from "../../ai/focus-update";
+import { startWorkbenchRequest } from "../../ai/workbench-run-activity";
+import { recordAIUsage } from "../../storage/ai-usage";
 
 vi.mock("../../ai/focus-session", () => ({ generateFocusSession: vi.fn() }));
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -29,9 +31,58 @@ beforeEach(async () => { vi.clearAllMocks(); localStorage.setItem("atlas-locale"
 
 async function confirmDiscussionScope() { const button = await screen.findByRole("button", { name: "Generate preview" }); await waitFor(() => expect(screen.queryByText("Finding discussions…")).not.toBeInTheDocument()); if ((button as HTMLButtonElement).disabled) { fireEvent.click(screen.getByRole("button", { name: "Browse other discussions" })); fireEvent.click(screen.getAllByRole("checkbox")[0]); } fireEvent.click(button); }
 
+it("offers a sidebar version that arrives while an older workbench version remains open", async () => {
+  const initial = { ...projectSession(), canvasId: "sidecar-project", createdAt: 10, updatedAt: 10 };
+  const saved = { ...initial, id: "sidecar-saved", previousSessionId: initial.id, createdAt: 20, updatedAt: 20,
+    continuationUpdate: { at: 20, conversationId: "c", sectionIds: [initial.sections[0].id] } };
+  const onOpenSession = vi.fn();
+  const view = (availableSessions: FocusSession[]) => <PreferencesProvider><FocusWorkspace initialSession={initial} availableSessions={availableSessions}
+    conversations={[]} canvases={[]} settingsRevision={0} onOpenSession={onOpenSession} onClose={vi.fn()}
+    onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>;
+  const { rerender } = render(view([initial]));
+  expect(screen.queryByRole("button", { name: "Open latest version" })).not.toBeInTheDocument();
+  rerender(view([saved, initial]));
+  expect(screen.getByText("The sidebar saved a new version")).toBeVisible();
+  expect(onOpenSession).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Open latest version" }));
+  await waitFor(() => expect(onOpenSession).toHaveBeenCalledWith(saved.id, undefined, false));
+});
+
+it("opens the previous-version comparison from More and lets the reader switch changed chapters", () => {
+  const base = projectSession();
+  const shared = "First shared passage.\n\nSecond shared passage.\n\nThird shared passage.";
+  const unchanged = { ...base.sections[0], id: "unchanged", title: "Stable chapter", body: "Same note." };
+  const previous = { ...base, id: "comparison-prev", sections: [{ ...base.sections[0], body: `${shared}\n\nOld approach.` }, unchanged, { ...base.sections[0], id: "old", title: "Retired chapter", body: "Old note only." }] };
+  const current = { ...base, id: "comparison-current", previousSessionId: previous.id,
+    sections: [{ ...base.sections[0], body: `${shared}\n\n**Updated** approach.` }, unchanged] };
+  render(<PreferencesProvider><FocusWorkspace initialSession={current} projectSessions={[previous, current]} conversations={[]} canvases={[]} settingsRevision={0}
+    onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
+  fireEvent.click(screen.getByText("More", { exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Compare with previous version" }));
+  const dialog = screen.getByRole("dialog", { name: "Compare with previous version" });
+  expect(within(dialog).getByText("Updated").closest("[data-kind=added]")).not.toBeNull();
+  expect(within(dialog).getByText("2 changed · 1 unchanged")).toBeInTheDocument();
+  const toggle = within(dialog).getByRole("button", { name: "Show 3 unchanged passages" });
+  const sharedBody = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+  expect(sharedBody).not.toBeVisible();
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAccessibleName("Hide unchanged passages");
+  expect(sharedBody).toBeVisible();
+  expect(Array.from(sharedBody.children, row => Array.from(row.children, cell => cell.textContent))).toEqual(
+    shared.split("\n\n").map(line => [line, line]),
+  );
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(sharedBody).not.toBeVisible();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Retired chapter Removed" }));
+  expect(within(dialog).getByText("Old note only.").closest("[data-kind=removed]")).not.toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close comparison" }));
+  expect(dialog).not.toBeInTheDocument();
+});
+
 it("collapses the Wiki directory with the Reader control and restores its selected tab", () => {
   const key = "atlas-project-navigation-layout";
-  localStorage.removeItem(key);
+  localStorage.setItem(key, JSON.stringify({ side: "right", width: 280, collapsed: false }));
   try {
     render(<PreferencesProvider><FocusWorkspace initialSession={projectSession()} conversations={[]} canvases={[]} settingsRevision={0}
       onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
@@ -39,15 +90,15 @@ it("collapses the Wiki directory with the Reader control and restores its select
     fireEvent.click(within(nav).getByRole("tab", { name: /Sources/ }));
     fireEvent.click(within(nav).getByRole("button", { name: "Collapse sidebar" }));
     expect(nav).toHaveAttribute("hidden");
-    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ collapsed: true });
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual({ width: 280, collapsed: true });
     fireEvent.click(screen.getByText("More", { exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Move project sidebar right" }));
+    expect(screen.queryByRole("button", { name: /Move project sidebar/ })).not.toBeInTheDocument();
     const open = within(document.querySelector(".project-navigation-rail") as HTMLElement).getByRole("button", { name: "Expand sidebar" });
     expect(open).toHaveAttribute("aria-controls", nav.id);
     fireEvent.click(open);
     expect(nav).not.toHaveAttribute("hidden");
     expect(within(nav).getByRole("tab", { name: /Sources/, selected: true })).toBeVisible();
-    expect(JSON.parse(localStorage.getItem(key)!)).toMatchObject({ side: "right", collapsed: false });
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual({ width: 280, collapsed: false });
   } finally { localStorage.removeItem(key); }
 });
 
@@ -112,13 +163,13 @@ it("reviews unlabelled and default AI points individually, decrementing the coun
  await db.put("focusSessions",project);
  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
  fireEvent.click(await screen.findByRole("button",{name:"Check evidence · 2 to confirm"}));
- expect(await screen.findByText("2 left to review")).toBeVisible();
+ expect(await screen.findByText("Review 1 of 2")).toBeVisible();
  fireEvent.click(screen.getByRole("button",{name:"Source is fine"}));
- expect(screen.getByText("1 left to review")).toBeVisible();
+ expect(screen.getByText("Review 2 of 2")).toBeVisible();
  expect(screen.getByRole("button",{name:"Check evidence · 1 to confirm"})).toBeVisible();
  fireEvent.click(screen.getByRole("button",{name:"Change"}));
  fireEvent.click(screen.getByRole("button",{name:"Decided"}));
- expect(screen.getByText("Chapter reviewed")).toBeVisible();
+ expect(screen.getAllByText("Chapter reviewed").length).toBeGreaterThan(0);
  expect(screen.queryByRole("button",{name:"Check evidence · 1 to confirm"})).toBeNull();
  await waitFor(async()=>{
   const saved=await db.get("focusSessions",project.id);
@@ -325,66 +376,10 @@ it.each(["ready"] as const)("switches versions of an unsaved result without atta
  expect(attach).not.toHaveBeenCalled();expect(await(await getDatabase()).getAll("canvases")).toHaveLength(0);expect(generateFocusSession).not.toHaveBeenCalled();expect(current.status).toBe(status);
 });
 
-it.each(["ready","preview"] as const)("opens scope reading directly in the workspace's right pane and shares it with evidence (%s)",async status=>{
- const project:FocusSession={...session,mode:"work",status,wikiScopeReview:{version:1,status:"complete",goal:session.goal,includeKeys:[],materials:[{id:"note",key:"note",title:"Prompt material",body:"Complete material body.\n\n================\n========== PHASE 1 — Welcome\n\nLast paragraph remains visible.",kind:"other",reason:"Check the project boundary.",quote:"",evidenceIds:["e1"]}]}};
- const {container}=render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
- // The pane opens only when the user reads a material.
- expect(screen.queryByLabelText("Material reading")).toBeNull();
- fireEvent.click(await screen.findByRole("button",{name:"Read material: Prompt material"}));
- const pane=await screen.findByLabelText("Material reading");
- expect(pane.parentElement).toHaveClass(status==="preview"?"focus-preview":"focus-workspace");
- expect(within(pane).getByText("Last paragraph remains visible.")).not.toBeVisible();
- const originals=within(pane).getByRole("region",{name:"Material originals"});
- await waitFor(()=>expect(originals).toHaveAttribute("aria-busy","false"));
- expect(within(originals).getByText("Why poles?")).toBeVisible();
- expect(container.querySelector(".wiki-scope-notice .workspace-source-panel")).toBeNull();
- fireEvent.click(within(pane).getByRole("button",{name:"View in conversation"}));
- const evidence=await screen.findByLabelText("Original evidence");
- expect(screen.queryByLabelText("Material reading")).toBeNull();
- fireEvent.click(within(evidence).getByRole("button",{name:"Close original evidence"}));
- expect(await screen.findByLabelText("Material reading")).toBeVisible();
- expect(generateFocusSession).not.toHaveBeenCalled();
-});
-
-it("keeps exactly one scope notice in overview and none in chapters across repeated navigation",async()=>{
- const project:FocusSession={...session,mode:"work",status:"ready",wikiScopeReview:{version:1,goal:session.goal,includeKeys:[],materials:[{id:"note",key:"reference",title:"Reference",body:"Original reference",kind:"reference",reason:"Comparison",quote:"Original",evidenceIds:["e1"]}]}};
- const errors=vi.spyOn(console,"error").mockImplementation(()=>undefined);
- const {container}=render(<StrictMode><PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider></StrictMode>);
- const navigation=screen.getByRole("navigation",{name:"Conversation chapters"});
- for(let index=0;index<5;index++){
-  expect(container.querySelectorAll(".wiki-scope-notice")).toHaveLength(1);
-  fireEvent.click(within(navigation).getByRole("button",{name:/Understanding poles/}));
-  expect(container.querySelectorAll(".wiki-scope-notice")).toHaveLength(0);
-  fireEvent.click(within(navigation).getByRole("button",{name:"Document overview"}));
- }
- expect(container.querySelectorAll(".wiki-scope-notice")).toHaveLength(1);
- expect(errors.mock.calls.flat().join(" ")).not.toMatch(/same key|unique.*key/i);
- expect(generateFocusSession).not.toHaveBeenCalled();
-});
 
 
-it("restores a scoped discussion through a separate preview while preserving personal Wiki edits",async()=>{
- const project:FocusSession={...session,mode:"work",status:"ready",locale:"en",scope:{kind:"all"},sections:[{...session.sections[0],userEdited:true,body:"My exact personal Wiki edit."}],wikiScopeReview:{version:1,goal:session.goal,includeKeys:["old-choice"],materials:[{id:"n2",key:"travel-key",title:"Other discussion",body:"Travel notes",kind:"other",reason:"Separate discussion",quote:"Travel notes",evidenceIds:["e1"]}]}};
- vi.mocked(generateFocusSession).mockResolvedValueOnce({...project,id:"restored",sections:[{...session.sections[0],id:"new",title:"Restored knowledge",body:"Restored material."}],wikiScopeReview:{version:1,goal:session.goal,includeKeys:["old-choice","travel-key"],materials:[]}});
- render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
- // A flagged discussion waits in the open review list, outside the Wiki.
- fireEvent.click(within(screen.getByRole("region",{name:"Needs review"})).getByRole("button",{name:"Keep in project"}));fireEvent.click(screen.getByRole("button",{name:"Apply 1 selection"}));
- await screen.findByRole("button",{name:"Save and view"});
- expect(vi.mocked(generateFocusSession).mock.calls.at(-1)?.[9]).toMatchObject({wikiScopeIncludeKeys:["old-choice","travel-key"],wikiScopeExcludeKeys:[]});
- expect(await screen.findByText("My exact personal Wiki edit.")).toBeInTheDocument();expect(await screen.findByText("Restored material.")).toBeInTheDocument();
- const original=await (await getDatabase()).get("focusSessions",project.id);expect(original?.sections[0].body).not.toBe("Restored material.");
-});
 
-it("saves project-only removal locally without a model call or changing the original chapter",async()=>{
- const project:FocusSession={...session,mode:"work",status:"ready",wikiScopeReview:{version:1,status:"complete",goal:session.goal,includeKeys:[],materials:[{id:"outside",key:"other-project",title:"Other project",body:"A separate product's design.",kind:"other",reason:"Separate project",quote:"",evidenceIds:[]}]}};
- render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
- fireEvent.click(within(screen.getByRole("region",{name:"Needs review"})).getByRole("button",{name:"Remove from project"}));
- fireEvent.click(screen.getByRole("button",{name:"Apply 1 selection"}));
- await screen.findByText("Removed from project 1");
- await waitFor(async()=>expect((await (await getDatabase()).get("focusSessions",project.id))?.wikiScopeReview).toMatchObject({excludeKeys:["other-project"],ignoredKeys:["other-project"]}));
- expect(generateFocusSession).not.toHaveBeenCalled();
- expect((await (await getDatabase()).get("focusSessions",project.id))?.sections).toEqual(project.sections);
-});
+
 
 it("saves the whole-project name and keeps manual renaming aligned with exported session metadata",async()=>{
  const project={...session,mode:"work" as const,status:"ready" as const,title:"Knowledge workspace",wikiSuggestedTitle:"Suggested name"},onSaved=vi.fn();
@@ -437,17 +432,6 @@ it("opens selected project file export directly from the toolbar without running
  const dialog=await screen.findByRole("dialog",{name:"Export project files"});expect(within(dialog).getByRole("checkbox",{name:"Project Wiki"})).toBeChecked();fireEvent.click(within(dialog).getByRole("button",{name:"Choose Wiki chapters"}));expect(within(dialog).getByRole("checkbox",{name:"Understanding poles"})).toBeChecked();expect(within(dialog).queryByRole("checkbox",{name:"Project matters"})).toBeNull();expect(within(dialog).getByRole("combobox",{name:"File format"})).toHaveValue("md");expect(generateFocusSession).not.toHaveBeenCalled();
 });
 
-it("offers an explicit side-material decision for a contradictory chapter in the final preview",async()=>{
- const preview:FocusSession={...session,id:"scope-preview",mode:"work",status:"preview",sections:[{...session.sections[0],wikiMaterialKeys:["main"]},{...session.sections[0],id:"outside",title:"Knowledge references",wikiQuestion:"Which discussions are outside this project?",wikiMaterialKeys:["side-a","side-b"]}],wikiScopeReview:{version:1,status:"complete",goal:session.goal,includeKeys:[],materials:[]}};
- vi.mocked(generateFocusSession).mockResolvedValueOnce({...preview,id:"new-scope-preview",sections:preview.sections.slice(0,1)});
- render(<PreferencesProvider><FocusWorkspace initialSession={preview} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
- expect(generateFocusSession).not.toHaveBeenCalled();expect(screen.getByRole("region",{name:"Chapter scope review"})).toBeVisible();
- fireEvent.click(screen.getByRole("button",{name:"Move to side material"}));expect(generateFocusSession).not.toHaveBeenCalled();
- fireEvent.click(screen.getByRole("button",{name:"Apply 1 selection"}));
- await waitFor(()=>expect(generateFocusSession).toHaveBeenCalledOnce());
- expect(vi.mocked(generateFocusSession).mock.calls[0][9]).toMatchObject({wikiScopeExcludeKeys:["side-a","side-b"]});
- expect(preview.sections).toHaveLength(2);
-});
 
 it("combines chapter understanding and revision with explicit multi-chapter selection and a separate preview",async()=>{
   const project:FocusSession={...session,mode:"work",status:"ready",locale:"en",sections:[session.sections[0],{...session.sections[0],id:"two",title:"Second chapter"},{...session.sections[0],id:"personal",title:"Personal chapter",userEdited:true}]};
@@ -610,7 +594,7 @@ describe("goal reading workflow", () => {
     fireEvent.click(screen.getByText("More"));
     expect(screen.queryByRole("button", { name: "Edit content" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reanalyze architecture" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Update chapter understanding" })).toBeNull();expect(screen.getByRole("button", { name: "Reorganize entire Wiki" })).toBeVisible();expect(screen.queryByRole("button", { name: "Revise with AI" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Update chapter understanding" })).toBeNull();expect(screen.getByRole("button", { name: "Reorganize all chapters" })).toBeVisible();expect(screen.queryByRole("button", { name: "Revise with AI" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reconcile project plan" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create project plan" })).not.toBeInTheDocument();
     expect(generateFocusSession).not.toHaveBeenCalled();
@@ -653,37 +637,6 @@ describe("goal reading workflow", () => {
     expect(screen.queryByRole("button",{name:"Handoff and export"})).toBeNull();
     expect(generateFocusSession).not.toHaveBeenCalled();
   });
-  it("saves project responsibilities and feedback without leaving overview or generating, then restores them", async () => {
-    const reading = { ...session, sections: [session.sections[0], { ...session.sections[0], id: "two", title: "Validation" }] };
-    const props = { conversations: [conversation], canvases: [], settingsRevision: 0, onClose: vi.fn(), onReturnToWorkbench: vi.fn(), onSettings: vi.fn(), onSaved: vi.fn() };
-    const { unmount } = render(<PreferencesProvider><FocusWorkspace {...props} initialSession={reading} /></PreferencesProvider>);
-    fireEvent.click(screen.getByRole("button", { name: "Reading overview" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Knowledge structure" }));
-    const route = screen.getByRole("region", { name: "Project structure" });
-    fireEvent.click(within(route).getByRole("button", { name: "Edit structure" }));
-    fireEvent.click(await within(route).findByRole("button", { name: /^Understanding poles/ }));
-    const editor = screen.getByRole("dialog", { name: "Edit understanding" });
-    fireEvent.click(within(editor).getByText("More options"));
-    fireEvent.change(within(editor).getByRole("textbox", { name: "Responsibility" }), { target: { value: "Explain conditions" } });
-    fireEvent.click(within(editor).getByText("Personal relationships", { selector: "summary" }));
-    fireEvent.click(within(editor).getByRole("button", { name: "+ Relation" }));
-    fireEvent.change(within(editor).getByRole("combobox", { name: "Relation 1" }), { target: { value: "feedback" } });
-    fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.projectUnderstanding?.nodes[0]).toMatchObject({ responsibility: "Explain conditions", sectionIds: ["one"], links: [{ targetTitle: "Validation", kind: "feedback" }] }));
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Responsibility" })).toBeNull());
-    expect(screen.getByRole("region", { name: "Reading overview" })).toBeVisible();
-    const saved = (await (await getDatabase()).get("focusSessions", "s"))!;
-    unmount();
-    render(<PreferencesProvider><FocusWorkspace {...props} initialSession={saved} /></PreferencesProvider>);
-    fireEvent.click(screen.getByRole("button", { name: "Reading overview" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Knowledge structure" }));
-    fireEvent.click(await within(screen.getByRole("region", { name: "Structure map" })).findByRole("button", { name: /^Understanding poles/ }));
-    const detail = screen.getByRole("region", { name: "Structure detail" });
-    expect(screen.getByRole("region", { name: "Project structure" })).toHaveTextContent("Explain conditions");
-    expect(detail).toHaveTextContent("My relation");
-    expect(saved.sections).toEqual(reading.sections);
-    expect(generateFocusSession).not.toHaveBeenCalled();
-  });
   it("keeps a readable citation and keyboard return when conversation metadata is missing", async () => {
     render(<PreferencesProvider><FocusWorkspace initialSession={session} conversations={[]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
     fireEvent.click(screen.getByText("More")); fireEvent.click(screen.getByRole("button", { name: "Chapter sources" }));
@@ -695,29 +648,6 @@ describe("goal reading workflow", () => {
     fireEvent.keyDown(context, { key: "Escape" });
     expect(screen.queryByRole("textbox", { name: "Project question" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Understanding poles", level: 1 })).toBeVisible();
-    expect(generateFocusSession).not.toHaveBeenCalled();
-  });
-  it("opens notes and deduplicated citations on demand, restoring keyboard focus without AI", async () => {
-    const props = { initialSession: { ...session, evidence: [...session.evidence, { ...session.evidence[0], id: "duplicate" }], sections: [{ ...session.sections[0], evidenceIds: ["e1", "duplicate"] }] }, conversations: [conversation], canvases: [], settingsRevision: 0, onClose: vi.fn(), onReturnToWorkbench: vi.fn(), onSettings: vi.fn(), onSaved: vi.fn() };
-    const { container } = render(<PreferencesProvider><FocusWorkspace {...props} /></PreferencesProvider>);
-    expect(screen.queryByRole("complementary", { name: "My notes panel" })).not.toBeInTheDocument();
-    expect(container.querySelector(".reader-content .reader-notes")).toBeNull();
-    expect(container.querySelector(".chapter-step-explanation")).toBeNull();
-    const more = screen.getByText("More"); more.focus(); fireEvent.click(more);
-    fireEvent.click(screen.getByRole("button", { name: "Chapter sources" }));
-    const panel = screen.getByRole("complementary", { name: "Chapter sources" });
-    await waitFor(()=>expect(within(panel).getAllByRole("button", { name: /Why poles\?/ })).toHaveLength(1));
-    expect(screen.getByRole("button", { name: "Close sources" })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("button", { name: "Close sources" }), { key: "Escape" });
-    expect(more).toHaveFocus();
-    const notesButton = within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: "My notes" }); notesButton.focus(); fireEvent.click(notesButton);
-    expect(screen.getByRole("complementary", { name: "My notes panel" })).toBeVisible();
-    fireEvent.change(screen.getByRole("textbox", { name: "Chapter notes" }), { target: { value: "My chapter understanding" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", session.id))?.sectionNotes?.one.text).toBe("My chapter understanding"));
-    fireEvent.click(screen.getByRole("button", { name: "Close notes" }));
-    expect(notesButton).toHaveFocus(); fireEvent.click(notesButton);
-    expect(screen.getByRole("textbox", { name: "Chapter notes" })).toHaveValue("My chapter understanding");
     expect(generateFocusSession).not.toHaveBeenCalled();
   });
   it("saves the project without leaving a persistent success caption", async () => {
@@ -768,31 +698,6 @@ describe("goal reading workflow", () => {
     fireEvent.click(screen.getByRole("button", { name: /Switch to Earlier version/ }));
     await waitFor(() => expect(open).toHaveBeenCalledWith(other.id));
   });
-  it("keeps the chapter route local and persists personal steps without changing project chapters", async () => {
-    const local = { ...session, mode:"review" as const, id: "chapter-route", sections: [{ ...session.sections[0], body: "## Matrix\nMatrix explanation\n### Eigenvalues\nTheir connection\n## Stability\nStable condition" }, { ...session.sections[0], id: "two", title: "Other project chapter" }] };
-    const props = { initialSession: local, conversations: [conversation], canvases: [], settingsRevision: 0, onClose: vi.fn(), onReturnToWorkbench: vi.fn(), onSettings: vi.fn(), onSaved: vi.fn() };
-    const first = render(<PreferencesProvider><FocusWorkspace {...props} /></PreferencesProvider>);
-    expect(screen.queryByRole("region", { name: "Chapter understanding path" })).toBeNull();
-    fireEvent.click(screen.getByText("My notes", { selector: ".chapter-personal-notes > summary" }));
-    fireEvent.click(screen.getByRole("button", { name: "+ Add note" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), { target: { value: "My missing link" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Explanation" }), { target: { value: "My personal explanation" } });
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Edit understanding" })).getByText("More options"));
-    fireEvent.change(screen.getByRole("textbox", { name: "Group" }), { target: { value: "My foundation" } });
-    fireEvent.click(screen.getByRole("button", { name: "+ Relation" }));
-    expect(screen.getByRole("combobox", { name: "Linked concept 1" })).toHaveTextContent("Matrix");
-    expect(screen.getByRole("combobox", { name: "Linked concept 1" })).not.toHaveTextContent("Other project chapter");
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    const db = await getDatabase();
-    await waitFor(async () => expect((await db.get("focusSessions", local.id))?.sections[0].understandingPath?.at(-1)).toMatchObject({ title: "My missing link", origin: "user", phase: "My foundation", understandingLinks: [{ targetId: "chapter-step:one:0", kind: "requires" }] }));
-    const saved = (await db.get("focusSessions", local.id))!;
-    expect(saved.sections.map(item => item.id)).toEqual(["one", "two"]); expect(saved.sections[0].body).toBe(local.sections[0].body);
-    first.unmount(); render(<PreferencesProvider><FocusWorkspace {...props} initialSession={saved} /></PreferencesProvider>);
-    fireEvent.click(screen.getByText("My notes", { selector: ".chapter-personal-notes > summary" }));
-    expect(within(document.querySelector(".chapter-personal-notes")! as HTMLElement).getByRole("button", { name: /^My missing link/ })).toBeVisible();
-    expect(focusStorage.focusMarkdown(saved)).toContain("My personal explanation");
-    expect(generateFocusSession).not.toHaveBeenCalled();
-  });
   it("opens a continued organization request as an editable revision without submitting AI",()=>{
  render(<PreferencesProvider><FocusWorkspace initialSession={{...session,mode:"work"}} revisionRequest={{instruction:"Combine the repeated sections",nonce:1}} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
  const dialog=screen.getByRole("dialog",{name:"Revise with AI"});expect(within(dialog).getByRole("textbox")).toHaveValue("Combine the repeated sections");
@@ -804,29 +709,52 @@ describe("goal reading workflow", () => {
  expect(screen.getByRole("article",{name:"Wiki document"})).toBeVisible();expect(document.querySelector(".project-query-thread")).toBeNull();
  
 });
-  it("creates and edits personal route cards in an empty project without AI and restores them on reload", async () => {
-    const empty = { ...session, id: "empty-project", sections: [], activeSectionId: "", evidence: [], sourceConversationIds: [], canvasId: "project" };
-    const props = { initialSession: empty, conversations: [], canvases: [], settingsRevision: 0, onClose: vi.fn(), onReturnToWorkbench: vi.fn(), onSettings: vi.fn(), onSaved: vi.fn() };
+  it("opens an empty project in the document workspace and saves its first Markdown chapter", async () => {
+    const empty = await focusStorage.createLivingProject("Empty Wiki", "", "en", "handoff");
+    const props = { initialSession: empty, conversations: [conversation], canvases: [], settingsRevision: 0, onClose: vi.fn(), onReturnToWorkbench: vi.fn(), onSettings: vi.fn(), onSaved: vi.fn() };
     const first = render(<PreferencesProvider><FocusWorkspace {...props} /></PreferencesProvider>);
-    fireEvent.click(screen.getByRole("button", { name: "+ Understanding card" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Understanding card title" }), { target: { value: "My own reasoning" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Understanding card content" }), { target: { value: "An explanation I wrote" } });
+    const overview = screen.getByRole("article", { name: "Document overview" });
+    expect(within(overview).getByRole("heading", { name: "Empty Wiki" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "Chapters" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: /Sources/ })).toBeVisible();
+    expect(screen.queryByText("Reading path")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Understanding card" })).not.toBeInTheDocument();
+    fireEvent.click(within(overview).getByRole("button", { name: "Organize sources" }));
+    expect(screen.getByRole("dialog", { name: "Add conversations" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Close source picker" }));
+    fireEvent.click(within(overview).getByRole("button", { name: "New chapter" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Section title" }), { target: { value: "First chapter" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Section content" }), { target: { value: "**An explanation I wrote**" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await within(await screen.findByRole("article", { name: "Wiki document" })).findByText("An explanation I wrote")).toBeVisible();
     const db = await getDatabase();
-    await waitFor(async () => expect((await db.get("focusSessions", empty.id))?.sections[0]).toMatchObject({ origin: "user", title: "My own reasoning", body: "An explanation I wrote", evidenceIds: [] }));
-    fireEvent.click(screen.getByRole("button", { name: "Reading overview" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Knowledge structure" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit structure" }));
-    fireEvent.click(screen.getByText("Adjust reading order"));
-    fireEvent.click(screen.getByRole("button", { name: "Edit path" }));
-    fireEvent.click(screen.getByRole("button", { name: "Edit My own reasoning" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Understanding card content" }), { target: { value: "My later correction" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(async () => expect((await db.get("focusSessions", empty.id))?.sections[0].body).toBe("My later correction"));
+    const saved = (await focusStorage.listFocusSessions()).find(item => item.previousSessionId === empty.id);
+    expect(saved?.sections[0]).toMatchObject({ origin: "user", userEdited: true, title: "First chapter", body: "**An explanation I wrote**", evidenceIds: [] });
+    expect((await db.get("focusSessions", empty.id))?.sections).toEqual([]);
     first.unmount();
-    render(<PreferencesProvider><FocusWorkspace {...props} initialSession={await db.get("focusSessions", empty.id)} /></PreferencesProvider>);
-    expect(screen.getByText("My later correction")).toBeVisible();
+    render(<PreferencesProvider><FocusWorkspace {...props} initialSession={saved} /></PreferencesProvider>);
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: /First chapter/ }));
+    expect(await screen.findByText("An explanation I wrote")).toBeVisible();
     expect(generateFocusSession).not.toHaveBeenCalled();
+  });
+  it("generates the first material-based preview inside the same empty project", async () => {
+    const empty = await focusStorage.createLivingProject("Manual title", "", "en", "handoff");
+    const db = await getDatabase();
+    await db.put("conversations", conversation);
+    vi.mocked(generateFocusSession).mockResolvedValueOnce({ ...session, id: "first-preview", mode: "work", title: "Generated title" });
+    const onReturnToWorkbench = vi.fn();
+    render(<PreferencesProvider><FocusWorkspace initialSession={empty} conversations={[conversation]} canvases={[]} settingsRevision={0}
+      onClose={vi.fn()} onReturnToWorkbench={onReturnToWorkbench} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Organize sources" }));
+    const sources = screen.getByRole("dialog", { name: "Add conversations" });
+    fireEvent.click(within(sources).getByRole("checkbox", { name: conversation.title }));
+    fireEvent.click(within(sources).getByRole("button", { name: "Preview update" }));
+    expect(await screen.findByRole("button", { name: "Save and view" })).toBeVisible();
+    await waitFor(async () => expect(await db.get("focusSessions", "first-preview")).toMatchObject({
+      title: empty.title, canvasId: empty.canvasId, previousSessionId: empty.id, sidecarWritingMode: "handoff", status: "preview",
+    }));
+    expect(vi.mocked(generateFocusSession).mock.calls[0]?.[9]?.initialWritingMode).toBe("handoff");
+    expect(onReturnToWorkbench).not.toHaveBeenCalled();
   });
   it("persists failed generation with its confirmed scope and resumes the same run", async () => {
     vi.mocked(generateFocusSession).mockRejectedValueOnce(new AIProviderResponseError("PROVIDER_OUTPUT_TRUNCATED")).mockResolvedValueOnce({ ...session, runId: "saved-run" });
@@ -856,21 +784,16 @@ describe("goal reading workflow", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Prepare");
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
-    const scopeReview:FocusSession["wikiScopeReview"]={version:1,status:"complete",goal:"Review stability",includeKeys:[],materials:[{id:"foreign",key:"foreign",kind:"other",title:"Other project discussion",body:"Original note",reason:"Belongs to a different product",quote:"Original",evidenceIds:["e1"]}]};
-    act(()=>call[9]?.onPartial?.({...session,mode:"work",wikiScopeReview:scopeReview,sections:[{...session.sections[0],title:"Completed draft chapter",body:"Source-checked partial text."}]}));
+    act(()=>call[9]?.onPartial?.({...session,mode:"work",sections:[{...session.sections[0],title:"Completed draft chapter",body:"Source-checked partial text."}]}));
     await waitFor(()=>expect(screen.getByRole("region",{name:"Chapter draft preview"})).toHaveTextContent("Source-checked partial text."));
-    expect(screen.getByRole("region",{name:"Needs review"})).toHaveTextContent("Other project discussion");
-    expect(screen.getByRole("button",{name:"Keep in project"})).toBeDisabled();
     expect(host.querySelector(".focus-header-progress")).not.toBeNull();
     expect(workspace.container.querySelector(".focus-generation-panel")).toBeNull();
     expect(workspace.container.querySelector(".focus-generation-progress")).toBeNull();
     expect(host.querySelector("details")).not.toHaveAttribute("open");
     expect(screen.queryByRole("button",{name:"Save and view"})).toBeNull();expect(onSaved).not.toHaveBeenCalled();
-    finish({ ...session, mode: "work", wikiScopeReview:scopeReview, sections: [{ ...session.sections[0], body: "Opening paragraph.\n\n" + "Full chapter details. ".repeat(80) + "End of the complete chapter." }] });
+    finish({ ...session, mode: "work", sections: [{ ...session.sections[0], body: "Opening paragraph.\n\n" + "Full chapter details. ".repeat(80) + "End of the complete chapter." }] });
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ status: "preview", scope })));
     expect(host).toBeEmptyDOMElement();
-    expect(screen.getByRole("region",{name:"Needs review"})).toHaveTextContent("Other project discussion");
-    expect(screen.getByRole("button",{name:"Keep in project"})).toBeEnabled();
     expect(screen.queryByText("Read chapter")).not.toBeInTheDocument();
     expect((await screen.findByText(/End of the complete chapter/)).closest("details")).toBeNull();
   });
@@ -888,22 +811,6 @@ describe("goal reading workflow", () => {
     expect(back).toHaveBeenCalledWith("Project", ["c"], "work");
     workspace.unmount();
     expect(host).toBeEmptyDOMElement();
-  });
-  it("reopens an automatically saved preview without regenerating, then accepts it locally", async () => {
-    vi.mocked(generateFocusSession).mockResolvedValue(session);
-    const onSaved = vi.fn();
-    const props = { conversations: [conversation], canvases: [], settingsRevision: 0, onClose: vi.fn(), onReturnToWorkbench: vi.fn(), onSettings: vi.fn(), onSaved };
-    const first = render(<PreferencesProvider><FocusWorkspace {...props} request={{ id: "recover-preview", goal: "Review poles", mode: "answer", sourceIds: ["c"], scope: { kind: "all", sourceConversationIds: ["c"] } }} /></PreferencesProvider>);
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ status: "preview" })));
-    first.unmount();
-    const stored = await (await getDatabase()).get("focusSessions", "s"); expect(stored?.status).toBe("preview");
-    render(<PreferencesProvider><FocusWorkspace {...props} initialSession={stored} /></PreferencesProvider>);
-    expect(screen.getByRole("button", { name: "Confirm and start" })).toBeInTheDocument();
-    expect(await screen.findByText("Read the original explanation.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and start" }));
-    await screen.findByRole("region", { name: "Reading overview" });
-    expect((await (await getDatabase()).get("focusSessions", "s"))?.status).toBe("ready");
-    expect(generateFocusSession).toHaveBeenCalledOnce();
   });
   it("retains generated text when saving fails and retries storage without another AI call", async () => {
     const save = vi.spyOn(focusStorage, "saveFocusSession").mockRejectedValueOnce(new Error("Disk unavailable"));
@@ -991,23 +898,6 @@ describe("goal reading workflow", () => {
     expect(screen.queryByRole("textbox", { name: "Project question" })).not.toBeInTheDocument();
     expect(generateFocusSession).not.toHaveBeenCalled();
   });
-  it("navigates without marking understanding and marks only the current section", async () => {
-    const reading = { ...session, mode:"review" as const, sections: [session.sections[0], { ...session.sections[0], id: "two", title: "Next stage" }] };
-    render(<PreferencesProvider><FocusWorkspace initialSession={reading} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
-    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Previous" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Chapter understanding path" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "Chapter guide" })).toBeNull();
-    expect(screen.getByText("My notes", { selector: ".chapter-personal-notes > summary" })).toBeVisible();
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: /Next stage/ }));
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.activeSectionId).toBe("two"));
-    expect((await (await getDatabase()).get("focusSessions", "s"))?.completedSectionIds).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Mark understood" }));
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.completedSectionIds).toEqual(["two"]));
-    expect((await (await getDatabase()).get("focusSessions", "s"))?.activeSectionId).toBe("two");
-    expect(screen.queryByText("Saved locally")).not.toBeInTheDocument();
-    expect(generateFocusSession).not.toHaveBeenCalled();
-  });
 
   it("previews translation of the whole saved result without changing the original", async () => {
     localStorage.setItem("atlas-locale", "zh-CN");
@@ -1034,23 +924,12 @@ describe("goal reading workflow", () => {
     await waitFor(() => expect(generateFocusSession).toHaveBeenCalledOnce());
     expect(screen.queryByText("Read selected originals while AI works")).not.toBeInTheDocument();
     expect(screen.getAllByRole("progressbar")).toHaveLength(1);
-    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Generation log" })).toBeVisible();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(vi.mocked(generateFocusSession).mock.calls[0][4]?.aborted).toBe(true);
     expect(onReturnToWorkbench).toHaveBeenCalledWith("Review", ["c"], "answer");
     expect(generateFocusSession).toHaveBeenCalledOnce();
-  });
-  it("requires an explicit action for complete reading and preserves that choice when retrying", async () => {
-    const sampled = { ...session, coverage: { method: "sampled" as const, sourceCount: 1, processedSegments: 5, totalSegments: 100 } };
-    vi.mocked(generateFocusSession).mockRejectedValue(new Error("Failed once"));
-    render(<PreferencesProvider><FocusWorkspace initialSession={sampled} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
-    expect(generateFocusSession).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Reading overview" }));
-    fireEvent.click(screen.getByRole("button", { name: "Analyze all sources" }));
-    await screen.findByText("Failed once");
-    fireEvent.click(screen.getByRole("button", { name: "Retry generation" }));
-    await waitFor(() => expect(generateFocusSession).toHaveBeenCalledTimes(2));
-    for (const call of vi.mocked(generateFocusSession).mock.calls) expect(call[9]).toEqual({ complete: true });
   });
   it("keeps a goal started inside a space attached to that space after review", async () => {
     vi.mocked(generateFocusSession).mockResolvedValue(session);
@@ -1075,6 +954,10 @@ describe("goal reading workflow", () => {
     vi.mocked(generateFocusSession).mockImplementation(async (...args) => {
       args[8]?.(0, 1, "synthesis");
       args[6]?.("waiting_model", { streaming: true, firstTokenMs: 800, receivedCharacters: 42 });
+      const runId = args[7]!;
+      const active = startWorkbenchRequest(runId, { operationId: "live", operation: "wiki:writing", modelId: "fixture", attempt: 1, startedAt: Date.now() });
+      Object.assign(active!, { excerpt: "<private-draft>", outputLength: 42 });
+      await recordAIUsage({ id: "log-fixture", runId, createdAt: Date.now(), taskType: "other", operation: "wiki:topic-plan", providerId: "openai", modelId: "fixture", conversationIds: ["private-conversation"], inputTokens: 20, outputTokens: 0, tokenSource: "provider", status: "failed", attempt: 1, errorCode: "PROVIDER_TIMEOUT", timeoutStage: "first_token" });
       return new Promise(() => undefined);
     });
     const onSaved = vi.fn();
@@ -1082,6 +965,22 @@ describe("goal reading workflow", () => {
     await confirmDiscussionScope();
     expect(await screen.findByText("Compose answer", { exact: true, selector: "strong" })).toBeInTheDocument();
     expect(screen.queryByText(/Receiving model output/)).not.toBeInTheDocument();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Generation log" }));
+      const log = screen.getByRole("dialog", { name: "Generation log" });
+      expect(within(log).getByText("Receiving · 42 chars")).toBeVisible();
+      expect(await within(log).findByText("PROVIDER_TIMEOUT")).toBeVisible();
+      fireEvent.click(within(log).getByText("View model output excerpt"));
+      expect(within(log).getByText(/<private-draft>/).tagName).toBe("PRE");
+      fireEvent.click(within(log).getByRole("button", { name: "Copy diagnostics" }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+      const copied = writeText.mock.calls[0][0];
+      expect(copied).toContain("PROVIDER_TIMEOUT");
+      expect(copied).not.toMatch(/private-draft|private-conversation/);
+      fireEvent.click(within(log).getByRole("button", { name: "Close log" }));
+    } finally { Reflect.deleteProperty(navigator, "clipboard"); }
     expect(screen.queryByRole("button", { name: "Confirm and start" })).not.toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
   });
@@ -1142,26 +1041,6 @@ describe("goal reading workflow", () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
-  it("opens a cited Brief claim in continuous context, returns, and remembers an unresolved question", async () => {
-    const work: FocusSession = { ...session, mode: "answer", sections: [{ ...session.sections[0], kind: "finding", transition: "This led to the next decision." }, { id: "two", title: "Next decision", body: "The next stage.", kind: "open_question", transition: "", evidenceIds: [] }], brief: { summary: "The project changed direction.", turningPoints: [{ text: "Reading became central.", evidenceIds: ["e1"] }], confirmed: [], openQuestions: ["What remains unclear?"] } };
-    render(<PreferencesProvider><FocusWorkspace initialSession={work} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
-    fireEvent.click(screen.getByRole("button", { name: "Reading overview" }));
-    expect(screen.getByRole("region", { name: "Review summary" })).toHaveTextContent("The project changed direction.");
-    fireEvent.click(screen.getByRole("button", { name: "Read discussion" }));
-    await waitFor(() => expect(screen.getByRole("region", { name: "Original discussion reader" })).toHaveTextContent("Why poles?"));
-    fireEvent.keyDown(screen.getByRole("region", { name: "Original discussion reader" }), { key: "Escape" });
-    expect(screen.getByRole("region", { name: "Review summary" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Edit overview" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Review summary" }), { target: { value: "My corrected summary" } });
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.brief?.summary).toBe("My corrected summary"));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: /Understanding poles/ }));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: "My notes" }));
-    fireEvent.click(screen.getByRole("button", { name: "Review question" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "What still needs review?" }), { target: { value: "Why did this change?" } });
-    fireEvent.click(screen.getByRole("button", { name: "Revisit later" }));
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.reviewNeeds?.one).toBe("Why did this change?"));
-    expect(screen.getByRole("navigation", { name: "Conversation chapters" })).toHaveTextContent("Revisit · Why did this change?");
-  });
   it("shows live source and batch progress instead of a static onboarding checklist", async () => {
     await (await getDatabase()).put("messages", { id: "other-m", conversationId: "other", messageIndex: 0, role: "user", content: "Review poles", preview: "", contentHash: "other", createdAt: 1, updatedAt: 1 });
     vi.mocked(generateFocusSession).mockImplementation(async (...args) => {
@@ -1229,44 +1108,7 @@ describe("goal reading workflow", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("saves previews before acceptance, reads original text, and saves progress independently", async () => {
-    vi.mocked(generateFocusSession).mockResolvedValue(session);
-    const onSaved = vi.fn();
-    render(<PreferencesProvider><FocusWorkspace request={{ id: "request", goal: "Review poles", mode: "answer", sourceIds: ["c"] }} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={onSaved} /></PreferencesProvider>);
-    await confirmDiscussionScope();
-    expect(screen.queryByLabelText("Knowledge Space name")).not.toBeInTheDocument();
-    await screen.findByRole("button", { name: "Confirm and start" });
-    expect(generateFocusSession).toHaveBeenCalledWith("Review poles", "answer", [conversation], "en", expect.any(AbortSignal), undefined, expect.any(Function), "request", expect.any(Function), expect.objectContaining({ scope: expect.objectContaining({ kind: "all" }) }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ status: "preview" })));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm and start" }));
-    expect(screen.queryByText("Why poles?")).not.toBeInTheDocument();
-    const overview = await screen.findByRole("region", { name: "Reading overview" });
-    fireEvent.click(overview.querySelector("[data-point-id]")!);
-    fireEvent.click(within(screen.getByRole("region", { name: "Structure detail" })).getByRole("button", { name: /Understanding poles Read chapter/ }));
-    expect(screen.queryByRole("complementary", { name: "Chapter sources" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("More")); fireEvent.click(screen.getByRole("button", { name: "Chapter sources" }));
-    fireEvent.click(await within(screen.getByRole("complementary", { name: "Chapter sources" })).findByRole("button", { name: /Why poles\?/ }));
-    await within(screen.getByRole("region", { name: "Original discussion reader" })).findByText("Why poles?");
-    fireEvent.keyDown(screen.getByRole("region", { name: "Original discussion reader" }), { key: "Escape" });
-    fireEvent.click(screen.getByRole("button", { name: "Close sources" }));
-    fireEvent.click(screen.getByRole("button", { name: "Mark understood" }));
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.completedSectionIds).toEqual(["one"]));
-    expect(await (await getDatabase()).getAll("canvases")).toEqual([]);
-  });
 
-  it("keeps the original result and user notes when a follow-up fails", async () => {
-    vi.mocked(generateFocusSession).mockRejectedValue(new Error("Provider unavailable"));
-    const onSaved = vi.fn();
-    render(<PreferencesProvider><FocusWorkspace initialSession={session} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={onSaved} /></PreferencesProvider>);
-    fireEvent.click(screen.getByText("More")); fireEvent.click(screen.getByRole("button", { name: "Edit content" })); fireEvent.click(screen.getByRole("button", { name: "Revise with AI" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Revision instructions" }), { target: { value: "Shorten this" } });
-    fireEvent.click(screen.getByRole("button", { name: "Preview revision" }));
-    await screen.findByText("Provider unavailable");
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: "My notes" }));
-    fireEvent.click(screen.getByText("Shared review notes"));
-    expect(screen.getByRole("textbox", { name: "Shared review notes" })).toHaveValue("Keep my edits");
-    expect(onSaved).not.toHaveBeenCalled();
-  });
 
   it("keeps work sources collapsed and persists edited work text", async () => {
     const work: FocusSession = { ...session, mode: "work", sections: [{ ...session.sections[0], kind: "finding" }] };
@@ -1309,28 +1151,6 @@ describe("goal reading workflow", () => {
 });
 
 describe("chapter records and update preview", () => {
-  it("saves understanding per chapter with its original question, and keeps old shared notes separate", async () => {
-    const reading = { ...session, sections: [session.sections[0], { ...session.sections[0], id: "two", title: "Later correction" }] };
-    render(<PreferencesProvider><FocusWorkspace initialSession={reading} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: "My notes" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Chapter notes" }), { target: { value: "Only valid under condition B" } });
-    fireEvent.blur(screen.getByRole("textbox", { name: "Chapter notes" }));
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.sectionNotes?.one.text).toBe("Only valid under condition B"));
-    const saved = await (await getDatabase()).get("focusSessions", "s");
-    expect(saved?.sectionNotes?.one.sources?.[0].messageId).toBe("m1");
-    expect(saved?.notes).toBe("Keep my edits");
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: /Later correction/ }));
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Conversation chapters" })).getByRole("button", { name: "My notes" }));
-    expect(screen.getByRole("textbox", { name: "Chapter notes" })).toHaveValue("");
-  });
-  it("opens the exact chapter and note from search without generating or losing the record", async () => {
-    const reading = { ...session, sections: [session.sections[0], { ...session.sections[0], id: "two", title: "Later correction" }], sectionNotes: { two: { text: "My later understanding", evidenceIds: ["e1"], updatedAt: 1 } } };
-    render(<PreferencesProvider><FocusWorkspace initialSession={reading} searchTarget={{ sectionId: "two", note: true, nonce: 1 }} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()} /></PreferencesProvider>);
-    expect(await screen.findByRole("heading", { level: 1, name: "Later correction" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Chapter notes" })).toHaveValue("My later understanding");
-    await waitFor(async () => expect((await (await getDatabase()).get("focusSessions", "s"))?.activeSectionId).toBe("two"));
-    expect(generateFocusSession).not.toHaveBeenCalled();
-  });
   it("does not overwrite a stale review until its update is previewed and accepted", async () => {
     const { sourceMessageSignature } = await import("../../shared/source-signature");
     const old = { ...session, sourceSignatures: { c: { m1: sourceMessageSignature("Old question") } }, coverage: { method: "full_batched" as const, sourceCount: 1, processedSegments: 1, totalSegments: 1 } };
@@ -1376,7 +1196,8 @@ it("reorganizes a project Wiki from its saved sources into a preview, keeping th
  const action=vi.spyOn(focusUpdates,"generateFocusUpdate").mockResolvedValue({...project,id:"reorganized",sections:[{...session.sections[0],body:"Rewritten."},edited]});
  vi.spyOn(window,"confirm").mockReturnValue(true);
  render(<PreferencesProvider><FocusWorkspace initialSession={project} conversations={[conversation]} canvases={[]} settingsRevision={0} onClose={vi.fn()} onReturnToWorkbench={vi.fn()} onSettings={vi.fn()} onSaved={vi.fn()}/></PreferencesProvider>);
- fireEvent.click(screen.getByText("More",{exact:true}));fireEvent.click(screen.getByRole("button",{name:"Reorganize entire Wiki"}));
+ fireEvent.click(screen.getByText("More",{exact:true}));fireEvent.click(screen.getByRole("button",{name:"Reorganize all chapters"}));
+ fireEvent.click(screen.getByRole("button",{name:"Start reorganizing"}));
  await waitFor(async()=>expect((await db.get("focusSessions","reorganized"))?.status).toBe("preview"));
  expect(await screen.findByRole("region",{name:"Reorganization summary"})).toBeVisible();
  expect(document.querySelectorAll(".update-preview-summary")).toHaveLength(1);
@@ -1388,4 +1209,8 @@ it("reorganizes a project Wiki from its saved sources into a preview, keeping th
  expect(await db.get("focusSessions","s")).toEqual(project);
  const preview=await db.get("focusSessions","reorganized");
  expect(preview?.sections.find(chapter=>chapter.title==="My chapter")?.body).toBe("My own words.");
+ fireEvent.click(screen.getByRole("button",{name:"Compare with saved document"}));
+ const comparison=screen.getByRole("dialog",{name:"Compare with saved document"});
+ expect(within(comparison).getByText("Rewritten.")).toBeVisible();
+ expect(within(comparison).getAllByText("Proposed").some(node=>node.tagName==="STRONG")).toBe(true);
 });

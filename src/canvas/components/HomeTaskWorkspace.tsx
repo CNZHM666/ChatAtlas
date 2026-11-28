@@ -10,10 +10,8 @@ import { getAISettings } from "../../storage/knowledge-graph";
 import { effectiveAISettings, hasAIConnection } from "../../ai/ai-mode";
 import { AIProviderValidationError, hasProviderPermission } from "../../ai/provider";
 import { AIQuickSelect } from "./AIQuickSelect";
-import { streamedSectionProse } from "../../ai/streamed-prose";
 import { findHistory, historyRequest, type HistoryMatch } from "../../search/home-history";
 import { answerHomeRecall } from "../../ai/home-recall";
-import { ReaderGuide } from "./ReaderGuide";
 import { getDatabase } from "../../storage/db";
 import { sourceMessageSignature } from "../../shared/source-signature";
 import type { ConversationMessage } from "../../shared/types";
@@ -60,7 +58,7 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
   const [answer, setAnswer] = useState<FocusSession | undefined>(initialRecord?.answer);
   const [record, setRecord] = useState<HomeAnswerResult | undefined>(initialRecord);
   const [saveError, setSaveError] = useState(false);
-  const [draftAnswer, setDraftAnswer] = useState("");
+  const [verifiedSources, setVerifiedSources] = useState<FocusEvidence[]>([]);
   const [run, setRun] = useState(!readOnly && !initialRecord && (localSearch || !initialPaused));
   const [topicGoal, setTopicGoal] = useState(initialRecord?.topicGoal ?? goal);
   const [aiReady, setAIReady] = useState(false), [aiBusy, setAIBusy] = useState(false);
@@ -95,7 +93,7 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
   const sourceRevision = JSON.stringify(conversations.filter(source => poolIds.includes(source.id)).map(source => [source.id, source.updatedAt, source.rawRevision, source.sourceRevision, source.importState, source.hydrationState]));
   useEffect(() => {
     if (!run || readOnly) return;
-    let live = true; sourceRequest.current++; setLocalMatches([]); setAnswer(undefined); setDraftAnswer(""); setSource(undefined); setVisibleMatches(10); setLocalCapped(false);
+    let live = true; sourceRequest.current++; setLocalMatches([]); setAnswer(undefined); setVerifiedSources([]); setSource(undefined); setVisibleMatches(10); setLocalCapped(false);
     if (requestedAction === "answer") {
       const activity: HomeActivity = localActivity.current?.question === taskGoal && JSON.stringify(localActivity.current.poolIds) === poolKey ? {...localActivity.current, status:"started"} : {id:`history-search-${crypto.randomUUID()}`,kind:"search",question:taskGoal,topicGoal:taskGoal,poolIds:JSON.parse(poolKey),createdAt:Date.now(),status:"started"};
       if(localOnly){localActivity.current=activity;activitySave.current=saveHomeResult(activity).catch(()=>{if(live)setSaveError(true);});}
@@ -113,7 +111,7 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
     const abort = new AbortController(); controller.current = abort; let live = true;
     const diagnosticRunId=`history-search-${crypto.randomUUID()}`;
     void (async () => {
-      setError(undefined); setPending([]); setAnswer(undefined); setDraftAnswer(""); setSaveError(false);
+      setError(undefined); setPending([]); setAnswer(undefined); setVerifiedSources([]); setSaveError(false);
       try {
         const pool = new Set<string>(JSON.parse(poolKey));
         const sources = inputs.current.conversations.filter(source => pool.has(source.id));
@@ -135,13 +133,17 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
         }
         setStage("retrieving");
         const settings = effectiveAISettings(await getAISettings());
-        const found = await retrieveHomeTask(next, sources, abort.signal, { provider: createAtlasAI(settings, abort.signal, diagnosticRunId), goal: taskGoal, zh, onStage: value => { if (live) setStage(value); } });
+        const found = await retrieveHomeTask(next, sources, abort.signal, { provider: createAtlasAI(settings, abort.signal, diagnosticRunId), goal: taskGoal, zh, projects, onStage: value => { if (live) setStage(value); } });
         if (!live) return;
         if (found.pending.length) { setPending(found.pending); setStage("sync"); return; }
         if (!found.ids.length) { setQuestion(found.question || (zh ? "已选材料中没有找到这个主题的足够依据，能补充一个项目名或术语吗？" : "No sufficient evidence for this subject. Add a project name or term?")); setStage("clarify"); return; }
         if (next.action === "answer" && !next.allSources && found.scope.kind === "goal") {
           setStage("answering");
-          const response = await answerHomeRecall(taskGoal, sources, found, next.queries, zh, abort.signal, text => { if (live) setDraftAnswer(streamedSectionProse(text)); }, { runId:diagnosticRunId, history: background.current, onVerifying: () => { if (live) setStage("verifying"); } });
+          const response = await answerHomeRecall(taskGoal, sources, found, next.queries, zh, abort.signal, {
+            runId: diagnosticRunId, history: background.current,
+            onSources: evidence => { if (live && !abort.signal.aborted) setVerifiedSources(evidence); },
+            onVerifying: () => { if (live) setStage("verifying"); },
+          });
           abort.signal.throwIfAborted();
           const db = await getDatabase();
           const expected = (found.scope.blocks ?? []).flatMap(block => block.messageIds.map(messageId => ({ conversationId: block.conversationId, messageId, signature: block.messageSignatures[messageId] })));
@@ -150,14 +152,14 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
           const saved: HomeAnswerResult = { id: response.id, question: clarifiedGoal, topicGoal, poolIds: [...pool], answer: response, createdAt: Date.now(), previousId: lastRecord.current?.id };
           if (!live) return;
           try { await saveHomeResult(saved, abort.signal); } catch { abort.signal.throwIfAborted(); if (live) setSaveError(true); }
-          if (live) { lastRecord.current = saved; setAnswer(response); setRecord(saved); setStage("answered"); setDraftAnswer(""); setRun(false); }
+          if (live) { lastRecord.current = saved; setAnswer(response); setRecord(saved); setStage("answered"); setRun(false); }
           return;
         }
         inputs.current.onStart(taskGoal, homeTaskMode(next), found.ids, found.scope);
       } catch (failure) {
         if (live && !abort.signal.aborted) {
           setError({ message: failure instanceof TypeError ? zh ? "连接 AI 失败，请检查网络或 AI 配置后重试。" : "Could not connect to AI. Check your connection or AI settings and retry." : failure instanceof Error ? failure.message : zh ? "任务未能完成，请重试。" : "Could not complete the task. Try again.", ...(failure instanceof AIProviderValidationError ? { code: failure.code, paths: failure.fieldPaths } : {}) });
-          setDraftAnswer(""); setStage("error");
+          setStage("error");
         }
       }
     })();
@@ -319,9 +321,14 @@ export function HomeTaskWorkspace({ goal, poolIds, conversations, sessions, proj
         {visibleMatches < shownMatches.length ? <button type="button" className="home-recall-secondary" onClick={() => setVisibleMatches(value => value + 10)}>{zh ? "显示更多结果" : "Show more results"}</button> : null}
         {localCapped ? <p className="home-recall-limit">{zh ? "匹配较多，已显示本次检索范围；可补充关键词缩小范围。" : "Many matches; refine your keywords to narrow the search."}</p> : null}
       </section> : null}
-      {draftAnswer && !answer ? <article className="home-recall-answer"><small>{zh ? "正在生成 · 待核对" : "Generating · awaiting verification"}</small><ReaderGuide content={draftAnswer} zh={zh} complete hideEvidenceMarkers /></article> : null}
-      {answer ? <><HomeRecallAnswer answer={answer} zh={zh} onSource={ref => setSource({session: answer, reference: ref, references: answer.evidence})} onLocate={ref => void locate(ref.conversationId, ref.messageId, ref.sourceSignature)} />{error && !source ? <p role="alert">{error.message}</p> : null}{saveError && record ? <p role="alert">{zh ? "记录保存失败。" : "Could not save the result."}<button onClick={() => void saveHomeResult(record).then(() => setSaveError(false)).catch(() => setSaveError(true))}>{zh ? "重新保存" : "Save again"}</button></p> : null}<div className="home-answer-actions">{!readOnly?<button onClick={() => { plan.current = undefined; setStage("planning"); setRun(true); setRetry(value => value + 1); }}>{zh ? "重新查找" : "Search again"}</button>:null}<button onClick={() => inputs.current.onStart(zh ? `整理这些讨论：${taskGoal}` : `Organize these discussions: ${taskGoal}`, "work", answer.sourceConversationIds, { kind: "all", sourceConversationIds: answer.sourceConversationIds })}>{zh ? "整理为项目" : "Organize as a project"}</button></div></> : null}
+      {!answer && verifiedSources.length > 0 ? <article className="home-recall-answer home-recall-sources">
+        <h3>{zh ? "已找到的原话" : "Original passages"}</h3>
+        {verifiedSources.map(ref => <button key={ref.id} type="button" onClick={() => void locate(ref.conversationId, ref.messageId, ref.sourceSignature)}>
+          <strong>{ref.title}</strong><span>{ref.excerpt}</span>
+        </button>)}
+      </article> : null}
+      {answer ? <><HomeRecallAnswer answer={answer} zh={zh} onSource={ref => setSource({session: answer, reference: ref, references: answer.evidence})} onLocate={ref => void locate(ref.conversationId, ref.messageId, ref.sourceSignature)} />{error && !source ? <p role="alert">{error.message}</p> : null}{saveError && record ? <p role="alert">{zh ? "记录保存失败。" : "Could not save the result."}<button onClick={() => void saveHomeResult(record).then(() => setSaveError(false)).catch(() => setSaveError(true))}>{zh ? "重新保存" : "Save again"}</button></p> : null}<div className="home-answer-actions">{!readOnly?<button onClick={() => { plan.current = undefined; setStage("planning"); setRun(true); setRetry(value => value + 1); }}>{zh ? "重新查找" : "Search again"}</button>:null}<button onClick={() => inputs.current.onStart(zh ? `整理这些讨论：${taskGoal}` : `Organize these discussions: ${taskGoal}`, "work", answer.sourceConversationIds, answer.scope ?? { kind: "all", sourceConversationIds: answer.sourceConversationIds })}>{zh ? "整理为项目" : "Organize as a project"}</button></div></> : null}
     </div></div>
-    {!readOnly && !localOnly ? <footer className="home-task-composer"><form onSubmit={event => { event.preventDefault(); submit(); }}><label><span className="sr-only">{zh ? "继续提问" : "Ask another question"}</span><textarea rows={2} placeholder={zh ? "继续提问或查找一个问题…" : "Ask or find another answer…"} value={followup} maxLength={500} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }} /></label>{busy ? <button type="button" aria-label={zh ? "停止生成" : "Stop generation"} onClick={() => { controller.current?.abort(); setRun(false); setDraftAnswer(""); setStage("cancelled"); }}><Square size={17} /></button> : <button className="primary" disabled={!followup.trim() || aiBusy} aria-label={zh ? "提问" : "Ask"}><ArrowUp size={19} /></button>}</form></footer> : null}
+    {!readOnly && !localOnly ? <footer className="home-task-composer"><form onSubmit={event => { event.preventDefault(); submit(); }}><label><span className="sr-only">{zh ? "继续提问" : "Ask another question"}</span><textarea rows={2} placeholder={zh ? "继续提问或查找一个问题…" : "Ask or find another answer…"} value={followup} maxLength={500} onChange={event => setFollowup(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }} /></label>{busy ? <button type="button" aria-label={zh ? "停止生成" : "Stop generation"} onClick={() => { controller.current?.abort(); setRun(false); setStage("cancelled"); }}><Square size={17} /></button> : <button className="primary" disabled={!followup.trim() || aiBusy} aria-label={zh ? "提问" : "Ask"}><ArrowUp size={19} /></button>}</form></footer> : null}
   </main>{source && !reading ? <WorkspaceSourcePanel session={source.session} reference={source.reference} references={source.references} conversationTitle={conversations.find(conversation=>conversation.id===source.reference.conversationId)?.title} quote={source.quote} readerError={error?.message} zh={zh} onSelect={reference => {sourceRequest.current++;setError(undefined);const hit=source.search?.hits.find(hit=>hit.messageId===reference.messageId);setSource({...source, reference, range:hit?.sourceRange, quote:hit?.excerpt});}} onClose={() => {sourceRequest.current++;setSource(undefined);}} onReader={() => void locate(source.reference.conversationId, source.reference.messageId, source.reference.sourceSignature, source.range, source.search)}/> : null}</div>;
 }

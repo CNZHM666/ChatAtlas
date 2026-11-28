@@ -1,10 +1,11 @@
 import {wikiHistoricalHeading,wikiHistoryLayout} from "./wiki-history-layout";
 import { wikiDocumentBlocks } from "./wiki-document-blocks";
+import { wikiIsDocumentReviewTable } from "./wiki-editorial-cleanup";
 import {wikiExampleDisplayKey,wikiExampleKey,wikiExampleStage,wikiExampleStanding} from "./wiki-example-identity";
 import { sourceMessageSignature } from "./source-signature";
 import {wikiUiCopy,wikiUiCopySupports} from "./wiki-ui-copy";
 import {isRequiredWikiSourceBlock} from "./wiki-source-code";
-import type { WikiDraftChapter, WikiKnowledgeUnit } from "./wiki-knowledge";
+import type { WikiDraftChapter, WikiKnowledgeUnit, WikiWritingMode } from "./wiki-knowledge";
 
 import {illustrativeWikiFlow,plainBlockLayout,wikiLiteralText} from "./wiki-plain-block";
 import {WIKI_SUPPLEMENT,wikiSupplementTitle,groupWikiSupplements,wikiSupplementRanges,normalizeWikiSupplementHeadings} from "./wiki-source-supplements";
@@ -22,12 +23,60 @@ interface SourceBlock { language: string; text: string }
 const PLAIN = /^(?:text|plaintext|plain|txt|markdown|md)?$/iu;
 const HISTORICAL = /早期|此前|已替换|earlier|replaced|superseded/iu;
 const STRUCTURE = /[┌└├┤╭╰│┃]|^\s*(?:interface |export |type \w+\s*=|const |let |function |class |import |SELECT |CREATE )|^\s*[{[]/mu;
+const CONTRACT = /^\s*(?:export\s+)?(?:interface|type|class|enum|struct)\s+[A-Za-z_$][\w$]*|^\s*CREATE\s+TABLE\b/imu;
+const DIRECTORY_LINE = /(?:^|[ ├└─])(?:[\w.@-]+\/|[\w.@-]+\.[a-z]{1,5}$)/iu;
+const BARE_ENDPOINT = /^(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\/\S*$/iu;
+const BARE_PATH = /^(?:\.?\/)?[\w.@-]+(?:\/[\w.@-]+)+\/?$/u;
+const STATUS_BAR = /^(?:AI\s*助手|AI\s*assistant\b).*(?:已连接|\bconnected\b)/iu;
+const CHAT_TURN = /^(?:你|用户|User|AI\s*助手|AI\s*assistant)\s*[：:]?$/iu;
 const CAPTION = /^\*{1,2}(?:讨论中的原文(?:代码|表格)|(?:Code|Table) from the discussion|对照表|命令|数据结构|代码示例|代码|界面草图|规则逻辑|事件清单|目录结构|提示词|计算规则|示例数据|界面文案|流程|对照|清单|Table|Commands|Data structure|Code example|Code|UI sketch|Rules|Event list|File layout|Prompt|Scoring|Sample data|UI copy|Flow|Mapping|List)(?:[^\n]*)\*{1,2}$/u;
 const linesOf = (text: string) => text.split(/\r?\n/u).map(line => line.trim()).filter(Boolean);
 const keyOf = (code: SourceBlock) => sourceMessageSignature(`${code.language}\n${code.text}`);
 const codeOf = (markdown:string):SourceBlock|undefined=>{
  const opening=/^[ \t]*(`{3,}|~{3,})([^\n]*)\n/u.exec(markdown);
  if(opening)return {language:opening[2].trim(),text:markdown.slice(opening[0].length).replace(/\n[ \t]*(?:`{3,}|~{3,})[ \t]*$/u,"")};
+};
+/** Single-line bare paths, HTTP endpoints or 2-line status strips add noise as standalone examples. */
+const trivialFragment = (code: SourceBlock): boolean => {
+ const lines = linesOf(code.text);
+ if (!lines.length) return true;
+ if (PLAIN.test(code.language)) {
+  if (lines.length === 1 && (BARE_ENDPOINT.test(lines[0]) || BARE_PATH.test(lines[0]))) return true;
+  if (lines.length === 2 && STATUS_BAR.test(lines[0])) return true;
+ }
+ return false;
+};
+/** Simulated chat/edit preview mockups belong in original discussion rather than clean Wiki prose. */
+const isMockDialogue = (code: SourceBlock): boolean => {
+ if (!PLAIN.test(code.language)) return false;
+ const lines = linesOf(code.text);
+ if (lines.length < 3 || lines.length > 24) return false;
+ const hasSpeaker = lines.some(line => CHAT_TURN.test(line) || STATUS_BAR.test(line));
+ const hasMockChrome = lines.some(line => /^[✓✔−\-+↑↓]\s+\S|^\[(?:撤销|应用|确认|Undo|Apply)\]$|^(?:撤销|修改设计|修改计划|准备修改设计)$/u.test(line));
+ return hasSpeaker && hasMockChrome;
+};
+/** Technical contracts, schemas, commands and directory layouts that remain useful in handoff specs. */
+const isTechnicalContract = (code: SourceBlock): boolean => {
+ const lines = linesOf(code.text);
+ if (CONTRACT.test(code.text)) return true;
+ if (/^(?:sql|graphql|proto|prisma|yaml|yml|toml)$/iu.test(code.language) && lines.length >= 2) return true;
+ if (/^json$/iu.test(code.language)) return lines.length >= 2 || (code.text.match(/"[^"]+"\s*:/gu)?.length ?? 0) >= 2;
+ if (/^(?:bash|sh|shell|zsh|powershell|ps1|cmd|console)$/iu.test(code.language)) return lines.length >= 1 && !BARE_PATH.test(lines[0]);
+ if (lines.filter(line => DIRECTORY_LINE.test(line)).length >= 3) return true;
+ return !PLAIN.test(code.language) && lines.length >= 3;
+};
+const normalizedTokens = (text: string) => new Set(
+ text.normalize("NFKC").toLowerCase()
+  .replace(/[✓✔−\-+↑↓[\]()（）•●▾,，。：:]/gu, " ")
+  .split(/\s+/u).filter(token => token.length >= 2)
+);
+const nearDuplicateBlock = (a: SourceBlock, b: SourceBlock): boolean => {
+ if (a.language !== b.language || !PLAIN.test(a.language)) return false;
+ const ta = normalizedTokens(a.text), tb = normalizedTokens(b.text);
+ if (ta.size < 4 || tb.size < 4) return false;
+ let shared = 0;
+ for (const token of ta) if (tb.has(token)) shared++;
+ return shared / Math.max(ta.size, tb.size) >= 0.72;
 };
 /** A short label example adds nothing when every literal line is already stated
  * in the subsection's explanation. Never infer equivalence or remove diagrams. */
@@ -40,9 +89,10 @@ const redundantLabels=(code:SourceBlock,context:string)=>{
 };
 /** Recheck saved application attachments too: otherwise old grouped examples
  * bypass admission forever. Only exact repetitions or fully explained labels go. */
-function compactSavedExamples(body:string,zh:boolean,units:WikiKnowledgeUnit[]){
+function compactSavedExamples(body:string,zh:boolean,units:WikiKnowledgeUnit[],writingMode?:WikiWritingMode){
  body=normalizeWikiSupplementHeadings(body);
  const ranges=wikiSupplementRanges(body),blocks=wikiDocumentBlocks(body),seen=new Map<string,{title:string;literal:string;notes:string[]}>();
+ const seenBlocks:Array<{code:SourceBlock;stage:string;standing:string;example:{title:string;literal:string;notes:string[]}}>=[];
  const exterior=blocks.filter(block=>!ranges.some(([start,end])=>block.start>=start&&block.end<=end));
  const collections:Array<{start:number;end:number;raw:string;examples:Array<{title:string;literal:string;notes:string[]}>}>=[];
  for(const [start,end] of ranges){
@@ -65,7 +115,7 @@ function compactSavedExamples(body:string,zh:boolean,units:WikiKnowledgeUnit[]){
    pending="";
    previousExample=undefined;
    const matching=units.filter(unit=>unit.evidence.code&&wikiExampleKey(unit.evidence.code)===wikiExampleKey(code));
-   const decision=planWikiSourceBlock(code,"",matching,prose);
+   const decision=planWikiSourceBlock(code,"",matching,prose,writingMode);
    if(decision.mode==="source_only"&&!/(?:项目发起人|你)(?:确认|提供)|(?:confirmed|provided) by you/iu.test(caption))continue;
    const title=/^(?:原文与示例|Originals and examples|参考示例|Reference example|流程示例|Flow example|原文示例|Source example|数据结构|Data structure|命令示例|Command example|JSON 示例|界面草图|UI sketch|目录结构|File layout)(?: · |$)/u.test(caption)
     ?wikiSupplementTitle(code,"",zh,heading?.text)+provenance(caption)
@@ -99,10 +149,15 @@ function compactSavedExamples(body:string,zh:boolean,units:WikiKnowledgeUnit[]){
    if(unlabelledCopies.has(example))return false;
    const {literal,title}=example;
    const code=codeOf(literal)!;
-   const key=wikiExampleDisplayKey(code,wikiExampleStage(title,heading?.text??""),wikiExampleStanding(title));
+   const stage=wikiExampleStage(title,heading?.text??""),standing=wikiExampleStanding(title);
+   const key=wikiExampleDisplayKey(code,stage,standing);
    const prior=seen.get(key);
    if(prior){prior.notes.push(...example.notes);return false;}
-   seen.set(key,example);return true;
+   const similar=seenBlocks.find(entry=>entry.stage===stage&&entry.standing===standing&&nearDuplicateBlock(entry.code,code));
+   if(similar){similar.example.notes.push(...example.notes);return false;}
+   seen.set(key,example);
+   seenBlocks.push({code,stage,standing,example});
+   return true;
   });
   collections.push({start,end,raw,examples:kept});
  }
@@ -119,19 +174,23 @@ function compactSavedExamples(body:string,zh:boolean,units:WikiKnowledgeUnit[]){
 }
 const provenance=(caption:string)=>caption.match(/ · (?:AI\s*建议|(?:项目发起人|你)(?:确认|提供)|以(?:项目发起人|你)后来的决定|confirmed by you|provided by you|AI suggestion|Earlier|早期方案).*$/iu)?.[0]??"";
 
-export function planWikiSourceBlock(code: SourceBlock, caption = "", units: WikiKnowledgeUnit[] = [], context = ""): WikiBlockAdmission {
+export function planWikiSourceBlock(code: SourceBlock, caption = "", units: WikiKnowledgeUnit[] = [], context = "", writingMode?: WikiWritingMode): WikiBlockAdmission {
   const signature = keyOf(code), lines = linesOf(code.text);
   const result = (mode: WikiBlockAdmission["mode"], reason: string, format?: WikiBlockAdmission["format"]): WikiBlockAdmission => ({ id: `block:${signature}`, mode, reason, ...(format ? { format } : {}), language: code.language, unitIds: units.map(unit => unit.id), sourceSignature: signature });
   if (HISTORICAL.test(caption)) return result("source_only", "Historical examples remain in the original Reader instead of the article.");
   const required=units.some(isRequiredWikiSourceBlock);
+  if (!required && trivialFragment(code)) return result("source_only", "Single-line endpoints, paths, and status fragments stay in the original source.");
+  if (!required && isMockDialogue(code) && writingMode !== "audit") return result("source_only", "Simulated chat previews remain in the original discussion.");
   if(!required&&redundantLabels(code,context))return result("source_only","Every short example line is already explained here; its exact original stays in the source.");
- if(!required&&units.length&&PLAIN.test(code.language)&&lines.length===2&&wikiSupplementTitle(code,"",false)==="AI connection state")
-    return result("source_only","A connected-state label and model name stay available in the source.");
-  if (code.language === "table") return result("verbatim", "An original table preserves exact field/value associations.");
+  if (code.language === "table") return wikiIsDocumentReviewTable(code.text)
+    ? result("source_only", "Review of a previous export stays in the original discussion.")
+    : result("verbatim", "An original table preserves exact field/value associations.");
+  if (code.language === "mermaid") return result("verbatim", "Structured Mermaid diagrams render directly in the Reader and exports.");
   const ui=wikiUiCopy(code);
   if(ui){
     const supported=units.filter(unit=>wikiUiCopySupports(code,unit));
     if(!required&&units.length&&!supported.length)return result("source_only", "UI copy is not supported by its associated claim; the original remains in Reader.");
+    if(!required&&(writingMode==="concise"||writingMode==="handoff"))return result("source_only", "UI copy examples remain in the original discussion outside audit mode.");
     return {...result("supplement", "UI copy is an example, not standalone prose; retain it with an explicit purpose in the source attachment."),unitIds:supported.map(unit=>unit.id)};
   }
   if (!PLAIN.test(code.language)) {
@@ -140,11 +199,15 @@ export function planWikiSourceBlock(code: SourceBlock, caption = "", units: Wiki
     const declaration=/\b(?:interface|type|class)\s+([A-Za-z_$][\w$]*)/u.exec(code.text)?.[1];
     const dedicated=/^#{1,6}\s+[^\n]*(?:接口定义|接口契约|数据结构定义|模式定义|API contract|interface definition|schema definition)/imu.test(context);
     if(lines.length<=28&&declaration&&dedicated&&context.includes(declaration))return result("verbatim", "A named contract is explained in its own definition section; keep its exact syntax beside the explanation.");
+    if(!required&&writingMode==="concise")return result("source_only", "Concise mode keeps supporting code in the original source; cite to inspect.");
+    if(!required&&writingMode==="handoff"&&!isTechnicalContract(code))return result("source_only", "Handoff mode keeps only technical contracts, schemas, and commands in chapter attachments.");
     return result("supplement", "Literal preservation does not require inline display; examples remain complete in the subsection attachment.");
   }
   const layout=plainBlockLayout(code.text);
   if(!required&&layout?.kind==="flow"&&illustrativeWikiFlow(code.text))return result("source_only","The demonstration adds no distinct acceptance condition; it remains in the original discussion.");
   if(layout)return result("reformat", "The original grouping and explicit relationships determine the layout.",layout.kind);
+  if(!required&&writingMode==="concise")return result("source_only", "Concise mode keeps decorative sketches and raw text examples in the original discussion.");
+  if(!required&&writingMode==="handoff"&&!isTechnicalContract(code))return result("source_only", "Handoff mode keeps non-contract text sketches in the original discussion.");
   if (STRUCTURE.test(code.text) || /界面草图|UI sketch|目录结构|file layout|提示词|prompt/iu.test(caption)) return result("supplement", "Layout-sensitive material remains intact in an optional source example.");
   if (lines.length === 1 && lines[0].length <= 120) {
     const value = lines[0];
@@ -155,8 +218,9 @@ export function planWikiSourceBlock(code: SourceBlock, caption = "", units: Wiki
 }
 
 /** One shared Markdown projection for Wiki and every export. Originals and authored chapters are unchanged. */
-export function wikiBlockPresentation(body: string, options: { zh?: boolean; units?: WikiKnowledgeUnit[] } = {}) {
-  const zh = options.zh ?? true, blocks = wikiDocumentBlocks(body), decisions: WikiBlockAdmission[] = [], seen = new Set<string>();
+export function wikiBlockPresentation(body: string, options: { zh?: boolean; units?: WikiKnowledgeUnit[]; writingMode?: WikiWritingMode } = {}) {
+  const zh = options.zh ?? true, writingMode = options.writingMode, blocks = wikiDocumentBlocks(body), decisions: WikiBlockAdmission[] = [], seen = new Set<string>();
+  const seenBlocks: SourceBlock[] = [];
   const edits: Array<{ start: number; end: number; text: string }> = [];
   let supplement = false, historicalDepth=0, sectionStart=0, topic="";
   // Older projections may have flattened source UI copy. Recover only exact ledger-backed matches.
@@ -180,7 +244,7 @@ export function wikiBlockPresentation(body: string, options: { zh?: boolean; uni
     if(block.kind==="paragraph"){
       const legacy=legacyCopies.get(block.text.trim());
       if(legacy){
-        const decision=planWikiSourceBlock(legacy.code,"",legacy.units);decisions.push(decision);
+        const decision=planWikiSourceBlock(legacy.code,"",legacy.units,"",writingMode);decisions.push(decision);
         const label=wikiSupplementTitle(legacy.code,"",zh,topic);
         const fence="`".repeat(Math.max(3,...[...legacy.code.text.matchAll(/`+/gu)].map(match=>match[0].length+1)));
         const original=`${fence}${legacy.code.language}\n${legacy.code.text}\n${fence}`;
@@ -190,18 +254,19 @@ export function wikiBlockPresentation(body: string, options: { zh?: boolean; uni
     }
     if (block.kind !== "code") continue;
     const open = /^\s*(`{3,}|~{3,})([^\n]*)\n/u.exec(block.text);
-    if (!open || open[2].trim() === "atlas-flow") continue;
+    if (!open || open[2].trim() === "atlas-flow" || open[2].trim() === "mermaid") continue;
     const text = block.text.slice(open[0].length).replace(/\n[ \t]*(?:`{3,}|~{3,})[ \t]*$/u, "");
     const code = { language: open[2].trim(), text };
     const previous = blocks[index - 1], caption = previous?.kind === "paragraph" && CAPTION.test(previous.text.trim()) ? previous.text.trim() : "";
     const units = (options.units ?? []).filter(unit => unit.evidence.code&&wikiExampleKey(unit.evidence.code)===wikiExampleKey(code));
-    let decision = planWikiSourceBlock(code, caption, units, body.slice(sectionStart,block.start));
+    let decision = planWikiSourceBlock(code, caption, units, body.slice(sectionStart,block.start), writingMode);
     if(historicalDepth)decision={...decision,mode:"source_only",reason:"Historical examples remain in the original Reader instead of the article."};
     const identity = wikiExampleDisplayKey(code,wikiExampleStage(caption,topic),wikiExampleStanding(caption));
     // The attachment pass can consolidate duplicate examples and collect both
     // source lines. An earlier pass must leave those lines with their block.
     if (decision.mode!=="supplement"&&seen.has(identity)) decision = { ...decision, mode: "source_only", reason: "The same literal block is already shown in this chapter." };
-    if(decision.mode!=="source_only")seen.add(identity);
+    else if (decision.mode==="supplement"&&seenBlocks.some(other=>nearDuplicateBlock(other,code))) decision = { ...decision, mode: "source_only", reason: "A near-identical example is already shown in this chapter." };
+    if(decision.mode!=="source_only"){seen.add(identity);seenBlocks.push(code);}
     decisions.push(decision);
     let replacement = block.text;
     if (decision.mode === "source_only") replacement = "";
@@ -227,7 +292,7 @@ export function wikiBlockPresentation(body: string, options: { zh?: boolean; uni
     if (replacement !== block.text) edits.push({ start: caption ? previous.start : block.start, end: block.end, text: replacement });
   }
   for (const edit of edits.reverse()) body = body.slice(0, edit.start) + edit.text + body.slice(edit.end);
-  return { body: wikiHistoryLayout(compactSavedExamples(groupWikiSupplements(body,zh),zh,options.units??[])), decisions };
+  return { body: wikiHistoryLayout(compactSavedExamples(groupWikiSupplements(body,zh),zh,options.units??[],writingMode)), decisions };
 }
 
 /** Restore literal payloads after a prose pass. Status/caption changes remain outside the fence. */

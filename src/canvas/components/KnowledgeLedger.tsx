@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, useState } from "react";
-import { BookMarked, Search } from "lucide-react";
+import { BookMarked, ChevronDown, Search } from "lucide-react";
 import type { FocusEvidence, FocusSession } from "../../shared/focus-session";
 import type { WorkspaceEvidenceOptions } from "../workspace-evidence-context";
 import { type WikiKnowledgeUnit, type WikiUnitStatus } from "../../shared/wiki-knowledge";
@@ -48,24 +48,40 @@ export function KnowledgeLedger({ session, zh, onLocate, pageReading }: { sessio
     onLocate(ref, { references: [ref], quote: unit.evidence.quote, claim: unit.statement, mode: "view" });
   };
   const count = (statuses: WikiUnitStatus[]) => statuses.reduce((sum, status) => sum + (data.counts.get(status) ?? 0), 0);
+  const visibleChapters = chapters.filter(chapter => chapter.rows.length > 0);
   return <section className="knowledge-ledger" aria-label={name}>
-    <h2><BookMarked size={18} aria-hidden="true" />{zh ? "知识点账本" : "Knowledge ledger"}<small>{zh ? `${data.total} 个知识点 · 你的决定 ${count(["confirmed"])} · AI 建议 ${count(["proposal", "analysis"])}` : `${data.total} points · yours ${count(["confirmed"])} · AI ${count(["proposal", "analysis"])}`}</small></h2>
+    <header className="knowledge-ledger-header">
+      <h2><BookMarked size={19} aria-hidden="true" />{zh ? "知识点账本" : "Knowledge ledger"}</h2>
+      <div className="knowledge-ledger-stats">
+        <span>{zh ? `共 ${data.total} 条` : `${data.total} points`}</span>
+        <span className="is-decided">{zh ? `你的决定 ${count(["confirmed"])}` : `Yours ${count(["confirmed"])}`}</span>
+        <span className="is-ai">{zh ? `AI 建议 ${count(["proposal", "analysis"])}` : `AI ${count(["proposal", "analysis"])}`}</span>
+      </div>
+    </header>
     <div className="knowledge-ledger-tools">
       <div role="tablist" aria-label={zh ? "按来源筛选" : "Filter by holder"}>{FILTERS.filter(item => !item.statuses || count(item.statuses) > 0 || filter === item.id).map(item => <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} title={item.title?.[zh ? 0 : 1]} onClick={() => { if (item.id !== filter) { setFilter(item.id); setExpanded({}); } }}>{item.label[zh ? 0 : 1]}{item.statuses ? <small>{count(item.statuses)}</small> : null}</button>)}</div>
       <label><Search size={14} aria-hidden="true" /><input type="search" value={query} placeholder={zh ? "搜索知识点" : "Search points"} aria-label={zh ? "搜索知识点" : "Search points"} onChange={event => { setQuery(event.target.value); setExpanded({}); }} /></label>
     </div>
-    {chapters.map(chapter => {
+    {visibleChapters.length === 0 ? <p className="knowledge-ledger-empty" role="status">{zh ? "当前筛选条件下没有匹配的知识点。" : "No knowledge points match the current filter."}</p> : null}
+    {visibleChapters.map(chapter => {
       const { rows } = chapter;
-      if (!rows.length) return null;
       const limit = shown[chapter.id] ?? PAGE;
       const openChapter = expanded[chapter.id] ?? (Boolean(needle) || filter !== "all");
       return <details key={chapter.id} className="knowledge-ledger-chapter" open={openChapter}>
-        <summary onClick={event => { event.preventDefault(); setExpanded(current => ({ ...current, [chapter.id]: !openChapter })); }}><strong>{chapter.title}</strong><small>{rows.length}</small></summary>
-        {openChapter && <><ul>{rows.slice(0, limit).map(({ subject, unit }, index) => <li key={unit.id}>
+        <summary onClick={event => { event.preventDefault(); setExpanded(current => ({ ...current, [chapter.id]: !openChapter })); }}>
+          <strong>{chapter.title}</strong>
+          <small>{rows.length}</small>
+          <ChevronDown size={15} className="knowledge-ledger-chevron" aria-hidden="true" />
+        </summary>
+        {openChapter && <div className="knowledge-ledger-body"><ul>{rows.slice(0, limit).map(({ subject, unit }, index) => <li key={unit.id}>
           {index === 0 || rows[index - 1].subject !== subject ? <h3>{subject}</h3> : null}
-          <button type="button" className={checking === unit.id ? "is-checking" : undefined} aria-current={checking === unit.id ? "true" : undefined} title={zh ? "查看原文" : "Read the original"} onClick={() => open(unit)}><span className={`knowledge-ledger-status is-${data.statuses.get(unit.id)}`}>{LABELS[data.statuses.get(unit.id)!][zh ? 0 : 1]}</span><span>{unit.statement}</span></button>
+          <button type="button" className={checking === unit.id ? "is-checking" : undefined} aria-current={checking === unit.id ? "true" : undefined} title={zh ? "查看原文" : "Read the original"} onClick={() => open(unit)}>
+            <span className={`knowledge-ledger-status is-${data.statuses.get(unit.id)}`}>{LABELS[data.statuses.get(unit.id)!][zh ? 0 : 1]}</span>
+            <span className="knowledge-ledger-statement">{unit.statement}</span>
+            <span className="knowledge-ledger-jump" aria-hidden="true">{zh ? "原文 ↗" : "Source ↗"}</span>
+          </button>
         </li>)}</ul>
-        {rows.length > limit ? <button type="button" className="knowledge-ledger-more" onClick={() => setShown(current => ({ ...current, [chapter.id]: limit + PAGE }))}>{zh ? `再显示 ${Math.min(PAGE, rows.length - limit)} 条（共 ${rows.length}）` : `Show ${Math.min(PAGE, rows.length - limit)} more (${rows.length})`}</button> : null}</>}
+        {rows.length > limit ? <button type="button" className="knowledge-ledger-more" onClick={() => setShown(current => ({ ...current, [chapter.id]: limit + PAGE }))}>{zh ? `再显示 ${Math.min(PAGE, rows.length - limit)} 条（共 ${rows.length}）` : `Show ${Math.min(PAGE, rows.length - limit)} more (${rows.length})`}</button> : null}</div>}
       </details>;
     })}
   </section>;

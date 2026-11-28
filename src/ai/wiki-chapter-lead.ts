@@ -51,7 +51,9 @@ export function wikiChapterLeads({ ledger: reading, organization, statuses, unit
       if ((homes.get(unit.id) === chapter.id || chapterIds.includes(unit.id)) && ["plan", "decision"].includes(unit.kind)
         && ["confirmed", "stated", "proposal"].includes(statuses.get(unit.id) ?? "") && wikiStageTransition(unit.statement) && !next.includes(unit.id)) next.push(unit.id);
     }
-    const order = [...new Set([...next, ...chapter.openingUnitIds ?? [], ...primary])];
+    // A quarantined opening source must not prevent a confirmed point actually written in the chapter from leading it.
+    const confirmedHere = chapterIds.filter(id => statuses.get(id) === "confirmed" && homes.get(id) === chapter.id);
+    const order = [...new Set([...next, ...chapter.openingUnitIds ?? [], ...primary, ...confirmedHere])];
     const topicTerms = [...knowledgeTerms(chapter.title)].filter(term => !/^(?:设计|技术|机制|策略|方案|规划|系统|状态|实现|design|technical|system|plan|strategy|status|implementation)$/iu.test(term));
     const candidates = order.flatMap(id => {
       const unit = byId.get(id), status = statuses.get(id);

@@ -451,3 +451,66 @@ it("places a titled generated sequence in a card without promoting inline change
   rerender(<ReaderGuide content={text} zh={false} complete />);
   expect(container.querySelector(".wiki-flow")).toBeNull();
 });
+
+it("keeps all table cells clean without decorative status pills", () => {
+  const mixed = [
+    "| 阶段 | 做什么 | 什么时候 |",
+    "| --- | --- | --- |",
+    "| M2 | 重构 | 现在 |",
+    "| M3 | 视觉识别 | 紧接着做 |",
+    "| M4 | 接线 | 再往后 |",
+    "",
+    "| 版本 | 状态 |",
+    "| --- | --- |",
+    "| 实验 | 分析报告 |",
+    "| 计划 | 开放计划 |",
+    "| alpha | 提案 |",
+    "",
+    "| 模块 | 状态 |",
+    "| --- | --- |",
+    "| 前端 | 已定 |",
+    "| 后端 | 延后 |",
+  ].join("\n");
+  const { container } = render(<ReaderGuide content={mixed} zh complete hideEvidenceMarkers />);
+  expect(container.querySelectorAll(".reader-status-pill")).toHaveLength(0);
+  expect(container.querySelectorAll("table")).toHaveLength(3);
+  expect(container.textContent).toContain("已定");
+  expect(container.textContent).toContain("延后");
+});
+
+it("hides raw trailing status markers like 〔建议〕 in generated prose instead of rendering non-interactive pills", () => {
+  const content = "前端/Next.js → 腾讯云 / 阿里云 → Docker 〔建议〕";
+  const { container, rerender } = render(<ReaderGuide content={content} zh complete hideEvidenceMarkers />);
+  expect(container.querySelector(".reader-inline-status")).toBeNull();
+  expect(container.textContent).not.toContain("〔建议〕");
+  expect(container.textContent).not.toContain("AI 建议");
+  expect(container.textContent?.trim()).toBe("前端/Next.js → 腾讯云 / 阿里云 → Docker");
+  // Non-generated source reading leaves literal text untouched.
+  rerender(<ReaderGuide content={content} zh complete />);
+  expect(container.textContent).toContain("〔建议〕");
+});
+
+it("hides redundant trailing meta-status columns in generated tables while keeping business status columns", () => {
+  const tables = [
+    "| 原阶段/版本 | 适用范围 | 安排/标准 | 状态 |",
+    "| --- | --- | --- | --- |",
+    "| 第一批实验 | 技术与产品验证 | 20个标准项目中≥18个生成合理架构。 | 分析报告 |",
+    "| Phase A | README 重构建议 | 完成三入口统一与完整性门控。 | 开放计划 |",
+    "| v0.1.0-alpha | 项目整体路线 | 完成三个官方示例的真实搭建与验证。 | 提案 |",
+    "",
+    "| 功能模块 | 负责人 | 状态 |",
+    "| --- | --- | --- |",
+    "| 本地索引 | 前端 | 已完成 |",
+    "| 语义检索 | 算法 | 进行中 |",
+  ].join("\n");
+  const { container, rerender } = render(<ReaderGuide content={tables} zh complete hideEvidenceMarkers />);
+  const rendered = container.querySelectorAll("table");
+  expect([...rendered[0].querySelectorAll("th")].map(th => th.textContent)).toEqual(["原阶段/版本", "适用范围", "安排/标准"]);
+  expect(rendered[0].textContent).not.toContain("分析报告");
+  expect(rendered[0].textContent).not.toContain("开放计划");
+  expect([...rendered[1].querySelectorAll("th")].map(th => th.textContent)).toEqual(["功能模块", "负责人", "状态"]);
+  expect(rendered[1].textContent).toContain("已完成");
+  // Non-generated source reading leaves original tables untouched.
+  rerender(<ReaderGuide content={tables} zh complete />);
+  expect([...container.querySelectorAll("table")[0].querySelectorAll("th")].map(th => th.textContent)).toEqual(["原阶段/版本", "适用范围", "安排/标准", "状态"]);
+});

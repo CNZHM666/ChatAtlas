@@ -1,5 +1,7 @@
 import {unified} from "unified";
 import remarkParse from "remark-parse";
+import { knowledgeTerms } from "../shared/knowledge-subject";
+import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
 import type {FocusSection} from "../shared/focus-session";
 
 const parser=unified().use(remarkParse);
@@ -70,6 +72,33 @@ export function mergeThinWikiSubtopics(body:string):{body:string;merged:number;t
  // One remaining heading only repeats the chapter title; the chapter becomes continuous prose.
  const sections=parts.length===1?[parts[0].content.trim()]:parts.map(part=>`${part.heading}\n\n${part.content.trim()}`);
  return {body:[lead.trim(),...sections].filter(Boolean).join("\n\n")+"\n",merged:original-parts.length,toName};
+}
+
+/** A brief note under a related topic can keep its label without a separate directory entry. */
+export function foldAdjacentWikiNotes(body: string) {
+ const blocks=wikiDocumentBlocks(body);
+ const headings=blocks.flatMap((block,index)=>/^### [^\n]+$/u.test(block.text)&&block.kind==="heading"?[index]:[]);
+ const folded=new Map<string,string>();
+ let text=body;
+ for(let index=headings.length-1;index>0;index--){
+  const start=headings[index],prior=headings[index-1],end=headings[index+1]??blocks.length;
+  const heading=blocks[start],previous=blocks[prior];
+  const items=blocks.slice(start+1,end);
+  if(items.length!==1||items[0].kind!=="paragraph"||proseLength(items[0].text)>WIKI_MIN_SUBTOPIC_CHARACTERS*wikiProseScale(items[0].text)
+   ||blocks.slice(prior+1,start).some(block=>block.kind==="heading"||block.kind==="html"||block.kind==="thematicBreak")
+   ||/历史|此前|待决|引用|history|earlier|pending|citation/iu.test(heading.text))continue;
+  const title=heading.text.slice(4),parent=previous.text.slice(4),terms=knowledgeTerms(title),priorTerms=knowledgeTerms(blocks.slice(prior,start).map(block=>block.text).join("\n"));
+  const shared=[...terms].filter(term=>priorTerms.has(term));
+  if(title===parent||shared.length<2||shared.length<terms.size*.5||headings.filter(at=>blocks[at].text===heading.text).length>1)continue;
+  text=text.slice(0,heading.start)+"**"+title+"**"+text.slice(heading.end);
+  folded.set(title,parent);
+ }
+ for(const [title,parent] of folded){
+  let root=parent;
+  while(folded.has(root)&&folded.get(root)!==root)root=folded.get(root)!;
+  folded.set(title,root);
+ }
+ return {body:text,folded};
 }
 
 /** Generated chapters only; a user's own structure is never merged. */

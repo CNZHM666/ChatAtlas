@@ -1,4 +1,4 @@
-import { Check, Circle, CircleDot, History, House, Pencil, Sparkles, Trash2, RotateCcw, X } from "lucide-react";
+import { Check, ChevronRight, Circle, CircleDot, History, House, Pencil, Sparkles, Trash2, RotateCcw, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { AtlasCanvas, OrganizationRun } from "../../shared/types";
 import type { FocusSession } from "../../shared/focus-session";
@@ -94,14 +94,39 @@ export function MapSidebar({ canvases, activeId, onSelect, onRename, onDelete, d
           </div>
         ))}
       </div>
-      {(deletedProjects.length && onRestore) || (deletedVersions.length && onRestoreVersion) ? <details ref={trashRef} className="project-trash" onToggle={event => { setTrashOpen(event.currentTarget.open); if (!event.currentTarget.open && !emptying) { setConfirmEmpty(false); setTrashError(false); } }}><summary><Trash2 size={13} /><span>{locale === "zh-CN" ? "回收站" : "Trash"} · {deletedProjects.length + deletedVersions.length}</span>{onEmptyTrash && trashOpen && !confirmEmpty ? <button type="button" className="project-trash-empty" onClick={event => { event.preventDefault(); event.stopPropagation(); setTrashError(false); setConfirmEmpty(true); }}>{locale === "zh-CN" ? "清空回收站" : "Empty Trash"}</button> : null}</summary>{onEmptyTrash && (confirmEmpty || trashError) ? <section className="project-trash-clear">{confirmEmpty ? <><p>{locale === "zh-CN" ? "永久删除回收站中的项目和版本？来源对话不受影响。" : "Permanently delete trashed projects and versions? Source conversations are retained."}</p><div><button type="button" disabled={emptying} onClick={() => setConfirmEmpty(false)}>{locale === "zh-CN" ? "取消" : "Cancel"}</button><button type="button" disabled={emptying} onClick={() => void emptyTrash()}>{emptying ? locale === "zh-CN" ? "清空中…" : "Emptying…" : locale === "zh-CN" ? "永久清空" : "Empty permanently"}</button></div></> : null}{trashError ? <p role="alert">{locale === "zh-CN" ? "清空失败，请重试。" : "Could not empty Trash. Try again."}</p> : null}</section> : null}{onRestore ? deletedProjects.map(project => <div key={project.id}><span title={project.title ?? project.name}><strong>{project.title ?? project.name}</strong><small>{locale === "zh-CN" ? "项目" : "Project"}</small></span><button type="button" aria-label={`${locale === "zh-CN" ? "恢复项目" : "Restore project"} ${project.title ?? project.name}`} title={locale === "zh-CN" ? "恢复" : "Restore"} disabled={emptying} onClick={() => onRestore(project.id)}><RotateCcw size={13} /></button></div>) : null}{onRestoreVersion ? deletedVersions.map(version => {
-        // A deleted version usually shares its project's title; say which one it was.
-        const full = versionLabels.get(version.id) ?? version.title, kind = !version.canvasId ? locale === "zh-CN" ? "未保存" : "Unsaved" : locale === "zh-CN" ? "版本" : "Version";
-        const label = `${full}${locale === "zh-CN" ? `（${kind}）` : ` (${kind.toLowerCase()})`}`;
-        // The title on one line, and the date, chapters and state on a quieter second line.
-        const meta = [kind, full.startsWith(`${version.title} · `) ? full.slice(version.title.length + 3) : ""].filter(Boolean).join(" · ");
-        return <div key={version.id}><span title={label}><strong>{version.title}</strong><small>{meta}</small></span><button type="button" aria-label={`${locale === "zh-CN" ? "恢复版本" : "Restore version"} ${label}`} title={locale === "zh-CN" ? "恢复" : "Restore"} disabled={emptying} onClick={() => onRestoreVersion(version.id)}><RotateCcw size={13} /></button></div>;
-      }) : null}</details> : null}
+      {(deletedProjects.length && onRestore) || (deletedVersions.length && onRestoreVersion) ? <details ref={trashRef} className="project-trash" onToggle={event => { setTrashOpen(event.currentTarget.open); if (!event.currentTarget.open && !emptying) { setConfirmEmpty(false); setTrashError(false); } }}>
+        <summary>
+          <ChevronRight size={14} className="project-trash-chevron" aria-hidden="true" />
+          <Trash2 size={14} className="project-trash-icon" aria-hidden="true" />
+          <span className="project-trash-label">{locale === "zh-CN" ? "回收站" : "Trash"} · {deletedProjects.length + deletedVersions.length}</span>
+          {onEmptyTrash && trashOpen && !confirmEmpty ? <button type="button" className="project-trash-empty" aria-label={locale === "zh-CN" ? "清空回收站" : "Empty Trash"} title={locale === "zh-CN" ? "清空回收站" : "Empty Trash"} onClick={event => { event.preventDefault(); event.stopPropagation(); setTrashError(false); setConfirmEmpty(true); }}>{locale === "zh-CN" ? "清空" : "Empty"}</button> : null}
+        </summary>
+        {onEmptyTrash && (confirmEmpty || trashError) ? <section className="project-trash-clear">
+          {confirmEmpty ? <><p>{locale === "zh-CN" ? "永久删除回收站中的项目和版本？来源对话不受影响。" : "Permanently delete trashed projects and versions? Source conversations are retained."}</p><div><button type="button" disabled={emptying} onClick={() => setConfirmEmpty(false)}>{locale === "zh-CN" ? "取消" : "Cancel"}</button><button type="button" className="is-danger" disabled={emptying} onClick={() => void emptyTrash()}>{emptying ? locale === "zh-CN" ? "清空中…" : "Emptying…" : locale === "zh-CN" ? "永久清空" : "Empty permanently"}</button></div></> : null}
+          {trashError ? <p role="alert">{locale === "zh-CN" ? "清空失败，请重试。" : "Could not empty Trash. Try again."}</p> : null}
+        </section> : null}
+        <div className="project-trash-list">
+          {onRestore ? deletedProjects.map(project => <div className="project-trash-item" key={project.id}>
+            <span className="project-trash-copy" title={project.title ?? project.name}>
+              <strong>{project.title ?? project.name}</strong>
+              <small><em className="project-trash-kind is-project">{locale === "zh-CN" ? "项目" : "Project"}</em></small>
+            </span>
+            <button type="button" className="project-trash-restore" aria-label={`${locale === "zh-CN" ? "恢复项目" : "Restore project"} ${project.title ?? project.name}`} title={locale === "zh-CN" ? "恢复项目" : "Restore project"} disabled={emptying} onClick={() => onRestore(project.id)}><RotateCcw size={13} aria-hidden="true" /><span>{locale === "zh-CN" ? "恢复" : "Restore"}</span></button>
+          </div>) : null}
+          {onRestoreVersion ? deletedVersions.map(version => {
+            const full = versionLabels.get(version.id) ?? version.title, kind = !version.canvasId ? locale === "zh-CN" ? "未保存" : "Unsaved" : locale === "zh-CN" ? "版本" : "Version";
+            const label = `${full}${locale === "zh-CN" ? `（${kind}）` : ` (${kind.toLowerCase()})`}`;
+            const detail = full.startsWith(`${version.title} · `) ? full.slice(version.title.length + 3) : "";
+            return <div className="project-trash-item" key={version.id}>
+              <span className="project-trash-copy" title={label}>
+                <strong>{version.title}</strong>
+                <small><em className="project-trash-kind">{kind}</em>{detail ? <span>{detail}</span> : null}</small>
+              </span>
+              <button type="button" className="project-trash-restore" aria-label={`${locale === "zh-CN" ? "恢复版本" : "Restore version"} ${label}`} title={locale === "zh-CN" ? "恢复版本" : "Restore version"} disabled={emptying} onClick={() => onRestoreVersion(version.id)}><RotateCcw size={13} aria-hidden="true" /><span>{locale === "zh-CN" ? "恢复" : "Restore"}</span></button>
+            </div>;
+          }) : null}
+        </div>
+      </details> : null}
       {onSelectTask ? <TaskSidebarSection runs={tasks} activeId={activeTaskId} onSelect={onSelectTask} /> : null}
       <div className="map-sidebar-resize" role="separator" aria-label={locale === "zh-CN" ? "调整画布侧边栏宽度" : "Resize canvas sidebar"} aria-orientation="vertical" aria-valuemin={146} aria-valuemax={380} aria-valuenow={width} tabIndex={0} title={locale === "zh-CN" ? "拖动调整宽度，双击重置" : "Drag to resize, double-click to reset"}
         onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); resizeStart.current = { x: event.clientX, width }; event.currentTarget.setPointerCapture(event.pointerId); }}

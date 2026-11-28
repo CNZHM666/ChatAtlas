@@ -30,13 +30,20 @@ export interface EvidenceAttention { kind: "missing" | "settled" | "negation" | 
   /** The assertion in the visible prose that should be compared with the original. */
   claimExcerpt?: string }
 
+/** Whether a finding warrants asking for a review decision. Weak wording matches remain readable in source view. */
+export function evidenceRequiresConfirmation(attention: EvidenceAttention | undefined, sourceLocated = false): boolean {
+  if (!attention) return false;
+  return attention.kind === "settled" || attention.kind === "tentative" || attention.kind === "negation"
+    || !sourceLocated && (attention.kind === "unsupported" || attention.kind === "missing");
+}
+
 export function evidenceAttentionText(attention: EvidenceAttention, zh: boolean): string {
   const text: Record<EvidenceAttention["kind"], [string, string]> = {
     missing: ["引用的原话没有在原文里找到，请确认这句结论的来源", "The quoted words were not found in the original; check where this claim comes from"],
     settled: ["这句写成了已决定，但依据是 AI 建议，原文里没有你的确认", "This reads as decided, but its source is an AI proposal with no confirmation of yours"],
     negation: ["请对照原话与正文，核对同一项操作的限制和适用范围", "Compare the source and the Wiki wording for restrictions on the same action"],
     tentative: ["原话只是在考虑或建议，结论写得更肯定", "The quote only considers or suggests this; the claim states it firmly"],
-    approximate: ["这句是按措辞近似匹配到的原文，请确认它说的是同一件事", "Matched to this original by wording only; check it says the same thing"],
+    approximate: ["按措辞找到的相似原文", "Similar wording in the source"],
     partial: ["AI 核对：原文只支持一部分", "AI check: the original supports only part of this"],
     unsupported: ["AI 核对：原文没有说这个", "AI check: the original does not say this"],
   };
@@ -180,6 +187,27 @@ export function localMeaningProblem(claim: string, fullQuote: string | undefined
   if (!fullQuote || !statesSomething(claim)) return undefined;
   const sourceText = withoutRejectedQuotes(fullQuote);
   const restrictable = (text: string) => text.replace(CONDITION_PREFIX, "");
+  const claimVersion = version(claim);
+  if (claimVersion) {
+    const candidates = clauses(sourceText).filter(line => {
+      const label = version(line);
+      return label && label[0] === claimVersion[0] && negative(line) === negative(claim) && actionMatch(topicText(claim), topicText(line)) >= 3;
+    });
+    const mismatch = candidates.find(line => version(line) !== claimVersion);
+    if (mismatch && !candidates.some(line => version(line) === claimVersion)) {
+      return { kind: "negation", cue: mismatch, claimExcerpt: claim };
+    }
+  }
+  for (const line of claimSentences(claim, sourceText).split(/[。！？!?\n]|\.(?=\s|$)/u)) {
+    const conditional = line.match(/(?:只有|仅在|只在)\s*([^，,。]{2,45})[，,]?\s*才(?:能|可|会)?\s*([^。！？]+)/u);
+    const english = line.match(/^(.+?)\s+\bonly (?:if|when)\s+(.+)$/iu);
+    const condition = conditional?.[1] ?? english?.[2];
+    const predicate = conditional?.[2] ?? english?.[1];
+    if (!condition || !predicate || topicText(claim).replace(/\s/gu, "").includes(topicText(condition).replace(/\s/gu, ""))) continue;
+    if (actionMatch(topicText(claim), topicText(predicate)) >= 3) {
+      return { kind: "negation", cue: line.trim(), claimExcerpt: claim };
+    }
+  }
   // A list of what a version covers is checked item by item: the "不需要后端" next to it says nothing about its items.
   const scopeIssue = !negative(claim) && deferredItem(claim, sourceText);
   if (scopeIssue) return scopeIssue;

@@ -28,8 +28,7 @@ it("anchors on the exact original table and leaves nearby prose and similar tabl
  const view=render(<WorkspaceSourcePanel session={session} reference={reference} tableTarget={wikiTableSignature(table)} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
  await waitFor(()=>expect(view.container.querySelector("table[data-atlas-table-active]")).toHaveTextContent("矩阵问题3"));
  expect(view.container.querySelector("table[data-atlas-table-active]")?.parentElement).toHaveClass("workspace-source-table-scroll");
- expect(screen.getByLabelText("定位图例")).toHaveTextContent("原始表格");
- expect(within(screen.getByLabelText("定位图例")).queryByText("措辞相近")).toBeNull();
+ expect(screen.queryByLabelText("定位图例")).toBeNull();
  expect(screen.getByRole("button",{name:"来源"})).toBeVisible();
  expect(view.container.querySelector("table:first-of-type")).not.toHaveAttribute("data-atlas-table-active");
  expect(view.container.querySelector(".workspace-source-highlight")).toBeNull();
@@ -52,7 +51,7 @@ it.each([
   expect(markedRanges(marks).length).toBeGreaterThan(0);
   expect(Boolean(marks.get("atlas-original-similar")?.size)).toBe(approximate);
  });
- expect(screen.getByLabelText("定位图例")).toHaveTextContent("原话措辞相近同一轮的相关句");
+ expect(screen.getByText(claim)).toBeVisible();
  const ranges=markedRanges(marks);
  expect(ranges.map(range=>range.toString()).join('|')).toContain(wanted);
  expect(ranges.some(range=>range.startContainer.parentElement?.closest(selector))).toBe(true);
@@ -73,7 +72,7 @@ it("rejects a color quote for a static-animation claim and finds its short sourc
   expect(highlighted).toContain("保持静态");
   expect(highlighted).toContain("不要大量动画");
   expect(highlighted).not.toContain("默认中性灰");
-  expect(screen.getByText("措辞相近")).toBeVisible();
+  expect(screen.getByText("V0.1 保持静态，不大量动画。")).toBeVisible();
   expect(screen.queryByText("虚线标出措辞相近的原文。")).toBeNull();
 });
 
@@ -310,29 +309,30 @@ it("compares the restriction with the Wiki sentence and handles wording independ
  fireEvent.click(screen.getByRole("button",{name:"保留正文"}));expect(onHolder).toHaveBeenCalledWith(points[0],undefined);
 });
 
-it("offers the status behind a quiet link on a point that needs no answer",async()=>{
+it("offers direct one-click status pills on a point that needs no answer",async()=>{
  const session=projectSession();vi.mocked(readSessionSource).mockResolvedValue([original]);
  const reference={...session.evidence[0],excerpt:"首版支持预览。"},onHolder=vi.fn(),onPoint=vi.fn();
  const point={key:"a",claim:"首版支持预览",quote:"首版支持预览。",source:"aiProposal" as const,reference,references:[reference],placed:true,holder:"ai" as const};
  const points=[point,{...point,key:"b"}];
  render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文" points={points} pointIndex={0} onPoint={onPoint} onHolder={onHolder}/>);
  await waitFor(()=>expect(document.querySelector(".workspace-source-message.is-source-target")).toBeTruthy());
- expect(screen.queryByText("这句是你的决定吗？")).toBeNull();expect(screen.getByText("状态：").textContent).toContain("AI 建议");
- // The link offers the statuses themselves; nothing was flagged, so there is no question about the meaning.
- fireEvent.click(screen.getByRole("button",{name:"改状态"}));expect(screen.getByText("这句的状态")).toBeTruthy();expect(screen.queryByText("这句和原话意思一致吗？")).toBeNull();
- fireEvent.click(screen.getByRole("button",{name:"此前"}));
+ expect(screen.queryByText("这句是你的决定吗？")).toBeNull();
+ const statusBar=screen.getByRole("group",{name:"结论状态"});
+ expect(within(statusBar).getByRole("button",{name:"AI 建议"})).toHaveAttribute("aria-pressed","true");
+ fireEvent.click(within(statusBar).getByRole("button",{name:"早先方案"}));
  expect(onHolder).toHaveBeenCalledWith(point,"earlier");
  expect(onPoint).not.toHaveBeenCalled();
- expect(screen.queryByText("这句的状态")).toBeNull();
 });
 
-it("shows an answered point as recorded, without the flag banner or kind chip coming back",async()=>{
+it("shows an answered point as checked, without the flag banner or kind chip coming back",async()=>{
  const session=projectSession();vi.mocked(readSessionSource).mockResolvedValue([original]);
  const reference={...session.evidence[0],excerpt:"首版支持预览。"};
  const points=[{key:"a",claim:"首版支持预览",quote:"首版支持预览。",source:"aiProposal" as const,label:"AI 建议",reference,references:[reference],placed:false,holder:"decided" as const,checked:true,attention:{kind:"settled" as const}}];
  render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()} embedded returnLabel="返回上下文" points={points} pointIndex={0} onPoint={vi.fn()} onHolder={vi.fn()}/>);
  await waitFor(()=>expect(document.querySelector(".workspace-source-message.is-source-target")).toBeTruthy());
- expect(screen.getByText("已记录：").textContent).toContain("已定");
+ const statusBar=screen.getByRole("group",{name:"结论状态"});
+ expect(statusBar).toHaveTextContent("已核对");
+ expect(within(statusBar).getByRole("button",{name:"已定"})).toHaveAttribute("aria-pressed","true");
  expect(document.querySelector(".workspace-source-kind")).toBeNull();expect(document.querySelector(".workspace-source-attention")).toBeNull();expect(document.querySelector(".workspace-source-origin")).toBeNull();
 });
 
@@ -555,11 +555,12 @@ it("opens long context near the cited turn and expands it in either direction on
  const {container}=render(<WorkspaceSourcePanel session={session} reference={reference} zh onSelect={vi.fn()} onClose={vi.fn()}/>);
  await screen.findByText("消息 25");
  fireEvent.click(screen.getByRole("button",{name:"前后文"}));
- expect(container.querySelectorAll("[data-message-id]")).toHaveLength(11);
- expect(screen.queryByText("消息 19")).toBeNull();
- fireEvent.click(screen.getByRole("button",{name:"显示更早的消息"}));
- expect(screen.getByText("消息 19")).toBeVisible();
- fireEvent.click(screen.getByRole("button",{name:"显示更晚的消息"}));
- expect(screen.getByText("消息 31")).toBeVisible();
+ expect(container.querySelectorAll("[data-message-id]")).toHaveLength(5);
+ expect(screen.getByText("当前引用")).toBeVisible();
+ expect(screen.queryByText("消息 22")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:"展开更早的消息"}));
+ expect(screen.getByText("消息 21")).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"展开后续的消息"}));
+ expect(screen.getByText("消息 29")).toBeVisible();
  expect(screen.queryByText("消息 59")).toBeNull();
 });

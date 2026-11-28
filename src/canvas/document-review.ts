@@ -5,16 +5,25 @@ import { wikiChapterEvidencePoints } from "./wiki-evidence";
 import { needsConfirmation } from "./workspace-evidence-context";
 import { wikiChapterPage } from "./wiki-document";
 
-export function documentEvidenceReview(session: FocusSession, zh: boolean) {
+type ChapterReviewCount = { sectionId: string; count: number };
+const evidenceReviewCache = new WeakMap<FocusSession, Map<boolean, ChapterReviewCount[]>>();
+
+export function documentEvidenceReview(session: FocusSession, zh: boolean): ChapterReviewCount[] {
+  const cache = evidenceReviewCache.get(session) ?? new Map<boolean, ChapterReviewCount[]>();
+  const existing = cache.get(zh);
+  if (existing) return existing;
   if (!session.wikiKnowledge?.draft && !session.sections.some(section => section.claims?.some(claim => !claim.checked && !claim.markOnly))) return [];
   const { view, chapters } = projectKnowledgeReadingContext(session);
-  return chapters.flatMap(section => {
+  const review = chapters.flatMap(section => {
     if (!section.claims?.some(claim => !claim.checked && !claim.markOnly)) return [];
     const reading = projectKnowledgeReading(section, session, view, chapters, true);
     const page = wikiChapterPage(reading, session.evidence);
     const count = wikiChapterEvidencePoints({ ...reading, body: page.body }, session.evidence, zh).filter(needsConfirmation).length;
     return count ? [{ sectionId: section.id, count }] : [];
   });
+  cache.set(zh, review);
+  evidenceReviewCache.set(session, cache);
+  return review;
 }
 
 const LABELS: Record<WikiBlockIssue["code"], [string, string]> = {

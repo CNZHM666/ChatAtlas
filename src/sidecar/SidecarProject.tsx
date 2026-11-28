@@ -1,40 +1,37 @@
 import {useCallback,useEffect,useRef,useState} from "react";
 import {MessageSquare,RefreshCw,Download,X} from "lucide-react";
 import {SidecarHeader} from "./SidecarHeader";
-import {SidecarMemory,type MemoryView} from "./SidecarMemory";
 import {SidecarLibraryFooter} from "./SidecarLibraryFooter";
 import {SidecarProjectLinker} from "./SidecarProjectLinker";
 import {SidecarProjectWiki} from "./SidecarProjectWiki";
 import {sendSidecarMessage} from "./host";
 import type {FocusSession} from "../shared/focus-session";
-import type {Conversation,ConversationMessage} from "../shared/types";
+import type {Conversation} from "../shared/types";
 import type {AtlasMessage,CaptureCommandResponse,NavigationResponse} from "../shared/messages";
-import type {MessageSourceRange,ReaderSearchContext} from "../shared/message-location";
 import {getDatabase} from "../storage/db";
 import {listFocusSessions} from "../storage/focus-sessions";
 import {linkSidecarProject,unlinkSidecarProject} from "../storage/sidecar-links";
 import {savedFocusProjects} from "../canvas/focus-versions";
 import {isCurrentHydrationComplete} from "../sync/import-state";
-import {observeMessageSearchEvents} from "../search/message-search-events";
 import {WEB_CAPTURE_PLATFORMS} from "../shared/web-capture";
-import {platformName} from "../shared/platforms";
+import {conversationDisplayTitle,platformName} from "../shared/platforms";
 import {useNoticeDismissal} from "../shared/use-notice-dismissal";
 import {currentSourceChange,hasSourceChange,sourceChangeLabels,type SourceChange} from "../canvas/source-freshness";
 
 const updateNoticeKey=(projectId:string|undefined,conversationId:string)=>`atlas-sidecar-update:${JSON.stringify([projectId,conversationId])}`;
 
-export function SidecarProject({conversationId,conversationTitle="",zh,platformLabel,onToggleLanguage,canInsert=false}: {conversationId:string;conversationTitle?:string;zh:boolean;canInsert?:boolean;platformLabel?:string;onToggleLanguage?:()=>void}) {
+export function SidecarProject({conversationId,conversationTitle="",zh,platformLabel,onToggleLanguage}: {conversationId:string;conversationTitle?:string;zh:boolean;platformLabel?:string;onToggleLanguage?:()=>void}) {
  const [projects,setProjects]=useState<FocusSession[]>([]),[conversations,setConversations]=useState<Conversation[]>([]),[selected,setSelected]=useState<string>(),[loaded,setLoaded]=useState(false);
- const [busy,setBusy]=useState(false),[error,setError]=useState(""),[status,setStatus]=useState(""),[view,setView]=useState<MemoryView>("home");
+ const [busy,setBusy]=useState(false),[error,setError]=useState(""),[status,setStatus]=useState("");
  const alive=useRef(true),sending=useRef(false),openingProject=useRef(false),refreshRevision=useRef(0),currentConversationId=useRef(conversationId);currentConversationId.current=conversationId;
  const label=(cn:string,en:string)=>zh?cn:en;
- useEffect(()=>observeMessageSearchEvents(),[]);
  useEffect(()=>{setStatus("");setError("");setSelected(undefined);},[conversationId]);
  // A confirmation is read once: it fades after a few seconds and can be dismissed at once.
  useEffect(()=>{if(!status)return;const timer=window.setTimeout(()=>setStatus(""),5000);return()=>window.clearTimeout(timer);},[status]);
  const current=conversations.find(item=>item.id===conversationId),currentImported=Boolean(current&&isCurrentHydrationComplete(current));
  const pageCapture=WEB_CAPTURE_PLATFORMS.some(site=>conversationId.startsWith(`${site.id}:`));
- const title=current?.title||conversationTitle||label("当前 AI 对话","Current AI conversation");
+ const currentPlatform=current?.platform??(platformLabel||(pageCapture?conversationId.split(":")[0]:"chatgpt"));
+ const title=conversationDisplayTitle(current?.title||conversationTitle,currentPlatform)||label("当前 AI 对话","Current AI conversation");
  const isLinked=(session:FocusSession)=>Boolean(conversationId&&(session.sourceConversationIds.includes(conversationId)||session.sidecarConversationIds?.includes(conversationId)));
  const project=projects.find(item=>item.id===selected),related=projects.filter(isLinked);
  const projectRef=useRef(project);projectRef.current=project;
@@ -102,9 +99,9 @@ export function SidecarProject({conversationId,conversationTitle="",zh,platformL
   // Locale is stable for this isolated frame.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh, conversationId, zh]);
-  const open = async (source?: Conversation, message?: ConversationMessage, sourceRange?: MessageSourceRange, search?: ReaderSearchContext) => {
+  const open = async (source?: Conversation) => {
     setError("");
-    try { const result = await sendSidecarMessage(source ? { type: "ATLAS_OPEN_CONVERSATION", conversationId: source.id, ...(message ? { messageId: message.id, sourceRange, ...(search ? { search } : {}) } : {}) } : { type: "ATLAS_OPEN" }) as NavigationResponse; if (!result?.ok) throw new Error(label("无法打开 ChatAtlas，请重试。", "Unable to open ChatAtlas. Try again.")); }
+    try { const result = await sendSidecarMessage(source ? { type: "ATLAS_OPEN_CONVERSATION", conversationId: source.id } : { type: "ATLAS_OPEN" }) as NavigationResponse; if (!result?.ok) throw new Error(label("无法打开 ChatAtlas，请重试。", "Unable to open ChatAtlas. Try again.")); }
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
   };
   const updateConversation = async () => {
@@ -164,7 +161,7 @@ export function SidecarProject({conversationId,conversationTitle="",zh,platformL
   const wiki=project&&linked&&project.sections.some(section=>section.body.trim())
     ? <SidecarProjectWiki key={projectKey} project={project} chapterId={chapterId} onRead={readChapter} zh={zh} onOpen={sectionId=>void openProject(project.id,sectionId)}/>
     : undefined;
-  return <main className="sidecar-project" onKeyDown={event=>{if(event.key!=="Escape")return;if(chapterId)readChapter();else if(view!=="home")setView("home");else if(parent!==window)parent.postMessage({type:"ATLAS_SIDECAR_COLLAPSE"},"https://chatgpt.com");}}>
+  return <main className="sidecar-project" onKeyDown={event=>{if(event.key!=="Escape")return;if(chapterId)readChapter();else if(parent!==window)parent.postMessage({type:"ATLAS_SIDECAR_COLLAPSE"},"https://chatgpt.com");}}>
     {conversationId?<section className="sidecar-current sidecar-current-bar" aria-label={label("当前对话", "Current conversation")}>
       <div className="sidecar-current-title"><MessageSquare size={16}/><div className="sidecar-current-copy">{current?<button className="sidecar-current-name" title={title} aria-label={label("阅读当前对话","Read current conversation")} onClick={()=>void open(current)}><strong>{title}</strong></button>:<strong title={title}>{title}</strong>}<small>{platformLabel||(current?platformName(current.platform,zh?"zh-CN":"en"):"")||(conversationId?"ChatGPT":label("未识别当前对话","No conversation detected"))}{conversationId?` · ${currentImported?label("已导入","Imported"):label("未同步","Not synced")}`:""}</small></div><button className={`sidecar-update-button${currentImported?" is-imported":""}`} aria-busy={busy} aria-label={busy?label("正在同步对话","Syncing conversation"):currentImported?label("更新对话","Update chat"):label("导入当前对话","Import this chat")} title={currentImported?label("更新对话","Update chat"):label("导入当前对话","Import this chat")} disabled={busy||!loaded||!conversationId} onClick={()=>void updateConversation()}>{currentImported?<RefreshCw size={15}/>:<Download size={15}/>}</button>{onToggleLanguage?<SidecarHeader zh={zh} onToggleLanguage={onToggleLanguage} showBrand={false}/>:null}</div>
       {noticeRevision&&noticeRevision!==savedDismissal&&project?<div className="sidecar-pending-update">
@@ -176,5 +173,5 @@ export function SidecarProject({conversationId,conversationTitle="",zh,platformL
       </div>:null}
       <div className="sidecar-project-association" hidden={!projects.length}><SidecarProjectLinker key={conversationId} zh={zh} projects={projects} linkedIds={related.map(item=>item.id)} organizedIds={related.filter(item=>item.sourceConversationIds.includes(conversationId)).map(item=>item.id)} onUnlink={unlink} selectedId={selected} disabled={busy||!loaded||!conversationId} onChoose={async item=>{if(isLinked(item)){setSelected(item.id);return true;}return link(item.id);}}/></div>
     </section>:null}
- <div className="sidecar-project-body">{!loaded?<p role="status">{label("读取本地知识…","Loading local knowledge…")}</p>:null}<SidecarMemory conversations={conversations} conversationId={conversationId} zh={zh} view={view} onView={setView} projects={projects} projectId={projectId} canInsert={canInsert} onOpen={(source,message,range,search)=>void open(source,message,range,search)} projectConversationIds={project?[...new Set([...project.sourceConversationIds,...project.sidecarConversationIds??[]])]:[]} toolbarActions={!conversationId&&onToggleLanguage?<SidecarHeader zh={zh} onToggleLanguage={onToggleLanguage} showBrand={false}/>:undefined} emptyContent={wiki} readingWiki={Boolean(chapterId)&&view==="home"}/>{error?<p role="alert" className="sidecar-project-error">{error}</p>:null}{status?<p role="status" className="sidecar-project-status"><span>{status}</span><button type="button" aria-label={label("关闭提示","Dismiss")} onClick={()=>setStatus("")}><X size={14} aria-hidden="true"/></button></p>:null}</div><SidecarLibraryFooter zh={zh} count={conversations.filter(item=>isCurrentHydrationComplete(item)).length} onOpen={()=>void open()}/></main>;
+ <div className="sidecar-project-body">{!loaded?<p role="status">{label("读取本地知识…","Loading local knowledge…")}</p>:null}{!conversationId&&onToggleLanguage?<SidecarHeader zh={zh} onToggleLanguage={onToggleLanguage} showBrand={false}/>:null}{wiki}{error?<p role="alert" className="sidecar-project-error">{error}</p>:null}{status?<p role="status" className="sidecar-project-status"><span>{status}</span><button type="button" aria-label={label("关闭提示","Dismiss")} onClick={()=>setStatus("")}><X size={14} aria-hidden="true"/></button></p>:null}</div><SidecarLibraryFooter zh={zh} count={conversations.filter(item=>isCurrentHydrationComplete(item)).length} onOpen={()=>void open()}/></main>;
 }

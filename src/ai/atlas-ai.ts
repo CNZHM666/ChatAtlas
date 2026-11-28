@@ -70,6 +70,7 @@ const NETWORK_RETRY_DELAYS_MS = [2000, 8000, 20000];
  * it asks, at most this long. */
 const BUSY_RETRY_MAX_MS = 30_000;
 import { aiRetryTiming } from "./retry-timing";
+import { startWorkbenchRequest } from "./workbench-run-activity";
 export { aiRetryTiming };
 /** Streaming providers send response headers within about 4 s of accepting a request.
  * A failure with no header inside this window means the connection never opened: on
@@ -217,6 +218,11 @@ class DefaultAtlasAI implements AtlasAI {
 
   private async runTask<T>(role: AITaskRole, request: StructuredAIRequest<T>, signal?: AbortSignal): Promise<T> {
     const preparationStarted=performance.now(), operationId=request.trace?.operationId??crypto.randomUUID();
+    const parentRunId = request.runId ?? this.runId;
+    const parent = request.taskType === "question_snapshot"
+      ? await (await getDatabase()).get("organizationRuns", parentRunId).catch(() => undefined) : undefined;
+    const relatedRunId = parent?.pipelineSpans?.some(span => span.phase === "wiki:generation") ? parentRunId : undefined;
+    const runId = relatedRunId ? `question-snapshot:${relatedRunId}` : parentRunId;
     signal?.throwIfAborted();
     // Language is part of the request and cache identity, including older
     // chapter/profile/composition tasks. Never rewrite source text or IDs.
@@ -235,8 +241,8 @@ class DefaultAtlasAI implements AtlasAI {
     const provider = useEconomy ? this.economyProvider ?? this.provider : this.provider;
     const modelId = provider.modelId ?? this.modelId;
     const identity=classifyAIRequest(request.taskType,request.prompt,request.trace);
-    const rejectInput = async (message: string, code: AILocalInputError["code"]) => {
-      await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId: this.runId, ...identity,operationId,parentOperationId:request.trace?.parentOperationId, recoveryReason:request.trace?.recoveryReason, recoveryDepth:request.trace?.recoveryDepth,taskType: request.taskType ?? "other", providerId: this.id, modelId, conversationIds: request.conversationIds ?? [], inputTokens: 0, outputTokens: 0, tokenSource: "provider", status: "failed", failureOrigin:"local",requestSent:false,errorCode: "TASK_INPUT_LIMIT", costCny: 0, attempt: 1, durationMs: 0 }).catch(() => undefined);
+    const rejectInput = async (message: string, code: AILocalInputError["code"], estimatedInputTokens?: number, inputTokenLimit?: number) => {
+      await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId, relatedRunId, ...identity,operationId,parentOperationId:request.trace?.parentOperationId, recoveryReason:request.trace?.recoveryReason, recoveryDepth:request.trace?.recoveryDepth, stage: typeof routed?.presentation === "string" ? routed.presentation : undefined, budgetedInputTokens: estimatedInputTokens, inputTokenLimit, taskType: request.taskType ?? "other", providerId: this.id, modelId, conversationIds: request.conversationIds ?? [], inputTokens: 0, outputTokens: 0, tokenSource: "provider", status: "failed", failureOrigin:"local",requestSent:false,errorCode: "TASK_INPUT_LIMIT", costCny: 0, attempt: 1, durationMs: 0 }).catch(() => undefined);
       throw new AILocalInputError(message, code);
     };
     const inputCharacters = request.system.length + request.prompt.length;
@@ -245,7 +251,7 @@ class DefaultAtlasAI implements AtlasAI {
     const session = this.id === "atlas-demo" ? await atlasApiClient.getSession(signal, focusTask, focusTask ? CURRENT_FOCUS_TASK_VERSION : 0) : undefined;
     const payload = taskData(request.prompt);
     const stage = payload?.coverage as { stage?: string; final?: boolean } | undefined;
-    const diagnostic = { ...identity,operationId,parentOperationId:request.trace?.parentOperationId,recoveryReason:request.trace?.recoveryReason,recoveryDepth:request.trace?.recoveryDepth,schedulingMs:request.trace?.schedulingMs, stage: stage?.stage ? `${stage.stage}${stage.final ? ":final" : ""}` : [payload?.presentation, payload?.stage].filter(item => typeof item === "string").join(":") || undefined, taskVersion: session?.taskVersion ?? `client-${POLICY_VERSION}`, tokenEstimateVersion: session && !session.features?.contentTokenEstimates ? "1" : TOKEN_ESTIMATE_VERSION, coveragePlan: request.coveragePlan };
+    const diagnostic = { ...identity, relatedRunId,operationId,parentOperationId:request.trace?.parentOperationId,recoveryReason:request.trace?.recoveryReason,recoveryDepth:request.trace?.recoveryDepth,schedulingMs:request.trace?.schedulingMs, stage: stage?.stage ? `${stage.stage}${stage.final ? ":final" : ""}` : [payload?.presentation, payload?.stage].filter(item => typeof item === "string").join(":") || undefined, taskVersion: session?.taskVersion ?? `client-${POLICY_VERSION}`, tokenEstimateVersion: session && !session.features?.contentTokenEstimates ? "1" : TOKEN_ESTIMATE_VERSION, coveragePlan: request.coveragePlan };
     if (session && focusTask && !(Number(session.taskVersion) >= CURRENT_FOCUS_TASK_VERSION)) throw new DemoApiError("DEMO_SERVICE_OUTDATED", 409);
     const taskVersion = session ? `${session.taskVersion ?? "1"}:${JSON.stringify(session.models ?? {})}` : "";
     const budgetModel = session?.models ? economyTask(request.taskType ?? "other", taskData(request.prompt)) ? session.models.economy : session.models.main : modelId;
@@ -259,7 +265,8 @@ class DefaultAtlasAI implements AtlasAI {
     const wikiStage = request.taskType === "other" && !session && isSizedWikiStage(payload?.presentation) ? payload.presentation : undefined;
     const reasoningReserve = wikiStage ? generationProfile(this.baseUrl, budgetModel).reasoningReserve : 0;
     const inputLimit = Math.min(budget.maxInputTokens, provider.capabilities?.maxInputTokens ?? Infinity);
-    if (budget.inputTokens * inputScale > inputLimit) await rejectInput(`AI task exceeds its input budget (${budget.inputTokens}/${inputLimit} estimated tokens). Reduce sources or split this task.`, "LOCAL_INPUT_BUDGET");
+    const estimatedInput = Math.ceil(budget.inputTokens * inputScale);
+    if (estimatedInput > inputLimit) await rejectInput(`AI task exceeds its input budget (${estimatedInput}/${inputLimit} estimated tokens). Reduce sources or split this task.`, "LOCAL_INPUT_BUDGET", estimatedInput, inputLimit);
     const preparationMs=Math.round(performance.now()-preparationStarted), cacheStarted=performance.now();
     const { hash, id } = await this.cacheIdentity(role, request, modelId, taskVersion);
     const db = await getDatabase();
@@ -272,7 +279,7 @@ class DefaultAtlasAI implements AtlasAI {
       // The provider already validated and normalized this value before it was stored.
       // The key includes the prompt schema and analysis version; re-validating it as raw model JSON breaks cache hits.
       this.cacheHits += 1;
-      await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId: this.runId, ...diagnostic, taskType: request.taskType ?? "other", providerId: this.id, modelId, conversationIds: [...new Set(request.conversationIds ?? [])], inputTokens: 0, outputTokens: 0, tokenSource: "provider", status: "cached", cacheLayer:"result",timing:{preparationMs,cacheLookupMs}, costCny: 0, pendingCostCny: 0, attempt: 1, durationMs: 0 }).catch(() => undefined);
+      await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId, ...diagnostic, taskType: request.taskType ?? "other", providerId: this.id, modelId, conversationIds: [...new Set(request.conversationIds ?? [])], inputTokens: 0, outputTokens: 0, tokenSource: "provider", status: "cached", cacheLayer:"result",timing:{preparationMs,cacheLookupMs}, costCny: 0, pendingCostCny: 0, attempt: 1, durationMs: 0 }).catch(() => undefined);
       request.onCacheHit?.();
       return cached.result as T;
     }
@@ -286,7 +293,7 @@ class DefaultAtlasAI implements AtlasAI {
       const result = await pending.promise;
       signal?.throwIfAborted();
       this.cacheHits += 1;
-      await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId: this.runId, ...diagnostic, taskType: request.taskType ?? "other", providerId: this.id, modelId, conversationIds: [...new Set(request.conversationIds ?? [])], inputTokens: 0, outputTokens: 0, tokenSource: "provider", status: "cached", cacheLayer:"inflight",timing:{preparationMs,cacheLookupMs,clientMs:Math.round(performance.now()-waitStarted)}, costCny: 0, pendingCostCny: 0, attempt: 1, durationMs: 0 }).catch(() => undefined);
+      await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId, ...diagnostic, taskType: request.taskType ?? "other", providerId: this.id, modelId, conversationIds: [...new Set(request.conversationIds ?? [])], inputTokens: 0, outputTokens: 0, tokenSource: "provider", status: "cached", cacheLayer:"inflight",timing:{preparationMs,cacheLookupMs,clientMs:Math.round(performance.now()-waitStarted)}, costCny: 0, pendingCostCny: 0, attempt: 1, durationMs: 0 }).catch(() => undefined);
       request.onCacheHit?.();
       return structuredClone(result) as T;
     }
@@ -298,7 +305,7 @@ class DefaultAtlasAI implements AtlasAI {
       let repairStructure = Boolean(request.repair);
       let repairContent: string | undefined;
       let repairFields: StructuredAIRequest<T>["repairFields"];
-      let homeValidationFields: string[] = [];
+      let validationFields: string[] = [];
       let lastBackoffMs=0,quietResends=0,budgetResends=0;
       for (let attempt = 0; attempt < (request.maxAttempts ?? 2); attempt += 1) {
         signal?.throwIfAborted();
@@ -310,13 +317,21 @@ class DefaultAtlasAI implements AtlasAI {
         const timing=()=>({preparationMs:attempt===0?preparationMs:0,cacheLookupMs:attempt===0?cacheLookupMs:0,validationMs:Math.round(validationMs),cacheWriteMs,queueMs:transport.queueMs,responseMs:transport.responseMs,backoffMs:lastBackoffMs,clientMs:Math.max(0,Math.round((finishedAt??performance.now())-startedAt)-(transport.queueMs??0)-(transport.responseMs??0)-Math.round(validationMs))});
         let lastProgress = -Infinity;
         const usageAfter = (): ProviderUsageSnapshot | undefined => receipt ? { requests: 1, reportedRequests: 1, inputTokens: receipt.inputTokens, outputTokens: receipt.outputTokens, costCny: receipt.costCny, pendingCostCny: receipt.pendingCostCny, cacheHits: Number(receipt.cacheHit), lastModelId: receipt.modelId, lastRequestId: receipt.requestId, ...(receipt.cachedInputTokens === undefined ? {} : { cachedInputTokens: receipt.cachedInputTokens }) } : provider.capabilities?.requestUsage ? undefined : provider.getUsageSnapshot?.();
-        const system = `${request.system}${attempt && repairStructure ? "\nYour previous response failed schema validation. Repair it once and return only a schema-valid JSON object." : ""}${attempt && homeValidationFields.length ? `\nInvalid fields: ${homeValidationFields.join(", ")}. Follow expectedShape and the supplied IDs exactly. Return empty optional fields when unused.` : ""}`;
+        const sidecarUpdate = data?.presentation === "sidecar_project_update";
+        // Spell out the existing validator's bounds at the provider boundary so valid cached batches still match.
+        const sidecarLimits = sidecarUpdate
+          ? "\nUse at most 100 characters for title and 700 for text. For quote, copy 5–600 consecutive characters from one discussion entry in its original language, without ellipses or added quotation marks. Cite that entry's ID. Prior context and the existing document are context only. Use target only for an exact ID from existing. Omit it for a new section."
+          : "";
+        const fieldGuidance = sidecarUpdate
+          ? "Correct these fields using the documented shape, length limits and supplied IDs."
+          : "Follow expectedShape and the supplied IDs exactly. Return empty optional fields when unused.";
+        const system = `${request.system}${sidecarLimits}${attempt && repairStructure ? "\nYour previous response failed schema validation. Repair it once and return only a schema-valid JSON object." : ""}${attempt && validationFields.length ? `\nInvalid fields: ${validationFields.join(", ")}. ${fieldGuidance}` : ""}`;
         const startedAt = performance.now();
         const attemptRequest = { ...wireRequest, priority: request.priority ?? (request.taskType === "project_query_plan" || data?.presentation === "project_query" ? 2 : stage?.stage?.startsWith("structure:") ? 0 : 1), repair: repairStructure, ...(repairContent === undefined ? {} : { repairContent,repairFields }) };
         budget = requestBudget({ ...attemptRequest, system }, budgetModel, this.baseUrl, false, Boolean(session && !session.features?.contentTokenEstimates));
         const inputTokensEstimated = Math.ceil(budget.inputTokens * inputScale);
         const inputTokenLimit = Math.min(budget.maxInputTokens, provider.capabilities?.maxInputTokens ?? Infinity);
-        if (inputTokensEstimated > inputTokenLimit) await rejectInput(`AI task exceeds its input budget (${inputTokensEstimated}/${inputTokenLimit} estimated tokens)`, "LOCAL_INPUT_BUDGET");
+        if (inputTokensEstimated > inputTokenLimit) await rejectInput(`AI task exceeds its input budget (${inputTokensEstimated}/${inputTokenLimit} estimated tokens)`, "LOCAL_INPUT_BUDGET", inputTokensEstimated, inputTokenLimit);
         const plannedOutputTokens = Math.min(budget.maxOutputTokens, request.maxOutputTokens ?? Infinity);
         const predictedOutputTokens = wikiStage && !request.trace?.recoveryReason && !budgetResends && !attempt
           ? predictedWikiOutput(this.outputSamples, this.id, modelId, wikiStage, plannedOutputTokens) : plannedOutputTokens;
@@ -324,15 +339,22 @@ class DefaultAtlasAI implements AtlasAI {
           (provider.capabilities?.maxContextTokens ?? Infinity) - inputTokensEstimated - 256);
         const outputTokenLimit = Math.min(predictedOutputTokens + reasoningReserve, outputCeiling);
         if (outputTokenLimit < (wikiStage ? Math.min(384, plannedOutputTokens) + reasoningReserve : 1)) {
-          await rejectInput("The model context has insufficient room for a complete response", "LOCAL_INPUT_BUDGET");
+          await rejectInput("The model context has insufficient room for a complete response", "LOCAL_INPUT_BUDGET", inputTokensEstimated, inputTokenLimit);
         }
-        const limits = { inputTokenLimit, plannedOutputTokens, predictedOutputTokens, outputTokenLimit };
+        const limits = { inputTokenLimit, plannedOutputTokens, predictedOutputTokens, outputTokenLimit, budgetedInputTokens: inputTokensEstimated, inputBudgetScale: inputScale };
         const requestAttempt = attempt + quietResends + budgetResends + 1;
         const requestStartedAt = Date.now();
+        const activity = startWorkbenchRequest(runId, { operationId, operation: identity.operation, modelId, attempt: requestAttempt, startedAt: requestStartedAt });
+        const onResponseText = activity ? (value: string) => {
+          activity.excerpt = value.slice(-2000);
+          activity.outputLength = value.length;
+          request.onResponseText?.(value);
+        } : request.onResponseText;
         try {
           this.onRequestState?.("waiting_model");
-          const result = await provider.generateStructured({ ...attemptRequest, validate:value=>{const validationStarted=performance.now();try{return attemptRequest.validate(value);}finally{validationMs+=performance.now()-validationStarted;}}, onResponseText: request.onResponseText, signal: signal ?? request.signal, system, runId: this.runId, maxOutputTokens: outputTokenLimit, onUsage: (usage) => { receipt = usage; request.onUsage?.(usage); }, onDiagnostics: (value) => {
+          const result = await provider.generateStructured({ ...attemptRequest, validate:value=>{if(activity)activity.state="validating";const validationStarted=performance.now();try{return attemptRequest.validate(value);}finally{validationMs+=performance.now()-validationStarted;}}, onResponseText, signal: signal ?? request.signal, system, runId, maxOutputTokens: outputTokenLimit, onUsage: (usage) => { receipt = usage; request.onUsage?.(usage); }, onDiagnostics: (value) => {
             transport = {...transport,...value}; request.onDiagnostics?.(value);
+            if (activity) activity.diagnostics = transport;
             if ((value.receivedCharacters ?? 0) > 0 && performance.now() - lastProgress >= 500 && !signal?.aborted) {
               lastProgress = performance.now(); this.onRequestState?.("waiting_model", value);
             }
@@ -348,7 +370,7 @@ class DefaultAtlasAI implements AtlasAI {
           signal?.throwIfAborted();
           const after = usageAfter();
           const reported = Boolean(before && after && after.reportedRequests > before.reportedRequests);
-          if (reported && receipt) recordTokenSample(budgetModel, budget.inputTokens, receipt.inputTokens);
+          if (receipt && !receipt.cacheHit) recordTokenSample(budgetModel, budget.inputTokens, receipt.inputTokens, diagnostic.stage);
           if (wikiStage && receipt && !receipt.cacheHit) recordWikiOutput(this.id, modelId, wikiStage, plannedOutputTokens,
             receipt.outputTokens - (transport.reasoningTokens ?? 0));
 
@@ -361,7 +383,7 @@ class DefaultAtlasAI implements AtlasAI {
             if (focusTask && (stage?.final || !stage)) this.finalResults.set(id, createdAt);
           }
           cacheWriteMs=Math.round(performance.now()-cacheWriteStarted);
-          await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId: this.runId, ...diagnostic, ...limits, ...transport, timing:timing(), estimatedInputTokens: budget.inputTokens, ...(receipt?.cachedInputTokens === undefined ? {} : { cachedInputTokens: receipt.cachedInputTokens }), requestStartedAt, durationMs: Math.round(finishedAt-startedAt), taskType: request.taskType ?? "other", providerId: this.id, modelId: after?.lastModelId ?? modelId, requestId: after?.lastRequestId ?? transport.requestId, conversationIds: [...new Set(request.conversationIds ?? [])], inputTokens: reported ? Math.max(0, after!.inputTokens - before!.inputTokens) : budget.inputTokens, outputTokens: reported ? Math.max(0, after!.outputTokens - before!.outputTokens) : estimateTokens(result), tokenSource: reported ? "provider" : "estimated", status: (after?.cacheHits ?? 0) > (before?.cacheHits ?? 0) ? "cached" : "completed", costCny: after?.costCny === undefined ? undefined : after.costCny - (before?.costCny ?? 0), pendingCostCny: after?.pendingCostCny === undefined ? undefined : after.pendingCostCny - (before?.pendingCostCny ?? 0), attempt: requestAttempt }).catch(() => undefined);
+          await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId, ...diagnostic, ...limits, ...transport, timing:timing(), estimatedInputTokens: budget.inputTokens, ...(receipt?.cachedInputTokens === undefined ? {} : { cachedInputTokens: receipt.cachedInputTokens }), requestStartedAt, durationMs: Math.round(finishedAt-startedAt), taskType: request.taskType ?? "other", providerId: this.id, modelId: after?.lastModelId ?? modelId, requestId: after?.lastRequestId ?? transport.requestId, conversationIds: [...new Set(request.conversationIds ?? [])], inputTokens: reported ? Math.max(0, after!.inputTokens - before!.inputTokens) : budget.inputTokens, outputTokens: reported ? Math.max(0, after!.outputTokens - before!.outputTokens) : estimateTokens(result), tokenSource: reported ? "provider" : "estimated", status: (after?.cacheHits ?? 0) > (before?.cacheHits ?? 0) ? "cached" : "completed", costCny: after?.costCny === undefined ? undefined : after.costCny - (before?.costCny ?? 0), pendingCostCny: after?.pendingCostCny === undefined ? undefined : after.pendingCostCny - (before?.pendingCostCny ?? 0), attempt: requestAttempt }).catch(() => undefined);
           this.concurrencyControl.success();
           return result;
         } catch (error) {
@@ -369,11 +391,12 @@ class DefaultAtlasAI implements AtlasAI {
           if (error instanceof AIProviderResponseError && ["PROVIDER_OUTPUT_TRUNCATED", "PROVIDER_STREAM_INCOMPLETE"].includes(error.code)) request.onResponseText?.("");
           const after = usageAfter();
           const reported = Boolean(before && after && after.reportedRequests > before.reportedRequests);
-          if (reported && receipt) recordTokenSample(budgetModel, budget.inputTokens, receipt.inputTokens);
-          await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId: this.runId, ...diagnostic, ...limits, ...transport, timing:timing(), estimatedInputTokens: budget.inputTokens, ...(receipt?.cachedInputTokens === undefined ? {} : { cachedInputTokens: receipt.cachedInputTokens }), requestStartedAt, durationMs: Math.round(performance.now() - startedAt), taskType: request.taskType ?? "other", providerId: this.id, modelId: after?.lastModelId ?? modelId, requestId: after?.lastRequestId ?? transport.requestId ?? (error instanceof DemoApiError || error instanceof AIProviderHttpError || error instanceof AIProviderResponseError ? error.requestId : undefined), conversationIds: [...new Set(request.conversationIds ?? [])], inputTokens: reported ? Math.max(0, after!.inputTokens - before!.inputTokens) : 0, outputTokens: reported ? Math.max(0, after!.outputTokens - before!.outputTokens) : 0, tokenSource: reported ? "provider" : "unavailable", costCny: after?.costCny === undefined ? undefined : after.costCny - (before?.costCny ?? 0), pendingCostCny: after?.pendingCostCny === undefined ? undefined : after.pendingCostCny - (before?.pendingCostCny ?? 0), status: "failed", failureOrigin:signal?.aborted?undefined:failureOrigin(error,request.prompt), citationDiagnostics: error instanceof AIProviderValidationError ? error.citationDiagnostics : undefined, validationPaths: error instanceof AIProviderValidationError ? error.fieldPaths : undefined, claimValidation:error instanceof AIProviderValidationError?error.wikiClaimIssues:undefined, directoryValidation:directoryValidationCounts(error), ownershipValidation: error instanceof AIProviderValidationError ? error.wikiOwnershipDetails : undefined, errorCode: error instanceof DemoApiError || error instanceof AIProviderResponseError || error instanceof AIProviderHttpError || error instanceof AIProviderValidationError ? error.code : error instanceof TypeError ? "NETWORK_USAGE_UNKNOWN" : signal?.aborted ? "CANCELLED" : error instanceof Error && /Incomplete history field verification/u.test(error.message) ? "HISTORY_VERIFICATION_INCOMPLETE" : error instanceof Error && /(?:Invalid|Incomplete|Missing|changed stage identity).*?(?:history|version)|(?:History|Version).*?(?:Invalid|Incomplete|Missing|changed stage identity)/iu.test(error.message) ? "HISTORY_SCHEMA_INVALID" : error instanceof Error && /(?:evidence|quote|claim)/iu.test(error.message) ? "SOURCE_EVIDENCE_INVALID" : "STRUCTURE_OR_PROVIDER_ERROR", attempt: requestAttempt }).catch(() => undefined);
+          if (receipt && !receipt.cacheHit) recordTokenSample(budgetModel, budget.inputTokens, receipt.inputTokens, diagnostic.stage);
+          await recordAIUsage({ id: crypto.randomUUID(), createdAt: Date.now(), runId, ...diagnostic, ...limits, ...transport, timing:timing(), estimatedInputTokens: budget.inputTokens, ...(receipt?.cachedInputTokens === undefined ? {} : { cachedInputTokens: receipt.cachedInputTokens }), requestStartedAt, durationMs: Math.round(performance.now() - startedAt), taskType: request.taskType ?? "other", providerId: this.id, modelId: after?.lastModelId ?? modelId, requestId: after?.lastRequestId ?? transport.requestId ?? (error instanceof DemoApiError || error instanceof AIProviderHttpError || error instanceof AIProviderResponseError ? error.requestId : undefined), conversationIds: [...new Set(request.conversationIds ?? [])], inputTokens: reported ? Math.max(0, after!.inputTokens - before!.inputTokens) : 0, outputTokens: reported ? Math.max(0, after!.outputTokens - before!.outputTokens) : 0, tokenSource: reported ? "provider" : "unavailable", costCny: after?.costCny === undefined ? undefined : after.costCny - (before?.costCny ?? 0), pendingCostCny: after?.pendingCostCny === undefined ? undefined : after.pendingCostCny - (before?.pendingCostCny ?? 0), status: "failed", failureOrigin:signal?.aborted?undefined:failureOrigin(error,request.prompt), citationDiagnostics: error instanceof AIProviderValidationError ? error.citationDiagnostics : undefined, validationPaths: error instanceof AIProviderValidationError ? error.fieldPaths : undefined, claimValidation:error instanceof AIProviderValidationError?error.wikiClaimIssues:undefined, directoryValidation:directoryValidationCounts(error), ownershipValidation: error instanceof AIProviderValidationError ? error.wikiOwnershipDetails : undefined, errorCode: error instanceof DemoApiError || error instanceof AIProviderResponseError || error instanceof AIProviderHttpError || error instanceof AIProviderValidationError ? error.code : error instanceof TypeError ? "NETWORK_USAGE_UNKNOWN" : signal?.aborted ? "CANCELLED" : error instanceof Error && /Incomplete history field verification/u.test(error.message) ? "HISTORY_VERIFICATION_INCOMPLETE" : error instanceof Error && /(?:Invalid|Incomplete|Missing|changed stage identity).*?(?:history|version)|(?:History|Version).*?(?:Invalid|Incomplete|Missing|changed stage identity)/iu.test(error.message) ? "HISTORY_SCHEMA_INVALID" : error instanceof Error && /(?:evidence|quote|claim)/iu.test(error.message) ? "SOURCE_EVIDENCE_INVALID" : "STRUCTURE_OR_PROVIDER_ERROR", attempt: requestAttempt }).catch(() => undefined);
           failure = error;
-          if (["home_task_plan", "home_task_review"].includes(String(data?.presentation)) && error instanceof AIProviderValidationError) {
-            homeValidationFields = (error.fieldPaths ?? []).filter(path => /^[a-zA-Z.[\]0-9_]{1,100}$/u.test(path)).slice(0, 8);
+          if (activity) activity.state = "finished";
+          if (["home_task_plan", "home_task_review", "sidecar_project_update"].includes(String(data?.presentation)) && error instanceof AIProviderValidationError) {
+            validationFields = (error.fieldPaths ?? []).filter(path => /^[a-zA-Z.[\]0-9_]{1,100}$/u.test(path)).slice(0, 8);
           }
           if (error instanceof AIProviderHttpError && error.status === 429 || error instanceof DemoApiError && ["RATE_LIMITED", "PROVIDER_BUSY"].includes(error.code)) this.concurrencyControl.rateLimited();
           signal?.throwIfAborted();

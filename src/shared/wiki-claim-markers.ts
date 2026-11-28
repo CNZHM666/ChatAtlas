@@ -1,8 +1,9 @@
-import type {Root,Paragraph,PhrasingContent,RootContent} from "mdast";
+import type {Root,Paragraph,TableCell,PhrasingContent,RootContent} from "mdast";
 
 export const WIKI_CLAIM_MARKER="#atlas-claim-";
 export interface WikiClaimMarkerPoint {key:string;phrases:string[];approximate?:boolean}
 
+type TextHost = Paragraph | TableCell;
 const textOf=(node:PhrasingContent|RootContent):string=>"value" in node?String(node.value):"children" in node?(node.children as PhrasingContent[]).map(textOf).join(""):"";
 // Matching ignores whitespace and width differences; offsets map back to the raw text.
 const compact=(text:string)=>text.normalize("NFKC").replace(/\s/gu,"");
@@ -16,25 +17,32 @@ function compactOffsets(text:string){
 
 /** Insert `node` at a flat-text offset among inline children. Splits a text node;
  * an offset inside emphasis, code or a link goes after that whole element. */
-function insertAt(paragraph:Paragraph,offset:number,nodes:PhrasingContent[]){
+function insertAt(host:TextHost,offset:number,nodes:PhrasingContent[]){
  let position=0;
- for(const [index,child] of paragraph.children.entries()){
+ for(const [index,child] of host.children.entries()){
   const length=textOf(child).length;
   if(offset<=position+length){
    if(child.type==="text"&&offset<position+length){
     const at=offset-position;
-    paragraph.children.splice(index,1,{type:"text",value:child.value.slice(0,at)},...nodes,{type:"text",value:child.value.slice(at)});
-   }else paragraph.children.splice(index+1,0,...nodes);
+    host.children.splice(index,1,{type:"text",value:child.value.slice(0,at)},...nodes,{type:"text",value:child.value.slice(at)});
+   }else host.children.splice(index+1,0,...nodes);
    return;
   }
   position+=length;
  }
- paragraph.children.push(...nodes);
+ host.children.push(...nodes);
 }
 
-function paragraphs(nodes:RootContent[]):Paragraph[]{
- // Quotations, code and tables are source material or structure, never a claim position.
- return nodes.flatMap(node=>node.type==="paragraph"?[node]:node.type==="list"?node.children.flatMap(item=>paragraphs(item.children)):[]);
+const SUBSTANTIVE_TABLE_CELL_MIN = 20;
+const isSubstantiveTableCell = (cell: TableCell, columnIndex: number) =>
+ columnIndex > 0 && compact(cell.children.map(textOf).join("")).length >= SUBSTANTIVE_TABLE_CELL_MIN;
+
+function paragraphs(nodes:RootContent[]):TextHost[]{
+ // Keep short label/tag cells in tables clean; allow inline claim markers on substantive long-text cells (e.g. plans/criteria).
+ return nodes.flatMap(node=>node.type==="paragraph"?[node]
+  :node.type==="list"?node.children.flatMap(item=>paragraphs(item.children))
+  :node.type==="table"?node.children.slice(1).flatMap(row=>row.children.filter((cell,index)=>isSubstantiveTableCell(cell,index)))
+  :[]);
 }
 
 /** Reading-only: place one marker after the sentence containing each claim's first

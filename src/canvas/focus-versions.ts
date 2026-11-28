@@ -32,7 +32,7 @@ export function groupFocusVersions(sessions: FocusSession[]): FocusVersionGroup[
 /** Completed local results only; never use an unconfirmed revision as the handoff. */
 export function savedFocusProjects(sessions: FocusSession[]): FocusSession[] {
   return groupFocusVersions(sessions).flatMap(group => {
-    const saved = group.versions.find(item => item.mode === "work" && item.status !== "preview" && (item.sections.length || item.projectState));
+    const saved = group.versions.find(item => item.mode === "work" && item.status !== "preview" && (item.livingProject || item.sections.length || item.projectState));
     return saved ? [saved] : [];
   }).sort((a, b) => b.updatedAt - a.updatedAt);
 }

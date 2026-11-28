@@ -73,3 +73,28 @@ it("closes without saving, or marking the chapter edited, when nothing changed",
   expect(onCancel).toHaveBeenCalledOnce();
   expect(onSave).not.toHaveBeenCalled();
 });
+
+it("formats selected Markdown, previews it, and saves the source", async () => {
+  const onSave = vi.fn();
+  render(<ChapterTextEditor title="项目范围" body="支持项目" zh onSave={onSave} onCancel={vi.fn()} />);
+  const area = screen.getByRole("textbox", { name: "章节内容" }) as HTMLTextAreaElement;
+  area.setSelectionRange(0, 4);
+  fireEvent.click(screen.getByRole("button", { name: "粗体" }));
+  expect(area.value).toBe("**支持项目**");
+  expect(area.value.slice(area.selectionStart, area.selectionEnd)).toBe("支持项目");
+  fireEvent.keyDown(area, { ctrlKey: true, key: "b" });
+  expect(area.value).toBe("支持项目");
+  fireEvent.click(screen.getByRole("button", { name: "撤销" }));
+  expect(area.value).toBe("**支持项目**");
+  area.setSelectionRange(area.value.length, area.value.length);
+  fireEvent.click(screen.getByRole("button", { name: "表格" }));
+  expect(area.value).toContain("| 列一 | 列二 |");
+  fireEvent.click(screen.getByRole("button", { name: "分栏" }));
+  expect(await screen.findByRole("columnheader", { name: "列二" })).toBeVisible();
+  expect(screen.getByText("支持项目").tagName).toBe("STRONG");
+  expect(area).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "预览" }));
+  expect(area).not.toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "保存" }));
+  expect(onSave).toHaveBeenCalledWith("项目范围", expect.stringContaining("**支持项目**"));
+});

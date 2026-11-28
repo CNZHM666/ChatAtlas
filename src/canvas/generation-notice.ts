@@ -1,3 +1,5 @@
+import { wikiCoverageCounts, type WikiKnowledgeLedger } from "../shared/wiki-knowledge";
+
 /** Resolve notices at render time so changing the UI language also changes an
  * already displayed failure. Provider messages remain available in diagnostics. */
 export function generationFailureReason(message: string, code: string | undefined, zh: boolean): string {
@@ -47,4 +49,14 @@ export function generationFailureReason(message: string, code: string | undefine
   if (pair) return pair[zh ? 0 : 1];
   if (/\p{Script=Han}/u.test(message) === zh || !message) return message;
   return text("操作未完成，请重试。详细原因可在诊断信息中查看。", "The operation did not complete. Please retry; details are available in diagnostics.");
+}
+
+export function wikiPreviewQuality(ledger: WikiKnowledgeLedger | undefined, zh: boolean) {
+  const coverage = wikiCoverageCounts(ledger?.batches ?? []);
+  const critical = ledger?.draft?.quality?.critical ?? 0;
+  return [
+    coverage.failed ? zh ? `读取失败可重试 ${coverage.failed} 条` : `${coverage.failed} source messages can be retried` : "",
+    coverage.pending ? zh ? `依据不足待判断 ${coverage.pending} 条` : `${coverage.pending} source messages need an evidence decision` : "",
+    critical ? zh ? `正文校验问题 ${critical} 项` : `${critical} article checks need review` : "",
+  ].filter(Boolean);
 }

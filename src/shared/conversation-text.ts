@@ -22,7 +22,7 @@ function widgetJsonEnd(value: string, start: number): number | undefined {
 const PLATFORM_CITATION = /\uE002REF[A-Za-z\d_-]{1,256}\uE003|\uE200(?:filecite|cite|memcite|url)|(?:<|&lt;)Cite\b/u;
 
 /** Platform citation IDs are not URLs. Preserve code and only link a verified target. */
-export function withoutPlatformCitations(value: string, exportReference?: (token: string, offset: number) => string | undefined): string {
+export function withoutPlatformCitations(value: string, exportReference?: (token: string, offset: number) => string | undefined, preserveOffsets = false): string {
   if (!PLATFORM_CITATION.test(value)) return value;
   const protectedRanges = codeRanges(value);
   const protectedAt = (offset: number) => protectedRanges.some(([from, to]) => offset >= from && offset < to);
@@ -32,7 +32,8 @@ export function withoutPlatformCitations(value: string, exportReference?: (token
     const parts = urlPayload?.split("\uE202").filter(part => !/^turn[\w:.-]+$/u.test(part)) ?? [];
     const urls = parts.filter(part => validPlatformUrl(part));
     if (exportReference && urls.length === 1) return externalMarkdownLink(urls[0], parts.filter(part => part !== urls[0]).join(" · ") || urls[0]);
-    return parts.join(" · ") || exportReference?.(token, offset) || "";
+    const display = parts.join(" · ") || exportReference?.(token, offset) || "";
+    return preserveOffsets ? display.padEnd(token.length, " ") : display;
   });
 }
 

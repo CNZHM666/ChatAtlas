@@ -9,7 +9,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [使用指南](GETTING_STARTED.md) | 安装后首次使用、来源导入、项目与侧栏 |
-| [上下文打包与精炼](CONTEXT.md) | 本地打包、章节选择、AI 精炼与还原 |
+| [项目导出](CONTEXT.md) | 精简 / 开发 / 审计三种 Markdown 模式与章节导出 |
 | [隐私说明](PRIVACY.md) | 本地存储、服务商请求、权限与备份 |
 | [首版范围](FIRST_RELEASE_OVERVIEW.md) | 已开放、实验和暂未开放的能力 |
 | [发布清单](RELEASE_CHECKLIST.md) | 自动检查、真实验收、打包与 GitHub 准备 |

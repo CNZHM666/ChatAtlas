@@ -1,7 +1,7 @@
 import {useEffect,useState} from "react";
 import {SidecarHeader} from "./SidecarHeader";
 import {useSidecarLocale} from "./sidecar-locale";
-import {SidecarProject} from "./SidecarProject";
+import {NativeProjects} from "./NativeProjects";
 import {setNativeSidecarTab} from "./host";
 import {chatGPTConversationId} from "../shared/native-discussion";
 import {isNativePanelSite} from "../shared/sidecar-scope";
@@ -46,6 +46,6 @@ export function NativeSidecar({zh:initialChinese,tabId}:{zh:boolean;tabId?:numbe
  if(tabId!==undefined&&tab&&!isNativePanelSite(tab.url))return null;
  if(tabId!==undefined&&tab?.id!==tabId)return <SidecarHeader zh={zh} onToggleLanguage={toggleLanguage} showBrand={false}/>;
  let conversation="",canInsert=false,platformLabel="";
- try{const url=new URL(tab?.url??"");const site=webCaptureSite(url.href);platformLabel=site?platformName(site.id,zh?"zh-CN":"en"):url.origin==="https://chatgpt.com"?"ChatGPT":"";if(url.origin==="https://chatgpt.com")conversation=chatGPTConversationId(url.pathname)??"";else conversation=webConversation(url.href)?.id??"";canInsert=isNativePanelSite(url.href);}catch{/* A browser/system tab still supports local history search. */}
- return <SidecarProject onToggleLanguage={toggleLanguage} canInsert={canInsert} platformLabel={platformLabel} conversationId={conversation} conversationTitle={isNativePanelSite(tab?.url)?tab?.title??"":""} zh={zh}/>;
+ try{const url=new URL(tab?.url??"");const site=webCaptureSite(url.href);platformLabel=site?platformName(site.id,zh?"zh-CN":"en"):url.origin==="https://chatgpt.com"?"ChatGPT":"";if(url.origin==="https://chatgpt.com")conversation=chatGPTConversationId(url.pathname)??"";else conversation=webConversation(url.href)?.id??"";canInsert=isNativePanelSite(url.href);}catch{/* Projects can still be opened from browser and system tabs. */}
+ return <NativeProjects onToggleLanguage={toggleLanguage} canInsert={canInsert} platformLabel={platformLabel} conversationId={conversation} conversationTitle={isNativePanelSite(tab?.url)?tab?.title??"":""} zh={zh}/>;
 }

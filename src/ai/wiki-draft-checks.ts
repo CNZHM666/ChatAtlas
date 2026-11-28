@@ -40,6 +40,11 @@ export function stageOf(clause: string): { level: "iteration" | "version"; label
 /** The stage word a statement names ("本阶段", "Milestone 3.2", "V1"), as it is written. */
 export const stageWord = (text: string) => (text.match(ITERATION) ?? text.match(VERSION))?.[0];
 const LABELED_ITEM = /^\s*\d+\.\s+\*{0,2}(?:第[一二三四五六七八九十\d]+阶段|(?:Phase|Stage)\s+\d+)\*{0,2}\s*[:：]/imu;
+const STAGE_SCHEME = /^(?:phase|第.*阶段$)|^milestone|^m(?=\d)|^v(?=\d)|^p(?=\d)/iu;
+const sourceStageScheme = (label:string)=>{
+  const family=STAGE_SCHEME.exec(label)?.[0].toLowerCase();
+  return family?.startsWith("第")?"phase":family==="m"?"milestone":family;
+};
 const SOURCE_STAGE = /\b(?:Phase|Milestone)\s+(?:[A-Z]|\d+(?:\.\d+)*)(?:\s*(?:–|—|[-~～]|至|to)\s*(?:[A-Z]|\d+(?:\.\d+)*))?\b|\b[MP]\d+\b|第[一二三四五六七八九十\d]+阶段|\bV\d+(?:\.\d+)*\b/giu;
 
 /** A legacy list sometimes invented ordinal stages across independent
@@ -62,7 +67,7 @@ export function separateUnconfirmedWikiPlans(chapter: WikiDraftChapter, units: R
       const key = unit.evidence.conversationId + "\0" + unit.evidence.messageId;
       const families = bySource.get(key) ?? new Set<string>();
       for (const label of stages(unit)) {
-        const family = /^(?:Phase|Milestone)\b|^[MP](?=\d)/iu.exec(label)?.[0].toLocaleLowerCase();
+        const family = sourceStageScheme(label);
         if (family) families.add(family);
       }
       if (families.size) bySource.set(key, families);
@@ -80,18 +85,16 @@ export function separateUnconfirmedWikiPlans(chapter: WikiDraftChapter, units: R
     }
     if (rows.size < 2) return paragraph;
     const claims: NonNullable<WikiDraftChapter["paragraphs"][number]["claims"]> = [];
-    const heading = zh ? "| 原阶段或版本 | 讨论中的安排 | 状态 |" : "| Original stage or release | Proposed work | Status |";
+    const heading = zh ? "| 原阶段或版本 | 讨论中的安排 |" : "| Original stage or release | Proposed work |";
     const lines = [...rows.values()].map(row => {
       const text = row.cited.map(unit => {
         const current = escape(wikiStatementWithConditions(unit, zh));
         claims.push({ text: current, unitIds: [unit.id] });
         return current;
       }).join(" ");
-      const owner = row.cited.every(unit => unit.evidence.role === "user" && !unit.evidence.pasted);
-      const status = row.question ? zh ? "待回答" : "Open question" : owner ? zh ? "发起人提出" : "Author proposal" : zh ? "讨论中" : "Proposed";
-      return "| " + escape(row.labels.join("、") || (zh ? "未注明" : "Unspecified")) + " | " + text + " | " + status + " |";
+      return "| " + escape(row.labels.join("、") || (zh ? "未注明" : "Unspecified")) + " | " + text + " |";
     });
-    const text = [heading, "| --- | --- | --- |", ...lines].join("\n");
+    const text = [heading, "| --- | --- |", ...lines].join("\n");
     body = replaceParagraph(body, paragraph.text, () => text);
     return { ...paragraph, text, claims };
   });

@@ -1,0 +1,215 @@
+:is(.wiki-claim-marker,.wiki-status-key).is-holder-decided { --holder: var(--wiki-holder-decided, #15803d); }
+:is(.wiki-claim-marker,.wiki-status-key).is-holder-open { --holder: var(--wiki-holder-open, #b45309); }
+:is(.wiki-claim-marker,.wiki-status-key).is-holder-earlier { --holder: var(--wiki-holder-earlier, #475569); }
+:is(.wiki-claim-marker,.wiki-status-key).is-holder-ai { --holder: var(--wiki-holder-ai, #4338ca); }
+:is(.wiki-claim-marker,.wiki-status-key).is-holder-user { --holder: var(--wiki-holder-user, #6d28d9); }
+:is(.wiki-claim-marker,.wiki-status-key).is-holder-user.is-report { --holder: var(--wiki-holder-report, #9d174d); }
+:is(.wiki-claim-marker,.wiki-status-key).is-holder-material { --holder: var(--wiki-holder-material, #0369a1); }
+:is(.wiki-claim-marker,.wiki-status-key).is-holder-corrected { --holder: var(--wiki-holder-corrected, #0f766e); }
+.wiki-status-key.is-source-excerpt { --holder: var(--wiki-source-excerpt, #854d0e); }
+
+:root {
+  --atlas-hl-decided-bg: rgba(21, 128, 61, 0.16);
+  --atlas-hl-decided-line: rgba(21, 128, 61, 0.55);
+  --atlas-hl-decided-fg: inherit;
+  --atlas-hl-open-bg: rgba(217, 119, 6, 0.18);
+  --atlas-hl-open-line: rgba(180, 83, 9, 0.72);
+  --atlas-hl-open-fg: inherit;
+  --atlas-hl-earlier-bg: rgba(100, 116, 139, 0.14);
+  --atlas-hl-earlier-line: rgba(71, 85, 105, 0.72);
+  --atlas-hl-earlier-fg: inherit;
+  --atlas-hl-ai-bg: rgba(67, 56, 202, 0.13);
+  --atlas-hl-ai-line: rgba(67, 56, 202, 0.55);
+  --atlas-hl-ai-fg: inherit;
+  --atlas-hl-user-bg: rgba(109, 40, 217, 0.16);
+  --atlas-hl-user-fg: inherit;
+  --atlas-hl-material-bg: rgba(3, 105, 161, 0.16);
+  --atlas-hl-material-fg: inherit;
+  --atlas-hl-corrected-bg: rgba(15, 118, 110, 0.16);
+  --atlas-hl-corrected-fg: inherit;
+  --atlas-hl-source-bg: rgba(234, 179, 8, 0.22);
+  --atlas-hl-source-fg: inherit;
+}
+
+:root[data-theme="dark"] {
+  --wiki-holder-decided: #4ade80;
+  --wiki-holder-open: #fbbf24;
+  --wiki-holder-earlier: #cbd5e1;
+  --wiki-holder-ai: #a5b4fc;
+  --wiki-holder-user: #c4b5fd;
+  --wiki-holder-report: #f9a8d4;
+  --wiki-holder-material: #38bdf8;
+  --wiki-holder-corrected: #5eead4;
+  --wiki-source-excerpt: #fde68a;
+  --atlas-hl-decided-bg: rgba(34, 197, 94, 0.34);
+  --atlas-hl-decided-line: rgba(74, 222, 128, 0.92);
+  --atlas-hl-decided-fg: #ecfdf5;
+  --atlas-hl-open-bg: rgba(245, 158, 11, 0.36);
+  --atlas-hl-open-line: rgba(251, 191, 36, 0.95);
+  --atlas-hl-open-fg: #fffbeb;
+  --atlas-hl-earlier-bg: rgba(148, 163, 184, 0.28);
+  --atlas-hl-earlier-line: rgba(203, 213, 225, 0.88);
+  --atlas-hl-earlier-fg: #e2e8f0;
+  --atlas-hl-ai-bg: rgba(129, 140, 248, 0.38);
+  --atlas-hl-ai-line: rgba(165, 180, 252, 0.95);
+  --atlas-hl-ai-fg: #eef2ff;
+  --atlas-hl-user-bg: rgba(167, 139, 250, 0.36);
+  --atlas-hl-user-fg: #f5f3ff;
+  --atlas-hl-material-bg: rgba(56, 189, 248, 0.34);
+  --atlas-hl-material-fg: #f0f9ff;
+  --atlas-hl-corrected-bg: rgba(45, 212, 191, 0.34);
+  --atlas-hl-corrected-fg: #f0fdfa;
+  --atlas-hl-source-bg: rgba(250, 204, 21, 0.36);
+  --atlas-hl-source-fg: #fefce8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --wiki-holder-decided: #4ade80;
+    --wiki-holder-open: #fbbf24;
+    --wiki-holder-earlier: #cbd5e1;
+    --wiki-holder-ai: #a5b4fc;
+    --wiki-holder-user: #c4b5fd;
+    --wiki-holder-report: #f9a8d4;
+    --wiki-holder-material: #38bdf8;
+    --wiki-holder-corrected: #5eead4;
+    --wiki-source-excerpt: #fde68a;
+    --atlas-hl-decided-bg: rgba(34, 197, 94, 0.34);
+    --atlas-hl-decided-line: rgba(74, 222, 128, 0.92);
+    --atlas-hl-decided-fg: #ecfdf5;
+    --atlas-hl-open-bg: rgba(245, 158, 11, 0.36);
+    --atlas-hl-open-line: rgba(251, 191, 36, 0.95);
+    --atlas-hl-open-fg: #fffbeb;
+    --atlas-hl-earlier-bg: rgba(148, 163, 184, 0.28);
+    --atlas-hl-earlier-line: rgba(203, 213, 225, 0.88);
+    --atlas-hl-earlier-fg: #e2e8f0;
+    --atlas-hl-ai-bg: rgba(129, 140, 248, 0.38);
+    --atlas-hl-ai-line: rgba(165, 180, 252, 0.95);
+    --atlas-hl-ai-fg: #eef2ff;
+    --atlas-hl-user-bg: rgba(167, 139, 250, 0.36);
+    --atlas-hl-user-fg: #f5f3ff;
+    --atlas-hl-material-bg: rgba(56, 189, 248, 0.34);
+    --atlas-hl-material-fg: #f0f9ff;
+    --atlas-hl-corrected-bg: rgba(45, 212, 191, 0.34);
+    --atlas-hl-corrected-fg: #f0fdfa;
+    --atlas-hl-source-bg: rgba(250, 204, 21, 0.36);
+    --atlas-hl-source-fg: #fefce8;
+  }
+}
+
+.wiki-status-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+}
+.wiki-status-clear {
+  padding: 1px 6px;
+  min-height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wiki-status-clear:hover {
+  background: var(--accent-soft);
+}
+
+.wiki-status-panel .wiki-status-key {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  color: var(--holder, var(--muted));
+  border: 1px solid color-mix(in srgb, currentColor 26%, var(--border));
+  background: color-mix(in srgb, currentColor 7%, var(--surface-solid));
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.12s ease;
+}
+.wiki-status-panel .wiki-status-key:hover {
+  background: color-mix(in srgb, currentColor 14%, var(--surface-solid));
+  border-color: color-mix(in srgb, currentColor 52%, var(--border));
+}
+.wiki-status-panel .wiki-status-key[aria-pressed="true"] {
+  background: color-mix(in srgb, currentColor 16%, var(--surface-solid));
+  border-color: currentColor;
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 55%, transparent);
+  font-weight: 650;
+}
+.wiki-status-panel .wiki-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.wiki-status-panel .wiki-status-name {
+  flex: 1;
+  text-align: left;
+  color: var(--text);
+}
+.wiki-status-panel .wiki-status-key[aria-pressed="true"] .wiki-status-name {
+  color: currentColor;
+}
+.wiki-status-panel .wiki-status-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: currentColor;
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.wiki-status-panel .wiki-status-key:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* Distinct, clear highlight styles for each status category across light & dark modes */
+::highlight(atlas-holder-decided) {
+  background-color: var(--atlas-hl-decided-bg);
+  color: var(--atlas-hl-decided-fg);
+  text-decoration: underline;
+  text-decoration-color: var(--atlas-hl-decided-line);
+  text-decoration-thickness: 1.5px;
+}
+::highlight(atlas-holder-open) {
+  background-color: var(--atlas-hl-open-bg);
+  color: var(--atlas-hl-open-fg);
+  text-decoration: underline dashed;
+  text-decoration-color: var(--atlas-hl-open-line);
+  text-decoration-thickness: 1.5px;
+}
+::highlight(atlas-holder-earlier) {
+  background-color: var(--atlas-hl-earlier-bg);
+  color: var(--atlas-hl-earlier-fg);
+  text-decoration: line-through;
+  text-decoration-color: var(--atlas-hl-earlier-line);
+}
+::highlight(atlas-holder-ai) {
+  background-color: var(--atlas-hl-ai-bg);
+  color: var(--atlas-hl-ai-fg);
+  text-decoration: underline dotted;
+  text-decoration-color: var(--atlas-hl-ai-line);
+  text-decoration-thickness: 1.5px;
+}
+::highlight(atlas-holder-user) { background-color: var(--atlas-hl-user-bg); color: var(--atlas-hl-user-fg); }
+::highlight(atlas-holder-material) { background-color: var(--atlas-hl-material-bg); color: var(--atlas-hl-material-fg); }
+::highlight(atlas-holder-corrected) { background-color: var(--atlas-hl-corrected-bg); color: var(--atlas-hl-corrected-fg); }
+::highlight(atlas-holder-source) { background-color: var(--atlas-hl-source-bg); color: var(--atlas-hl-source-fg); }

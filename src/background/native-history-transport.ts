@@ -35,7 +35,8 @@ export async function nativeHistoryRequest(source: NativeImportSource, request: 
           gemini: /^\/app(?:\?|$)/u,
         };
         if (!allowed[input.platform]?.test(req.path) || req.path.includes("..") || req.path.startsWith("//")) throw Error("History request is not allowed");
-        const globals = window as Window & { WIZ_global_data?: Record<string, unknown> };
+        type SessionCache = { token: string; identity: string; at: number; snapshot: string };
+        const globals = window as Window & { WIZ_global_data?: Record<string, unknown>; __chatAtlasSessionCache?: SessionCache };
         const cookie = (name: string) => document.cookie.split(";").map(v => v.trim()).find(v => v.startsWith(`${name}=`))?.slice(name.length + 1);
         const sessionSnapshot = () => JSON.stringify([
           ...["userToken", "access_token", "kimi-auth", "token", "flow_tea_user_id"].map(key => localStorage.getItem(key)),
@@ -50,11 +51,24 @@ export async function nativeHistoryRequest(source: NativeImportSource, request: 
           try { const parsed = JSON.parse(value); token = typeof parsed === "string" ? parsed : parsed.value ?? parsed.access_token ?? parsed.token ?? ""; } catch { token = value; }
           if (token) break;
         }
+        const readChatGPTSession = async (forceRefresh = false): Promise<{ token: string; identity: string }> => {
+          const cached = globals.__chatAtlasSessionCache;
+          if (!forceRefresh && cached && cached.snapshot === beforeSession && Date.now() - cached.at < 300_000) {
+            return { token: cached.token, identity: cached.identity };
+          }
+          const session = await fetch("/api/auth/session", { credentials: "include", signal: AbortSignal.timeout(20_000) }).then(r => r.json());
+          const nextToken = String(session.accessToken ?? ""), nextIdentity = String(session.user?.id ?? "");
+          if (!nextToken || !nextIdentity) {
+            delete globals.__chatAtlasSessionCache;
+            throw Error("请先登录 ChatGPT / Sign in to ChatGPT");
+          }
+          globals.__chatAtlasSessionCache = { token: nextToken, identity: nextIdentity, at: Date.now(), snapshot: beforeSession };
+          return { token: nextToken, identity: nextIdentity };
+        };
         let sessionToken = "";
         if (input.platform === "chatgpt") {
-          const session = await fetch("/api/auth/session", { credentials: "include", signal: AbortSignal.timeout(15000) }).then(r => r.json());
-          sessionToken = session.accessToken ?? ""; identity = session.user?.id ?? "";
-          if (!sessionToken || !identity) throw Error("请先登录 ChatGPT / Sign in to ChatGPT");
+          const chatgptSession = await readChatGPTSession(false);
+          sessionToken = chatgptSession.token; identity = chatgptSession.identity;
         }
         if (input.platform === "claude") identity = cookie("lastActiveOrg") ?? "";
         if (input.platform === "gemini") identity = String(globals.WIZ_global_data?.oPEP7c ?? globals.WIZ_global_data?.XWmO9e ?? "");
@@ -102,7 +116,14 @@ export async function nativeHistoryRequest(source: NativeImportSource, request: 
           headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8";
           body = new URLSearchParams({ at: String(wiz.SNlM0e), "f.req": JSON.stringify([[[req.rpc, JSON.stringify(req.body), null, "generic"]]]) }).toString();
         }
-        const response = await fetch(url.href, { method: body === undefined ? "GET" : "POST", credentials: "include", headers, body, signal: AbortSignal.timeout(30000) });
+        const issue = () => fetch(url.href, { method: body === undefined ? "GET" : "POST", credentials: "include", headers, body, signal: AbortSignal.timeout(55_000) });
+        let response = await issue();
+        if (response.status === 401 && input.platform === "chatgpt") {
+          const refreshed = await readChatGPTSession(true);
+          if (refreshed.identity !== identity) throw Error("登录账号已变化，请重新导入，已保存内容保留 / Account changed; start a new import");
+          headers.Authorization = `Bearer ${refreshed.token}`;
+          response = await issue();
+        }
         if (!response.ok) throw Error(`历史读取失败 / History request failed (${response.status})`);
         if (response.redirected && new URL(response.url).origin !== url.origin) throw Error("登录已失效 / Session expired (401)");
         let data: unknown;
@@ -119,13 +140,20 @@ export async function nativeHistoryRequest(source: NativeImportSource, request: 
         if (location.origin !== input.origin) throw Error("Source page changed during import");
         if (sessionSnapshot() !== beforeSession) throw Error("读取期间登录账号或会话已变化，请重试 / Account or session changed during import");
         return { reply: { data, account } };
-      } catch (error) { return { error: error instanceof Error ? error.message : "History request failed" }; }
+      } catch (error) {
+        const raw = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+        if (/timed?\s*out|timeouterror|abort/iu.test(raw)) {
+          return { error: "读取超时，请保持来源 AI 页面打开并稍后重试 / Request timed out; keep the source AI tab open and retry" };
+        }
+        return { error: error instanceof Error ? error.message : "History request failed" };
+      }
     }, args: [source, request],
   });
   const value = result[0]?.result;
   if (!value?.reply) throw Error(value?.error ?? "无法连接 AI 页面，请刷新后重试 / Reload the AI page and retry");
-  const fresh = await chrome.tabs.get(source.tabId);
-  if (fresh.url !== tab.url) throw Error("读取期间来源网页已变化 / Source page changed during import");
+  const fresh = await chrome.tabs.get(source.tabId).catch(() => undefined);
+  const freshOrigin = fresh?.url ? (() => { try { return new URL(fresh.url).origin; } catch { return ""; } })() : "";
+  if (freshOrigin !== source.origin) throw Error("读取期间来源网页已变化 / Source page changed during import");
   if (source.account && source.account !== value.reply.account) throw Error("Account changed");
   source.account = value.reply.account;
   return value.reply;

@@ -26,7 +26,7 @@ export function projectOverviewText(session:FocusSession) {
   const introduction=projectKnowledgeIntroduction(session);
   if(valid(introduction)||session.knowledgeViewVersion===1)return introduction;
   if(valid(session.projectState?.summary))return projectPurposeText(session.projectState!.summary);
-  for(const section of session.sections.filter(section=>section.kind==="finding"||section.kind==="review")){
+  for(const section of session.sections.filter(section=>!section.continuationLoose&&(section.kind==="finding"||section.kind==="review"))){
     // A chapter introduction ("本章概述…") describes one chapter, not the project.
     const paragraph=discussionBlocks(section.body).find(block=>!/^\s*(?:[#>`~|*-]|\d+[.)])/u.test(block.text)&&!/^\s*(?:本章|这一章|本节)/u.test(block.text)&&block.text.length<=500&&valid(block.text));
     if(paragraph)return evidencePresentation(projectPurposeText(paragraph.text));
@@ -44,12 +44,14 @@ export function projectOverviewContent(session:FocusSession,reading?:ReturnType<
  if(generated)return {text:aiAdvicePresentation(base),evidenceIds:generated.evidenceIds};
  const parts=base.trim()?[base.trim().replace(/\s*\n\s*/gu," ")]:[],ids=new Set(intro.evidenceIds);
  const sentence=(part:string)=>/[。！？.!?]$/u.test(part)?part:part+(session.locale==="en"?".":"。");
- const view=projectKnowledgeView(session),blocks=projectSnapshot(session,view);
- const scope=view.current.filter(fact=>fact.role==="scope"&&!fact.contested&&!fact.sourceChanged).map(fact=>({text:knowledgeFactText(fact,session.locale!=="en"),evidenceIds:fact.claim.evidenceIds}));
+ const loose=new Set(session.sections.filter(section=>section.continuationLoose).map(section=>section.id));
+ const view=projectKnowledgeView(session),blocks=projectSnapshot(session,view).filter(block=>!block.sectionIds.some(id=>loose.has(id)));
+ const current=view.current.filter(fact=>!loose.has(fact.sectionId));
+ const scope=current.filter(fact=>fact.role==="scope"&&!fact.contested&&!fact.sourceChanged).map(fact=>({text:knowledgeFactText(fact,session.locale!=="en"),evidenceIds:fact.claim.evidenceIds}));
  let characters=parts.join("\n\n").length;
  // Current state comes only from user confirmations and reports, never from suggestions.
  const state:string[]=[];
- for(const fact of [...view.current.filter(fact=>!fact.contested&&fact.adoption==="accepted").slice(0,2),...view.current.filter(fact=>!fact.contested&&fact.implementation==="reported").slice(0,2)]){
+ for(const fact of [...current.filter(fact=>!fact.contested&&fact.adoption==="accepted").slice(0,2),...current.filter(fact=>!fact.contested&&fact.implementation==="reported").slice(0,2)]){
   const text=knowledgeFactText(fact,session.locale!=="en"),key=factTextKey(text);
   if([...parts,...state].some(part=>factTextKey(part).includes(key))||characters+text.length>1100)continue;
   state.push(sentence(text.trim().replace(/\s*\n\s*/gu," ")));characters+=text.length;

@@ -1,7 +1,10 @@
 import { homeEntryIntent } from "../../shared/home-entry-intent";
 import {experimentalHomeGoal} from "../../shared/home-experiments";
+import { DEFAULT_PROJECT_GOAL } from "../../shared/constants";
+import { WIKI_WRITING_MODES } from "../../shared/wiki-writing-modes";
+import type { WikiWritingMode } from "../../shared/wiki-knowledge";
 import { useEffect, useRef, useState } from "react";
-import { Compass, FileText, FolderGit2, Info, MessageSquare, Plus, Search, Sparkles, X } from "lucide-react";
+import { AlertCircle, Compass, FileText, FolderGit2, Info, MessageSquare, Plus, RefreshCw, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import type { Conversation, ConversationMessage } from "../../shared/types";
 import { AIQuickSelect } from "./AIQuickSelect";
 import type { HomeTaskPlan } from "../../ai/home-task";
@@ -10,11 +13,19 @@ import type { MessageSourceRange } from "../../shared/message-location";
 import { isCurrentHydrationComplete } from "../../sync/import-state";
 
 const defaultGoals={
- project:{"zh-CN":"把全部已选对话整理成一个项目",en:"Create a project from all selected conversations"},
+ project:DEFAULT_PROJECT_GOAL,
  summary:{"zh-CN":"总结全部已选对话的主要结论、决策和未解决问题",en:"Summarize the conclusions, decisions and open questions in all selected conversations"},
 } as const;
+const INSTRUCTION_EXAMPLES = {
+  "zh-CN": ["聚焦选型与已拍板约束，略过早期闲聊", "优先交付顺序、里程碑与验收条件"],
+  en: ["Focus on key choices and constraints; skip early small talk", "Prioritize delivery order, milestones, and acceptance criteria"],
+} as const;
 
-export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSources, onHydrate, onConfigureAI, selectedIds, onSelectedIds, onDiscoverGoal, discovery = true, experimentalActions = false, readOnly = false }: {
+export function HistoryWorkbench({ conversations, goal, onGoal, writingMode = "concise", onWritingMode, onDirectOrganize, onRequest, onSources, onHydrate, onConfigureAI, selectedIds, onSelectedIds, onDiscoverGoal, discovery = true, experimentalActions = false, readOnly = false, projectOnly = false }: {
+  projectOnly?: boolean;
+  writingMode?: WikiWritingMode;
+  onWritingMode?: (mode: WikiWritingMode) => void;
+  onDirectOrganize?: (options: { instruction?: string; writingMode: WikiWritingMode; sourceIds: string[] }) => void;
   conversations: Conversation[]; goal: string; onGoal: (goal: string) => void;
   onRequest: (goal: string, ids?: string[], action?: HomeTaskPlan["action"], localSearch?: boolean) => void; onSources: () => void;
   onRead?: (id: string, message?: ConversationMessage, sourceRange?: MessageSourceRange) => void;
@@ -37,16 +48,20 @@ export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSou
   const [switchingAI, setSwitchingAI] = useState(false);
   const [allMaterials, setAllMaterials] = useState(false);
   const [coverageHint, setCoverageHint] = useState(false);
+  const [instructionOpen, setInstructionOpen] = useState(() => Boolean(projectOnly && goal.trim() && !isDefaultGoal));
   const incompleteIds = conversations.filter(source => !isCurrentHydrationComplete(source)).map(source => source.id);
   const materials = [...(selectedIds ?? [])].map(id => ({ id, source: conversations.find(source => source.id === id) }));
+  const selectedPendingIds = materials.filter(({ source }) => !source || !isCurrentHydrationComplete(source)).map(({ id }) => id);
+  const customInstruction = isDefaultGoal ? "" : goal;
   const input = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => { const node = input.current; if (node) { node.style.height = "auto"; node.style.height = `${Math.min(220, Math.max(48, node.scrollHeight))}px`; } }, [goal]);
+  useEffect(() => { const node = input.current; if (node) { node.style.height = "auto"; node.style.height = `${Math.min(220, Math.max(48, node.scrollHeight))}px`; } }, [goal, instructionOpen]);
   useEffect(() => {
     const selectionChanged=previousSelection.current!==selectionKey;
     const languageChanged=previousLocale.current!==locale;
     if(!selectionChanged&&!languageChanged)return;
     previousSelection.current = selectionKey;previousLocale.current=locale;
     setError("");
+    if (projectOnly) return;
     if (selectionKey === "[]") {
       if (goal === automaticGoal.current) { onGoal(""); if (!explicitMode.current) { setIntent(undefined); setShortcut(undefined); } }
       automaticGoal.current = undefined;
@@ -55,15 +70,37 @@ export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSou
       automaticGoal.current = next; if(goal!==next)onGoal(next);
       setIntent(shortcut === 1 ? "answer" : "project"); setShortcut(shortcut === 1 ? 1 : 2);
     }
-  }, [selectionKey, locale, goal, onGoal, projectGoal, summaryGoal, shortcut]);
+  }, [selectionKey, locale, goal, onGoal, projectGoal, summaryGoal, shortcut, projectOnly]);
   const [choosing,setChoosing]=useState(false);
   const entryAction = (text:string, action = intent):HomeTaskPlan["action"] => action ?? (text===projectGoal?"project":({find:"answer",project:"project",summarize:"answer",review:"project",continue:"continue",choose:"clarify"} as const)[homeEntryIntent(text)]);
-  const currentAction = entryAction(goal), summary = experimentalActions&&(shortcut === 1 || shortcut === undefined && homeEntryIntent(goal)==="summarize");
+  const inferredAction = entryAction(goal);
+  const currentAction = projectOnly && inferredAction !== "continue" ? "project" : inferredAction;
+  const summary = experimentalActions&&(shortcut === 1 || shortcut === undefined && homeEntryIntent(goal)==="summarize");
   const activeMode = shortcut ?? (currentAction === "project" || currentAction === "continue" ? 2 : 0);
   const SubmitIcon = shortcut === 3 ? Compass : currentAction === "project" ? FileText : currentAction === "continue" ? FolderGit2
     : summary ? FileText : currentAction === "clarify" && goal.trim() ? Sparkles : Search;
   const search = (action = intent, selectedShortcut = shortcut, text = goal) => {
-    if (!text.trim() || switchingAI) return;
+    if (switchingAI) return;
+    if (projectOnly) {
+      const chosenIds = [...(selectedIds ?? [])];
+      if (!chosenIds.length) {
+        setError(zh ? "请先选择至少一条对话。" : "Select at least one conversation first.");
+        onSources();
+        return;
+      }
+      if (selectedPendingIds.length) {
+        setError(zh ? `所选对话中有 ${selectedPendingIds.length} 条尚未同步正文，请先同步或调整材料。` : `${selectedPendingIds.length} selected conversations still need their messages synced.`);
+        return;
+      }
+      const note = (isDefaultGoal ? "" : text).trim();
+      if (onDirectOrganize) {
+        onDirectOrganize({ instruction: note || undefined, writingMode, sourceIds: chosenIds });
+      } else {
+        onRequest(note || projectGoal, chosenIds, "project");
+      }
+      return;
+    }
+    if (!text.trim()) return;
     if(!experimentalActions&&(selectedShortcut===1||selectedShortcut===3||selectedShortcut!==0&&experimentalHomeGoal(text)&&entryAction(text,action)!=="project")){
       setChoosing(false);setError(zh?"该功能暂未开放，可使用找回历史对话或整理成项目。":"This feature is not available yet. Find past conversations or organize a project instead.");return;
     }
@@ -99,17 +136,17 @@ export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSou
     search(action, index, next);
   };
   return <div className="history-workbench">
-    <div className="history-shortcuts" role="group" aria-label={t("workbenchModes")}>
+    {!projectOnly && <div className="history-shortcuts" role="group" aria-label={t("workbenchModes")}>
       <button type="button" aria-pressed={activeMode === 0} onClick={() => runShortcut(0)} disabled={switchingAI}><Search size={16} aria-hidden="true"/><span>{t("workbenchFind")}</span></button>
       <button type="button" aria-pressed={activeMode === 2} onClick={() => runShortcut(2)} disabled={switchingAI}><FolderGit2 size={16} aria-hidden="true"/><span>{t("workbenchOrganize")}</span></button>
       {experimentalActions?<button type="button" aria-pressed={activeMode === 1} disabled={switchingAI} onClick={() => runShortcut(1)}><FileText size={16} aria-hidden="true"/><span>{zh ? "总结历史讨论" : "Summarize discussions"}</span></button>:null}
       {experimentalActions&&discovery ? <button type="button" aria-pressed={activeMode===3} disabled={switchingAI} onClick={() => runShortcut(3)}><Compass size={16} aria-hidden="true"/><span>{zh ? "发现整理主题" : "Discover topics"}</span></button> : null}
-    </div>
-    <form className="goal-composer is-simple history-composer" onSubmit={event => { event.preventDefault(); search(); }}>
+    </div>}
+    <form className={`goal-composer is-simple history-composer${projectOnly ? " is-compact-organize" : ""}`} onSubmit={event => { event.preventDefault(); search(); }}>
       {materials.length ? <div className={`history-source-attachments${allMaterials ? " is-expanded" : ""}`} role="group" aria-label={zh ? "已选材料" : "Selected materials"}>
         <div className="history-source-chips">{materials.slice(0, allMaterials ? undefined : 4).map(({id, source}) => {
           const title = source?.title || (zh ? "不可用的对话" : "Unavailable conversation");
-          return <div className="history-source-attachment" key={id}>
+          return <div className={`history-source-attachment${!source || !isCurrentHydrationComplete(source) ? " is-pending" : ""}`} key={id}>
             <MessageSquare size={13} aria-hidden="true" /><span title={title}>{title}</span>
             {!source || !isCurrentHydrationComplete(source) ? <small>{zh ? source ? "待同步" : "不可用" : source ? "Needs sync" : "Unavailable"}</small> : null}
             <button type="button" disabled={!onSelectedIds} aria-label={zh ? `移除材料：${title}` : `Remove material: ${title}`} onClick={() => onSelectedIds?.(new Set([...selectedIds ?? []].filter(value => value !== id)))}><X size={12} /></button>
@@ -121,22 +158,67 @@ export function HistoryWorkbench({ conversations, goal, onGoal, onRequest, onSou
         <button type="button" className="history-source-clear" aria-label={zh ? "清空材料" : "Clear materials"} title={zh ? "清空材料" : "Clear materials"} onClick={() => onSelectedIds?.(new Set())}>{zh ? "清空" : "Clear"}</button>
         </div>
       </div> : null}
-      <label><span className="sr-only">{zh ? "搜索或整理历史对话" : "Search or organize past conversations"}</span>
-        <textarea ref={input} rows={1} maxLength={500} value={goal}
-          onChange={event => { if (automaticGoal.current && !explicitMode.current) { setIntent(undefined); setShortcut(undefined); } automaticGoal.current = undefined; setError(""); onGoal(event.target.value); }}
-          onKeyDown={event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); search(); } }}
-          placeholder={shortcut===3
-            ?zh?"想从历史讨论中发现哪些主题？例如：找出值得继续的硬件 AI 项目":"What topics would you like to discover? e.g. Find hardware AI projects worth continuing."
-            :intent==="answer"&&shortcut===1
-              ?zh?"想总结哪个主题的讨论？":"Which topic would you like to summarize?"
-              :intent==="project"
-                ?zh?"例如：整理过去讨论过的硬件 AI 项目":"e.g. Organize the hardware AI project we discussed earlier"
-                :zh?"例如：之前关于 Orama 搜索索引的讨论在哪里？":"e.g. Where did we discuss the Orama search index?"} />
-      </label>
-      <div className="goal-composer-footer">
-        <button type="button" className="history-selection-summary" onClick={onSources}><Plus size={15} aria-hidden="true"/>{t("workbenchAddChat")}</button>
-        <div className="goal-composer-actions"><AIQuickSelect compact zh={zh} readOnly={readOnly} configureLabel={readOnly ? (zh ? "模型设置" : "Model settings") : (zh ? "配置模型" : "Configure model")} onConfigure={onConfigureAI} onBusy={setSwitchingAI} /><button className="primary" title="Ctrl / ⌘ + Enter" disabled={!goal.trim() || switchingAI}><SubmitIcon size={15} aria-hidden="true" />{shortcut===3?zh?"发现主题":"Discover topics":currentAction === "project" ? zh ? "开始整理" : "Organize project" : currentAction === "continue" ? zh ? "继续项目" : "Continue project" : summary ? zh ? "总结讨论" : "Summarize" : currentAction==="clarify"&&goal.trim()?zh?"选择操作":"Choose action":zh ? "搜索历史" : "Search history"}</button></div>
-      </div>
+      {projectOnly && selectedPendingIds.length > 0 ? <div className="organize-pending-banner" role="status">
+        <AlertCircle size={14} aria-hidden="true" />
+        <span>{zh ? `已选对话中有 ${selectedPendingIds.length} 条未同步正文` : `${selectedPendingIds.length} selected conversations need sync`}</span>
+        <div className="organize-pending-actions">
+          <button type="button" disabled={switchingAI} onClick={() => onHydrate(selectedPendingIds)}><RefreshCw size={12} aria-hidden="true" />{zh ? "同步所选" : "Sync selected"}</button>
+          <button type="button" onClick={onSources}>{zh ? "调整材料" : "Adjust sources"}</button>
+        </div>
+      </div> : null}
+      {projectOnly ? <>
+        <div className="goal-composer-footer organize-compact-row">
+          <div className="organize-compact-left">
+            <button type="button" className="history-selection-summary" onClick={onSources}><Plus size={15} aria-hidden="true"/>{t("workbenchAddChat")}{materials.length ? <span className="composer-source-badge" aria-hidden="true">{materials.length}</span> : null}</button>
+            <label className="organize-mode-select">
+              <span className="sr-only">{zh ? "写作模式" : "Writing mode"}</span>
+              <select aria-label={zh ? "写作模式" : "Writing mode"} value={writingMode} disabled={readOnly || switchingAI} onChange={event => onWritingMode?.(event.target.value as WikiWritingMode)}>
+                {(["concise", "handoff", "audit"] as const).map(mode => <option key={mode} value={mode}>{WIKI_WRITING_MODES[mode][zh ? "zh" : "en"]}</option>)}
+              </select>
+            </label>
+            <button type="button" className={`organize-instruction-toggle${customInstruction.trim() ? " has-value" : ""}`} aria-expanded={instructionOpen} onClick={() => {
+              const next = !instructionOpen;
+              setInstructionOpen(next);
+              if (next) window.requestAnimationFrame(() => input.current?.focus());
+            }}><SlidersHorizontal size={14} aria-hidden="true" /><span>{zh ? "整理要求" : "Instructions"}</span>{customInstruction.trim() ? <span className="organize-instruction-dot" aria-hidden="true" /> : null}</button>
+          </div>
+          <div className="goal-composer-actions">
+            <AIQuickSelect compact zh={zh} readOnly={readOnly} configureLabel={readOnly ? (zh ? "模型设置" : "Model settings") : (zh ? "配置模型" : "Configure model")} onConfigure={onConfigureAI} onBusy={setSwitchingAI} />
+            <button className="primary" title="Ctrl / ⌘ + Enter" disabled={!materials.length || switchingAI}><SubmitIcon size={15} aria-hidden="true" />{zh ? "开始整理" : "Organize project"}</button>
+          </div>
+        </div>
+        {instructionOpen ? <div className="organize-instruction-drawer">
+          <label><span className="sr-only">{zh ? "整理要求" : "Organization instructions"}</span>
+            <textarea ref={input} rows={2} maxLength={500} value={customInstruction}
+              onChange={event => { automaticGoal.current = undefined; setError(""); onGoal(event.target.value); }}
+              onKeyDown={event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); search(); } }}
+              placeholder={zh ? "可选：补充整理重点或排除内容，例如「聚焦硬件选型和已拍板方案，略过早期闲聊」" : "Optional: focus or exclusions, e.g. 'Prioritize key decisions and constraints; skip early small talk'"} />
+          </label>
+          <div className="organize-instruction-footer">
+            <div className="composer-starters" aria-label={zh ? "示例要求" : "Example instructions"}>
+              {INSTRUCTION_EXAMPLES[locale].map(prompt => <button key={prompt} type="button" className="composer-starter-chip" onClick={() => { automaticGoal.current = undefined; setError(""); onGoal(prompt); input.current?.focus(); }}>{prompt}</button>)}
+            </div>
+            {customInstruction.trim() ? <button type="button" className="organize-instruction-clear" onClick={() => onGoal("")}>{zh ? "清空" : "Clear"}</button> : null}
+          </div>
+        </div> : null}
+      </> : <>
+        <label><span className="sr-only">{zh ? "搜索或整理历史对话" : "Search or organize past conversations"}</span>
+          <textarea ref={input} rows={1} maxLength={500} value={goal}
+            onChange={event => { if (automaticGoal.current && !explicitMode.current) { setIntent(undefined); setShortcut(undefined); } automaticGoal.current = undefined; setError(""); onGoal(event.target.value); }}
+            onKeyDown={event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) { event.preventDefault(); search(); } }}
+            placeholder={shortcut===3
+              ?zh?"想从历史讨论中发现哪些主题？例如：找出值得继续的硬件 AI 项目":"What topics would you like to discover? e.g. Find hardware AI projects worth continuing."
+              :intent==="answer"&&shortcut===1
+                ?zh?"想总结哪个主题的讨论？":"Which topic would you like to summarize?"
+                :intent==="project"
+                  ?zh?"例如：整理过去讨论过的硬件 AI 项目":"e.g. Organize the hardware AI project we discussed earlier"
+                  :zh?"例如：之前关于 Orama 搜索索引的讨论在哪里？":"e.g. Where did we discuss the Orama search index?"} />
+        </label>
+        <div className="goal-composer-footer">
+          <button type="button" className="history-selection-summary" onClick={onSources}><Plus size={15} aria-hidden="true"/>{t("workbenchAddChat")}{materials.length ? <span className="composer-source-badge" aria-hidden="true">{materials.length}</span> : null}</button>
+          <div className="goal-composer-actions"><AIQuickSelect compact zh={zh} readOnly={readOnly} configureLabel={readOnly ? (zh ? "模型设置" : "Model settings") : (zh ? "配置模型" : "Configure model")} onConfigure={onConfigureAI} onBusy={setSwitchingAI} /><button className="primary" title="Ctrl / ⌘ + Enter" disabled={!goal.trim() || switchingAI}><SubmitIcon size={15} aria-hidden="true" />{shortcut===3?zh?"发现主题":"Discover topics":currentAction === "project" ? zh ? "开始整理" : "Organize project" : currentAction === "continue" ? zh ? "继续项目" : "Continue project" : summary ? zh ? "总结讨论" : "Summarize" : currentAction==="clarify"&&goal.trim()?zh?"选择操作":"Choose action":zh ? "搜索历史" : "Search history"}</button></div>
+        </div>
+      </>}
     </form>
     {coverageHint && incompleteIds.length ? <div className="history-coverage-hint"><Info size={14} aria-hidden="true"/><span>{zh ? `还有 ${incompleteIds.length} 条已发现对话未导入完整正文，${experimentalActions?"搜索和主题发现":"搜索"}可能遗漏结果。` : `${incompleteIds.length} discovered conversations still need their full messages imported; ${experimentalActions?"search and topic discovery":"search"} may miss results.`}</span><button type="button" disabled={switchingAI} onClick={() => onHydrate(incompleteIds)}>{zh ? "同步全部正文" : "Sync all messages"}</button></div> : null}
     {choosing?<div className="home-intent-choice" role="group" aria-label={zh?"选择执行方式":"Choose action"}><p>{zh?"选择如何使用这段输入：":"Choose how to use this input:"}</p><button type="button" onClick={()=>search("answer",0)}>{zh?"搜索历史":"Search history"}</button><button type="button" onClick={()=>search("project",2)}>{zh?"整理成项目":"Organize as project"}</button>{experimentalActions?<button type="button" onClick={()=>search("answer",1)}>{zh?"总结讨论":"Summarize"}</button>:null}</div>:null}

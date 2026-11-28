@@ -7,7 +7,7 @@ import {withDecision} from "../ai/wiki-key-decisions";
 import type {WikiKnowledgeLedger,WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 import {wikiOverviewSignature} from "../shared/wiki-overview";
 import {numberedWikiReferences} from "./wiki-numbered-references";
-import {projectQuickBrief} from "./project-quick-brief";
+import {formatProjectMarkdown,projectQuickBrief} from "./project-quick-brief";
 
 const selection:ProjectExportSelection={overview:false,wikiIds:["database"],matters:false,history:false,sources:false};
 
@@ -27,6 +27,95 @@ it("bounds the quick brief without cutting any selected argument or dropping its
  expect(brief).toContain("方案二：先在内部试用。");
  expect(brief).not.toContain("论述");
  expect(brief).not.toContain("其他话题");
+});
+
+it("uses the saved writing mode and lets callers explicitly select each Markdown edition",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const sentence="数据库在本地读取索引。";
+ source.excerpt=sentence;
+ page.body=sentence;
+ page.claims=[{text:sentence,quote:sentence,evidenceIds:[source.id],holder:"ai"}];
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",documentType:"project",writingMode:"handoff",materials:1,batches:[]};
+ const selected={...selection,overview:true,wikiIds:[page.id]};
+ const handoff=projectDocument(session,selected,"md").text;
+ const brief=projectDocument(session,{...selected,preset:"concise"},"md").text;
+ const audit=projectDocument(session,{...selected,preset:"audit"},"md").text;
+ expect(handoff).toContain("章节导航");
+ expect(handoff).not.toMatch(/来源范围|一页速览|文档信息与核对说明/u);
+ expect(brief).toContain(sentence);
+ expect(brief).not.toMatch(/一页速览|章节导航|引用定位|自动检查|来源\d+|<!--/u);
+ expect(audit).toContain("一页速览");
+ expect(audit).toContain("文档信息与核对说明");
+ expect(audit).not.toContain("来源范围");
+});
+
+it("cleans the brief's inline citations and empty headings while keeping nested fenced code byte for byte",()=>{
+ const literal="~~~js\nconst x = 'A -> B 〔建议〕';\n\n\nreturn x;\n~~~";
+ const body="# 项目\n\n\n启动 -> 校验〔建议〕 [来源1](#source-S-1-abcd)。\n\n"+literal+"\n\n### 空标题\n";
+ const text=formatProjectMarkdown(body,"brief");
+ expect(text).toContain("启动 → 校验。");
+ expect(text).toContain(literal);
+ expect(text).not.toMatch(/来源1|空标题/u);
+ expect(text).toMatch(/^# 项目\n\n启动/u);
+});
+
+it("keeps handoff table sources off unrelated flows, hoists uniform decided badges, and prunes orphan locators",()=>{
+ const body=[
+  "# 项目",
+  "## 硬件架构",
+  "自然语言 → Hardware IR → Firmware",
+  "表格来源 [来源1](#source-S-1-tech)",
+  "| 模块 | 技术 |\n| --- | --- |\n| 前端 | Next.js |",
+  "表格来源 [来源3](#source-S-3-comp)",
+  "| 竞品 | 特点 |\n| --- | --- |\n| A | 开源 |",
+  "### 开发路线图",
+  "| 阶段 | 安排 |\n| --- | --- |\n| Phase 1〔已定〕 [来源4](#source-S-4-plan) | 基础框架〔已定〕 [来源4](#source-S-4-plan) |\n| Phase 2 | 领域模型〔已定〕 [来源4](#source-S-4-plan) |",
+  "---",
+  "## 引用定位",
+  [
+   '- **来源1**<a id="source-S-1-tech"></a> · AI · 第 1 条消息',
+   '- **来源2**<a id="source-S-2-orphan"></a> · AI · 第 2 条消息',
+   '- **来源3**<a id="source-S-3-comp"></a> · AI · 第 3 条消息',
+   '- **来源4**<a id="source-S-4-plan"></a> · AI · 第 4 条消息',
+  ].join("\n"),
+ ].join("\n\n");
+ const text=formatProjectMarkdown(body,"handoff");
+ expect(text).toContain("自然语言 → Hardware IR → Firmware\n\n*下表来源：[来源1](#source-S-1-tech)*\n\n| 模块 | 技术 |");
+ expect(text).toContain("*下表来源：[来源2](#source-S-3-comp)*\n\n| 竞品 | 特点 |");
+ expect(text).not.toContain("表格来源");
+ expect(text).toContain("### 开发路线图\n\n*本表各项均为〔已定〕 [来源3](#source-S-4-plan)*\n\n| 阶段 | 安排 |\n| --- | --- |\n| Phase 1 | 基础框架 |\n| Phase 2 | 领域模型 |");
+ expect(text).not.toContain("source-S-2-orphan");
+ expect(text).toContain('- **来源2**<a id="source-S-3-comp"></a>');
+ expect(text).toContain('- **来源3**<a id="source-S-4-plan"></a>');
+ expect(text).not.toContain("来源4");
+});
+
+it("merges split double-numbered ordered lists, converts chained CJK arrows, and deduplicates overlapping adjacent tables",()=>{
+ const body=[
+  "# 项目",
+  "## 流程与选型",
+  "核心用户旅程（识别->加入库存->发现->生成->验证）及演示。",
+  "1. **欢迎页**：进入界面。\n2. **对话理解**：解析需求。",
+  "1. **3. 验证**：校验结构。\n2. **4. 制作**：完成组装。",
+  "| 层级 | 技术选择 |\n| --- | --- |\n| 框架 | Next.js + TypeScript |\n| 状态管理 | Zustand |",
+  "表格来源 [来源1](#source-S-1-stack)",
+  "| 模块 | 技术 |\n| --- | --- |\n| 前端 | **Next.js + TypeScript** |\n| 页面状态 | Zustand |\n| 校验 | Zod |",
+  "| 项目名称 | 核心功能 | 许可/限制 |\n| --- | --- | --- |\n| Microsoft SchGen | 自然语言 → PCB | 无特殊限制 |\n| Words2Wires | 自然语言 → 电路 | 不复制旧版 pipeline |\n| Boardsmith | Prompt → KiCad | AGPL-3.0 许可，禁止复制源码 |",
+  "表格来源 [来源2](#source-S-2-refs)",
+  "| 项目 | 做什么 | 相似度 |\n| --- | --- | --- |\n| **Microsoft SchGen** | 自然语言 → PCB | ⭐⭐⭐⭐⭐ |\n| **Words2Wires** | 自然语言 → 电路 | ⭐⭐⭐⭐⭐ |\n| **Boardsmith** | Prompt → KiCad | ⭐⭐⭐⭐⭐ |",
+  "---",
+  "## 引用定位",
+  '- **来源1**<a id="source-S-1-stack"></a> · AI · 第 1 条消息\n- **来源2**<a id="source-S-2-refs"></a> · AI · 第 2 条消息',
+ ].join("\n\n");
+ const text=formatProjectMarkdown(body,"handoff");
+ expect(text).toContain("（识别→加入库存→发现→生成→验证）");
+ expect(text).toContain("1. **欢迎页**：进入界面。\n2. **对话理解**：解析需求。\n3. **验证**：校验结构。\n4. **制作**：完成组装。");
+ expect(text).not.toContain("1. **3.");
+ expect(text).not.toContain("| 层级 | 技术选择 |");
+ expect(text).toContain("| 前端 | **Next.js + TypeScript** |");
+ expect(text).toContain("| 项目名称 | 核心功能 | 许可/限制 |");
+ expect(text).not.toContain("⭐⭐⭐⭐⭐");
+ expect(text).toContain("*下表来源：[来源2](#source-S-2-refs)*");
 });
 
 it("attaches table evidence to its own caption instead of leaving an orphan source line",()=>{
@@ -180,7 +269,8 @@ it("keeps an exact release matrix in handoff and moves an explicitly selected co
  const clean=projectDocument(session,options,"md").text;
  expect(clean).toContain(matrix);
  expect(clean).toContain("AI 建议，未确认");
- expect(clean).toMatch(/表格来源 \[来源\d+\]\(#source-S-/u);
+ expect(clean).toMatch(/讨论中的原文表格[^\n]* \[来源\d+\]\(#source-S-/u);
+ expect(clean).not.toContain("<!-- {");
  expect(clean).not.toContain(comparison);
  const [main,appendix]=projectDocument(session,{...options,referenceAppendix:true},"md").text.split("## 参考示例附录");
  expect(main).not.toContain(comparison);
@@ -440,7 +530,9 @@ it("T24: states the document type from saved checks and puts key conclusions bes
  expect(file).toContain("| 文档类型 | 历史讨论整理稿");
  expect(file).toMatch(/\| 来源 \| .* · 讨论于 /u);
  // The first line says when the discussions took place, so "当前" in the text reads as of then.
- expect(file.split("\n")[0]).toBe(`# ${session.title}`);expect(file.split("\n")[2]).toBe("文档状态：整理稿 · 实现未核验  ");expect(file.split("\n")[3]).toMatch(/^来源：\d+ 个来源对话 · 讨论于 \d+\/\d+(?:–\d+\/\d+)?$/u);
+ expect(file.split("\n")[0]).toBe(`# ${session.title}`);expect(file.split("\n")[2]).toMatch(/^来源：\d+ 个来源对话 · 讨论于 \d+\/\d+(?:–\d+\/\d+)?$/u);
+ expect(file).not.toMatch(/^文档状态：/mu);
+ expect(projectDocument(session,{overview:false,wikiIds:["store"],matters:false,history:false,sources:false},"md",false).text).not.toMatch(/^Document status:/mu);
  expect(file).toContain("| 实现核对 | 未进行");
  expect(file).toContain("**关键结论与来源**");
  // Each label heads its group once; the conclusions under it are plain items.
@@ -465,7 +557,7 @@ it("keeps the reading entrance brief, retains scope warnings and moves detailed 
  session.sections=groundWikiClaims([{id:"index",title:"索引",body:`方案 9 采用本地索引。\n\n## 细节\n\n${claims.slice(0,9).map(claim=>claim.text).join("\n\n")}`,kind:"finding",transition:"",evidenceIds:session.evidence.map(ref=>ref.id),claims}],session.evidence,originals,true);
  const file=projectDocument(session,{overview:false,wikiIds:["index"],matters:false,history:false,sources:true},"md").text;
  const opening=file.split("\n\n## ")[0];
- expect(opening.split("\n").length).toBeLessThanOrEqual(7);expect(opening).toContain("实现未核验");
+ expect(opening.split("\n").length).toBeLessThanOrEqual(7);expect(opening).not.toContain("文档状态");
  expect(opening).not.toContain("### 句末标记");
  const notes=file.split("## 文档信息与核对说明")[1];expect(notes).toContain("文档类型");expect(notes).toContain("| 实现核对 | 未进行");
  expect(file).toContain("**本章来源**：共 10 条，见来源索引；关键结论旁已标出对应来源");
@@ -1146,6 +1238,17 @@ it("reports failed planned chapters separately from the available export selecti
  expect(JSON.parse(projectDocument(session,chosen,"json").text).context.missingChapters).toEqual(["开发计划与发布状态"]);
 });
 
+it("distinguishes unfinished organization from content findings in the export",()=>{
+ const session=contextKnowledge().session,page=session.sections[0];
+ session.sections=[page];
+ session.wikiKnowledge={version:1,generatedAt:1,status:"complete",materials:1,batches:[],
+  draft:{version:1,generatedAt:1,status:"partial",chapters:[{...page,question:"",group:"",paragraphs:[],problems:[]}],
+   report:{},quality:{sources:"complete",failedBatches:0,organization:"partial",critical:0,problems:0,passed:false}}};
+ const file=projectDocument(session,{...selection,wikiIds:[page.id]},"md").text;
+ expect(file).toContain("当前成稿检查未发现问题，仍有整理步骤待完成");
+ expect(file).not.toContain("质量检查未通过");
+});
+
 it("lists every decided sentence of a run among the key decisions, not only the one carrying the mark",()=>{
  const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
  page.body="第一阶段允许使用 Mock AI 准备三个演示项目。若成本合理，再加入命令面板作为后续增强。";
@@ -1292,6 +1395,17 @@ it("gives a chapter's answer at a glance without its sentence mark",()=>{
  expect(glance).toContain(`| ${stack} |`);
  expect(glance).not.toContain("[Decided]");
  expect(file).toContain(`${stack} [Decided]`);
+});
+
+it("lists each confirmed roadmap row with its stage and never splices adjacent rows",()=>{
+ const session=contextKnowledge().session,page=session.sections[0],source=session.evidence[0];
+ const cells=["Phase 1","完成基础框架与主题","Phase 2","搭建硬件领域模型"];
+ page.body="| 阶段 | 目标 |\n| --- | --- |\n| "+cells.slice(0,2).join(" | ")+" |\n| "+cells.slice(2).join(" | ")+" |";
+ page.claims=cells.map(text=>({text,quote:text,evidenceIds:[source.id],holder:"decided" as const,unitIds:["roadmap"],holderMark:true}));
+ const md=projectDocument(session,{...selection,overview:true,wikiIds:[page.id]},"md").text;
+ const overview=md.slice(0,md.indexOf("\n---\n"));
+ expect(overview).toContain("- Phase 1：完成基础框架与主题。");
+ expect(overview).toContain("- Phase 2：搭建硬件领域模型。");
 });
 
 it("lists a decided table row with its item first, and two overlapping sentences once",()=>{

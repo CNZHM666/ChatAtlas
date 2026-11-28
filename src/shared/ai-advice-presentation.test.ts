@@ -28,3 +28,7 @@ it("unifies narrator roles across Markdown without changing product names, sourc
  expect(output).toBe('AI认为先整理，再导出。AI提出新方案。AI说明边界。AI**建议**本地保存。AI建议先核对。用户决定保留记录。智能助手建议显示入口。客服助手回答用户问题。原话“助手**建议**本地保存”。');
  expect(aiAdvicePresentation(output)).toBe(output);
 });
+it("preserves product nouns before a preposition or verb", () => {
+ const text = "这解决了AI硬件助手在可验证性方面的问题。助手建议先验证。";
+ expect(aiAdvicePresentation(text)).toBe("这解决了AI硬件助手在可验证性方面的问题。AI建议先验证。");
+});

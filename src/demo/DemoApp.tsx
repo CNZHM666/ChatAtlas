@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Github, History, Languages, LayoutDashboard, Moon, Settings, Sun } from "lucide-react";
+import { Download, Github, Languages, LayoutDashboard, Moon, PanelRightOpen, Settings, Sun } from "lucide-react";
 import { DocumentOverview } from "../canvas/components/DocumentOverview";
 import { MapSidebar } from "../canvas/components/MapSidebar";
 import { ProjectNavigationLayout, ProjectNavigationOpen, useProjectNavigationLayout } from "../canvas/components/ProjectNavigationLayout";
@@ -7,7 +7,6 @@ import { ProjectSourceList } from "../canvas/components/ProjectSourceList";
 import { ProjectWikiNavigation } from "../canvas/components/ProjectWikiNavigation";
 import { ReaderBackButton } from "../canvas/components/ReaderBackButton";
 import { ReaderConversation } from "../canvas/components/ReaderConversation";
-import { ReaderMoreMenu } from "../canvas/components/ReaderMoreMenu";
 import { WikiDocument } from "../canvas/components/WikiDocument";
 import { WorkspaceSourcePanel } from "../canvas/components/WorkspaceSourcePanel";
 import { ProjectExampleContext } from "../canvas/project-example-context";
@@ -17,6 +16,7 @@ import { BrandMark } from "../shared/BrandMark";
 import { OVERVIEW_CANVAS_ID } from "../shared/constants";
 import type { FocusEvidence } from "../shared/focus-session";
 import { architectureChapter, demoProject, type DemoLocale } from "./project";
+import { ContinuationDemo } from "./ContinuationDemo";
 
 const ProjectExportDialog = lazy(() => import("../canvas/components/ProjectExportDialog").then(module => ({ default: module.ProjectExportDialog })));
 const ReviewHome = lazy(() => import("../canvas/components/ReviewHome").then(module => ({ default: module.ReviewHome })));
@@ -63,6 +63,7 @@ function DemoWorkspace() {
   const [exportOpen, setExportOpen] = useState(false);
   const [settings, setSettings] = useState<"ai" | "data">();
   const [needsExtension, setNeedsExtension] = useState(false);
+  const [continuationOpen, setContinuationOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set<string>());
   const navigationLayout = useProjectNavigationLayout();
   const [headingTarget, setHeadingTarget] = useState<{ title: string; revision: number }>();
@@ -72,8 +73,8 @@ function DemoWorkspace() {
   const { knowledge, overview } = useMemo(() => demoProject(locale), [locale]);
   const session = knowledge.session;
   const defaultRoute = "/wiki/" + architectureChapter;
-  const route = routeHash === "/search" ? "/workbench"
-    : ["/overview", "/workbench", "/workbench/history"].includes(routeHash) || session.sections.some(section => "/wiki/" + section.id === routeHash)
+  const route = ["/search", "/workbench/history"].includes(routeHash) ? "/workbench"
+    : ["/overview", "/workbench"].includes(routeHash) || session.sections.some(section => "/wiki/" + section.id === routeHash)
       ? routeHash : defaultRoute;
   const canvases = useMemo(() => [
     { id: OVERVIEW_CANVAS_ID, name: "Workbench", type: "overview" as const, createdAt: session.createdAt, updatedAt: session.updatedAt },
@@ -85,8 +86,7 @@ function DemoWorkspace() {
   }), [knowledge]);
   const chapter = session.sections.find(section => route === "/wiki/" + section.id) ?? session.sections.find(section => section.id === architectureChapter)!;
   const isOverview = route === "/overview";
-  const isHome = route === "/workbench" || route === "/workbench/history";
-  const isHistory = route === "/workbench/history";
+  const isHome = route === "/workbench";
   const original = fullSource && source ? knowledge.conversations.find(chat => chat.id === source.reference.conversationId) : undefined;
   const open = (reference: FocusEvidence, options: WorkspaceEvidenceOptions = {}) => {
     setNavigationOpen(false);
@@ -107,7 +107,6 @@ function DemoWorkspace() {
   const read = (id: string, heading?: string) => { setNavigationTab("wiki"); navigate("/wiki/" + id, heading); };
   const readOverview = () => navigate("/overview");
   const readHome = () => navigate("/workbench");
-  const readHistory = () => navigate("/workbench/history");
   const requireExtension = () => setNeedsExtension(true);
   const readConversation = (id: string, message?: (typeof knowledge.messages)[number]) => {
     const references = session.evidence.filter(ref => ref.conversationId === id);
@@ -161,11 +160,11 @@ function DemoWorkspace() {
     <header className="topbar">
       <button type="button" className="brand brand-home" onClick={readHome} aria-label={tr("ChatAtlas 工作台", "ChatAtlas Workbench")}><BrandMark className="brand-mark" /><span>ChatAtlas</span></button>
       <span className="demo-badge">{tr("只读演示", "Read-only demo")}</span>
-      {isHome && <button type="button" className="icon-button topbar-workbench-history" onClick={isHistory ? readHome : readHistory} aria-label={tr("历史记录", "History")}><History size={17} aria-hidden="true" /></button>}
       <div className="topbar-actions demo-actions">
+        <button type="button" className="demo-continuation-trigger" onClick={() => setContinuationOpen(true)} aria-label={tr("体验续写", "Try continuation")} title={tr("体验续写", "Try continuation")}><PanelRightOpen size={16} aria-hidden="true"/><span>{tr("体验续写", "Try continuation")}</span></button>
         <a className="demo-github" href={repository}><Github size={16} aria-hidden="true" />GitHub</a>
         <a className="demo-install" href={installUrl}>{tr("安装扩展", "Install extension")}</a>
-        <button type="button" className="icon-button" onClick={() => setSettings("data")} aria-label={tr("设置", "Settings")} title={tr("设置", "Settings")}><Settings size={17} aria-hidden="true" /></button>
+        <button type="button" className="icon-button" onClick={() => setSettings("ai")} aria-label={tr("设置", "Settings")} title={tr("设置", "Settings")}><Settings size={17} aria-hidden="true" /></button>
         <button type="button" className="icon-button" onClick={changeLanguage} aria-label={tr("切换为英文", "Switch to Chinese")} title={tr("切换为英文", "Switch to Chinese")}><Languages size={17} aria-hidden="true" /></button>
         <button type="button" className="icon-button" aria-label={tr("切换主题", "Switch theme")} title={tr("切换主题", "Switch theme")} onClick={() => {
           setTheme(theme === "light" ? "dark" : "light");
@@ -174,18 +173,18 @@ function DemoWorkspace() {
     </header>
     <div className="workspace-shell">
       {isHome ? <>
-        <MapSidebar canvases={canvases} activeId={OVERVIEW_CANVAS_ID} onSelect={id => id === OVERVIEW_CANVAS_ID ? readHome() : readOverview()} workbenchHistoryActive={isHistory} onWorkbenchHistory={readHistory} />
-        <div className="workspace"><Suspense fallback={null}><ReviewHome
+        <MapSidebar canvases={canvases} activeId={OVERVIEW_CANVAS_ID} onSelect={id => id === OVERVIEW_CANVAS_ID ? readHome() : readOverview()} />
+        <div className="workspace"><Suspense fallback={null}><ReviewHome projectFirst
           canvases={canvases} sessions={[session]} conversations={knowledge.conversations}
           selectedIds={selectedIds} onSelectedIds={setSelectedIds} importJob={null} importSource="web" recentReading={[]}
-          historyOpen={isHistory} onHistoryChange={open => open ? readHistory() : readHome()} onSession={readOverview}
+          onHistoryChange={readHome} onSession={readOverview}
           onReadConversation={readConversation} onPreviewAction={requireExtension} onConfigureAI={() => setSettings("ai")}
           onStart={requireExtension} onResume={readOverview} onSpace={readOverview} onPrioritize={requireExtension} onScan={requireExtension}
           onHydrate={requireExtension} onZip={requireExtension} onPause={requireExtension} onConnect={requireExtension} onDiscover={requireExtension}
         /></Suspense></div>
       </> : <ProjectExampleContext.Provider value={readers}>
         <WorkspaceEvidenceContext.Provider value={{ open, close, active: source && !original ? { ...source.options, shown: source.reference } : undefined }}>
-          <div className={source && !original ? "focus-workspace has-original-panel" : "focus-workspace"} data-project-navigation-side={navigationLayout.side}
+          <div className={source && !original ? "focus-workspace has-original-panel" : "focus-workspace"}
             data-project-navigation-collapsed={navigationLayout.collapsed || undefined} style={navigationLayout.style}>
             <div className="project-reading-base" ref={readingBase} aria-hidden={Boolean(original) || undefined}>
               <ProjectNavigationOpen layout={navigationLayout} zh={zh} navigationId="demo-project-navigation" />
@@ -224,7 +223,6 @@ function DemoWorkspace() {
                   <div className="focus-reader-location"><span>{session.title}</span></div>
                   <div className="focus-reader-toolbar-actions project-document-actions">
                     <button type="button" aria-label={tr("导出", "Export")} title={tr("导出项目", "Export project")} onClick={() => setExportOpen(true)}><Download size={15} aria-hidden="true" /><span>{tr("导出", "Export")}</span></button>
-                    <ReaderMoreMenu zh={zh} iconOnly flat edits={[navigationLayout.moveAction(zh)]} />
                   </div>
                 </div>
                 <main className={isOverview ? "focus-reading-body" : "focus-reading-body is-chapter-view"} ref={readingBody} key={route}>
@@ -269,6 +267,11 @@ function DemoWorkspace() {
       <ProjectExportDialog session={session} zh={zh} onClose={() => setExportOpen(false)} />
     </Suspense>}
     {settings && <Suspense fallback={null}><SettingsPanel key={settings} initialTab={settings} onClose={() => setSettings(undefined)} installUrl={installUrl} /></Suspense>}
+    {continuationOpen && <ContinuationDemo session={session} zh={zh} onClose={() => setContinuationOpen(false)} onEvidence={reference => {
+      setContinuationOpen(false);
+      read(architectureChapter);
+      open(reference, { references: [reference], quote: reference.excerpt, sectionId: architectureChapter });
+    }}/>}
     {needsExtension && <div className="demo-action-notice" role="status"><span>{tr("安装扩展后可操作自己的对话。", "Install the extension to work with your own conversations.")}</span>
       <a href={installUrl}>{tr("安装扩展", "Install extension")}</a>
       <button type="button" className="icon-button" onClick={() => setNeedsExtension(false)} aria-label={tr("关闭提示", "Dismiss notice")}>×</button>

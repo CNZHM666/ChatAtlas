@@ -6,6 +6,8 @@ import { repairGeneratedWikiTable } from "../shared/wiki-table-source";
 /** A table written on one line, its rows joined by "||": "| 层级 | 代表项目 || --- | --- || 重量级 | PX4 |". */
 const JOINED_TABLE = /^\s*\|.*\|\|\s*:?-{3,}/u;
 const ITEM = /^( {0,3})(\d+)([.)])(\s+)/u;
+const BOLD_ORDINAL = /^(\s*(?:\*\*|__))(\d{1,3})[.)、][ \t]+(?=\S)/u;
+export const stripWikiLabelOrdinal = (text: string) => text.replace(BOLD_ORDINAL, "$1");
 
 /** The table's rows on lines of their own. Only a line that is a table with its separator row joined in. */
 export function splitJoinedTable(text: string): string {
@@ -31,9 +33,15 @@ export function renumberedLists(text: string): string {
       break;
     }
     const numbers = items.map(line => Number(lines[line].match(ITEM)![2]));
-    // Strip the presentation number in the item label before changing the list counter.
-    items.forEach(line => { lines[line] = lines[line].replace(/^(\s*(\d{1,3})[.)]\s+(?:\*\*|__)?)(\d{1,3})[.)、][ \t]+(?=\S)/u,
-      (whole, opening: string, outer: string, inner: string) => outer === inner ? opening : whole); });
+    const labels = items.map(line => lines[line].replace(ITEM, "").match(BOLD_ORDINAL));
+    const pairedRun = labels.length >= 2 && labels.every((label, place) => label
+      && (!place || numbers[place] === numbers[place - 1] + 1 && Number(label[2]) === Number(labels[place - 1]![2]) + 1));
+    items.forEach((line, place) => {
+      const lead = lines[line].match(ITEM)![0], label = labels[place];
+      if (label && (pairedRun || Number(label[2]) === numbers[place])) lines[line] = lead + stripWikiLabelOrdinal(lines[line].slice(lead.length));
+      else lines[line] = lines[line].replace(/^(\s*(\d{1,3})[.)]\s+)(\d{1,3})[.)、][ \t]+(?=\S)/u,
+        (whole, opening: string, outer: string, inner: string) => outer === inner ? opening : whole);
+    });
     const sequence = numbers.every((number, place) => !place || number > numbers[place - 1]
       || number === 1 && numbers[place - 1] >= 3 && numbers[place + 1] === 2);
     if (sequence && numbers.some((number, place) => place && number !== numbers[place - 1] + 1))
@@ -81,7 +89,10 @@ export function tidiedMarkdown(chapters: WikiDraftChapter[]): number {
     const text = tidyGeneratedWikiMarkdown(splitJoinedTable(paragraph.text));
     if (text === paragraph.text) continue;
     chapter.body = replaceParagraph(chapter.body, paragraph.text, text);
-    if (paragraph.claims) paragraph.claims = paragraph.claims.map(claim => ({ ...claim, text: tidyGeneratedWikiMarkdown(claim.text) }));
+    if (paragraph.claims) paragraph.claims = paragraph.claims.map(claim => {
+      const tidied = tidyGeneratedWikiMarkdown(claim.text), label = stripWikiLabelOrdinal(tidied);
+      return { ...claim, text: !text.includes(tidied) && text.includes(label) ? label : tidied };
+    });
     paragraph.text = text;
     changed++;
   }

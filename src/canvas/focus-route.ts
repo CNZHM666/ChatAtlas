@@ -1,5 +1,15 @@
 import type { FocusSection } from "../shared/focus-session";
-import type { RouteCardDraft } from "./components/FocusUnderstandingPath";
+
+export interface RouteCardDraft {
+  id: string;
+  title: string;
+  body: string;
+  transition: string;
+  before?: string;
+  phase?: string;
+  responsibility?: string;
+  links?: FocusSection["understandingLinks"];
+}
 
 export function removePersonalRouteCard(sections: FocusSection[], id: string): FocusSection[] {
   if (sections.find(section => section.id === id)?.origin !== "user") throw new Error("Only personal cards can be deleted");

@@ -18,6 +18,20 @@ export function conversationPlatformGroup(platform: string): string {
   return Object.hasOwn(PLATFORM_ALIASES,id) ? PLATFORM_ALIASES[id] : Object.hasOwn(NAMES,id) || id === "other" ? id : platform;
 }
 
+const TITLE_BRANDS: Record<string, string[]> = { claude: ["Claude AI"], gemini: ["Google Gemini"], kimi: ["Kimi AI"], qwen: ["千问", "Qwen 国际站"] };
+
+/** Strip a browser's platform decoration when the interface already identifies the source. */
+export function conversationDisplayTitle(title: string, platform: string): string {
+  const id = conversationPlatformGroup(platform);
+  if (!id) return title.trim();
+  const aliases = Object.hasOwn(TITLE_BRANDS, id) ? TITLE_BRANDS[id] : [];
+  const brands = new Set([platform, platformName(id, "zh-CN"), platformName(id, "en"), ...aliases].map(name => name.toLowerCase()));
+  const parts = title.trim().split(/(\s+[-–—|·｜]\s+)/u);
+  while (parts.length && brands.has(parts[0].toLowerCase())) parts.splice(0, 2);
+  while (parts.length && brands.has(parts[parts.length - 1].toLowerCase())) parts.splice(-2, 2);
+  return parts.join("");
+}
+
 /** Map a free-form label (exporter metadata, Markdown speaker) to a known platform ID. */
 export function platformFromLabel(label: unknown): string | undefined {
   if (typeof label !== "string") return undefined;

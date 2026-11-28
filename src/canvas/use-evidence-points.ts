@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { FocusEvidence } from "../shared/focus-session";
 import type { WikiClaimMarkerPoint } from "../shared/wiki-claim-markers";
 import { WorkspaceEvidenceContext, needsConfirmation, type EvidencePoint } from "./workspace-evidence-context";
@@ -55,7 +55,7 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
   const highlighted = useMemo(() => activeKey ? [activeKey] : shown ? ordered.filter(point =>
     (!selectedClaim || point.claim === selectedClaim) && point.references.some(ref => ref.id === shown.id || ref.conversationId === shown.conversationId && ref.messageId === shown.messageId)).map(point => point.key) : [], [activeKey, shown, ordered, selectedClaim]);
   const highlightKey = highlighted.join("|");
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = rootRef.current;
     let ranges = paintClaimHighlights(root, highlightKey ? highlightKey.split("|") : [], key => {
       const point = points.find(item => item.key === key);
@@ -74,9 +74,10 @@ export function useEvidencePoints(points: Array<EvidencePoint & { phrases: strin
     // restores the reading position on the next frame (the layout narrows), so the reveal runs just after that.
     const first = ranges[0];
     const timer = first ? window.setTimeout(() => revealRange(first), 120) : undefined;
-    return () => { window.clearTimeout(timer); paintClaimHighlights(root, []); };
+    return () => { window.clearTimeout(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- points change with the prose, which renderKey tracks.
   }, [highlightKey, activeKey, active?.locationRevision, renderKey, shown?.id, selectedClaim, reviewExcerpt]);
+  useEffect(() => () => { paintClaimHighlights(rootRef.current, []); }, []);
   const pointByKey = useMemo(() => new Map(ordered.map(point => [point.key, point])), [ordered]);
   const markerContext = useMemo(() => ({ points: ordered, pointByKey, activeKey, open, zh }), [ordered, pointByKey, activeKey, open, zh]);
   return { rootRef, claimMarkers: claimMarkers.length ? claimMarkers : undefined, ordered, open, markerContext };

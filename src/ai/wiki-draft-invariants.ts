@@ -1,3 +1,5 @@
+import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
+import { isSourceCodeParagraph } from "../shared/wiki-source-code";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import type { WikiDraftChapter, WikiInvariantIssue, WikiKnowledgeUnit, WikiTopicChain, WikiUnitStatus } from "../shared/wiki-knowledge";
 
@@ -29,8 +31,11 @@ const APART = /此前|早先|早期|最初|起初|原先|原来|原本|之前|�
 /** The assistant credited with a point: what the user said told as a suggestion. */
 const CREDITS_AI = /(?:AI|助手|ChatGPT|模型)\s*(?:的)?(?:建议|提议|推荐)|(?<![你我])曾建议|(?<![你我])(?:建议|提议)(?:将|把|采用|使用|改为)|\b(?:the (?:AI|assistant) (?:suggests|suggested|proposes|proposed))\b/iu;
 /** The user credited with a point: a decision or proposal told as the user's. */
-const CREDITS_USER = /(?<![让由给请供待需许将把为与和及或、（(])你(?:已|已经)?(?:提出|决定|确认|选择|要求|确定)(?!的|是否|与|和|、|[（(])|(?<![区分供让由给交请待需许将把为与和及或、（(误认])用户(?:已|已经)?(?:决定|确认|确定)(?!的|是否|与|和|、|[（(]|合并)|\b(?:you (?:decided|confirmed|chose)|the user (?:decided|confirmed|chose))\b/iu;
-export const wikiCreditsUserDecision=(text:string)=>CREDITS_USER.test(text.replace(/(?:不等于|不代表|不能视为|未经)\s*(?:项目发起人|用户|你)(?:已|已经)?(?:确认|决定|确定)/gu,""));
+const CREDITS_USER = /(?<![让由给请供待需许将把为与和及或、（(])你(?:已|已经)?(?:提出|决定|确认|选择|要求|确定)(?!的|是否|与|和|、|[（(])|(?<![区分供让由给交请待需许将把为与和及或、（(误认])用户(?:已|已经)?(?:决定|确认|确定)(?!的|是否|与|和|、|[（(]|合并)|项目发起人(?:已|已经)?(?:决定|确认|确定)(?!的|是否|[（(])|\b(?:you (?:decided|confirmed|chose)|the user (?:decided|confirmed|chose))\b/iu;
+export const wikiCreditsUserDecision = (text: string) => CREDITS_USER.test(text
+  .replace(/(?:不等于|不代表|不能视为|未经)\s*(?:项目发起人|用户|你)(?:已|已经)?(?:确认|决定|确定)/gu, "")
+  .replace(/(?:经|待|如果|若|在|仅在)?用户(?!已|已经)(?:确认|决定|确定)(?=[^，。；：\n]{0,30}(?:之后|后才|后再|后[，。；]|后$))/gu, "")
+  .replace(/\b(?:after|once|if|when) the user (?:confirmed|decided|chose)\b/giu, ""));
 
 const pairs = (text: string) => knowledgeTerms(text);
 const ownWords = (unit: WikiKnowledgeUnit) => unit.evidence.role === "user" && !unit.evidence.pasted && !unit.about;
@@ -58,7 +63,11 @@ export function partTold(part: string, text: string, share = PART_TOLD): boolean
   return shared / own.size >= share;
 }
 
-const sentencesOf = (text: string) => text.split("\n").filter(line => !/^\s*(?:\||```|>|#)/u.test(line)).join("\n").split(/(?<=[。！？!?\n])/u).map(sentence => sentence.replace(/\*\*/gu, "").trim()).filter(Boolean);
+const sentencesOf = (text: string) => wikiDocumentBlocks(text).flatMap(block => {
+  if (block.kind !== "paragraph" && block.kind !== "list") return [];
+  if (/^\s*\*[^*\n]*(?:原文代码|原文流程|原文表格|source code|source flow|source table)[^*\n]*\*\s*$/iu.test(block.text)) return [];
+  return block.text.split(/(?<=[。！？!?\n])/u).map(sentence => sentence.replace(/\*\*/gu, "").trim()).filter(Boolean);
+});
 
 /** The checks one chapter can fail on its own, the ones a rewrite of it can fix. */
 export function chapterInvariants(chapter: WikiDraftChapter, context: InvariantContext): WikiInvariantIssue[] {
@@ -94,6 +103,7 @@ export function chapterInvariants(chapter: WikiDraftChapter, context: InvariantC
     if (told.length) issues.push({ kind: "rejected_as_current", chapterId: chapter.id, unitIds: told.map(unit => unit.id), text: sentence.slice(0, 80) });
   }
   for (const paragraph of chapter.paragraphs) {
+    if (isSourceCodeParagraph(paragraph.text)) continue;
     const claims = paragraph.claims?.length ? paragraph.claims : [{ text: paragraph.text, unitIds: paragraph.unitIds }];
     for (const claim of claims) {
       const ids = claim.unitIds.filter(id => context.unitOf(id));
@@ -104,7 +114,8 @@ export function chapterInvariants(chapter: WikiDraftChapter, context: InvariantC
       const units = ids.map(id => context.unitOf(id)!);
       if (units.every(ownWords) && CREDITS_AI.test(claim.text) && !/你|用户/u.test(claim.text)) issues.push({ kind: "user_as_ai", chapterId: chapter.id, unitIds: ids, text: claim.text.slice(0, 80) });
       // A point the user never turned down told as turned down beside one they did: 「……的提议也被否定」.
-      if (context.declined && TURNED_DOWN.test(claim.text) && units.some(unit => !context.declined!(unit.id) && unit.evidence.role !== "user")) issues.push({ kind: "declined_overstated", chapterId: chapter.id, unitIds: ids.filter(id => !context.declined!(id)), text: claim.text.slice(0, 80) });
+      const ownDeclines = units.filter(unit => !unit.about && unit.evidence.role !== "user" && !context.declined?.(unit.id));
+      if (context.declined && TURNED_DOWN.test(claim.text) && ownDeclines.length) issues.push({ kind: "declined_overstated", chapterId: chapter.id, unitIds: ownDeclines.map(unit => unit.id), text: claim.text.slice(0, 80) });
       if (units.every(unit => unit.evidence.role === "assistant") && ids.every(id => ["proposal", "analysis"].includes(context.statusOf(id) ?? "")) && wikiCreditsUserDecision(claim.text)) issues.push({ kind: "ai_as_user", chapterId: chapter.id, unitIds: ids, text: claim.text.slice(0, 80) });
     }
   }

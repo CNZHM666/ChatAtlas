@@ -49,12 +49,13 @@ export function SourceUpdateNotice({ changes, conversations, zh, onUpdate, updat
   const titleOf = (id: string) => conversations.find(item => item.id === id)?.title ?? session?.evidence.find(item => item.conversationId === id)?.title ?? id;
   const chapterLabels = (titles: string[]) => zh ? `涉及章节：${titles.join("、")}` : `Affected chapters: ${titles.join(", ")}`;
   const action = pending.length ? zh ? "选择材料" : "Choose sources"
+    : decisions && !changed.length ? zh ? "预览正文更新" : "Preview chapter update"
     : overview ? zh ? "开始更新" : "Start update" : zh ? "预览更新" : "Preview update";
   return <aside className="source-update-notice">
     <div className="source-update-row">
-      <RefreshCw className="source-update-icon" size={16} aria-hidden="true"/>
+      <span className="source-update-icon-badge" aria-hidden="true"><RefreshCw className="source-update-icon" size={15}/></span>
       <div className="source-update-copy" role="status">
-        <strong>{pending.length ? zh ? "项目有新材料" : "New project material" : zh ? "检测到改动" : "Changes detected"}</strong>
+        <strong>{pending.length ? zh ? "项目有新材料" : "New project material" : decisions && !changed.length ? zh ? "正文待更新" : "Chapter update pending" : zh ? "检测到改动" : "Changes detected"}</strong>
         <span>{summary}</span>
       </div>
       <div className="source-update-controls">

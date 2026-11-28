@@ -18,3 +18,7 @@ export async function recordAIUsage(event: AIUsageEvent): Promise<void> {
 export async function listAIUsage(): Promise<AIUsageEvent[]> {
   return (await (await getDatabase()).getAll("aiUsageEvents")).sort((a, b) => b.createdAt - a.createdAt);
 }
+
+export async function listAIUsageForRun(runId: string): Promise<AIUsageEvent[]> {
+  return (await (await getDatabase()).getAllFromIndex("aiUsageEvents", "by-run", runId)).sort((a, b) => b.createdAt - a.createdAt);
+}

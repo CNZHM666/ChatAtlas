@@ -2,6 +2,9 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { AISettings, AIUsageEvent, AnalysisDiagnostics, AtlasCanvas, CanvasCard, CanvasEdge, CanvasMembership, CanvasViewport, Conversation, ConversationGraph, ConversationMessage, ConversationSemanticProfile, ImportDiagnostics, ImportItemStatus, ImportJob, KnowledgeCard, KnowledgeProposal, KnowledgeRelation, MessageAnchor, OrganizationPlan, OrganizationRun, QuestionSnapshot, SemanticDecisionCache, SourceRelation } from "../shared/types";
 
 export interface AtlasDB extends DBSchema {
+  projectFiles: { key: string; value: import("./project-desk").ProjectFile; indexes: { "by-project": string } };
+  projectDesks: { key: string; value: import("./project-desk").ProjectDesk };
+  sidecarUpdateDrafts: { key: string; value: import("./sidecar-update-drafts").SidecarUpdateDraft; indexes: { "by-project": string } };
   imageAssets: { key: string; value: import("../shared/conversation-images").ConversationImageAsset };
   discussionHighlights: { key: string; value: import("./discussion-highlights").DiscussionHighlightEdit; indexes: { "by-conversation": string } };
   homeResults: { key: string; value: import("./home-results").HomeResult; indexes: { "by-created": number } };
@@ -57,12 +60,15 @@ export interface AtlasDB extends DBSchema {
 let database: Promise<IDBPDatabase<AtlasDB>> | undefined;
 
 export function getDatabase(): Promise<IDBPDatabase<AtlasDB>> {
-  database ??= openDB<AtlasDB>("ai-conversation-atlas", 26, {
+  database ??= openDB<AtlasDB>("ai-conversation-atlas", 28, {
     blocking(_currentVersion, _blockedVersion, event) {
       (event.target as IDBDatabase).close();
       database = undefined;
     },
     upgrade(db, _oldVersion, _newVersion, transaction) {
+      if (!db.objectStoreNames.contains("projectFiles")) db.createObjectStore("projectFiles", { keyPath: "id" }).createIndex("by-project", "projectIds", { multiEntry: true });
+      if (!db.objectStoreNames.contains("projectDesks")) db.createObjectStore("projectDesks", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("sidecarUpdateDrafts")) db.createObjectStore("sidecarUpdateDrafts", { keyPath: "id" }).createIndex("by-project", "projectId");
       if (!db.objectStoreNames.contains("imageAssets")) db.createObjectStore("imageAssets", { keyPath: "id" });
       if (!db.objectStoreNames.contains("discussionHighlights")) db.createObjectStore("discussionHighlights", { keyPath: "id" }).createIndex("by-conversation", "conversationId");
       if (!db.objectStoreNames.contains("homeResults")) db.createObjectStore("homeResults", { keyPath: "id" }).createIndex("by-created", "createdAt");

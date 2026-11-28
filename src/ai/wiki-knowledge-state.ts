@@ -6,13 +6,13 @@ import { knowledgeScopesAgree, knowledgeTerms } from "../shared/knowledge-subjec
 import { replaceParagraph } from "../shared/wiki-body-text";
 import { stageWord } from "./wiki-draft-checks";
 import { wikiUserChooses } from "../shared/wiki-user-choice";
-import { assistantRequest, DECIDING_KINDS, personalDirection, STATE_KINDS, type WikiKnowledgeUnit, type WikiKnowledgeOrganization, type WikiKnowledgeLedger, type WikiUnitStatus, type WikiDraftChapter, type WikiBaselineItem } from "../shared/wiki-knowledge";
+import { assistantRequest, DECIDING_KINDS, personalDirection, STATE_KINDS, wikiExploratoryIntent, type WikiKnowledgeUnit, type WikiKnowledgeOrganization, type WikiKnowledgeLedger, type WikiUnitStatus, type WikiDraftChapter, type WikiBaselineItem } from "../shared/wiki-knowledge";
 import { wikiDiscussionOrder, wikiSaidLater } from "../shared/wiki-sources";
 import { UNDECIDED, wikiMeasure } from "../shared/wiki-section-status";
 import { wikiSaidInQuote } from "../shared/wiki-said-in-quote";
 import { exclusiveWikiVersions } from "./wiki-version-conflict";
 import { distinctWikiStageScopes } from "../shared/wiki-roadmap-scope";
-import { asksForDiscussionArtifact } from "../shared/statement-evidence";
+import { asksForDiscussionArtifact, isWikiOptionReply, isWikiDeicticChoice } from "../shared/statement-evidence";
 
 const ANALYSIS_KINDS: WikiKnowledgeUnit["kind"][] = ["fact", "report", "history", "question"];
 const LEFT_UNDECIDED = /\bcan'?t decide\b|\bcannot decide\b|\bhaven'?t decided\b|拿不定|定不下来/iu;
@@ -31,12 +31,18 @@ export function quotesMaterial(unit: WikiKnowledgeUnit): boolean {
 // A user's own decision says what to do; an observation or a question checking understanding does not.
 // Liking one of the shown designs ("我喜欢这种设计") or settling on it ("就这个") chooses it too.
 /** A confirmed point: a deciding kind, accepted from a proposal or chosen in the user's own words. */
-const decides = (unit: WikiKnowledgeUnit) => {
-  if (unit.about || unit.evidence.pasted || wikiPersonalIntent(unit) || !DECIDING_KINDS.includes(unit.kind)) return false;
+const SHORT_CONFIRMATION = /^\s*(?:好的?|可以|行|嗯|对|同意|确认|没问题|就(?:这|那)样|按(?:这|那)个|用(?:这|那)个|ok(?:ay)?|yes|sure|agreed|confirmed)(?:[，,。.!！\s]+(?:就这样|按这个(?:方案)?|继续(?:做|执行)?))?[，,。.!！\s]*$/iu;
+export function wikiUnitDecisionOrigin(unit: WikiKnowledgeUnit): "user_message" | "user_confirmed" | undefined {
+  if (unit.about || unit.evidence.pasted || wikiPersonalIntent(unit) || wikiExploratoryIntent(unit) || !DECIDING_KINDS.includes(unit.kind)) return;
   const { status, approval } = unit.adoption;
-  if (status === "user_adopted") return unit.evidence.role === "assistant" && Boolean(approval?.evidenceId && approval.messageId && approval.messageId !== unit.evidence.messageId && approval.quote?.trim() && !asksForDiscussionArtifact(approval.quote));
-  return status === "user_decision" && unit.evidence.role === "user" && wikiUserChooses(unit.evidence.quote);
-};
+  if (status === "user_adopted") {
+    if (unit.evidence.role !== "assistant" || !approval?.evidenceId || !approval.messageId || approval.messageId === unit.evidence.messageId
+      || !approval.quote?.trim() || asksForDiscussionArtifact(approval.quote) || /[？?]\s*$/u.test(approval.quote)) return;
+    if (SHORT_CONFIRMATION.test(approval.quote) || wikiUserChooses(approval.quote) || isWikiOptionReply(approval.quote) || isWikiDeicticChoice(approval.quote)) return "user_confirmed";
+  }
+  if (status === "user_decision" && unit.evidence.role === "user" && !quotesMaterial(unit) && wikiUserChooses(unit.evidence.quote)) return "user_message";
+}
+const decides = (unit: WikiKnowledgeUnit) => Boolean(wikiUnitDecisionOrigin(unit));
 
 /** A unit's status from its own adoption and the checked relations. */
 export function wikiUnitStatuses(units: WikiKnowledgeUnit[], organization: Pick<WikiKnowledgeOrganization, "relations"> & Partial<Pick<WikiKnowledgeOrganization, "topics">>, decisions: WikiKnowledgeLedger["decisions"] = {}) {
@@ -110,7 +116,7 @@ export function wikiUnitStatuses(units: WikiKnowledgeUnit[], organization: Pick<
 
 const BASELINE_NOW = new RegExp(String.raw`下一阶段|接下来|当前重点|重点转向|${ITERATION_ZH}|\bPhase\s*[A-Z0-9]\b|里程碑|\bMilestone\s*[\d.]+|\bnext (?:phase|milestone)\b|${ITERATION_EN}|\bcurrent (?:focus|milestone)\b`, "iu");
 const BASELINE_LEAVES = new RegExp(String.raw`${LEAVES_OUT}|冻结|\b(?:won'?t (?:build|do|support|include|ship|add)|not (?:build|support|include|ship|add)|out of scope:?|defer(?:red)?|postpone[sd]?|freeze)\b`, "iu"), BASELINE_CURRENT = new RegExp(String.raw`当前|${PHASE.source}|\bthis release\b|\bcurrent milestone\b|\bfor now\b`, "iu");
-const BASELINE_DONE = /完成标准|完成定义|完成(?:时|后|前)?需(?:要)?具备|(?<!未)完成条件|验收|算完成|Definition of Done|必须全部通过|(?:通过率|成功率)\s*[>≥＞]|\b(?:acceptance criteria|done when|must (?:all )?pass|success criteria)\b/iu;
+const BASELINE_DONE = /完成标准|完成定义|完成(?:时|后|前)?需(?:要)?具备|(?<!未)完成条件|验收(?:标准|口径|条件|门槛|要求|场景|用例|清单|指标)|算完成|Definition of Done|必须全部通过|(?:通过率|成功率)\s*[>≥＞]|\b(?:acceptance criteria|done when|must (?:all )?pass|success criteria)\b/iu;
 const BASELINE_ITEMS = { now: 3, notNow: 2, done: 3 } as const, BASELINE_SAME = .6;
 /** A line opening with the stage it is about: "Revised Milestone 1 covers …", "M2 includes …". */
 const STAGE_SUBJECT = /^(?:(?:the\s+)?(?:revised|updated|new|current)\s+)?(milestone|phase|stage|m)\s*(\d+)\b/iu;
@@ -206,21 +212,41 @@ export function currentBaseline(units: WikiKnowledgeUnit[], statuses: Map<string
   // The latest entry into a stage ("建议进入 Milestone 5 Alpha Validation 阶段，冻结大功能") ends the stages before it: a
   // plan said earlier in its conversation ("按 Phase A 至 Phase B 逐步实现") and the criteria of earlier stages ("第一阶段
   // ……仿真运行率>80%", a milestone's 七个验收场景) were read as current beside it.
-  const entered = candidates.find(unit => wikiStageTransition(unit.statement) && ["confirmed", "reported", "stated"].includes(statuses.get(unit.id)!));
-  const proposedTransition = candidates.find(unit => wikiStageTransition(unit.statement) && statuses.get(unit.id) === "proposal");
-  const before = (unit: WikiKnowledgeUnit) => Boolean(entered) && unit !== entered && wikiSaidLater(entered!, unit);
+  const axis = (text: string) => {
+    if (/\bmilestone\s*\d+|\bM\d+\b|里程碑/iu.test(text)) return "milestone";
+    if (/\bPhase\s+[A-Z0-9]+\b|第[一二三四五六七八九十\d]+阶段/iu.test(text)) return "sequence";
+    if (/\bv\d+(?:\.\d+)*\b|\b(?:MVP|Alpha|Beta)\b|第[一二三四五六七八九十\d]+版/iu.test(text)) return "release";
+    return undefined;
+  };
+  const sameAxis = (earlier: WikiKnowledgeUnit, later: WikiKnowledgeUnit) => {
+    const first = axis(earlier.statement), second = axis(later.statement);
+    return first && second ? first === second : earlier.subject === later.subject;
+  };
+  const transitions = candidates.filter(unit => wikiStageTransition(unit.statement) && ["confirmed", "reported", "stated"].includes(statuses.get(unit.id)!));
+  const before = (unit: WikiKnowledgeUnit) => transitions.some(later => later !== unit && sameAxis(unit, later) && wikiSaidLater(later, unit));
   const criteria = live.filter(unit => unit.kind !== "report" && statuses.get(unit.id) !== "reported"
     && BASELINE_DONE.test(unit.statement) && !currentScopes.some(scope => scope.evidence.conversationId === unit.evidence.conversationId
     && sameScope(scope.statement, unit.statement) && leavesOut(scope).some(part => unit.statement.toLocaleLowerCase().includes(part.toLocaleLowerCase()))));
   const currentCriteria = criteria.some(unit => !before(unit));
   const done = pick("done", unit => criteria.includes(unit) && (!currentCriteria || !before(unit)));
+  const proposed = candidates.filter(unit => wikiStageTransition(unit.statement) && statuses.get(unit.id) === "proposal");
   const now = pick("now", unit => candidates.includes(unit) && !before(unit)
-    && !(proposedTransition && statuses.get(unit.id) === "proposal" && wikiSaidLater(proposedTransition, unit)));
+    && !(statuses.get(unit.id) === "proposal" && proposed.some(later => later !== unit && sameAxis(unit, later) && wikiSaidLater(later, unit))));
   // The work now is the earliest numbered stage given: "Milestone 3 involves running a private alpha …" stood under Doing
   // now beside Milestone 1's line, the roadmap's later stages read as current. Lines naming no stage stay.
   const numbered = (item: WikiBaselineItem) => { const stage = item.text.match(MOVED_TO) ?? item.text.match(STAGE_SUBJECT) ?? item.text.match(STAGE_NAMED); return stage ? Number(stage[2]) : undefined; };
-  const first = Math.min(...now.flatMap(item => numbered(item) ?? []));
-  return [...now.filter(item => numbered(item) === undefined || numbered(item) === first), ...notNow, ...done];
+  const sequence = (item: WikiBaselineItem) => {
+    const unit = live.find(candidate => candidate.id === item.unitIds[0]);
+    return JSON.stringify([unit?.evidence.conversationId, axis(item.text), unit?.subject]);
+  };
+  const starts = new Map<string, number>();
+  for (const item of now) {
+    const position = numbered(item);
+    if (position !== undefined) starts.set(sequence(item), Math.min(starts.get(sequence(item)) ?? Infinity, position));
+  }
+  return [...now.filter(item => numbered(item) === undefined
+    || item.unitIds.some(id => transitions.some(unit => unit.id === id))
+    || numbered(item) === starts.get(sequence(item))), ...notNow, ...done];
 }
 
 /** A project entering a phase, including a proposed transition with a feature freeze.

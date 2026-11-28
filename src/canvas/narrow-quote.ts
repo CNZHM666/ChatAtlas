@@ -46,10 +46,12 @@ function verticalQuotePassage(claim: string, quote: string) {
   return best && best.count !== next?.count ? best : undefined;
 }
 
-/** The part of a long quote that states its claim: the best-matching sentence and the sentences next to it that share
- * its words. A quote saved across three paragraphs (the tail of the one before, a passing remark, then the naming)
- * otherwise marks the neighbours as evidence too; a quote with no sentence clearly closer than the rest stays whole. */
+/** Keep single-paragraph quotes whole so highlights never drop half a passage.
+ * Only narrow quotes that span multiple distinct paragraphs (3+ blocks) or exceed 400 chars. */
+const LONG_QUOTE_THRESHOLD = 400;
 export function narrowQuote(claim:string,quote:string){
+  const blocks = quote.trim().split(/\n\s*\n/u).filter(Boolean);
+  if(quote.trim().length<=LONG_QUOTE_THRESHOLD && blocks.length<3)return quote;
   const pieces=quotePieces(quote);
   if(pieces.length<2)return quote;
   const own=meaningTerms(claim);

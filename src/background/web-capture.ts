@@ -1,22 +1,13 @@
-import { enabledWebCapturePlatforms, WEB_CAPTURE_KEY, WEB_CAPTURE_PAUSED_KEY, WEB_CAPTURE_PLATFORMS, webCapturePlatform, webCapturePatterns, webConversation, webCaptureSite, type WebHistoryPage, type WebCapturePlatform, type WebCaptureStatus, type WebCaptureTab, type WebPageInspection } from "../shared/web-capture";
+import { WEB_CAPTURE_KEY, WEB_CAPTURE_PLATFORMS, webCapturePlatform, webCapturePatterns, webConversation, webCaptureSite, type WebHistoryPage, type WebCapturePlatform, type WebCaptureTab, type WebPageInspection } from "../shared/web-capture";
 import type { ConversationCapture } from "../shared/types";
 import type { AtlasMessage, CaptureCommandResponse } from "../shared/messages";
 
-/** Supported source sites activate after browser permission. Explicit pauses persist. */
+/** Supported source sites activate as soon as browser permission is available. */
 export function createWebCaptureManager(scriptFile: string) {
   let queue: Promise<unknown> = Promise.resolve();
   let importing=false;
-  const enabled = async () => {
-    const paused=enabledWebCapturePlatforms((await chrome.storage.local.get(WEB_CAPTURE_PAUSED_KEY))[WEB_CAPTURE_PAUSED_KEY]);
-    return WEB_CAPTURE_PLATFORMS.filter(site=>!paused.includes(site.id)).map(site=>site.id);
-  };
   const permitted = async (platform: WebCapturePlatform) => chrome.permissions.contains({origins:webCapturePatterns(platform)});
   const id = (platform: WebCapturePlatform) => `atlas-web-capture-${platform}`;
-  async function status(): Promise<WebCaptureStatus[]> {
-    if (!chrome.storage?.local || !chrome.permissions?.contains) return WEB_CAPTURE_PLATFORMS.map(item=>({platform:item.id,enabled:false,permitted:false}));
-    const selected = await enabled();
-    return Promise.all(WEB_CAPTURE_PLATFORMS.map(async item=>({platform:item.id,enabled:selected.includes(item.id),permitted:await permitted(item.id)})));
-  }
   async function register(platform: WebCapturePlatform, active: boolean) {
     const scriptId=id(platform);
     const registered=await chrome.scripting.getRegisteredContentScripts({ids:[scriptId]});
@@ -33,7 +24,7 @@ export function createWebCaptureManager(scriptFile: string) {
   }
   const serialize=<T>(work:()=>Promise<T>):Promise<T>=>{const next=queue.catch(()=>undefined).then(work);queue=next;return next;};
   async function requireEnabled(platform: WebCapturePlatform) {
-    if (!webCapturePlatform(platform) || !(await enabled()).includes(platform) || !await permitted(platform)) throw Error("Page capture is disabled or website access was revoked");
+    if (!webCapturePlatform(platform) || !await permitted(platform)) throw Error("Page capture is disabled or website access was revoked");
   }
   async function inspectTab(tabId: number): Promise<WebPageInspection> {
     try {
@@ -43,7 +34,6 @@ export function createWebCaptureManager(scriptFile: string) {
     } catch { return {state:"disconnected",messageCount:0}; }
   }
   return {
-    status,
     async history(platform:WebCapturePlatform,tabId:number):Promise<WebHistoryPage>{
       await requireEnabled(platform);
       const tab=await chrome.tabs.get(tabId);
@@ -113,32 +103,17 @@ export function createWebCaptureManager(scriptFile: string) {
       if (!response?.ok || response.summary?.conversationId !== conversationId) throw Error(response?.error ?? "The selected conversation was not saved. Refresh and retry.");
       return response;
     },
-    set(platform: WebCapturePlatform, active: boolean) {
-      return serialize(async()=>{
-        if(!webCapturePlatform(platform))throw Error("Unsupported capture platform");
-        if(active&&!await permitted(platform))throw Error("Website access was not granted");
-        const selected=new Set(await enabled());
-        if(active)selected.add(platform);else selected.delete(platform);
-        await chrome.storage.local.set({[WEB_CAPTURE_PAUSED_KEY]:WEB_CAPTURE_PLATFORMS.filter(site=>!selected.has(site.id)).map(site=>site.id)});
-        const effective=(await status()).filter(item=>item.enabled&&item.permitted).map(item=>item.platform);
-        // Publish before registration so already-running readers pause immediately.
-        await chrome.storage.local.set({[WEB_CAPTURE_KEY]:effective});
-        await register(platform,active);
-        return status();
-      });
-    },
     restore() {
-      if(!chrome.storage?.local||!chrome.scripting?.getRegisteredContentScripts)return Promise.resolve();
+      if(!chrome.storage?.local||!chrome.permissions?.contains||!chrome.scripting?.getRegisteredContentScripts)return Promise.resolve();
       return serialize(async()=>{
-        const statuses=await status();
-        const selected=statuses.filter(item=>item.enabled&&item.permitted).map(item=>item.platform);
-        await chrome.storage.local.set({[WEB_CAPTURE_KEY]:selected});
-        await Promise.all(statuses.map(item=>register(item.platform,selected.includes(item.platform))));
+        const sites = await Promise.all(WEB_CAPTURE_PLATFORMS.map(async ({id}) => ({id, active:await permitted(id)})));
+        await chrome.storage.local.set({[WEB_CAPTURE_KEY]:sites.filter(site=>site.active).map(site=>site.id)});
+        await Promise.all(sites.map(site=>register(site.id,site.active)));
       });
     },
     async accepts(capture: ConversationCapture, url?: string) {
       const expected=url?webConversation(url):undefined, source=webConversation(capture.conversation.url);
-      if(!expected||expected.site.id!==capture.conversation.platform||!await permitted(expected.site.id)||!(await enabled()).includes(expected.site.id))return false;
+      if(!expected||expected.site.id!==capture.conversation.platform||!await permitted(expected.site.id))return false;
       return capture.conversation.id===expected.id&&capture.conversation.source===`${expected.site.id}_dom`&&source?.site.origin===expected.site.origin&&source?.id===expected.id;
     },
   };

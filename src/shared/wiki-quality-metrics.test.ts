@@ -3,7 +3,7 @@ import {wikiQualityMetrics,wikiQualityCsvMetrics} from "./wiki-quality-metrics";
 
 import fixture from "../test/fixtures/wiki-quality.md?raw";
 it("measures titles, emphasis, meta prose, duplicates, overview overlap and repeated terminology",()=>{
- const result=wikiQualityMetrics(fixture);
+ const result=wikiQualityMetrics(fixture,["IndexedDB","Orama","本地优先","BYOK","不得自动发送"]);
  expect(result).toMatchObject({chapter_count:3,subtopic_count:2,paired_title_rate:3/5,bold_count:2,bold_avg_chars:9,bold_max_chars:10,meta_overview_count:1,overview_verbatim_overlap:1});
  expect(result.sibling_suffix_pairs).toEqual([{first:"检索与上下文引擎",second:"记忆与上下文引擎",suffix:"与上下文引擎"}]);
  expect(result.cross_chapter_duplicates).toHaveLength(2);
@@ -13,6 +13,10 @@ it("measures titles, emphasis, meta prose, duplicates, overview overlap and repe
  expect(result.ai_advice_density).toBeCloseTo(2000/visible.length);
  expect(result.repeated_terms).toEqual([{term:"IndexedDB",chapters:2,occurrences:3},{term:"Orama",chapters:2,occurrences:2},{term:"本地优先",chapters:1,occurrences:1},{term:"BYOK",chapters:2,occurrences:2},{term:"不得自动发送",chapters:1,occurrences:1}]);
  const csv=wikiQualityCsvMetrics(fixture);expect(csv.cross_chapter_duplicates).toBe(2);expect(JSON.stringify(csv)).not.toContain("原始消息保存在本地");
+});
+it("derives recurring technical vocabulary from the current project",()=>{
+ const markdown="## Runtime\n\nHardwareIR validates port ownership.\n\n## Export\n\nHardwareIR defines the document model.\n\n## Citation locators\n\nNoisyTool NoisyTool";
+ expect(wikiQualityMetrics(markdown).repeated_terms).toEqual([{term:"HardwareIR",chapters:2,occurrences:2}]);
 });
 it("handles empty exports, repeated sentences within one chapter and custom terms",()=>{
  expect(wikiQualityMetrics("")).toMatchObject({chapter_count:0,paired_title_rate:0,bold_avg_chars:0,bold_max_chars:0,ai_advice_density:0,cross_chapter_duplicates:[]});

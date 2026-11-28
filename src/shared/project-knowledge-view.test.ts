@@ -3,7 +3,7 @@ import {projectSession} from "../test/project-fixture";
 import {prepareManualWikiReview} from "../ai/wiki-manual-review";
 import {knowledgeFactText,projectKnowledgeIntroduction,projectKnowledgeSection,projectKnowledgeView,relatedProjectFacts,type ProjectKnowledgeFact} from "./project-knowledge-view";
 import {projectSnapshot} from "./project-snapshot";
-import {projectOverviewText} from "../canvas/project-overview";
+import {projectOverviewText} from "./project-overview";
 import {sourceMessageSignature} from "./source-signature";
 import {validateWikiClaims,type WikiClaim} from "./wiki-claims";
 import type {ConversationMessage} from "./types";

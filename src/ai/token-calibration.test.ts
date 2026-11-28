@@ -9,7 +9,7 @@ it("stays uncalibrated until enough provider samples exist, then scales by the o
   recordTokenSample("qwen-flash", 10_000, 5_000);
   expect(writingInputScale("qwen-flash")).toBe(1);
   recordTokenSample("qwen-flash", 10_000, 5_000);
-  expect(writingInputScale("qwen-flash")).toBe(0.55);
+  expect(writingInputScale("qwen-flash")).toBe(0.58);
   expect(writingInputScale("other-model")).toBe(1);
   expect(JSON.parse(localStorage.getItem("atlas-token-calibration-v1")!)["qwen-flash"]).toMatchObject({ samples: 3 });
 });

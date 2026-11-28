@@ -47,10 +47,14 @@ export function rehomedStrayParagraphs(chapters: WikiDraftChapter[], organizatio
         const cited = units?.get(id);
         return cited && wikiPurposeReadingLane(cited)?.title.some(title => title === places[0].subtopic);
       });
+      const external = Boolean(paragraph.unitIds.length && paragraph.unitIds.every(id => {
+        const role = units?.get(id)?.about?.role;
+        return role === "reference" || role === "competitor";
+      }));
       const local = places[0]?.chapter === chapter.id && places[0].subtopic !== paragraph.subtopic
-        && (places.length >= MIN_UNITS || solePlace) && places.length === paragraph.unitIds.length
+        && (places.length >= MIN_UNITS || solePlace || external) && places.length === paragraph.unitIds.length
         && places.every(place => place.chapter === chapter.id && place.subtopic === places[0].subtopic)
-        && (Boolean(solePlace && unit && ["security","procurement","interface"].includes(wikiUnitLane(unit) ?? "")) || readingLane
+        && (external || Boolean(solePlace && unit && ["security","procurement","interface"].includes(wikiUnitLane(unit) ?? "")) || readingLane
           || chapter.paragraphs.some(other => other !== paragraph && other.subtopic === places[0].subtopic));
       const into = local ? chapter : target ? chapters.find(other => other.id === target) : undefined;
       if (!into) { follow = undefined; continue; }
@@ -103,7 +107,8 @@ function rehomeReadingClaims(chapters: WikiDraftChapter[], placeOfUnit: (id: str
         || !claim.unitIds.every(id => {
           const unit = units.get(id), target = placeOfUnit(id);
           return unit && target?.chapter === place.chapter && target.subtopic === place.subtopic
-            && (ownStandard || wikiPurposeReadingLane(unit)?.title.some(title => title === place.subtopic));
+            && (ownStandard || unit.about?.role === "reference" || unit.about?.role === "competitor"
+              || wikiPurposeReadingLane(unit)?.title.some(title => title === place.subtopic));
         })) continue;
       const into = ownStandard ? chapters.find(item=>item.id===place.chapter) : chapter;
       if (!into) continue;

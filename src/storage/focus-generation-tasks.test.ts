@@ -5,7 +5,7 @@ import { beginFocusGenerationTask, listFocusGenerationTasks, recoverLegacyFocusT
 import type { AIUsageEvent } from "../shared/types";
 import { createAtlasBackup, restoreAtlasBackup } from "./atlas-backup";
 import {projectSession} from "../test/project-fixture";
-import {saveFocusSession} from "./focus-sessions";
+import { saveFocusSession, wikiPublishBasis } from "./focus-sessions";
 
 beforeEach(async () => {
   const db = await getDatabase();
@@ -13,6 +13,18 @@ beforeEach(async () => {
 });
 const input = { id: "task", runId: "run", goal: "回顾控制节点", mode: "review" as const, sourceIds: ["selected"], scope: { kind: "all" as const, sourceConversationIds: ["selected"] } };
 const event = (id: string, patch: Partial<AIUsageEvent> = {}): AIUsageEvent => ({ id, runId: "legacy", taskType: "focus_session", providerId: "bailian", modelId: "deepseek-v4.1-flash", conversationIds: ["selected"], inputTokens: 10, outputTokens: 10, tokenSource: "provider", status: "completed", attempt: 1, stage: "reading", createdAt: 1, ...patch });
+
+it("keeps an update preview after a concurrent project write", async () => {
+  const base = { ...projectSession(), mode: "work" as const, id: "base", status: "ready" as const, sourceSignatures: undefined };
+  await saveFocusSession(base);
+  const preview = { ...base, id: "preview", rootSessionId: base.id, previousSessionId: base.id, status: "preview" as const, wikiPublishBasis: wikiPublishBasis(base) };
+  await saveFocusSession(preview);
+  await saveFocusSession({ ...base, notes: "Side panel edit" });
+  await expect(saveFocusSession({ ...preview, status: "ready" })).rejects.toMatchObject({ code: "WIKI_PREVIEW_STALE" });
+  const db = await getDatabase();
+  expect((await db.get("focusSessions", preview.id))?.status).toBe("preview");
+  expect((await db.get("focusSessions", base.id))?.notes).toBe("Side panel edit");
+});
 
 it("retains confirmed inputs across interruption and prevents late callbacks from hiding a preview", async () => {
   await beginFocusGenerationTask(input);

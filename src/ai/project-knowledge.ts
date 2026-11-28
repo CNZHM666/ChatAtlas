@@ -61,8 +61,8 @@ function retainedArchitectureFacts(session: FocusSession, originals: ProjectOrig
   try { const checked = validateProjectDraft(facts, unchanged, session); return checked.reviewNotes?.length ? [] : [{ sourceIds: [...ids], facts: checked }]; } catch { return []; }
 }
 /** Resolve immutable original ranges locally, avoiding copied quote/ID errors. */
-export function resolveProjectProofs(value: unknown, sources: Array<{ id: string; text: string }>): unknown {
-  const proofs = new Map<string, { start: number; end: number; text: string; id: string }>(sources.flatMap(source => projectProofBlocks(source.text).map((block, index) => [`${source.id}:${index + 1}`, { ...block, id: source.id }] as const)));
+export function resolveProjectProofs(value: unknown, sources: Array<{ id: string; text: string }>, blocksOf = projectProofBlocks, maxQuote = 350): unknown {
+  const proofs = new Map<string, { start: number; end: number; text: string; id: string }>(sources.flatMap(source => blocksOf(source.text).map((block, index) => [`${source.id}:${index + 1}`, { ...block, id: source.id }] as const)));
   const visit = (input: unknown): unknown => {
     if (Array.isArray(input)) return input.map(visit);
     if (!input || typeof input !== "object") return input;
@@ -75,7 +75,7 @@ export function resolveProjectProofs(value: unknown, sources: Array<{ id: string
       if (ranges.some((range, index) => range.id !== ranges[0].id || index > 0 && ranges[index - 1].end !== range.start)) continue;
       let quote = ranges.map(range => range.text).join("");
       if (ranges[0].start === 0) quote = quote.replace(/^(?:user|assistant|system|tool): /u, "");
-      if (!quote.trim() || quote.length > 350) continue;
+      if (!quote.trim() || quote.length > maxQuote) continue;
       row[field("quote")] = quote.trim(); row[prefix ? `${prefix}EvidenceIds` : "evidenceIds"] = [ranges[0].id];
     }
     return row;

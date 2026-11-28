@@ -89,10 +89,24 @@ export function evidenceSourceRanges(root:HTMLElement,content:string,highlights:
         const range=locate.at(from-blockFrom,to-blockFrom);if(range)result.push({range,highlight});
         continue;
       }
-      // The renderer may add text to an annotated block. Keep the raw-offset scope and map only a unique literal.
-      const needle=projection.text.slice(from,to),hit=dom.indexOf(needle);
-      if(!block||!needle||hit<0||hit!==dom.lastIndexOf(needle)||rendered.indexOf(needle)!==rendered.lastIndexOf(needle))continue;
-      const range=locate.at(hit,hit+needle.length);if(range)result.push({range,highlight});
+      // The renderer may add text or math/code wrappers to an annotated block.
+      // Keep unique literal mapping safe; for longer passages split by inline formatting, use head+tail dual anchoring.
+      const needle=projection.text.slice(from,to);
+      if(!block||!needle)continue;
+      const hit=dom.indexOf(needle);
+      if(hit>=0){
+        if(hit===dom.lastIndexOf(needle)&&rendered.indexOf(needle)===rendered.lastIndexOf(needle)){
+          const range=locate.at(hit,hit+needle.length);if(range)result.push({range,highlight});
+        }
+        continue;
+      }
+      if(needle.length>=14){
+        const head=needle.slice(0,10),tail=needle.slice(-10);
+        const h=dom.indexOf(head),t=h>=0?dom.indexOf(tail,h+head.length):-1;
+        if(h>=0&&t>=0&&t+tail.length-h<=Math.max(needle.length*2,240)){
+          const range=locate.at(h,t+tail.length);if(range)result.push({range,highlight});
+        }
+      }
     }
   }
   return result;

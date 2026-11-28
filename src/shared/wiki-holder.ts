@@ -7,14 +7,17 @@ import { wikiQuoteRange } from "./wiki-claims";
  * document, carries no mark; a mark is text, so copying and export keep it. */
 export type WikiHolder = "decided" | "open" | "earlier" | "user" | "material" | "ai" | "corrected";
 
-/** The holder of a sentence from the statuses of the units it states: decided only when every one is the user's
- * decision; the weakest holder otherwise, so a mixed sentence is never shown as more settled than its sources. */
+/** The holder of a sentence from the statuses of the units it states: decided when confirmed without unresolved
+ * conflicts (even when summarizing an earlier version it replaced); open when contested/open; earlier only when
+ * the sentence describes retired/historical options without a current settled conclusion. */
 export function wikiHolderOf(statuses: WikiUnitStatus[]): WikiHolder | undefined {
   if (!statuses.length) return undefined;
+  const hasConfirmed = statuses.some(status => status === "confirmed");
+  const hasOpen = statuses.some(status => status === "open" || status === "contested");
   if (statuses.every(status => status === "confirmed")) return "decided";
-  // A replaced or unsettled point retains that status, whoever proposed it.
+  if (hasOpen) return "open";
+  if (hasConfirmed && statuses.every(status => status === "confirmed" || status === "history")) return "decided";
   if (statuses.some(status => status === "history")) return "earlier";
-  if (statuses.some(status => status === "open" || status === "contested")) return "open";
   if (statuses.some(status => status === "proposal" || status === "analysis")) return "ai";
   if (statuses.some(status => status === "relayed")) return "material";
   return "user";
@@ -44,6 +47,7 @@ export const wikiShownHolder = (holder: WikiHolder, text: string): WikiHolder =>
 export const wikiUnmarkedHolder = (holder: WikiHolder) => holder === "ai";
 export const wikiHolderTitle = (holder: WikiHolder, zh: boolean) => TITLES[holder][zh ? 0 : 1];
 export function wikiHolderReadingLabel(holder: WikiHolder, zh: boolean, reported = false, learning = false) {
+  if (holder === "earlier") return zh ? "早先方案" : "Earlier plan";
   if (holder === "user" && reported) return zh ? "用户报告" : "User report";
   if (holder === "user" && !learning) return zh ? "用户陈述" : "User statement";
   if (holder === "material") return zh ? "引用资料" : "Source material";

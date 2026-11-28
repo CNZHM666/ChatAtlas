@@ -5,7 +5,7 @@ import { wikiMeasure } from "../shared/wiki-section-status";
 import { personalDirection, statesCore, type WikiKnowledgeOrganization, type WikiKnowledgeUnit, type WikiSubject } from "../shared/wiki-knowledge";
 import { wikiProjectToolHandoff, wikiProjectUsesStandard } from "./wiki-reference-ownership";
 
-type Lane = "purpose" | "interface" | "technical" | "security" | "documentation" | "progress" | "stage" | "roadmap" | "quality" | "example" | "commerce" | "procurement" | "algorithm";
+type Lane = "purpose" | "interface" | "technical" | "security" | "documentation" | "progress" | "stage" | "roadmap" | "quality" | "example" | "commerce" | "procurement" | "algorithm" | "delivery";
 const TITLE: Record<Lane, RegExp> = {
   purpose: /定位|用户价值|核心价值|positioning|purpose/iu,
   interface: /界面|交互|视觉|interface|interaction|visual/iu,
@@ -16,6 +16,7 @@ const TITLE: Record<Lane, RegExp> = {
   // 开发规划 is the development plan too: README rules sat under 采购 for want of a chapter called 开发计划.
   documentation: /文档|维护|开发(?:计划|规划)|发布|documentation|maintenance|development|release/iu,
   progress: /计划|进度|状态|发布|plan|progress|status|release/iu,
+  delivery: /部署|发布|交付|开发(?:计划|规划)|版本规划|deployment|release|delivery|development (?:plan|roadmap)/iu,
   stage: /规划|路线|里程碑|计划|roadmap|milestone|plan/iu,
   roadmap: /规划|路线|里程碑|计划|roadmap|milestone|plan/iu,
   // 规划 too: "开发规划与发布策略" holds the tests and the delivery rules ("每个 Phase 完成后必须通过 lint/typecheck……").
@@ -27,7 +28,7 @@ const TITLE: Record<Lane, RegExp> = {
   procurement: /采购|购买(?:清单|选型|规格|建议|引导)|比价|\b(?:procurement|purchasing|buying guide)\b/iu,
   algorithm: /算法|algorithm/iu,
 };
-const LABEL: Record<Lane, [string, string]> = { purpose: ["产品定位", "Product purpose"], interface: ["界面交互", "Interface"], technical: ["实现机制", "Implementation"], security: ["安全边界", "Security"], documentation: ["文档与维护", "Documentation"], progress: ["实现进度", "Progress"], stage: ["阶段安排", "Stages"], roadmap: ["开发路线", "Roadmap"], quality: ["验证与验收", "Validation"], example: ["使用示例", "Usage examples"], commerce: ["商业模式与定价", "Business model and pricing"], procurement: ["采购范围", "Procurement"], algorithm: ["算法机制", "Algorithms"] };
+const LABEL: Record<Lane, [string, string]> = { purpose: ["产品定位", "Product purpose"], interface: ["界面交互", "Interface"], technical: ["实现机制", "Implementation"], security: ["安全边界", "Security"], documentation: ["文档与维护", "Documentation"], progress: ["实现进度", "Progress"], stage: ["阶段安排", "Stages"], roadmap: ["开发路线", "Roadmap"], quality: ["验证与验收", "Validation"], example: ["使用示例", "Usage examples"], commerce: ["商业模式与定价", "Business model and pricing"], procurement: ["采购范围", "Procurement"], algorithm: ["算法机制", "Algorithms"], delivery: ["部署与发布", "Deployment and release"] };
 /** What is sold and how it is paid for: a store, a price, a membership. Its words in the label, and a sale in the point. */
 const COMMERCE_LABEL = /商店|商城|商品|定价|价格|付费|支付|收费|会员|订阅|SKU|商业化|变现|pricing|payment|monetiz|subscription|\bstore\b/iu;
 const COMMERCE_TEXT = /售卖|出售|销售|商品|SKU|付费|支付|价格|定价|会员|收费|订阅|变现|\d+\s*元|[¥￥]\s*\d|\b(?:sell|price|pay|paid|subscription)\b/iu;
@@ -81,6 +82,8 @@ export function wikiUnitLane(unit: WikiKnowledgeUnit): Lane | undefined {
   if (/进度|实现状态|已完成功能|completed features|project status/iu.test(identity) && /已完成|已实现|已通过|完成了|\b(?:implemented|completed|passed)\b/iu.test(text)) return "progress";
   // Tests and delivery rules ("开发工作流要求 · 交付标准", "视觉识别测试规范", "End-to-End HardwareBench"), wherever they were filed.
   if (/基准测试|验收|质量保障|成功标准|交付标准|开发工作流|测试规范|测试集|测试用例|benchmark|acceptance|quality assurance|definition of done/iu.test(identity) || /[A-Z][a-z]*Bench\b/u.test(identity)) return "quality";
+  if (TITLE.delivery.test(identity) && /部署|托管|发布|构建|\b(?:deploy|host|publish|release|build)\w*\b/iu.test(text)
+    && !/密钥|脱敏|访问权限|secret|credential|redact|access control/iu.test(identity)) return "delivery";
   // A shop's own positioning ("商店策略 · 定位与原则": 定位为“守护工具箱”，售卖……SKU) is how the product earns, not what it
   // is: read as purpose, one run's SKU rule stood under 核心价值主张, beside the same paid flow under 商业化模式.
   if (COMMERCE_LABEL.test(identity) && COMMERCE_TEXT.test(text) && ["decision", "constraint", "plan", "mechanism"].includes(unit.kind)) return "commerce";
@@ -99,6 +102,8 @@ export function wikiUnitLane(unit: WikiKnowledgeUnit): Lane | undefined {
     || /安全|security/iu.test(identity) && /密钥|API\s*Key|Proxy|代理|隐私|日志|持久化|\.env|secret|privacy/iu.test(text))) return "security";
   if (/密钥|API\s*Key|Bearer token|secret|credential/iu.test(text)
     && /脱敏|日志|持久化|sessionStorage|\bredact\w*\b|\blogg(?:er|ing)\b/iu.test(text)) return "security";
+  if (/(?:面板|侧栏|列表|折叠栏|界面|panel|sidebar|list|drawer)/iu.test(identity)
+    && /折叠|展开|收起|样式|排版|字体|字号|悬停|隐藏|显示在|渲染为|collaps|expand|typography|hover|render as/iu.test(text)) return "interface";
   if (/^(?:[^。！？]{0,35}?(?:Tab|面板|Sidebar|Inspector)\b|[^。！？]{0,25}面板)/iu.test(text)
     && /展开后|默认显示|收起|切换|仅显示|\b(?:when expanded|collapsed|switches to)\b/iu.test(text)) return "interface";
   // How the screen looks ("Theme Toggle · 主题同步"): an interface rule, wherever its subject sat.
@@ -187,9 +192,38 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
     // What another product has (「海外存在DAWG和Stirden等……」, filed as 外部参考) joins the chapter on other products:
     // under the positioning it stood among the project's own points, apart from the competitors it was told with.
     if (unit && from && reference) {
-      const into = fittingTopic(reference, unit, subjects, units) ?? reference.subtopics.find(topic => !topic.subjectIds.some(other => other.includes(":role:")));
-      const target = into && subjects.find(other => other.id === into.subjectIds[0]);
-      if (target) { subject.unitIds = subject.unitIds.filter(other => other !== id); target.unitIds.push(id); moved++; report.references_routed = (report.references_routed ?? 0) + 1; continue; }
+      const original = from.subtopics.find(topic => topic.subjectIds.includes(subject.id));
+      const distinct = unit.about && unit.about.role !== "other_project";
+      const title = distinct && original && REFERENCE_CHAPTER.test(original.title) ? original.title
+        : distinct ? unit.about!.name : fittingTopic(reference, unit, subjects, units)?.title
+          ?? reference.subtopics.find(topic => REFERENCE_CHAPTER.test(topic.title))?.title;
+      if (title) {
+        const into = reference.subtopics.find(topic => topic.title === title);
+        if (into) {
+          if (distinct && !into.subjectIds.includes(subject.id) && subject.unitIds.every(other => units.get(other)?.about?.role === unit.about?.role
+            && units.get(other)?.about?.name === unit.about?.name)) {
+            into.subjectIds.push(subject.id);
+          } else {
+            const target = subjects.find(item => item.id === into.subjectIds[0]);
+            if (!target || target === subject) continue;
+            subject.unitIds = subject.unitIds.filter(other => other !== id);
+            if (!target.unitIds.includes(id)) target.unitIds.push(id);
+          }
+        } else {
+          const target = { id: `${reference.id}:reference:${id}`, name: title, aliases: [], unitIds: [id] };
+          subjects.push(target);
+          reference.subtopics.push({ title, subjectIds: [target.id] });
+          subject.unitIds = subject.unitIds.filter(other => other !== id);
+        }
+        // A subject lives in one chapter. Move individual units when its other facts stay put.
+        if (into?.subjectIds.includes(subject.id)) {
+          original!.subjectIds = original!.subjectIds.filter(other => other !== subject.id);
+          home.set(subject.id, reference);
+        }
+        moved++;
+        report.references_routed = (report.references_routed ?? 0) + 1;
+        continue;
+      }
     }
     if (!unit || unit.about || !from || /相关项目|外部参考|参考项目|related project|outside reference/iu.test(from.title)) continue;
     const ownTopic = from.subtopics.find(topic => topic.subjectIds.includes(subject.id));
@@ -313,8 +347,8 @@ export function routeWikiUnits(organization: WikiKnowledgeOrganization, units: M
     // Otherwise the planned subtopic whose points share most of its words: a heading of the role's own ("### 产品定位" in
     // 产品定位与用户价值, "### 实现机制", "### 阶段安排") stood beside the planned ones, repeating the chapter or saying nothing.
     const fitting = diagram ? to.subtopics.find(topic => topic !== ownTopic && DIAGRAM_OUTPUT.test(topic.title))
-      : testing ?? (lane === "procurement"
-      ? to.subtopics.find(topic => TITLE.procurement.test(topic.title))
+      : testing ?? (lane === "procurement" || lane === "delivery"
+      ? to.subtopics.find(topic => TITLE[lane].test(topic.title))
       : fittingTopic(to, unit, subjects, units));
     let target = fitting ? subjects.find(subject => subject.id === fitting.subjectIds[0]) : subjects.find(subject => subject.id === targetId);
     if (!target) {

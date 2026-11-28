@@ -21,10 +21,10 @@ beforeEach(async()=>{
 });
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 const renderProject=(node:React.ReactNode)=>render(node);
-it("keeps project linking and local search without context-generation entry points",async()=>{
+it("keeps project linking without a message search entry point",async()=>{
  renderProject(<SidecarProject conversationId="source" zh/>);
  await waitFor(()=>expect(screen.getByRole("button",{name:"关联项目"})).toBeEnabled());
- expect(screen.getByRole("searchbox",{name:"搜索历史对话"})).toBeVisible();
+ expect(screen.queryByRole("searchbox",{name:"搜索历史对话"})).toBeNull();
  expect(screen.queryByRole("button",{name:"项目上下文"})).toBeNull();
  expect(screen.queryByRole("button",{name:"复制上下文"})).toBeNull();
  expect(screen.queryByRole("textbox",{name:"当前任务"})).toBeNull();
@@ -72,7 +72,7 @@ it("reads the linked Wiki in the empty side panel and opens the selected chapter
  renderProject(<SidecarProject conversationId="source" zh/>);
  const wiki=await screen.findByRole("region",{name:"项目 Wiki"});
  expect(within(wiki).getByText(project.title)).toBeVisible();
- expect(screen.getByRole("searchbox",{name:"搜索历史对话"})).toBeVisible();
+ expect(screen.queryByRole("searchbox",{name:"搜索历史对话"})).toBeNull();
  fireEvent.click(within(wiki).getByRole("button",{name:"核心流程"}));
  expect(await within(wiki).findByText(/需求采集提取目标与约束/)).toBeVisible();
  expect(screen.queryByRole("searchbox",{name:"搜索历史对话"})).toBeNull();
@@ -87,9 +87,8 @@ it("reads the linked Wiki in the empty side panel and opens the selected chapter
  fireEvent.click(within(wiki).getByRole("button",{name:"打开工作区"}));
  expect(send).toHaveBeenLastCalledWith({type:"ATLAS_OPEN_REVIEW",sessionId:project.id,sectionId:"next"});
  fireEvent.click(within(wiki).getByRole("button",{name:"章节目录"}));
- expect(screen.getByRole("searchbox",{name:"搜索历史对话"})).toBeVisible();
- fireEvent.change(screen.getByRole("searchbox",{name:"搜索历史对话"}),{target:{value:"计划"}});
- expect(screen.queryByRole("region",{name:"项目 Wiki"})).toBeNull();
+ expect(screen.queryByRole("searchbox",{name:"搜索历史对话"})).toBeNull();
+ expect(within(wiki).getByRole("button",{name:"核心流程"})).toBeVisible();
 });
 
 it("keeps the verified update notice during a fresh check and clears it when the source is current",async()=>{
@@ -151,7 +150,9 @@ it("links an unsaved current conversation directly from the searchable picker an
   fireEvent.click(screen.getByRole("button",{name:"关联到：ChatAtlas 目标项目"}));
   await screen.findByText("已关联，整理时再确认项目更新");
   await waitFor(()=>expect(screen.queryByRole("region",{name:"选择关联项目"})).not.toBeInTheDocument());
-  expect(send).toHaveBeenCalledExactlyOnceWith({type:"ATLAS_SIDECAR_SYNC",conversationId:"unsaved"});
+  expect(send).toHaveBeenNthCalledWith(1,{type:"ATLAS_SIDECAR_SYNC",conversationId:"unsaved"});
+  expect(send).toHaveBeenNthCalledWith(2,{type:"ATLAS_PROJECT_VERSION_SAVED"});
+  expect(send).toHaveBeenCalledTimes(2);
   const saved=await db.get("focusSessions",target.id);
   expect(saved?.sidecarConversationIds).toContain("unsaved");expect(saved?.sections).toEqual(target.sections);expect(saved?.projectMaintenance).toEqual(target.projectMaintenance);
   fireEvent.click(screen.getByRole("button",{name:"关联项目"}));

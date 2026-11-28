@@ -10,10 +10,11 @@ import { getAISettings } from "../storage/knowledge-graph";
 import { effectiveAISettings } from "./ai-mode";
 import { requestBudget } from "./request-policy";
 import { historyRequest } from "../search/home-history";
+import type { FocusEvidence, FocusSession } from "../shared/focus-session";
 
 /** Answer from selected original turns, without creating or saving a project. */
-export async function answerHomeRecall(goal: string, sources: Conversation[], found: HomeTaskSources, queries: string[], zh: boolean, signal: AbortSignal, onResponseText?: (text: string) => void, context?: { runId?:string; history?: Array<{ question: string; answer: string }>; onVerifying?: () => void }) {
-  const references = (found.scope.blocks ?? []).flatMap(block => block.messageIds.map(messageId => ({
+export async function answerHomeRecall(goal: string, sources: Conversation[], found: HomeTaskSources, queries: string[], zh: boolean, signal: AbortSignal, context?: { runId?:string; history?: Array<{ question: string; answer: string }>; onVerifying?: () => void; onSources?: (evidence: FocusEvidence[]) => void }): Promise<FocusSession> {
+  const references: FocusEvidence[] = (found.scope.blocks ?? []).flatMap(block => block.messageIds.map(messageId => ({
     id: `${block.conversationId}:${messageId}`, conversationId: block.conversationId, messageId, title: block.title, excerpt: "", sourceSignature: block.messageSignatures[messageId],
   })));
   const db = await getDatabase(), topic = homeTopic(goal);
@@ -22,8 +23,34 @@ export async function answerHomeRecall(goal: string, sources: Conversation[], fo
   signal.throwIfAborted();
   if (!originals.length || references.some(ref => !originals.some(message => message.id === ref.messageId && message.conversationId === ref.conversationId && sourceMessageSignature(message.content) === ref.sourceSignature))) throw new Error(zh ? "相关原文已更新，请重新查找。" : "Related sources changed. Search again.");
   if (topic.anchors.length && !homeTopicMatches(topic, originals.map(message => message.content).join("\n"))) throw new Error(zh ? "这些材料不能确认与你指定的主题相关，已停止生成。请补充项目名或术语。" : "These sources do not establish the requested subject. Add a project name or term.");
+  const checked = new Map<string, FocusEvidence>();
+  const intent = historyRequest(currentQuestion).intent === "summarize" ? "summarize" : isHistoryLookup(currentQuestion) ? "find" : "answer";
+  for (const item of found.quotes ?? []) {
+    const matches = originals.filter(message => message.conversationId === item.conversationId && item.messageIds.includes(message.id)
+      && message.content.includes(item.quote));
+    if (matches.length !== 1) continue;
+    const ref = references.find(ref => ref.messageId === matches[0].id && ref.conversationId === item.conversationId);
+    if (!ref) continue;
+    if (!ref.excerpt || item.relation === "direct") ref.excerpt = item.quote;
+    if (item.relation === "direct" && item.quote.length >= 8 && homeTopicMatches(topic, item.quote)) {
+      checked.set(ref.id, { ...ref, excerpt: item.quote });
+    }
+  }
+  const verified = [...checked.values()].slice(0, 6);
+  if (verified.length) context?.onSources?.(verified);
+  // A simple find can return exact, already reviewed original passages.
+  const asksForConclusion = /最终|最后|变化|修改|改了|为什么|比较|结论|确认|\b(?:final|latest|why|compare|changed|conclusion)\b/iu.test(currentQuestion);
+  if (intent === "find" && topic.anchors.length && verified.length && !asksForConclusion && !context?.history?.length) {
+    const now = Date.now(), title = zh ? "找到相关讨论" : "Related discussions";
+    const sections = verified.map((ref, index) => ({ id: `match-${index + 1}`, title: ref.title, transition: "", kind: "finding" as const,
+      body: ref.excerpt.split("\n").map(line => "> " + line).join("\n"), evidenceIds: [ref.id] }));
+    return { id: crypto.randomUUID(), runId: context?.runId, goal, mode: "answer", strategy: "answer", status: "ready", locale: zh ? "zh-CN" : "en",
+      title, scope: found.scope, sourceConversationIds: found.ids, evidence: verified, sections,
+      activeSectionId: sections[0].id, completedSectionIds: [], notes: "", createdAt: now, updatedAt: now };
+  }
+  const pinned = [...references].sort((left, right) => Number(Boolean(right.excerpt)) - Number(Boolean(left.excerpt)));
   const response = await generateFocusSession(goal, "answer", sources.filter(source => found.ids.includes(source.id)), zh ? "zh-CN" : "en", signal, undefined, undefined, context?.runId, undefined,
-    { query: true, scope: found.scope, queryReferences: references, querySearchQueries: groundedHomeQueries(goal, queries), queryHistory: context?.history, homeRecallIntent: historyRequest(currentQuestion).intent === "summarize" ? "summarize" : isHistoryLookup(currentQuestion) ? "find" : "answer", skipProjectState: true, onResponseText });
+    { query: true, scope: found.scope, queryReferences: pinned, querySearchQueries: groundedHomeQueries(goal, queries), queryHistory: context?.history, homeRecallIntent: intent, skipProjectState: true });
   signal.throwIfAborted(); context?.onVerifying?.();
   // Truthful citations can still answer the wrong question. Audit the subject separately.
   const bound = response.evidence.filter(ref => originals.some(message => message.id === ref.messageId && message.conversationId === ref.conversationId));

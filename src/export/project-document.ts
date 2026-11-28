@@ -4,17 +4,18 @@ import {portablePlatformReferences} from "../shared/conversation-text";
 import {generatedTopicHeadings,portableMarkdown} from "./portable-markdown";
 import {wikiNumberedCases} from "../shared/wiki-numbered-prose";
 import {wikiProjectVoice} from "../shared/wiki-project-voice";
-import {wikiChapterEdition, type WikiEdition} from "../shared/wiki-reading-edition";
+import {wikiChapterEdition, wikiExportEdition, type WikiEdition} from "../shared/wiki-reading-edition";
+import {planWikiSourceBlock} from "../shared/wiki-block-presentation";
 import {wikiStateGraphs,wikiStateGraphMarkdown} from "../shared/wiki-state-graph";
 import {wikiDecisionQuestions} from "../ai/wiki-key-decisions";
-import {wikiProcessOnly, withoutEmptyWikiHeadings, withoutWikiAuditWarnings} from "../shared/wiki-editorial-cleanup";
+import {wikiIsDocumentReviewTable, wikiIsProjectAside, wikiProcessOnly, withoutWikiProjectAsideProse, withoutEmptyWikiHeadings, withoutWikiAuditWarnings} from "../shared/wiki-editorial-cleanup";
 import {FIRST_VERSION_ZH,ITERATION_ZH,PHASE_ZH} from "../shared/stage-words";
 import {WIKI_SUPPLEMENT,wikiSupplementRanges} from "../shared/wiki-source-supplements";
 import {LEAVES_OUT,RULES_OUT_ZH} from "../shared/negation";
 import {leftOutClause} from "../shared/wiki-left-out";
 import {valuesDifferSaid} from "../shared/wiki-values-differ";
 import {wikiDisplayGroups,wikiReadingQuestion} from "../shared/wiki-display-groups";
-import {aboutNameKey,CRITICAL_PROBLEM,personalDirection,restatedWithin,wikiBlockedUnitIds,wikiCoverageCounts,wikiDraftCompleteness,wikiLedgerUnits,wikiOrganizationIncomplete,wikiStatementWithConditions,type WikiDraftChapter,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
+import {aboutNameKey,compactWikiSourceBlocks,CRITICAL_PROBLEM,personalDirection,restatedWithin,wikiBlockedUnitIds,wikiCoverageCounts,wikiDraftCompleteness,wikiLedgerUnits,wikiOrganizationIncomplete,wikiStatementWithConditions,type WikiDraftChapter,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 import {decidedValuesNotes,reportedStatusRows,UNDECIDED,wikiMeasure,wikiSaidWhen} from "../shared/wiki-section-status";
 import {unified} from "unified";
 import remarkParse from "remark-parse";
@@ -23,9 +24,13 @@ import { GFM_OPTIONS } from "../shared/markdown-gfm";
 import type {RootContent} from "mdast";
 import type {FocusEvidence,FocusSession} from "../shared/focus-session";
 import {wikiSections} from "../shared/wiki-navigation";
+import { continuationBullet, projectReviewedClaims } from "../shared/project-continuation";
+import { factTextKey } from "../shared/project-fact-state";
 import {projectOverviewContent,projectOverviewReadingText} from "../shared/project-overview";
 import { wikiTableKey } from "../shared/wiki-table-source";
+import { wikiEvidenceTarget } from "../shared/wiki-evidence-link";
 import {projectCurrentPlan} from "../shared/project-current-plan";
+import { wikiLedgerAtPublishedDraft } from "../shared/wiki-decision-receipts";
 import {projectKnowledgeReading,projectKnowledgeView} from "../shared/project-knowledge-view";
 import {generatedProse} from "../shared/generated-structure-prose";
 import {wikiReadingLayout} from "../shared/wiki-reading-layout";
@@ -45,10 +50,10 @@ import {wikiChapterLinksAsText} from "../shared/wiki-chapter-links";
 import {evolutionRecordsBySection,wikiHistoryEntries,type WikiHistoryEntry} from "../shared/wiki-history";
 import {wikiKeyClaims,wikiKeyClaimLabel,type WikiKeyClaim} from "../shared/wiki-key-claims";
 import {currentWikiVerification} from "../shared/wiki-explanations";
-import {documentNotes} from "./document-notes";
+import {documentNotes,wikiQualityStatus} from "./document-notes";
 import {keyEvidenceMarkdown,projectKeyEvidence} from "./project-key-evidence";
 import { numberedWikiReferences } from "./wiki-numbered-references";
-import { projectQuickBrief } from "./project-quick-brief";
+import { formatProjectMarkdown } from "./project-quick-brief";
 import { compactProposalFlows } from "../shared/wiki-reading-format";
 import { wikiChapterFlowBlocks, wikiFlowMarkdown, wikiFlowParagraph } from "../shared/wiki-flow-block";
 import {counted,wikiDocumentIdentity,wikiDocumentIdentityBrief} from "../shared/wiki-document-identity";
@@ -69,6 +74,7 @@ import {withoutUnrelatedScopeNotes} from "../shared/wiki-scope-identity";
 import {findWikiSourceBlock,projectRecordedWikiOrders,projectRequiredWikiSourceBlocks,SOURCE_BLOCK_PROBLEM} from "../ai/wiki-source-coverage";
 import {wikiSourceBlockCaption,wikiSourceTableRole} from "../shared/wiki-source-code";
 import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
+import { wikiTableCells } from "../shared/wiki-table-source";
 import {deduplicateWikiNumberProblems,isWikiNumberProblem,projectVersions,recheckWikiNumberProblem,wikiNumberProblemValues,wikiNumberSpans} from "../ai/wiki-number-diagnostics";
 import {INCOMPLETE_WIKI_PROSE,literalWikiProse,wikiIncompleteProse,wikiIntegrityNote} from "../ai/wiki-integrity";
 import {resolvedWikiFinalNotices} from "../ai/wiki-final-notices";
@@ -78,7 +84,7 @@ import {annotateReferenceExamples,compactReferenceHeadings,projectReferenceGroup
 
 /** holderMarks is a legacy preference; saved status and attribution are always retained. */
 export type ProjectSourceMode="locators"|"key"|"excerpts";
-export type ProjectExportPreset = WikiEdition;
+export type ProjectExportPreset = WikiEdition | "concise" | "audit";
 export interface ProjectExportSelection {overview:boolean;wikiIds:string[];matters:boolean;history:boolean;sources:boolean;sourceMode?:ProjectSourceMode;holderMarks?:boolean;referenceAppendix?:boolean|"separate"|"omit";referenceWikiFilename?:string;preset?:ProjectExportPreset}
 export type ProjectExportFormat="md"|"html"|"txt"|"json";
 interface ExportPart {title:string;body:string;evidenceIds:string[];planAppendix?:string;group?:string;question?:string;claims?:WikiClaim[];summary?:{lead:string;leadBasis?:string;leadDisplay?:string;decided:string[];open:string[];marked:boolean;sources?:Record<string,string>}}
@@ -394,7 +400,7 @@ function listedItems(chapters:ExportPart[],key:"decided"|"open"):Map<ExportPart,
  const seen:string[]=[];
  return new Map(chapters.map(chapter=>[chapter,(chapter.summary?.[key]??[]).filter(text=>!partOf(text)&&!seen.some(other=>other===text||sameItem(other,text))&&seen.push(text))]));
 }
-function exportOverview(session:FocusSession,chapters:ExportPart[],zh:boolean,documentStatus?:string,reading?:ReturnType<ReturnType<typeof wikiChapterReviewContext>["reading"]>,reportCitation?:(unit:WikiKnowledgeUnit)=>string,overviewRecords:{decided:string;open:string;citePlan?:(unit:WikiKnowledgeUnit)=>string}={decided:"",open:""},compact=false,centralizedOpen=false):ExportPart|undefined{
+function exportOverview(session:FocusSession,chapters:ExportPart[],zh:boolean,documentStatus?:string,reading?:ReturnType<ReturnType<typeof wikiChapterReviewContext>["reading"]>,reportCitation?:(unit:WikiKnowledgeUnit)=>string,overviewRecords:{decided:string;open:string;preferDecided?:boolean;citePlan?:(unit:WikiKnowledgeUnit)=>string;chapterLink?:(chapter:ExportPart)=>string}={decided:"",open:""},compact=false,centralizedOpen=false,edition?:WikiEdition):ExportPart|undefined{
  const l=(cn:string,en:string)=>zh?cn:en,overview=projectOverviewContent(session,reading);
  const description=projectOverviewReadingText(session,overview).split(/\n\s*\n/u).map(paragraph=>paragraph.trim()).filter(Boolean);
  const plan=projectCurrentPlan(session,reading);
@@ -486,7 +492,7 @@ function exportOverview(session:FocusSession,chapters:ExportPart[],zh:boolean,do
   const more=total>limit?`\n\n${l(`另有 ${total-limit} 条，见各章。`,`${total-limit} more in the chapters.`)}`:"";
   return `### ${title}\n\n${blocks.join("\n\n")}${more}`;
  };
- const decided=listed("decided",l("已定的关键决定","Key decisions"),MAX_SUMMARY_DECISIONS)||overviewRecords.decided;
+ const decided=overviewRecords.preferDecided&&overviewRecords.decided || listed("decided",l("已定的关键决定","Key decisions"),MAX_SUMMARY_DECISIONS)||overviewRecords.decided;
  const open=centralizedOpen?"":listed("open",l("待决问题","Open questions"),MAX_SUMMARY_OPEN)||overviewRecords.open;
  const refs=session.evidence.filter(ref=>chapters.some(chapter=>chapter.evidenceIds.includes(ref.id)));
  const messages=new Set(refs.map(ref=>JSON.stringify([ref.conversationId,ref.messageId]))).size;
@@ -603,7 +609,7 @@ function exportOverview(session:FocusSession,chapters:ExportPart[],zh:boolean,do
   return [`**${status}**${row.when?` · ${row.when}`:""}${citation}`,list].join("\n\n");
  };
  const measures=reported.filter(row=>row.status==="measured").sort((a,b)=>(a.at??Infinity)-(b.at??Infinity));
- const dateNote=l("优先显示原消息日期，缺失时列出来源对话的日期范围。","Dates refer to the source message when available, with the conversation range as a fallback.");
+ const dateNote=edition?"":l("优先显示原消息日期，缺失时列出来源对话的日期范围。","Dates refer to the source message when available, with the conversation range as a fallback.");
  const timeline=measures.length?`### ${l("你报告的数据","Figures you reported")}\n\n${l("以下数据来自用户报告，仍待核验。","These figures are self-reported and unverified.")} ${dateNote}\n\n| ${l("时间","When")} | ${l("数据","Figures")} |\n|---|---|\n${measures.map(row=>`| ${row.when||"—"} | ${cell(zh?figureClauses(row.text):row.text)}${reportCitation?.(reportById.get(row.unitId)!)??""} |`).join("\n")}`:"";
  const progress=figuresOnly?timeline:[latest.length?`### ${l("最近报告的项目状态","Latest reported project status")}\n\n${l("来自用户报告，未经代码核验。","From user reports, not verified in code.")} ${dateNote}\n\n${latest.map(reportLine).join("\n\n")}`: "",timeline].filter(Boolean).join("\n\n");
  // A learning record opens with where the learner stands: what is learned, still to learn and left for now, the
@@ -654,16 +660,35 @@ ${body}
  const movePlanDetails=Boolean(items.length>4&&chapters.length&&planDetails);
  const planningRecordLink="["+l("查看规划与验收记录","Read planning and acceptance records")+"](#atlas-planning-records)";
  const chapterIndex=order;
- const planText=plan?[
+ const title=l("项目总览","Project overview");
+ const overviewEvidence=[...new Set([...overview.evidenceIds,...plan?.items.map(item=>item.source.id)??[]])];
+ if(edition==="brief")return {title,body:[description[0],decided].filter(Boolean).join("\n\n"),evidenceIds:overviewEvidence};
+ if(edition==="handoff"){
+  const decisions=decided.replace(/^#{2,3} [^\n]+\n+/u,"");
+  const confirmedPlan=(plan?.items??[]).map(({text,unit})=>`- ${cell(text)}${cell(overviewRecords.citePlan?.(unit)??"")}`).join("\n");
+  const current=[...latest.map(reportLine),decisions,confirmedPlan].filter(Boolean).join("\n\n");
+  const navigation=chapters.map(chapter=>`- ${overviewRecords.chapterLink?.(chapter)??chapter.title}`).join("\n");
+  return {title,body:[description[0],current?`### ${l("当前进展与已定决策","Current progress and decisions")}\n\n${current}`:"",
+   navigation?`### ${l("章节导航","Chapters")}\n\n${navigation}`:""].filter(Boolean).join("\n\n"),evidenceIds:overviewEvidence};
+ }
+ const discussedSteps=items.filter(item=>item.part==="now"&&!item.holder
+  && !item.unitIds.some(id=>unselected.has(id))).slice(0,2);
+ const nextSteps=plan?.proposals?.length ? plan.proposals.map(item=>`- ${cell(item.text)}`)
+  : discussedSteps.map(item=>`- ${dated({...item,text:whole(item)})}`);
+ const discussedPlan=nextSteps.length?[
+  l("**讨论中的下一步 · 待确认**","**Next steps discussed · Pending confirmation**"),
+  nextSteps.join("\n"),
+ ].join("\n\n"):"";
+ const planText=plan||discussedPlan?[
   `### ${l("当前规划","Current plan")}`,
-  plan.personal||l("完整发布范围待确认。","The complete release scope is pending."),
-  ...(!plan.personal&&plan.items.length?[compact?plan.items.map(({text,unit,replacementPending})=>
+  plan?.personal||(!plan?.items.length&&discussedPlan)||l("完整发布范围待确认。","The complete release scope is pending."),
+  ...(!plan?.personal&&plan?.items.length?[compact?plan.items.map(({text,unit,replacementPending})=>
     "- "+cell(text)+cell(overviewRecords.citePlan?.(unit)??"")+(replacementPending?l(" · 待核对替代范围"," · Review replacement scope"):"")).join("\n"):[`| ${l("事项","Choice")} | ${l("适用版本或场景","Release or context")} | ${l("当前状态","Status")} | ${l("替代关系","Replacement")} |`,
     "| --- | --- | --- | --- |",
     ...plan.items.map(({text,unit,roadmap,scope,replacementPending})=>`| ${cell(text)}${cell(overviewRecords.citePlan?.(unit)??"")} | ${cell(roadmap?l("交付顺序","Delivery order"):scope??l("具体版本待定","Release pending"))} | ${l("已确认","Confirmed")} | ${replacementPending?l("待核对","Needs review"):l("未见明确替代","No explicit replacement recorded")} |`),
   ].join("\n")]:[]),
  ].join("\n\n"):"";
- return {title:l("项目总览","Project overview"),body:[documentState,description.join("\n\n"),planText,progress,chapterIndex,decided,open,scope,movePlanDetails?planningRecordLink:planDetails].filter(Boolean).join("\n\n"),evidenceIds:[...new Set([...overview.evidenceIds,...plan?.items.map(item=>item.source.id)??[]])],...(movePlanDetails?{planAppendix:planDetails}:{})};
+ return {title:l("项目总览","Project overview"),body:[documentState,description.join("\n\n"),planText,progress,chapterIndex,decided,open,edition?undefined:scope,movePlanDetails?planningRecordLink:planDetails].filter(Boolean).join("\n\n"),evidenceIds:[...new Set([...overview.evidenceIds,...plan?.items.map(item=>item.source.id)??[]])],...(movePlanDetails?{planAppendix:planDetails}:{})};
 }
 /** A learning record's points by role, for its document information. */
 /** A chapter's lead cut to its first sentence, then to a clause of about forty characters (or twenty English words). */
@@ -685,13 +710,31 @@ const BLOCK_CAPTION=/^(?:对照表|命令|数据结构|代码示例|代码|界�
 const TABLE_ONLY=/^(?:对照表|对照|清单|Table|Mapping|List)$/u;
 const personalPerspective=(unit:WikiKnowledgeUnit)=>unit.evidence.role==="user"&&(personalDirection(unit.statement)
  || /(?:不应|不该|不能|不想)[^。；]{0,14}放弃|\b(?:should not|won't|must not) give up\b/iu.test(unit.statement));
-const conciseGeneratedProse=(body:string)=> {
- const edits=wikiDocumentBlocks(body).flatMap(block=>{
-  if(block.kind!=="paragraph"&&block.kind!=="list")return [];
-  const next=block.text.replace(/(^[ \t]*(?:[-*+] +)?)(AI 对具体细节的建议[：:]\s*|AI suggestion:\s*)(?:\2)+/gimu,"$1$2")
+const conciseGeneratedProse=(body:string, original=body)=> {
+ const VERSION_LABEL=/\*\*(?:v\d+(?:\.\d+)*(?:\s*版本)?|(?:phase|milestone|plan)\s+[A-Z\d]+|第[一二三四五六七八九十\d]+版)\*\*/giu;
+ const labels=new Map<string,string|undefined>();
+ for(const block of wikiDocumentBlocks(original)){
+  if(block.kind!=="paragraph")continue;
+  for(const match of block.text.matchAll(VERSION_LABEL)){
+   const start=match.index, end=start+match[0].length;
+   const before=block.text.slice(Math.max(0,start-6),start),after=block.text.slice(end,end+10);
+   if(after.length<6)continue;
+   const key=before+"\0"+after;
+   labels.set(key,labels.has(key)&&labels.get(key)!==match[0]?undefined:match[0]);
+  }
+ }
+ const blocks=wikiDocumentBlocks(body);
+ const edits=blocks.flatMap((block,index)=>{
+  const gapStart=blocks[index-1]?.end??block.start, gap=body.slice(gapStart,block.start);
+  const gapEdit=/^(?:\r?\n){3,}$/u.test(gap)?[{start:gapStart,end:block.start,text:"\n\n"}]:[];
+  if(block.kind!=="paragraph"&&block.kind!=="list")return gapEdit;
+  const cleaned=block.text.split(/(\x60+[^\x60\n]+\x60+)/u).map((part,index)=>index%2?part:
+   part.replace(/(?<![\\*])\*\*[ \t]*\*\*(?!\*)/gu,(match,at:number,raw:string)=>
+    labels.get(raw.slice(Math.max(0,at-6),at)+"\0"+raw.slice(at+match.length,at+match.length+10))??"")).join("");
+  const next=cleaned.replace(/(^[ \t]*(?:[-*+] +)?)(AI 对具体细节的建议[：:]\s*|AI suggestion:\s*)(?:\2)+/gimu,"$1$2")
    .replace(/((?:AI 对具体细节的建议|AI proposal for the details|AI suggestion)[：:])[ \t]*(?:[-*+]|\d+[.)])\s+(?=\S)/giu,"$1")
    .replace(/([\p{Script=Han}A-Za-z0-9）])。\s*(?=而非[^。！？\n]+[。！？])/gu,"$1，");
-  return next===block.text?[]:[{...block,text:next}];
+  return next===block.text?gapEdit:[...gapEdit,{...block,text:next}];
  });
  for(const edit of edits.reverse())body=body.slice(0,edit.start)+edit.text+body.slice(edit.end);
  return body;
@@ -838,6 +881,7 @@ const leadKey=(text:string)=>text.normalize("NFKC").replace(/〔[^〕]+〕|\[(?:
 // Evidence IDs can be renamed by an update. A locator instead describes the
 // saved excerpt of a particular message and its source version.
 const locatorId=(ref:FocusEvidence)=>`S-${sourceMessageSignature(JSON.stringify([ref.conversationId,ref.messageId,ref.sourceSignature??ref.sourceVersionId,ref.excerpt])).replace(":","-")}`;
+const messageLocatorId=(ref:FocusEvidence)=>`S-${sourceMessageSignature(JSON.stringify([ref.conversationId,ref.messageId,ref.sourceSignature??ref.sourceVersionId])).replace(":","-")}`;
 /** Key conclusions beside their 1-3 deciding originals; numbers resolve to the
  * source index once it is built, and to nothing when sources are not exported. */
 /** The chapter's key conclusions with their source excerpts, for an export that carries sources. Without them the
@@ -864,23 +908,29 @@ const projectSnapshotId=(session:FocusSession)=>`W-${sourceMessageSignature(JSON
 /** The knowledge ledger the Wiki is written from: units, organization, draft and run counters, as the developer panel
  * exports it, so a document can be checked point by point. Only when the user ticks it. */
 export function projectLedgerFile(session:FocusSession){
- const ledger=session.wikiKnowledge;
+ const ledger=session.wikiKnowledge&&compactWikiSourceBlocks(session.wikiKnowledge);
  const roadmap=ledger&&ledger.documentType!=="learning"?wikiRoadmapScopes(ledger):undefined;
  return {text:JSON.stringify({title:session.title,runId:session.runId,snapshotId:projectSnapshotId(session),savedAt:session.updatedAt,ledger,
   ...(roadmap?.size?{roadmapScopes:Object.fromEntries(roadmap)}:{})},null,2),filename:`${fileBase(session)}-ledger.json`,mime:"application/json;charset=utf-8"};
 }
 /** The file contains only selected saved content, never a raw project/database dump. */
 export function projectDocument(session:FocusSession,selection:ProjectExportSelection,format:ProjectExportFormat,zh=true){
- const savedMode=selection.preset?undefined:session.wikiKnowledge?.draft?.writingMode;
- const audit=selection.preset==="archive"||savedMode==="audit";
- const compact=session.wikiKnowledge?.documentType!=="learning"&&(selection.preset==="brief"||selection.preset==="handoff"||savedMode==="concise"||savedMode==="handoff");
- const centralizedOpen=Boolean(selection.preset||savedMode);
+ const reviewedClaims = projectReviewedClaims(session);
+ const explicitEdition=wikiExportEdition(selection.preset);
+ const edition=explicitEdition??wikiExportEdition(session.wikiKnowledge?.draft?.writingMode??session.wikiKnowledge?.writingMode);
+ const markdownEdition=format==="md"&&session.wikiKnowledge?.documentType!=="learning"?edition:undefined;
+ const audit=edition==="archive";
+ const compact=session.wikiKnowledge?.documentType!=="learning"&&(edition==="brief"||edition==="handoff");
+ const centralizedOpen=Boolean(edition);
  const sourceMode=selection.sourceMode??(selection.sources?"excerpts":"locators");
  selection={...selection,sources:sourceMode==="excerpts"};
  const parts:ExportPart[]=[],l=(cn:string,en:string)=>zh?cn:en;
  const portable=format==="md"&&Boolean(session.wikiKnowledge)&&session.wikiKnowledge?.documentType!=="learning";
  const originalContext=wikiChapterReviewContext(session);
- const reading=session.wikiKnowledge?.draft&&session.wikiKnowledge.documentType!=="learning"?originalContext.reading():undefined;
+ const currentReading=session.wikiKnowledge?.draft&&session.wikiKnowledge.documentType!=="learning"?originalContext.reading():undefined;
+ const publishedLedger=session.wikiKnowledge&&wikiLedgerAtPublishedDraft(session.wikiKnowledge);
+ const decisionUpdatePending=publishedLedger!==session.wikiKnowledge;
+ const reading=decisionUpdatePending&&currentReading?wikiChapterReviewContext({...session,wikiKnowledge:publishedLedger}).reading():currentReading;
  const includeComparisonSources=format==="md"&&(selection.referenceAppendix===true||selection.referenceAppendix==="separate"||audit&&selection.referenceAppendix!=="omit"&&selection.referenceAppendix!==false);
  const coverage=projectRequiredWikiSourceBlocks(session,selection.wikiIds,zh,reading,includeComparisonSources);
  const reviewContext=coverage.session===session?originalContext:wikiChapterReviewContext(coverage.session,reading);
@@ -888,8 +938,15 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
  const view=projectKnowledgeView(session),verification=currentWikiVerification(session);
  const chapterLeads=portable&&reading&&!compact?wikiChapterLeads(reading):undefined;
  const pinnedRoadmaps=new Map(reading?confirmedRoadmaps(reading.ledger).map(({plan})=>[plan.unitId,confirmedRoadmapText(plan,zh)]):[]);
- const recordedOrders=reading&&selection.preset!=="brief"?projectRecordedWikiOrders(session,reading,selection.wikiIds):undefined;
+ const recordedOrders=reading&&edition!=="brief"?projectRecordedWikiOrders(session,reading,selection.wikiIds):undefined;
  const readingUnits=new Map(reading?.units.map(unit=>[unit.id,unit]));
+ const projectAsides=session.wikiKnowledge?.documentType==="learning"?[]:[...readingUnits.values()].filter(unit=>reading?.statuses.get(unit.id)!=="confirmed"&&wikiIsProjectAside(unit));
+ const currentProjectName=session.wikiKnowledge?.organization?.projectName;
+ const tentativeNames=new Set(currentProjectName===session.title?wikiLedgerUnits(session.wikiKnowledge).flatMap(unit=>{
+  if(unit.about)return [];
+  const name=/^(?:项目|产品)(?:的)?暂定(?:名为|名称为)\s*[“「*]?([A-Za-z][\w -]{2,39})(?=[”」*，。,:;；]|\s*$)/u.exec(unit.statement)?.[1].trim();
+  return name&&name!==currentProjectName?[name]:[];
+ }):[]);
  const ignoredKeys=new Set(session.wikiScopeReview?.ignoredKeys??[]);
  const ignoredSourceIds=new Set(session.wikiScopeReview?.materials.filter(item=>(item.keys??[item.key]).every(key=>ignoredKeys.has(key))).flatMap(item=>item.evidenceIds));
  const refsById=new Map(session.evidence.filter(ref=>!ignoredSourceIds.has(ref.id)).map(ref=>[ref.id,ref]));
@@ -903,8 +960,9 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
  const locatorRoles=new Map<string,string>();
  const confirmationRows=new Map<string,string>();
  const confirmationStatements=new Map<string,string>();
+ const locatorKey=session.wikiKnowledge&&session.wikiKnowledge.documentType!=="learning"?messageLocatorId:locatorId;
  const locator=(ref:FocusEvidence,role?:string)=>{
-  const key=locatorId(ref);locators.set(key,ref);if(role)locatorRoles.set(key,role);
+  const key=locatorKey(ref);locators.set(key,ref);if(role)locatorRoles.set(key,role);
   return key;
  };
  const availableSource=(ref:FocusEvidence)=>{
@@ -999,32 +1057,41 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   const checks={resolved:new Set<string>(),scopeProblems:new Set<string>()};
   let reviewed=reviewWikiChapter(page,session,zh,checks,reviewContext);
   if(!page.userEdited&&!page.origin&&session.wikiKnowledge?.documentType!=="learning"){
-   const body=cleanWikiDraftDisplay(reviewed.body);
+   let body=cleanWikiDraftDisplay(reviewed.body);
+   const asides=wikiDocumentBlocks(body,reviewed.claims).filter(block=>{
+    if(block.kind==="table"&&wikiIsDocumentReviewTable(block.text))return true;
+    const ids=block.claims.flatMap(claim=>claim.unitIds??[]);
+    return ids.length>0&&!block.claims.some(claim=>claim.userDecided)&&ids.every(id=>{
+     const unit=readingUnits.get(id);
+     return unit&&reading?.statuses.get(id)!=="confirmed"&&wikiIsProjectAside(unit);
+    });
+   });
+   for(const block of asides.reverse())body=body.slice(0,block.start)+body.slice(block.end);
    if(body!==reviewed.body)reviewed={...reviewed,body,claims:reviewed.claims&&cleanWikiDraftClaims(body,reviewed.claims)};
   }
   if(checks.resolved.size)repairedChecks.set(page.id,checks.resolved);
   if(checks.scopeProblems.size)sourceScopeChecks.set(page.id,checks.scopeProblems);
   if(format==="md"&&!page.userEdited&&!page.origin){
    const projected=separateWikiDraftExcerpts(reviewed.body);
-   if(projected.excerpts.length)reviewExcerpts.set(page.title,[...new Set([...reviewExcerpts.get(page.title)??[],...projected.excerpts])]);
+   if(projected.excerpts.length&&!markdownEdition)reviewExcerpts.set(page.title,[...new Set([...reviewExcerpts.get(page.title)??[],...projected.excerpts])]);
    if(projected.body!==reviewed.body)return {...reviewed,body:projected.body};
   }
   return reviewed;
  }).map(page=>{
   if(page.userEdited||page.origin||!centralizedOpen||session.wikiKnowledge?.documentType==="learning")return page;
   const projected={...page,body:withoutWikiAuditWarnings(page.body,!compact,true)};
-  if(!compact||!selection.preset)return projected;
+  if(markdownEdition||!compact||!explicitEdition)return projected;
   const blocks=wikiDocumentBlocks(projected.body);
   const preservedTables=new Set((coverage.bindings.get(page.id)??[]).flatMap(binding=>{
    const code=binding.unit.evidence.code, role=code&&wikiSourceTableRole(code);
    if(role!=="delivery"&&!(includeComparisonSources&&role==="comparison"))return [];
    return findWikiSourceBlock(blocks,binding.markdown,binding)?.text??[];
   }));
-  const filtered=wikiChapterEdition(projected,selection.preset,preservedTables);
-  if(selection.preset!=="handoff"||!reading)return filtered;
+  const filtered=wikiChapterEdition(projected,explicitEdition,preservedTables);
+  if(explicitEdition!=="handoff"||!reading)return filtered;
   const scopedRefs=session.evidence.filter(ref=>page.evidenceIds.includes(ref.id)&&availableSource(ref));
   const spec=reading.units.flatMap((unit):WikiClaim[]=>{
-   if(includedSpecs.has(unit.id)||unit.about||reading.statuses.get(unit.id)!=="confirmed")return [];
+   if(includedSpecs.has(unit.id)||unit.about||reviewedClaims.shadows(unit.id,unit.statement)||reading.statuses.get(unit.id)!=="confirmed")return [];
    const terms=specTerms(unit.statement);
    if(!terms.length||terms.every(term=>filtered.body.includes(term)))return [];
    const source=scopedRefs.find(ref=>ref.conversationId===unit.evidence.conversationId&&ref.messageId===unit.evidence.messageId
@@ -1061,7 +1128,21 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
    return `[${title}](#${anchor})`;
   }));
  };
- for(const page of selectedPages){
+ const loosePages = selectedPages.filter(page => page.continuationLoose);
+ const inlineNotes: ExportPart | undefined = loosePages.length ? {
+  title: l("项目记录", "Project notes"),
+  body: loosePages.map(page => {
+   const refs = page.evidenceIds.flatMap(id => refsById.get(id) ?? []).filter(availableSource);
+   const citations = refs.map(ref => ` [${locator(ref)}]`).join("");
+   const body = continuationBullet(page, zh, citations);
+   renderedChapters.set(page.id, { title: page.title, body, generated: !page.origin && !page.userEdited, claims: page.claims });
+   return body;
+  }).join("\n"),
+  evidenceIds: [...new Set(loosePages.flatMap(page => page.evidenceIds))],
+  claims: loosePages.flatMap(page => page.claims ?? []),
+ } : undefined;
+ if (inlineNotes) parts.push(inlineNotes);
+ for(const page of selectedPages.filter(page => !page.continuationLoose)){
   const originals=session.evidence.filter(ref=>page.evidenceIds.includes(ref.id)).map(ref=>ref.excerpt);
   // A chapter says only what changes how it is read (mostly proposals, an unbacked stance); its key conclusions name the decisions.
   const keyClaims=wikiKeyClaims(session,page,view.facts);
@@ -1089,7 +1170,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
     const roadmap=pinnedRoadmaps.get(unit.id);
     if(roadmap&&page.body.includes(roadmap))return;
     if(personalPerspective(unit))continue;
-    if(changedUnits.has(unit.id))continue;
+    if(changedUnits.has(unit.id)||reviewedClaims.shadows(unit.id,unit.statement))continue;
     const {conversationId,messageId,quote}=unit.evidence;
     const refs=refsByQuote.get(evidenceKey(conversationId,messageId,quote))?.filter(ref=>pageIds.has(ref.id))??[];
     const reference=cite({text:unit.statement,quote,evidenceIds:refs.map(ref=>ref.id),unitIds:[unit.id]},pageIds);
@@ -1114,17 +1195,22 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
     return `${scoped} ${l(`〔${label}〕`,`[${label}]`)}${reference}${status==="confirmed"?confirmation([unit.id],pageIds):""}`;
    }
   })();
+  const savedHolders=new Map(reviewedClaims.entries.filter(entry=>entry.sectionId===page.id).map(entry=>[factTextKey(entry.text),entry.holder]));
   // Who holds each run of text is marked after its last sentence, as in the Wiki.
   const holderMarks=page.userEdited||page.origin?[]:(page.claims??[]).flatMap(claim=>{
-   if(!claim.holder)return [];
+   const saved=savedHolders.get(factTextKey(claim.text)),holder=saved??claim.holder;
+   if(!holder)return [];
    const key=keyClaims.some(item=>item.claim.text===claim.text);
-   const reference=(claim.holderMark&&(claim.holder!=="ai"||claim.verification==="supported")||key)&&!changedClaims.has(claim.text)?cite(claim,pageIds):"";
-   const receipt=reference&&claim.holder==="decided"&&!compact?confirmation(claim.unitIds??[],pageIds):"";
-   return claim.holderMark||reference?[{text:claim.text,holder:claim.holder,reference:(compact?reference.match(/\s+\[S-[^\]]+\]/u)?.[0]??reference:reference)+receipt,...(sourceLabels.size&&!compact?{source:sourceOf(claim.unitIds??[])}:{})}]:[];
+   const reference=(claim.holderMark&&(holder!=="ai"||claim.verification==="supported")||key)&&!changedClaims.has(claim.text)?cite(claim,pageIds):"";
+   const receipt=reference&&holder==="decided"&&!compact?confirmation(claim.unitIds??[],pageIds):"";
+   return saved||claim.holderMark||reference?[{text:claim.text,holder,reference:(compact?reference.match(/\s+\[S-[^\]]+\]/u)?.[0]??reference:reference)+receipt,...(sourceLabels.size&&!compact?{source:sourceOf(claim.unitIds??[])}:{})}]:[];
   });
   // A run of sentences with one holder carries one mark, after its last sentence; every sentence of the run is listed:
   // listing only the marked one left out 「第一阶段允许使用 Mock AI……」, decided before 「若成本合理……」 in one run.
-  const holders=page.userEdited||page.origin?[]:(page.claims??[]).flatMap(claim=>claim.holder?[{text:claim.text,holder:claim.holder,unitIds:claim.unitIds??[]}]:[]);
+  const holders=page.userEdited||page.origin?[]:(page.claims??[]).flatMap(claim=>{
+   const holder=savedHolders.get(factTextKey(claim.text))??claim.holder;
+   return holder?[{text:claim.text,holder,unitIds:claim.unitIds??[]}]:[];
+  });
   if(holderMarks.length)marked=true;
   const rawBody=page.userEdited||page.origin==="user"?page.body:(()=>{
    const citeTable=(unit:WikiKnowledgeUnit)=>{
@@ -1139,7 +1225,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
    return withHolderMarks(text,ordered.map(item=>item.mark),zh);
   })();
   // A subtopic of many values, few of them the user's, says which: the rest are suggestions.
-  let body=page.userEdited||page.origin?rawBody:conciseGeneratedProse(decidedValuesNotes(rawBody,holders,zh));
+  let body=page.userEdited||page.origin?rawBody:conciseGeneratedProse(decidedValuesNotes(rawBody,holders,zh),page.body);
   if(portable&&reading&&!page.userEdited&&!page.origin){
    for(const answer of reading.ledger.userAnswers??[]){
     const statement=wikiLayerDeferral(answer.question,answer.answer);
@@ -1238,7 +1324,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   const originalBlocks=coverage.bindings.get(page.id)??[];
   if(originalBlocks.length){
    const blocks=wikiDocumentBlocks(body);
-   const displays=new Map<number,{start:number;end:number;caption:string;comparison:boolean;locators:Set<string>}>();
+   const displays=new Map<number,{start:number;tableStart:number;end:number;caption:string;comparison:boolean;locators:Set<string>}>();
    for(const binding of originalBlocks){
     const {unit,markdown,evidence}=binding;
     const block=findWikiSourceBlock(blocks,markdown,binding);
@@ -1247,13 +1333,13 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
     const previous=blocks[blocks.indexOf(block)-1];
     const hasCaption=previous?.kind==="paragraph"&&/^(?:\*)?(?:讨论中的原文表格|Table from the discussion)/iu.test(previous.text);
     const caption=code&&role?hasCaption?previous.text:`*${wikiSourceBlockCaption(code,unit.evidence.role,zh)}${binding.stage?` · ${binding.stage}`:""}*`:"";
-    const display=displays.get(block.start)??{start:hasCaption&&role?previous.start:block.start,end:block.end,caption,
+    const display=displays.get(block.start)??{start:hasCaption&&role?previous.start:block.start,tableStart:block.start,end:block.end,caption,
      comparison:includeComparisonSources&&role==="comparison",locators:new Set<string>()};
     if(portable&&availableSource(evidence))display.locators.add(locator(evidence,unit.evidence.role));
     displays.set(block.start,display);
    }
-   for(const [start,display] of [...displays].sort(([a],[b])=>b-a)){
-    const payload=[display.caption,body.slice(start,display.end),...Array.from(display.locators,id=>`${l("原文来源","Original source")} [${id}]`)].filter(Boolean).join("\n\n");
+   for(const [,display] of [...displays].sort(([a],[b])=>b-a)){
+    const payload=[display.caption,body.slice(display.tableStart,display.end),...Array.from(display.locators,id=>`${l("原文来源","Original source")} [${id}]`)].filter(Boolean).join("\n\n");
     const text=display.comparison?`<details data-atlas="${WIKI_SUPPLEMENT}">\n<summary>${l("竞品原文对照表","Original competitor comparison")}</summary>\n\n${payload}\n\n</details>`:payload;
     body=body.slice(0,display.start)+text+body.slice(display.end);
    }
@@ -1331,7 +1417,18 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   // the subtopic's: read as the opening's alone, the third version left the key decisions.
   const openingEnd=page.body.search(/^#{3,4}\s/mu),inOpening=(text:string)=>{const at=page.body.indexOf(text.trim());return openingEnd>0&&at>=0&&at<openingEnd&&page.body.indexOf(text.trim(),openingEnd)<0;};
   const summedUp=(holder:"decided"|"open",mark:typeof shown[number])=>holder==="decided"&&mark.unitIds.length>0&&inOpening(mark.text)&&mark.unitIds.every(id=>shown.some(other=>other.holder===holder&&!inOpening(other.text)&&other.unitIds.includes(id)));
-  const stepsOf=(holder:"decided"|"open")=>{const groups=new Map<string,typeof shown>();for(const mark of shown)if(mark.holder===holder&&mark.unitIds.length&&!summedUp(holder,mark)){const key=unitKey(mark);groups.set(key,[...groups.get(key)??[],mark]);}return new Map([...groups].filter(([,marks])=>marks.length>1));};
+  const tableRows=wikiDocumentBlocks(page.body).filter(block=>block.kind==="table")
+   .flatMap(block=>block.text.split("\n").slice(2).map(wikiTableCells));
+  const tableRowOf=(text:string)=>{
+   const rows=tableRows.flatMap((row,index)=>row.includes(text.trim())?[index]:[]);
+   return rows.length===1?rows[0]:undefined;
+  };
+  const tableRowsContain=(text:string)=>tableRows.some(row=>row.includes(text.trim()));
+  const overviewGroupKey=(mark:typeof shown[number])=>{
+   const row=tableRowOf(mark.text);
+   return row===undefined?unitKey(mark):`${unitKey(mark)}:row:${row}`;
+  };
+  const stepsOf=(holder:"decided"|"open")=>{const groups=new Map<string,typeof shown>();for(const mark of shown)if(mark.holder===holder&&mark.unitIds.length&&(!tableRowsContain(mark.text)||tableRowOf(mark.text)!==undefined)&&!summedUp(holder,mark)){const key=overviewGroupKey(mark);groups.set(key,[...groups.get(key)??[],mark]);}return new Map([...groups].filter(([,marks])=>marks.length>1));};
   const stepLabel=(text:string)=>page.body.split("\n").find(line=>line.includes(text))?.match(/^\s*(?:\d+\.|[-*+])\s+\*\*([^*\n]+)\*\*[：:]/u)?.[1]?.trim();
   const stepsItem=(marks:typeof shown)=>{
    const longest=marks.reduce((best,mark)=>mark.text.length>best.text.length?mark:best,marks[0]);
@@ -1348,8 +1445,14 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
    if(sentences)return [...marks].sort((a,b)=>page.body.indexOf(a.text)-page.body.indexOf(b.text)).map(mark=>mark.text.trim()).reduce((joined,next)=>joined?overlapped(joined,next):next,"");
    // The cells of one table row ("| 云同步 | 不做，后续规划不再纳入开发范围 |") read as the row says them, its item first:
    // joined as steps, the key decision read "不做，后续规划不再纳入开发范围；云同步。".
-   const line=page.body.split("\n").find(row=>/^\s*\|/u.test(row)&&marks.every(mark=>row.includes(mark.text.trim())));
-   if(line){const cells=[...marks].sort((a,b)=>line.indexOf(a.text.trim())-line.indexOf(b.text.trim())).map(mark=>mark.text.trim().replace(/[。.；;]$/u,""));return `${cells[0]}${l("：",": ")}${cells.slice(1).join(l("，",", "))}${l("。",".")}`;}
+   const row=tableRows.find(row=>marks.every(mark=>row.includes(mark.text.trim())));
+   if(row){
+    const cells=row.filter(text=>text&&marks.some(mark=>mark.text.trim()===text));
+    // An unbound phase name is a locator, not another decision.
+    const label=row[0];
+    const values=cells.filter(text=>text!==label).map(text=>text.replace(/[。.；;]$/u,""));
+    return values.length?`${label}${l("：",": ")}${values.join(l("，",", "))}${l("。",".")}`:"";
+   }
    // Steps each on a labelled line of their own ("1. **第一版**：保留原成长区…", "2. **第二版**：增加Agent动态状态…") are listed
    // with their labels, in order: the longest alone listed 「增加Agent动态状态、10分钟守护、60秒复盘、风险报告。」, of no version.
    const itemLabel=(mark:typeof marks[number])=>page.body.split("\n").map(row=>row.match(/^\s*(?:[-*+]|\d+\.)\s+\*\*([^*\n]{1,16})\*\*\s*[：:]\s*(.*)$/u)).find(hit=>hit&&hit[2].replace(/\*\*/gu,"").includes(mark.text.trim().replace(/[。.]$/u,"")))?.[1].trim();
@@ -1374,10 +1477,31 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
      const unit=readingUnits.get(id);
      return unit&&personalPerspective(unit);
     }))return [];
-    const key=mark.unitIds.length?unitKey(mark):"",group=key?steps.get(key):undefined;
-    if(group){if(told.has(key))return [];told.add(key);return [unlisted(stepsItem(group))];}
+    const reviewedDecided = holder==="decided" && savedHolders.get(factTextKey(mark.text))==="decided";
+    if(reviewedDecided && !/[。！？!?.]$/u.test(mark.text.trim()))return [`${unlisted(mark.text)}${zh?"。":"."}`];
+    const key=mark.unitIds.length?overviewGroupKey(mark):"",group=key?steps.get(key):undefined;
+    if(group){if(told.has(key))return [];told.add(key);const item=stepsItem(group);return item?[unlisted(item)]:[];}
+    if(tableRowsContain(mark.text)){
+     if(holder!=="decided")return [];
+     const rowIndex=tableRowOf(mark.text);
+     const row=rowIndex===undefined?undefined:tableRows[rowIndex];
+     if(!row||row[0]===mark.text.trim())return [];
+     return [`${row[0]}${l("：",": ")}${unlisted(mark.text).replace(/[。.]$/u,"")}${l("。",".")}`];
+    }
     if(LEANS_ON_BEFORE.test(mark.text.trim())||cut(mark.text))return [];
-    const said=unlisted(mark.text);
+    let said=unlisted(mark.text);
+    if(holder==="decided"&&/^(?:在.+(?:之前|之后|前|后)|(?:完成|确认|确定).+后|(?:如果|若).+|(?:after|before|when|once|if)\b.+)[。.]?$/iu.test(said)
+      && !/[，,]/u.test(said)){
+     const prefix=said.replace(/[。.]$/u,"");
+     const sameUnits=(ids:readonly string[])=>mark.unitIds.length>0&&ids.length===mark.unitIds.length&&ids.every(id=>mark.unitIds.includes(id));
+     const candidates=[
+      ...page.claims?.filter(claim=>claim.userDecided&&sameUnits(claim.unitIds??[])).map(claim=>claim.text)??[],
+      ...(mark.unitIds.length===1?[statementOf.get(mark.unitIds[0])??""]:[]),
+     ];
+     const whole=candidates.find(candidate=>candidate.startsWith(prefix)&&/^[，,：:]\s*\S{3}/u.test(candidate.slice(prefix.length)));
+     if(!whole)return [];
+     said=whole;
+    }
     // A claim saved without the full stop the body gives it (「首屏优先展示……及今日计划顶部」 before 「。〔已定〕」) is that
     // sentence: left out as a clause, a decision the user confirmed was missing from the key decisions.
     const text=!/[。！？.!?]$/u.test(said)&&page.body.replace(/\*\*/gu,"").includes(`${said.replace(/\*\*/gu,"")}${zh?"。":"."}`)?`${said}${zh?"。":"."}`:said;
@@ -1443,7 +1567,11 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
     &&!/下文为讨论时的竞品记录|competitor information reflects the discussion/iu.test(rendered)
     ?"\n\n"+l("下文为讨论时的竞品记录。来源链接与核实日期以原文为准，未明确核实的能力仍待核验。",
       "Competitor information reflects the discussion. Links and verification dates come from its sources. Capabilities without explicit verification remain unverified."):"";
-   const part=chapterPart({title,summary,body:rendered+graphText+conversationsLine+(selection.sources?keyClaimsMarkdown(keyClaims,zh,true):"")+history+auditNote,evidenceIds:[...new Set([...page.evidenceIds,...keyClaims.flatMap(item=>item.sources.map(source=>source.id))])],...(selection.sources&&!page.userEdited&&!page.origin?{claims:page.claims?.filter(claim=>claim.evidenceIds.some(id=>page.evidenceIds.includes(id)))}:{}),question:wikiReadingQuestion(page.wikiQuestion,page.title,page.wikiDisplayTitle??""),...(group&&!/^(?:待归类|未分类|uncategorized)$/iu.test(group)?{group}:{})});
+   const part=chapterPart({title,summary,body:rendered+graphText+conversationsLine+(selection.sources?keyClaimsMarkdown(keyClaims,zh,true):"")+history+auditNote,evidenceIds:[...new Set([...page.evidenceIds,...keyClaims.flatMap(item=>item.sources.map(source=>source.id))])],...(selection.sources&&!page.userEdited&&!page.origin?{claims:page.claims?.filter(claim=>claim.evidenceIds.some(id=>page.evidenceIds.includes(id))).map(claim=>{
+    const saved=claim.markOnly?undefined:reviewedClaims.entries.find(entry=>entry.sectionId===page.id&&factTextKey(entry.text)===factTextKey(claim.text)
+      &&entry.references.some(ref=>claim.evidenceIds.includes(ref.id)));
+    return saved?{...claim,holder:saved.holder,checked:true,userDecided:saved.holder==="decided"}:claim;
+   })}:{}),question:wikiReadingQuestion(page.wikiQuestion,page.title,page.wikiDisplayTitle??""),...(group&&!/^(?:待归类|未分类|uncategorized)$/iu.test(group)?{group}:{})});
    const anchor=exportAnchors.get(encodeURIComponent(page.id));
    if(anchor)partAnchors.set(part,anchor);
    if(!page.userEdited&&!page.origin)generatedParts.add(part);
@@ -1492,6 +1620,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   }
  }
  if(selection.overview){
+  const reading = currentReading;
   const reportCitation=portable?(unit:WikiKnowledgeUnit)=>{
    const {conversationId,messageId,quote}=unit.evidence;
    const ref=[...refsById.values()].find(item=>item.conversationId===conversationId&&item.messageId===messageId&&item.excerpt.trim()===quote.trim()&&availableSource(item));
@@ -1505,11 +1634,28 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   const summaryOnly=reading&&reading.ledger.documentType!=="learning"&&!selection.wikiIds.length;
   const planned = new Set(projectCurrentPlan(session,reading)?.items.map(item=>item.unit.id));
   const summaryList=(key:"confirmed"|"open",title:string,limit:number)=>{
-   if(!summaryOnly)return "";
    const lines=new Map<string,string>();
+   if(key==="confirmed") for(const entry of reviewedClaims.entries){
+    if(entry.holder!=="decided"||selection.wikiIds.length&&!selection.wikiIds.includes(entry.sectionId))continue;
+    const ref=entry.references.find(ref=>selectedEvidence.has(ref.id)&&availableSource(ref));
+    if(!ref&&!entry.overview)continue;
+    lines.set(leadKey(entry.text),`- ${cell(entry.text)}${ref&&(portable||format==="html")?` [${locator(ref)}]`:""}`);
+    if(lines.size>=limit)break;
+   }
+   if(!summaryOnly||!reading)return lines.size?`### ${title}\n\n${[...lines.values()].join("\n")}`:"";
+   if(key==="confirmed") for(const [id,receipt] of Object.entries(reading.ledger.decisionArbitrations??{}).sort((a,b)=>b[1].at-a[1].at)){
+    if(lines.size>=limit)break;
+    if(reviewedClaims.overriddenReceipts.has(id)||!receipt.deferredToDraft||!receipt.text||receipt.mode==="defer"||reviewedClaims.shadows(undefined,receipt.text)
+      ||receipt.unitIds?.some(id=>reviewedClaims.shadows(id,receipt.text!)))continue;
+    const source=receipt.scope?.targets.flatMap(target=>reading.units.find(unit=>unit.id===target.unitId)??[]).find(unit=>citeDecision(unit));
+    if(!source&&!receipt.evidenceIds?.some(id=>selectedEvidence.has(id)))continue;
+    lines.set(leadKey(receipt.text),`- ${cell(receipt.text)}${source?citeDecision(source):""}`);
+    if(lines.size>=limit)break;
+   }
    for(const unit of reading.units){
+    if(lines.size>=limit)break;
     const status=reading.statuses.get(unit.id);
-    if(status!==key&&(key!=="open"||status!=="contested")||unit.about||key==="confirmed"&&(unit.kind!=="decision"||planned.has(unit.id)))continue;
+    if(status!==key&&(key!=="open"||status!=="contested")||unit.about||key==="confirmed"&&(unit.kind!=="decision"||planned.has(unit.id)||reviewedClaims.shadows(unit.id,unit.statement)))continue;
     if(!session.sourceConversationIds.includes(unit.evidence.conversationId)||session.scope?.kind==="goal"&&!session.scope.blocks?.some(block=>block.conversationId===unit.evidence.conversationId&&block.messageIds.includes(unit.evidence.messageId)))continue;
     const basis=citeDecision(unit);
     if(!basis.trim())continue;
@@ -1540,25 +1686,39 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
    linkedAnchors.add(anchor);
    return " [" + l("查看章节","Read chapter") + "](#" + anchor + ")";
   };
-  const records={decided:summaryList("confirmed",l("已定的关键决定","Key decisions"),MAX_SUMMARY_DECISIONS),open:summaryList("open",l("待决问题","Open questions"),MAX_SUMMARY_OPEN),citePlan:portable||format==="html"?(unit:WikiKnowledgeUnit)=>`${l("〔已定〕"," [Decided]")}${citeDecision(unit,overviewEvidence)}${planPointer(unit)}`:undefined};
-  const overview=exportOverview(session,parts,zh,overviewReview(wikiSections(session).filter(page=>selection.wikiIds.includes(page.id)),zh),reading,reportCitation,records,compact,centralizedOpen);
+  const chapterLink=(chapter:ExportPart)=>{
+   const anchor=partAnchors.get(chapter);
+   if(!anchor)return chapter.title;
+   linkedAnchors.add(anchor);
+   return "["+chapter.title.replace(/\[|\]/gu,"\\$&")+"](#"+anchor+")";
+  };
+  const records={chapterLink,decided:summaryList("confirmed",l("已定的关键决定","Key decisions"),MAX_SUMMARY_DECISIONS),open:summaryList("open",l("待决问题","Open questions"),MAX_SUMMARY_OPEN),preferDecided:decisionUpdatePending,citePlan:portable||format==="html"?(unit:WikiKnowledgeUnit)=>`${l("〔已定〕"," [Decided]")}${citeDecision(unit,overviewEvidence)}${planPointer(unit)}`:undefined};
+  const overview=loosePages.length && loosePages.length === selectedPages.length && !session.briefUserEdited && !session.projectMaintenance?.overview
+   ? undefined : exportOverview(session,parts.filter(part=>part!==inlineNotes),zh,overviewReview(selectedPages.filter(page=>!page.continuationLoose),zh),reading,reportCitation,records,compact,centralizedOpen,markdownEdition);
   if(overview)parts.unshift(overview);
  }
- const unresolved=reading?.conflicts.filter(item=>!item.selected&&item.choices.some(choice=>choice.ids.some(id=>{
+ const unresolved=currentReading?.conflicts.filter(item=>!item.selected&&item.choices.some(choice=>choice.ids.some(id=>{
   const unit=readingUnits.get(id);
   return unit&&session.sourceConversationIds.includes(unit.evidence.conversationId);
  })))??[];
  if(selection.overview||selectedPages.length){
-  const rows=unresolved.map(conflict=>{
+  const developmentBlocker=(ids:string[])=>ids.some(id=>{
+   const unit=readingUnits.get(id);
+   return unit&&!unit.about&&["constraint","decision","mechanism","plan"].includes(unit.kind)
+    &&reading?.statuses.get(id)!=="history";
+  });
+  const rows=unresolved.filter(conflict=>markdownEdition!=="handoff"||conflict.choices.every(choice=>developmentBlocker(choice.ids))).map(conflict=>{
    const choices=[...new Map(conflict.choices.map(choice=>[choice.scope,choice])).values()];
    return ["- "+cell(conflict.question),...choices.map(choice=>"  - "+cell(choice.receipt.answer))].join("\n");
   });
   if(centralizedOpen&&reading){
+   const reading = currentReading ?? reviewContext.reading()!;
    const relevant=new Set(selectedPages.flatMap(page=>page.claims?.flatMap(claim=>claim.unitIds??[])??[]));
-   const actionDone=(id:string)=>["choose","merge","custom"].includes(session.wikiKnowledge?.decisionArbitrations?.[id]?.mode??"");
+   const actionDone=(id:string)=>["choose","merge","custom"].includes(reading.ledger.decisionArbitrations?.[id]?.mode??"");
    const withinSelection=(ids:string[])=>ids.some(id=>relevant.has(id)||selection.overview&&!selection.wikiIds.length);
    const effective=effectiveWikiAnswers(reading.ledger,reading.statuses);
-   const writing=pendingWritingQuestions(reading.ledger,reading.statuses).filter(question=>!actionDone(question.id)&&withinSelection(question.unitIds));
+   const writing=pendingWritingQuestions(reading.ledger,reading.statuses).filter(question=>!actionDone(question.id)&&withinSelection(question.unitIds)
+    &&(markdownEdition!=="handoff"||question.options.length>=2&&developmentBlocker(question.unitIds)));
    const tracked=unresolved.map(conflict=>({text:conflict.question,options:conflict.choices.map(choice=>choice.ids)}));
    const addQuestion=(question:{text:string;options:string[][]}, choices:string[]=[])=>{
     if(wikiQuestionAlreadyAnswered(question.text,effective)||tracked.some(existing=>sameWikiDecision(existing,question)))return;
@@ -1570,6 +1730,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
    const pending=wikiDecisionQuestions(session.wikiKnowledge,zh).versions.filter(question=>!question.answer
     && !actionDone(question.id)
     && withinSelection(question.options.flatMap(option=>option.unitIds))
+    && (markdownEdition!=="handoff"||question.options.length>=2&&question.options.every(option=>developmentBlocker(option.unitIds)))
     && !question.options.some(option=>option.unitIds.some(id=>reading.statuses.get(id)==="confirmed")
       &&question.options.filter(other=>other!==option).every(other=>other.unitIds.every(id=>reading.statuses.get(id)==="history"))));
    for(const question of pending)addQuestion({text:question.question,options:question.options.map(option=>option.unitIds)},
@@ -1578,9 +1739,12 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
     .filter(text=>!text.startsWith("版本未定")&&!/^范围有分歧|Not settled/iu.test(text)
      &&!wikiQuestionAlreadyAnswered(ownRow(text),effective)
      &&(!compact||/[？?]\s*$|(?:待(?:确认|决定|选择|确定)|尚未(?:确定|决定))\s*[。.]?$|\b(?:remains? open|undecided|unresolved)\s*\.?$/iu.test(text)));
-   for(const text of summaries.slice(0,compact?MAX_SUMMARY_OPEN:summaries.length))rows.push("- "+cell(ownRow(text).replace(/[：:]+(?=[。.!?！？]*$)/u,"")));
+   if(markdownEdition!=="handoff")for(const text of summaries.slice(0,compact?MAX_SUMMARY_OPEN:summaries.length))rows.push("- "+cell(ownRow(text).replace(/[：:]+(?=[。.!?！？]*$)/u,"")));
   }
-  if(rows.length)parts.push({title:l("待决事项","Open questions"),body:[...new Set(rows)].join("\n"),evidenceIds:[]});
+  const pendingBody=[...new Set(rows)].slice(0,markdownEdition==="brief"?MAX_SUMMARY_OPEN:Infinity).join("\n");
+  const overview=markdownEdition==="brief"&&parts.find(part=>part.title===l("项目总览","Project overview"));
+  if(pendingBody&&overview)overview.body=[overview.body,`### ${l("待决事项","Open questions")}\n\n${pendingBody}`].filter(Boolean).join("\n\n");
+  else if(pendingBody)parts.push({title:l("待决事项","Open questions"),body:pendingBody,evidenceIds:[]});
  }
  const plansAppendix=parts.find(part=>part.planAppendix)?.planAppendix;
  if(selection.matters){
@@ -1707,7 +1871,16 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   const original=refsById.get(source.refId);
   return original&&availableSource(original)?`[${locator(original,source.author)}]`:"";
  }:undefined):l("所选章节没有可附的关键证据。","The selected chapters have no key evidence available to include."),evidenceIds:[]});
- for(const part of parts)part.body=exportReferences(part.body,part.evidenceIds);
+ for(const part of parts){
+  const sourceIds = new Set(part.evidenceIds);
+  const body = part.body.replace(/^([^\S\r\n]*(?:原文来源|Original source)[^\S\r\n]+)\[(?:来源|Source)\]\((#atlas-original-[^)\s]+)\)[^\S\r\n]*$/gmu,(line,prefix:string,href:string)=>{
+   const target = wikiEvidenceTarget(href);
+   if(!target?.table || !sourceIds.has(target.id)) return line;
+   const ref = refsById.get(target.id);
+   return ref&&availableSource(ref) ? `${prefix}[${locator(ref)}]` : "";
+  });
+  part.body=exportReferences(body,part.evidenceIds);
+ }
  const usedLocators=new Set(parts.flatMap(part=>[...part.body.matchAll(/\[(S-\d+-[a-z0-9]+)\]/gu)].map(match=>match[1])).filter(id=>locators.has(id)));
  const sourceNumbers=new Map([...usedLocators].map((id,index)=>[id,index+1]));
  const locatorRows=[...locators].filter(([id])=>usedLocators.has(id)).map(([id,ref])=>{
@@ -1716,14 +1889,14 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   const anchor=format==="md"?`<a id="source-${id}"></a>`:format==="html"?`<span id="source-${id}" />`:"";
   return `- ${[`**${id}**${anchor}`,sourceLabels.get(ref.conversationId)?.label,role?roleName(role,zh):undefined,l(`对话 ${JSON.stringify(ref.conversationId)}`,`conversation ${JSON.stringify(ref.conversationId)}`),l(`消息 ${JSON.stringify(ref.messageId)}`,`message ${JSON.stringify(ref.messageId)}`),version?l(`版本 ${version}`,`version ${version}`):undefined].flatMap(value=>value?[cell(value)]:[]).join(" · ")}`;
  });
- if(locatorRows.length){
+ if(locatorRows.length&&markdownEdition!=="brief"){
   const locationBody=portable?[...usedLocators].map(id=>{
    const ref=locators.get(id)!,role=session.sourceRoles?.[ref.conversationId]?.[ref.messageId]??locatorRoles.get(id);
    const order=session.sourceMessageOrder?.[ref.conversationId]?.indexOf(ref.messageId)??-1;
    const metadata=JSON.stringify({conversationId:ref.conversationId,messageId:ref.messageId,version:ref.sourceSignature??ref.sourceVersionId}).replace(/-->/gu,"\\u002d\\u002d>");
    return `- **${l(`来源${sourceNumbers.get(id)}`,`Source ${sourceNumbers.get(id)}`)}**<a id="source-${id}"></a>${[
     sourceLabels.get(ref.conversationId)?.label,role?roleName(role,zh):"",order>=0?l(`第 ${order+1} 条消息`,`Message ${order+1}`):"",
-   ].filter(Boolean).map(value=>` · ${cell(value!)}`).join("")} <!-- ${metadata} -->`;
+   ].filter(Boolean).map(value=>` · ${cell(value!)}`).join("")}${markdownEdition==="handoff"?"":` <!-- ${metadata} -->`}`;
   }).join("\n"):locatorRows.join("\n");
   parts.push({title:l("引用定位","Citation locators"),body:locationBody,evidenceIds:[]});
  }
@@ -1733,7 +1906,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   const row=confirmationRows.get(id)!;
   return portable?row.replace(`**${id}**`,`**${l(`已确认${number}`,`Confirmed ${number}`)}**<a id="confirmation-${id}"></a>`):row;
  });
- if(savedConfirmations.length)parts.push({title:l("整理确认记录","Organization confirmations"),body:savedConfirmations.join("\n"),evidenceIds:[]});
+ if(savedConfirmations.length&&markdownEdition!=="brief")parts.push({title:l("整理确认记录","Organization confirmations"),body:savedConfirmations.join("\n"),evidenceIds:[]});
  if(!parts.length)throw new Error(l("所选内容为空，请选择已有内容。","The selected content is empty. Choose saved content."));
  const savedAt=new Date(session.updatedAt).toLocaleString(zh?"zh-CN":"en-US",zh?undefined:{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
  const selected=wikiSections(session).filter(page=>selection.wikiIds.includes(page.id));
@@ -1806,17 +1979,24 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
  const batches=session.wikiKnowledge?.batches.filter(batch=>!batch.skipped)??[];
  const coverStatus=wikiCoverageCounts(batches);
  const blockedSources=reading ? wikiBlockedUnitIds(reading.ledger).size : 0;
+ const unverifiedLicenses=batches.reduce((total,batch)=>total+(batch.rejected?.reference_license_unverified??0),0);
  const readingNotices=[
+  unverifiedLicenses?l(`${unverifiedLicenses} 项开源许可待核对，已保留有原文依据的机制`,`${counted(unverifiedLicenses,"open-source license")} need verification; supported mechanisms were kept`):"",
   coverStatus.failed?l(`读取失败可重试 ${coverStatus.failed} 条消息`,`${counted(coverStatus.failed,"source message")} can be retried`):"",
   coverStatus.pending?l(`依据不足待判断 ${coverStatus.pending} 条消息`,`${counted(coverStatus.pending,"source message")} need an evidence decision`):"",
   blockedSources?l(`${blockedSources} 条知识点因原文与结论不符，已移出正文`,`${counted(blockedSources,"knowledge item")} withheld because the source does not support the assertion`):"",
   ].filter(Boolean);
  const batchesProcessed=batches.filter(batch=>batch.status==="ok").length;
+ const organizationReport=session.wikiKnowledge?.organization?.report;
+ const fitFailures=organizationReport?.fit_failed??0, fitBudgetLimited=organizationReport?.fit_budget_limited??0;
  const reviewNotes=[quality?.uncovered&&batches.length?l(batchesProcessed+"/"+batches.length+" 个提取批次已处理",batchesProcessed+"/"+batches.length+" extraction batches processed"):"",
   ...readingNotices,
   quality?.uncovered&&!coverStatus.pending&&!coverStatus.failed?l(`${quality.uncovered} 条用户消息仍待补读或核对`,`${counted(quality.uncovered,"user message")} still need recovery or review`):"",
   quality?.failedBatches&&!coverStatus.failed?l(`提取批次失败 ${quality.failedBatches} 项`,`${quality.failedBatches} extraction batches failed`):"",
-  quality?.organization==="partial"||session.wikiKnowledge?.lastFailure?.step==="organize"?l("部分整理任务待重试","some organizing tasks need a retry"):"",
+  quality?.organization==="partial"||session.wikiKnowledge?.lastFailure?.step==="organize"?
+   fitFailures?l(`${fitFailures} 项章节归类核对待重试${fitBudgetLimited?`，其中 ${fitBudgetLimited} 项超出输入预算`:""}`,
+    `${counted(fitFailures,"placement check")} need a retry${fitBudgetLimited?`, including ${fitBudgetLimited} over the input budget`:""}`)
+   :l("部分整理任务待重试","some organizing tasks need a retry"):"",
   partial&&!quality?l("部分生成任务待处理","some generation tasks remain"):"",!criticalCount&&projectionProblems?l("有检查提示可供核对","check notices are available for review"):"",
   acceptanceNotices?l(`${acceptanceNotices} 项验收提示`,`${counted(acceptanceNotices,"acceptance notice")}`):""].filter(Boolean);
  const qualitySummary=criticalCount?l(`${criticalCount} 项关键检查未通过`,`${counted(criticalCount,"key check")} failed`)
@@ -1837,7 +2017,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   if(matching.length!==1)return "";
   const markers=[...new Set(matching[0].evidenceIds.flatMap(evidenceId=>{
    const ref=refsById.get(evidenceId);
-   const key=ref&&locatorId(ref);
+   const key=ref&&locatorKey(ref);
    return key&&usedLocators.has(key)?[`[${key}]`]:[];
   }))].slice(0,3);
   return markers.length?` · ${markers.join(" ")}`:"";
@@ -1846,7 +2026,8 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
  const unlocated=criticalCount-projectedCritical;
  if(unlocated>0)failing.push(l(`还有 ${unlocated} 项关键检查未通过，原有记录未保存具体位置。`,`${unlocated} more key checks failed without saved locations.`));
  const qualityWarning=qualityParts.join(" · ");
- const qualityNote=quality&&(qualityParts.length||!quality.passed)?l(`自动检查：质量检查${quality.passed?"通过":"未通过"} · 整理完整性${partial?"部分完成":"完整"} · 关键检查未通过 ${quality.critical} 项 · 全部检查提示 ${quality.problems} 项${readingNotices.length?` · ${readingNotices.join(" · ")}`:quality.uncovered?` · ${quality.uncovered} 条用户消息仍待补读或核对`:""}。`,`Automatic checks: quality ${quality.passed?"passed":"not passed"} · organizing ${partial?"partial":"complete"} · ${quality.critical} key checks failing · ${quality.problems} notices${readingNotices.length?` · ${readingNotices.join(" · ")}`:quality.uncovered?` · ${counted(quality.uncovered,"user message")} still need recovery or review`:""}.`):"";
+ const qualityLabel=quality?wikiQualityStatus(quality,partial,zh):"";
+ const qualityNote=quality&&(qualityParts.length||!quality.passed)?l(`自动检查：${qualityLabel} · 整理完整性${partial?"部分完成":"完整"} · 关键检查未通过 ${quality.critical} 项 · 全部检查提示 ${quality.problems} 项${readingNotices.length?` · ${readingNotices.join(" · ")}`:quality.uncovered?` · ${quality.uncovered} 条用户消息仍待补读或核对`:""}。`,`Automatic checks: ${qualityLabel} · organizing ${partial?"partial":"complete"} · ${quality.critical} key checks failing · ${quality.problems} notices${readingNotices.length?` · ${readingNotices.join(" · ")}`:quality.uncovered?` · ${counted(quality.uncovered,"user message")} still need recovery or review`:""}.`):"";
  // The period the document was discussed in, as the source list tells it: the conversations cited, from start to end.
  // Taken from key facts alone, the header read 6/6–8/18 above a source list dated 8/22.
  const citedIds=new Set(session.evidence.filter(ref=>ids.has(ref.id)).map(ref=>ref.conversationId));
@@ -1862,7 +2043,10 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
  const brief=wikiDocumentIdentityBrief(spanned,zh,isLearning);
  // When the discussions took place: "当前" and "第一版" in the text are as of then, not as of reading.
  const sourcesLine=l(`${verification.sources.conversations} 个来源对话`,counted(verification.sources.conversations,"source conversation"));
- const compactLines=[`${l("文档状态：","Document status: ")}${brief.label} · ${isLearning?l(`学习记录（按学习顺序）${LEARNING_BETA?" · 测试中":""}`,`learning record, in the order learned${LEARNING_BETA?" · beta":""}`):l("实现未核验","implementation not verified")}`,`${l("来源：","Sources: ")}${sourcesLine}${brief.period?l(` · 讨论于 ${brief.period}`,` · discussed ${brief.period}`):""}`];
+ const compactLines=[
+  ...(isLearning?[`${l("文档状态：","Document status: ")}${brief.label} · ${l(`学习记录（按学习顺序）${LEARNING_BETA?" · 测试中":""}`,`learning record, in the order learned${LEARNING_BETA?" · beta":""}`)}`]:[]),
+  `${l("来源：","Sources: ")}${sourcesLine}${brief.period?l(` · 讨论于 ${brief.period}`,` · discussed ${brief.period}`):""}`,
+ ];
  // Which marks are settled and which are not, before the first chapter; the full legend stays in the notes.
  // A 「版本未定」 note is open too; the legend named only 〔未定〕, which no line of the Wiki then carried.
  const notedOpen=parts.some(part=>/^> (?:\*\*)?版本未定(?:：|\*\*| ·)/mu.test(part.body));
@@ -1960,18 +2144,39 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
  const warnings=[scopeWarning,qualityWarning].filter(Boolean).map(line=>`> ${line}`).join("\n");
  let appendixHeading=l("参考示例附录","Reference examples appendix");
  const separateReferences=selection.referenceAppendix==="separate";
- const omitReferences=selection.referenceAppendix==="omit";
+ const omitReferences=selection.referenceAppendix==="omit"||selection.referenceAppendix===undefined&&markdownEdition==="brief";
  const documentFilename=projectDocumentFilename(session,format);
  const appendix:Array<{anchor:string;title:string;body:string}>=[];
  const portableChapter=(part:ExportPart,body:string)=>{
-  if(isLearning||!generatedParts.has(part)||(format!=="md"&&!omitReferences&&!separateReferences))return body;
+  const generatedOverview=part.title===l("项目总览","Project overview")&&!session.briefUserEdited&&!session.projectMaintenance?.overview;
+  const generated=generatedParts.has(part);
+  if(markdownEdition&&(generated||generatedOverview)){
+   body=withoutWikiProjectAsideProse(body,projectAsides);
+   if(currentProjectName&&tentativeNames.size)for(const block of wikiDocumentBlocks(body).reverse()){
+    if(block.kind!=="paragraph")continue;
+    const text=block.text.split("\n").map(line=>{
+     const oldName=[...tentativeNames].find(name=>line.startsWith(name)
+      &&/^\s*(?:定位为|是面向|面向|is (?:a|an)\b)/u.test(line.slice(name.length)));
+     return oldName?currentProjectName+line.slice(oldName.length):line;
+    }).join("\n");
+    if(text!==block.text)body=body.slice(0,block.start)+text+body.slice(block.end);
+   }
+  }
+  if(isLearning||!generated||(format!=="md"&&!omitReferences&&!separateReferences))return body;
   if(portable)body=generatedTopicHeadings(body);
   const formatFlows=(text:string)=>format!=="md"?text:wikiChapterFlowBlocks(text,zh).reverse().reduce((result,{start,end,flow})=>
    result.slice(0,start)+wikiFlowMarkdown(flow)+result.slice(end),text);
-  const groups=projectReferenceGroups(body,separateReferences||omitReferences||selection.referenceAppendix===true);
+  const groups=projectReferenceGroups(body,separateReferences||omitReferences||selection.referenceAppendix===true||markdownEdition==="handoff");
   if(!groups.length)return formatFlows(body);
   const anchor=`atlas-wiki-${900001+appendix.length}`;
-  const included=format==="md"&&!omitReferences&&selection.referenceAppendix!==false?groups:[];
+  const developmentGroup=(raw:string)=>wikiDocumentBlocks(raw).some(block=>{
+   if(block.kind!=="code")return false;
+   const code=/^(?:`{3,}|~{3,})(\S*)[^\n]*\n([\s\S]*?)\n(?:`{3,}|~{3,})$/u.exec(block.text);
+   return code&&planWikiSourceBlock({language:code[1],text:code[2]},"",[],part.body,"handoff").mode!=="source_only";
+  });
+  const included=format==="md"&&!omitReferences&&selection.referenceAppendix!==false
+   ?groups.filter(group=>markdownEdition!=="handoff"||selection.referenceAppendix!==undefined||developmentGroup(group.raw)):[];
+
   const include=included.length>0;
   if(include)appendix.push({anchor,title:part.title,body:included.map((group,index)=>[group.topic&&group.topic!==included[index-1]?.topic?`#### ${group.topic}`:"",group.raw].filter(Boolean).join("\n\n")).join("\n\n")});
   const containsRoadmap=included.some(group=>group.roadmap);
@@ -2013,7 +2218,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
   const anchor=partAnchors.get(part);
   const body=portableChapter(part,numbered.body);
   renderedBodies.set(part,body);
-  return `${anchor&&linkedAnchors.has(anchor)?`<a id="${anchor}"></a>\n\n`:""}## ${numbered.title}\n\n${body}`;
+  return part === inlineNotes ? body : `${anchor&&linkedAnchors.has(anchor)?`<a id="${anchor}"></a>\n\n`:""}## ${numbered.title}\n\n${body}`;
  });
  const appendixBody=appendix.length?`## ${appendixHeading}\n\n${appendix.map(part=>`<a id="${part.anchor}"></a>\n\n### ${part.title}\n\n${part.body}`).join("\n\n")}`:"";
  let referenceFile:{text:string;filename:string;mime:string}|undefined;
@@ -2045,18 +2250,24 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
  const referenceLink=format==="md"&&selection.referenceWikiFilename===documentFilename&&(referenceFile||omitReferences)
   ?`[${l("查看参考示例","See reference examples")}](${fileLink(referenceFilename(session,zh))})`:"";
  const locatorLinks=!portable&&["md","html"].includes(format)?[...locators.keys()].filter(id=>usedLocators.has(id)).map(id=>`[${id}]: #source-${id}`).join("\n"):"";
- const documentOpening=title+compactLines.join("  \n")+"\n\n"+[precedence,warnings,referenceLink].filter(Boolean).map(block=>`${block}\n\n`).join("");
+ const notesOnly = Boolean(inlineNotes && parts[0] === inlineNotes && loosePages.length === selectedPages.length);
+ const decisionNotice=decisionUpdatePending&&selectedPages.length ? l("> 部分决定已更新。章节正文仍是上次发布的版本。", "> Some decisions have changed. Chapter text is from the last published version.") : "";
+ const openingExtra=markdownEdition==="brief"?[]:markdownEdition==="handoff"
+  ?[parts.some(part=>/〔已定〕|\[Decided\]/u.test(part.body))?l("〔已定〕为用户确认的决定。","[Decided] marks user-confirmed decisions."):"",referenceLink]
+  :[precedence,decisionNotice,markdownEdition==="archive"?"":warnings,referenceLink];
+ const documentOpening=notesOnly ? title : title+compactLines.join("  \n")+"\n\n"+openingExtra.filter(Boolean).map(block=>`${block}\n\n`).join("");
  const compactNotes=[qualityNote,checkList.trim()].filter(Boolean).join("\n\n");
- if(compact)notes=compactNotes;
+ if(markdownEdition==="brief"||markdownEdition==="handoff")notes="";
+ else if(compact)notes=compactNotes;
  const markdown=portablePlatformReferences(documentOpening+documentParts.join("\n\n---\n\n")+(format==="html"||!notes?"":`\n\n---\n\n${notes}`)+(locatorLinks?`\n\n${locatorLinks}`:"")+"\n");
  // A citation a sentence follows on the same line stands apart from it: 「…〔此前〕 [S-148-1w1qwy8]这些方案均已被否定。」
  let text=(format==="md"||format==="txt"?fileCaptions(markdown):markdown).replace(/(\[S-\d+-[a-z0-9]+\])(?=\*\*|[\p{Script=Han}A-Za-z“「(（])/gu,"$1 ");
  if(format==="md"||format==="txt")text=portableMarkdown(text);
  if(format==="md"&&appendix.length&&!separateReferences)text=annotateReferenceExamples(text,appendixHeading,zh,deferrals);
  if(portable)text=numberedWikiReferences(text,sourceNumbers,confirmationNumbers,zh);
- if(format==="md"&&selection.preset==="brief"&&session.wikiKnowledge?.documentType!=="learning")text=projectQuickBrief(text,zh);
+ if(format==="md")text=formatProjectMarkdown(text,markdownEdition);
 
- if(format==="json")text=JSON.stringify({schemaVersion:1,title:session.title,knowledgeSavedAt:session.updatedAt,context:{...context,basis,identity:header},sections:parts.map(part=>{const {title,body,evidenceIds,claims}=part;return {title,body:portableChapter(part,body),...(selection.sources?{evidenceIds,...(claims?.length?{claims:claims.map(({text,quote,evidenceIds,subject,scope,workStatus,relation})=>({text,quote,evidenceIds,subject,scope,workStatus,relation}))}:{})}:{})};}),...(selection.sources?{sources}:{}),...(sourceMode==="key"?{keyEvidence}:{})},null,2);
+ if(format==="json")text=JSON.stringify({schemaVersion:1,title:session.title,knowledgeSavedAt:session.updatedAt,context:{...context,basis,identity:header},sections:parts.map(part=>{const {title,body,evidenceIds,claims}=part;return {title,body:portableChapter(part,body),...(selection.sources?{evidenceIds,...(claims?.length?{claims:claims.map(({text,quote,evidenceIds,subject,scope,workStatus,relation,holder,checked})=>({text,quote,evidenceIds,subject,scope,workStatus,relation,...(checked&&holder?{holder,checked}:{})}))}:{})}:{})};}),...(selection.sources?{sources}:{}),...(sourceMode==="key"?{keyEvidence}:{})},null,2);
  if(format==="txt")text=parser.parse(markdown).children.map(node=>node.type==="thematicBreak"?"────────────────────":node.type==="table"?node.children.map(row=>row.children.map(cell=>nodeText(cell)).join("  |  ")).join("\n"):node.type==="list"?node.children.map(item=>`• ${nodeText(item)}`).join("\n"):nodeText(node)).join("\n\n")+"\n";
  if(format==="html"){
   let heading=0,supplementDepth=0;const toc:Array<{id:string;title:string}>=[];
@@ -2127,7 +2338,7 @@ export function projectDocument(session:FocusSession,selection:ProjectExportSele
    const caption=captionOf(node,list[index+1]);
    return caption?`<p class="block-caption${list[index+1].type==="table"?" over-table":""}"><b>${escape(caption.kind)}</b>${caption.rest?`<span>${escape(caption.rest)}</span>`:""}</p>`:render(node);
   }).join("\n");
-  const opening=blocks(nodes.slice(0,firstSection)),body=blocks(nodes.slice(firstSection));
+  const opening=blocks(firstSection === -1 ? nodes : nodes.slice(0,firstSection)),body=firstSection === -1 ? "" : blocks(nodes.slice(firstSection));
   const noteBody=parser.parse(notes.replace(/^## [^\n]+\n/u, "")).children.map(render).join("\n");
   // The quick navigation beside the text is CSS only: the exported file carries no script, so its ticks link to
   // the chapters but do not follow the reading position as the reading view does.

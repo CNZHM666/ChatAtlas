@@ -3,7 +3,8 @@ import { retitleMisnamedChapters, routeOutOfReferences, routeWikiUnits } from ".
 import { withDiscussedProjects } from "./wiki-knowledge-units";
 import { withAnswerScope, withAnsweredOpenPoints, withSettledByAnswer, withAnsweredChoices, withDeclinedProposals, withTurnedDownRestatements, withSetAsideAlternatives, withSetAsideOffers, withSoundAnswers } from "./wiki-question-parse";
 import { stageMoveReplacements, withQuotedMoves } from "./wiki-stage-moves";
-import { scopedWikiDraft, statementsConflict, withoutOwnProjectAnswers, withUserAnswers, withUserRelations, wikiLedgerUnits, type WikiKnowledgeLedger } from "../shared/wiki-knowledge";
+import { scopedWikiDraft, statementsConflict, withoutOwnProjectAnswers, withUserAnswers, withUserRelations, wikiLedgerUnits, type WikiKnowledgeLedger, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { withoutStaleWikiDecisionReceipts } from "../shared/wiki-decision-receipts";
 import { explicitSwitches, gatherAcrossStages, gatherNamedItems, gatherPositioning, gatherTwins, gatherVersions, placeUnitsByKind } from "./wiki-knowledge-organize";
 import { scopedWishes, wikiUnitStatuses } from "./wiki-knowledge-state";
 import { laterSettings } from "./wiki-later-settings";
@@ -27,6 +28,31 @@ function opposedSides(first: string, second: string) {
   return OPPOSITES.some(([a, b]) => first.includes(a) && !first.includes(b) && second.includes(b) && !second.includes(a) || first.includes(b) && !first.includes(a) && second.includes(a) && !second.includes(b));
 }
 
+function withCustomProjectDecisions(ledger: WikiKnowledgeLedger): WikiKnowledgeLedger {
+  if (!ledger.organization) return ledger;
+  const receipts = Object.entries(ledger.decisionArbitrations ?? {}).filter(([, receipt]) =>
+    receipt.deferredToDraft && receipt.text && (receipt.mode === "custom" || receipt.mode === "merge"));
+  if (!receipts.length) return ledger;
+  const byId = new Map(wikiLedgerUnits(ledger).map(unit => [unit.id, unit]));
+  const additions = new Map<string, WikiKnowledgeUnit[]>(), decisions = { ...ledger.decisions };
+  for (const [id, receipt] of receipts) {
+    const anchor = receipt.unitIds?.flatMap(key => byId.get(key) ?? []).find(unit => !unit.about);
+    if (!anchor) continue;
+    const decisionId = `decision:${id}`;
+    if (byId.has(decisionId)) continue;
+    const unit: WikiKnowledgeUnit = { id: decisionId, subject: anchor.subject, facet: anchor.facet, kind: "decision", statement: receipt.text!, details: [],
+      evidence: { ...anchor.evidence, code: undefined, codeRef: undefined }, adoption: { status: "user_decision" }, delivery: "unknown" };
+    additions.set(anchor.id, [...additions.get(anchor.id) ?? [], unit]);
+    decisions[decisionId] = { verdict: "confirmed", at: receipt.at };
+  }
+  if (!additions.size) return ledger;
+  return { ...ledger, decisions,
+    batches: ledger.batches.map(batch => ({ ...batch, units: batch.units.flatMap(unit => [unit, ...additions.get(unit.id) ?? []]) })),
+    organization: { ...ledger.organization, subjects: ledger.organization.subjects.map(subject => ({ ...subject,
+      unitIds: subject.unitIds.flatMap(id => [id, ...additions.get(id)?.map(unit => unit.id) ?? []]) })) },
+  };
+}
+
 export function resolveWikiReading(stored: WikiKnowledgeLedger) {
   // Answers a question should not have offered (the project named as another, a label against its point) are not taken.
   // What a chosen option set aside as still open is settled by it (withSettledByAnswer), and the points elsewhere saying
@@ -34,8 +60,12 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
   // An answer confirming only an account of facts is the user's choice in its own words (withAnsweredChoices).
   // And a move the user's decision quotes, which extraction left out, is a decision of its own (withQuotedMoves).
   const report: Record<string, number> = {};
-  const source = withQuotedMoves(withAnsweredOpenPoints(withSettledByAnswer(withSetAsideAlternatives(withSetAsideOffers(withTurnedDownRestatements(withDeclinedProposals(withAnsweredChoices(withAnswerScope(withoutOwnProjectAnswers(withSoundAnswers(withUserQuestionsAsked(withUnsaidPlansOut(stored), report))))))))))), report);
-  const attributed = withWikiLocalFidelity(withReferenceOwnership(withDiscussedProjects(source)));
+  const active = withoutStaleWikiDecisionReceipts(stored);
+  const source = withQuotedMoves(withAnsweredOpenPoints(withSettledByAnswer(withSetAsideAlternatives(withSetAsideOffers(withTurnedDownRestatements(withDeclinedProposals(withAnsweredChoices(withAnswerScope(withoutOwnProjectAnswers(withSoundAnswers(withUserQuestionsAsked(withUnsaidPlansOut(active), report))))))))))), report);
+  const activeAnswers = new Set(source.userAnswers?.map(answer => answer.questionId));
+  const scopeReview = stored.userAnswers?.filter(answer => answer.scope && !activeAnswers.has(answer.questionId)).length;
+  if (scopeReview) report.scoped_answers_pending_review = scopeReview;
+  const attributed = withCustomProjectDecisions(withWikiLocalFidelity(withReferenceOwnership(withDiscussedProjects(source))));
   const answered = withUserAnswers(withUserRelations(attributed));
   const units = wikiLedgerUnits(answered), known = new Map(units.map(unit => [unit.id, unit]));
   const answeredIds = new Set((source.userAnswers ?? []).flatMap(answer => answer.unitIds));
@@ -71,20 +101,25 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
   }) } : undefined;
   // A later point ruling out what an earlier one proposed ("……而非青少年") replaces it.
   const excluding = checked ? explicitExclusions(checked, known, report) : undefined;
-  let organization = excluding ? explicitSwitches(scopedWishes(gatherPositioning(gatherNamedItems(gatherVersions(gatherTwins(gatherAcrossStages(placeUnitsByKind(excluding, known, report), known, report), known, report), known, report), known, report), known, report), known, report), known, report) : undefined;
+  const stablePlacement = excluding?.layoutContext || excluding?.placementVersion === 1;
+  const layout = excluding && (stablePlacement ? excluding : gatherPositioning(gatherNamedItems(gatherVersions(gatherTwins(
+    gatherAcrossStages(placeUnitsByKind(excluding, known, report), known, report), known, report), known, report), known, report), known, report));
+  let organization = layout && explicitSwitches(scopedWishes(layout, known, report), known, report);
   if (organization) {
     // A setting given again later with another value: the earlier value is the earlier version (600～720px → 760~800px).
     // Not one the user answered about or decided.
     organization = laterSettings(organization, known, report, id => answeredIds.has(id) || Boolean(source.decisions?.[id]));
     // What a later move took out of a stage leaves that stage's earlier line naming it (stageMoveReplacements).
     organization = stageMoveReplacements(organization, known, report);
-    organization = preserveMergedWikiDecisions(organization, wikiUnitStatuses(units, organization, source.decisions), report);
+    organization = preserveMergedWikiDecisions(organization, wikiUnitStatuses(units, organization, answered.decisions), report);
     // Named for what it holds first, so the plans routed next find the plan chapter.
     // A learning record's 学习路线 chapter is what it is about, not a project's misnamed plan.
-    if (source.documentType !== "learning") organization = retitleMisnamedChapters(organization, known, report);
     const unrouted = organization;
-    organization = routeWikiUnits(organization, known, report);
-    organization = routeOutOfReferences(organization, known, report);
+    if (!stablePlacement) {
+      if (source.documentType !== "learning") organization = retitleMisnamedChapters(organization, known, report);
+      organization = routeWikiUnits(organization, known, report);
+      organization = routeOutOfReferences(organization, known, report);
+    }
     organization = answeredTogether(unrouted, organization, source.userAnswers, report, source.decisions, known);
   }
   if (organization?.groups?.length) organization = { ...organization, groups: chooseGroupHomes(organization.groups, organization.subjects, units, organization.groups, report) };
@@ -105,7 +140,7 @@ export function resolveWikiReading(stored: WikiKnowledgeLedger) {
       return choices.length === 1 ? { ...topic, current: [...topic.current, choices[0].id] } : topic;
     }) };
   }
-  const statuses = wikiUnitStatuses(units, organization ?? { relations: [] }, source.decisions);
+  const statuses = wikiUnitStatuses(units, organization ?? { relations: [] }, answered.decisions);
   const conflicts = wikiDecisionConflicts(source, units, statuses);
   const arbitrationStatuses = wikiArbitrationStatuses(conflicts);
   for (const [id, status] of arbitrationStatuses) statuses.set(id, status);

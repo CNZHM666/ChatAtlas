@@ -4,7 +4,7 @@
  * they need the main model, and retries on a weaker model cost more than they save. */
 
 // Wiki planning tasks are "other" tasks, which otherwise default to the economy model.
-const MAIN_MODEL_PRESENTATIONS = new Set(["wiki_revision_sources", "wiki_revision_batch", "wiki_topic_plan", "wiki_subject_plan", "wiki_chapter_write", "wiki_topic_content", "wiki_content_plan", "wiki_directory", "wiki_topic_impact", "wiki_title_edit", "wiki_directory_names", "wiki_chapter_opening", "wiki_project_overview", "wiki_topic_overlap_audit", "wiki_subtopic_placement_audit", "wiki_chapter_merge"]);
+const MAIN_MODEL_PRESENTATIONS = new Set(["wiki_revision_sources", "wiki_revision_batch", "wiki_topic_plan", "wiki_subject_plan", "wiki_chapter_fit", "wiki_chapter_write", "wiki_topic_content", "wiki_content_plan", "wiki_directory", "wiki_topic_impact", "wiki_title_edit", "wiki_directory_names", "wiki_chapter_opening", "wiki_project_overview", "wiki_topic_overlap_audit", "wiki_subtopic_placement_audit", "wiki_chapter_merge", "sidecar_project_update"]);
 
 export function usesMainModelForPlanning(taskType: string | undefined, data: Record<string, unknown> | undefined) {
   return taskType === "other" && MAIN_MODEL_PRESENTATIONS.has(String(data?.presentation));

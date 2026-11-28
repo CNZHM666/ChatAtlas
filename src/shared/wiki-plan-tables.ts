@@ -121,7 +121,7 @@ function mergeComparisons(tables: ReadingTable[], zh: boolean) {
 
 type TableOptions = {units?: WikiKnowledgeUnit[]; citeTable?: (unit: WikiKnowledgeUnit) => string;
   tableSources?: readonly { text: string; link: string }[] };
-export const isWikiTableIntroduction = (text:string) => /^(?:下表(?:按|说明|记录|列出|对照两份检索方案)|以下对照「|以下是(?:「[^」]+」|本节)讨论过的规划。|这里记录了「[^」]+」讨论中的范围取舍。|The table compares |This records the proposed scope for |These proposals cover different priorities and delivery sequences\.)/u.test(text.trim());
+export const isWikiTableIntroduction = (text:string) => /^(?:下表(?:按|说明|记录|列出|对照两份检索方案)|以下对照「|以下是(?:「[^」]+」|本节)讨论过的规划。|这里记录了「[^」]+」讨论中的范围取舍。|The table compares |This table lists |This records the proposed scope for |These proposals cover different priorities and delivery sequences\.)/u.test(text.trim());
 
 function tableIntroduction(header: string[], caption: string | undefined, zh: boolean) {
   const [first, ...attributes] = header.map(value => value.replace(/\*\*|__|\x60/gu, "").trim()).filter(Boolean);
@@ -145,7 +145,7 @@ function tableIntroduction(header: string[], caption: string | undefined, zh: bo
   }
   if (attributes.length===1 && !/^(?:项目|功能|阶段|版本|维度|类型|平台|工具|模块|优先级|字段|feature|stage|version|kind|component|priority)$/iu.test(first))
     return zh ? `以下对照「${first}」和「${attributes[0]}」${context}。` : `The table compares ${first} and ${attributes[0]}${context}.`;
-  return caption ? (zh ? `适用范围为「${caption}」。` : `Scope: ${caption}.`) : "";
+  return caption ? (zh ? `下表列出「${caption}」的${first}与${fields}。` : `This table lists ${first} and ${fields} for ${caption}.`) : "";
 }
 
 const SEARCH_STEPS = [

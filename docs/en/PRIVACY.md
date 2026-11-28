@@ -2,7 +2,7 @@
 
 [简体中文](../PRIVACY.md) · **English**
 
-Conversations, source versions, projects, notes, the knowledge ledger, reading state, analysis caches and API configuration remain in the current browser. The public version provides neither a shared AI service nor knowledge cloud sync. Export files are chosen by you and read locally. Website capture for Claude, Gemini, DeepSeek, Doubao, Kimi and Qianwen (including Qwen international) runs automatically after browser website permission. Settings can pause or resume each platform. Pausing retains saved material. Capture makes no model calls or uploads to ChatAtlas servers.
+Conversations, source versions, projects, notes, the knowledge ledger, reading state, analysis caches and API configuration remain in the current browser. The public version provides neither a shared AI service nor knowledge cloud sync. Export files are chosen by you and read locally. Website capture for Claude, Gemini, DeepSeek, Doubao, Kimi and Qianwen (including Qwen international) runs automatically after browser website permission. Revoking a site's permission stops capture and retains saved material. Capture makes no model calls or uploads to ChatAtlas servers.
 
 ## When data leaves the device
 

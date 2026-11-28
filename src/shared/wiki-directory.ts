@@ -1,7 +1,7 @@
 import type { FocusSection } from "./focus-session";
 /** Naming protection is independent of authored graphs, notes and categories. */
 export const editableWikiTitle=(section:FocusSection)=>!section.origin&&!section.userEdited&&section.wikiOriginalTitle===undefined&&section.wikiDisplayTitle===undefined;
-export const editableWikiTopic = (section: FocusSection) => !section.origin && !section.userEdited && !section.structureEdited && !section.wikiGroupEdited && section.wikiOriginalTitle === undefined && section.wikiDisplayTitle === undefined && !section.understandingPath?.some(step=>step.origin||step.userEdited||step.structureEdited) && !section.understandingLinks?.length && !section.personalExplanation && !section.responsibility && !section.wikiDiagram;
+export const editableWikiTopic = (section: FocusSection) => !section.continuation && !section.origin && !section.userEdited && !section.structureEdited && !section.wikiGroupEdited && section.wikiOriginalTitle === undefined && section.wikiDisplayTitle === undefined && !section.understandingPath?.some(step=>step.origin||step.userEdited||step.structureEdited) && !section.understandingLinks?.length && !section.personalExplanation && !section.responsibility && !section.wikiDiagram;
 /** Child support may overlap within one owning parent during generated writing. */
 export interface WikiSubtopic { title:string; question:string; sectionIds:string[] }
 /** materialKeys: scope keys of the reading notes this chapter was planned from, so the reader can leave the chapter out. */

@@ -14,14 +14,14 @@ it("extracts a saved document's sources again into a fresh ledger without the ol
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
     prompts.push(JSON.parse(request.prompt).presentation);
     const passages = JSON.parse(request.prompt).passages as Array<{ id: string; role: string }>;
-    return request.validate({ units: [{ subject: "全文索引", statement: "全文索引使用 Orama。", kind: "decision", details: "30 秒", quoteKey: `${passages[0].id}:1`, adoption: "proposal" }] });
+    return request.validate({ units: [{ subject: "全文索引", statement: "全文索引使用 Orama，每 30 秒增量更新。", kind: "decision", quoteKey: `${passages[0].id}:1`, adoption: "proposal" }] });
   } };
   const session = { id: "s", title: "检索", sourceConversationIds: ["again"], locale: "zh-CN" } as FocusSession;
   const ledger = await reextractSessionKnowledge(session, ai, new AbortController().signal);
   expect(prompts).toEqual(["wiki_unit_extract"]);
   expect(ledger).toMatchObject({ status: "complete", materials: 2 });
   expect(ledger.organization).toBeUndefined();expect(ledger.draft).toBeUndefined();
-  expect(ledger.batches[0].units[0]).toMatchObject({ subject: "全文索引", details: ["30 秒"], evidence: { messageId: "again-0" } });
+  expect(ledger.batches[0].units[0]).toMatchObject({ subject: "全文索引", statement: "全文索引使用 Orama，每 30 秒增量更新。", evidence: { messageId: "again-0" } });
   // A source that is no longer stored stops the run instead of producing a partial ledger.
   await expect(reextractSessionKnowledge({ ...session, sourceConversationIds: ["again", "gone"] }, ai, new AbortController().signal)).rejects.toThrow("no longer stored");
 });

@@ -10,11 +10,14 @@ export function WikiClaimMarker({ pointKey, flowSource = false }: { pointKey: st
   const point = context?.pointByKey ? context.pointByKey.get(pointKey) : context?.points.find(item => item.key === pointKey);
   if (!context || !point) return null;
   const { zh } = context, label = point.label ?? (zh ? "整理记录" : "Organized record");
-  // A run ending names its status; the assistant's text, the default, and the points inside a run stay quiet dots.
-  const holder = point.holder, labelled = Boolean(holder && point.holderMark && !wikiUnmarkedHolder(holder));
+  // Core status pills (Decided / Open / Earlier plan) and AI suggestion when holder marks are revealed.
+  const holder = point.holder;
+  const showAiLabel = holder === "ai" && !wikiUnmarkedHolder(holder);
+  const labelled = Boolean(holder && (point.holderMark && !wikiUnmarkedHolder(holder) || showAiLabel || holder === "ai"));
   const reported = holder === "user" && point.source === "report";
   const basis = reported ? (zh ? "用户报告，代码或测试尚未核验" : "User report, code or tests unverified") : holder && wikiHolderTitle(holder, zh);
   const text = basis ? `${basis} · ${zh ? "核对依据" : "Check evidence"}` : zh ? `核对依据：${label}` : `Check evidence: ${label}`;
-  const classes = ["wiki-claim-marker", `is-${point.source}`, flowSource ? "is-flow-source" : holder ? `is-holder is-holder-${holder}${labelled ? " is-holder-mark" : " is-holder-quiet"}` : "", point.approximate ? "is-approximate" : "", context.activeKey === pointKey ? "is-active" : ""].filter(Boolean).join(" ");
+  const isAiPill = holder === "ai";
+  const classes = ["wiki-claim-marker", `is-${point.source}`, flowSource ? "is-flow-source" : holder ? `is-holder is-holder-${holder}${labelled ? (isAiPill ? " is-holder-mark is-holder-ai-pill" : " is-holder-mark") : " is-holder-quiet"}` : "", point.approximate ? "is-approximate" : "", context.activeKey === pointKey ? "is-active" : ""].filter(Boolean).join(" ");
   return <button type="button" className={classes} data-claim-key={pointKey} aria-label={text} title={text} aria-current={context.activeKey === pointKey || undefined} onClick={event => { event.preventDefault(); context.open(pointKey); }}>{flowSource ? (zh ? "来源" : "Source") : holder && labelled ? <span aria-hidden="true">{wikiHolderReadingLabel(holder, zh, reported, context.learning)}</span> : null}</button>;
 }

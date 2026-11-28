@@ -164,7 +164,12 @@ function parseJsonText(content: string): unknown {
 }
 
 function structuredContent<T>(request: StructuredAIRequest<T>, content: string): T {
-  if (request.taskType !== "focus_session") return validateProviderOutput(request, parseJsonText(content));
+  if (request.taskType !== "focus_session") {
+    let parsed: unknown;
+    try { parsed = parseJsonText(content); }
+    catch { throw new AIProviderValidationError("invalid_json"); }
+    return validateProviderOutput(request, parsed);
+  }
   let parsed: unknown;
   try {
     parsed = parseJsonText(content);

@@ -18,6 +18,19 @@ function ledger(units: WikiKnowledgeUnit[], organization: Partial<WikiKnowledgeO
 }
 const curate = (book: WikiKnowledgeLedger, budget?: number, length?: number) => curateWikiUnits(book, wikiUnitStatuses(book.batches.flatMap(batch => batch.units), book.organization!, book.decisions), budget, length);
 
+it("keeps reviews of previous exports and unrelated career advice out of project writing",()=>{
+  const body="| 评估维度 | 评分 | 评价 |\n| --- | --- | --- |\n| Codex 开发指导价值 | 6/10 | 导出稿待补充 |";
+  const rating=unit(1,"导出评审","Codex 开发指导价值为 6/10。");
+  rating.evidence.code={language:"table",text:body};
+  const career=unit(2,"行业前景依据","工业机器人全球年安装量达54.2万台，行业具备专业壁垒。");
+  career.evidence.section="你最适合的技术栈";
+  const decision=unit(3,"导出功能","导出文件须包含文档评分表。",{kind:"constraint",role:"user",adoption:"user_decision"});
+  const units=[rating,career,decision];
+  const book=ledger(units,{subjects:[subject("s","项目资料",units)]});
+  expect(curate({...book,documentType:"project",writingMode:"audit"}).selected).toEqual(new Set([decision.id]));
+  expect(book.batches[0].units).toEqual(units);
+});
+
 it("uses the same ledger for a concise Wiki, a technical spec and an audit", () => {
   const confirmed = unit(1, "提交", "只在用户确认后提交记录。", { adoption: "user_decision", role: "user", kind: "decision" });
   const exact = unit(2, "提交", "从 intensity-select 路由传入 flowType 字段。", { kind: "mechanism" });
@@ -29,6 +42,17 @@ it("uses the same ledger for a concise Wiki, a technical spec and an audit", () 
   expect(curate({ ...book, writingMode: "concise" }).selected).toEqual(new Set([confirmed.id]));
   expect(curate({ ...book, writingMode: "handoff" }).selected).toEqual(new Set([confirmed.id, exact.id]));
   expect(curate({ ...book, writingMode: "audit" }).selected).toEqual(new Set(points.map(point => point.id)));
+  expect(book.batches[0].units).toEqual(points);
+});
+
+it("keeps a personal study route out of a product chapter while retaining product audience constraints", () => {
+  const old = unit(3, "排除方向", "现阶段禁止涉足 FPGA AI 加速器或 ASIC，因其与自动化专业衔接弱。", { kind: "constraint" });
+  old.evidence.section = "你的最终学习路线";
+  const audience = unit(7, "产品定位", "目标用户是大学生，首版面向大二的硬件学习场景。", { kind: "fact" });
+  const points = [old, audience];
+  const book = ledger(points, { subjects: [subject("s:product", "产品壁垒", points)] });
+  expect(curate(book).selected).toEqual(new Set([audience.id]));
+  expect(curate({ ...book, documentType: "learning" }).selected.has(old.id)).toBe(true);
   expect(book.batches[0].units).toEqual(points);
 });
 

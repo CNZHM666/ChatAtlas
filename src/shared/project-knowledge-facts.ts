@@ -48,17 +48,21 @@ export function projectKnowledgeFacts(session: FocusSession) {
       const role=reading?.currentStage?"stage":claim.overviewRole;
       const axis=factAxis(claim,role);
       const sourceChanged = Boolean(claim.sourceReading && !reading);
+      const reviewed = claim.checked ? claim.holder : undefined;
       const reported = Boolean(reading?.reported || role === "stage" && reading?.currentStage);
-      const status: ProjectFactStatus = sourceChanged || axis.scopeConflict || claim.verification === "uncertain" ? "uncertain"
-        : reported ? "reported" : reading?.status === "confirmed" ? "confirmed"
+      const status: ProjectFactStatus = sourceChanged || axis.scopeConflict || claim.verification === "uncertain" && !reviewed ? "uncertain"
+        : reviewed === "decided" ? "confirmed" : reviewed === "open" ? "open" : reviewed === "ai" ? "proposal"
+        : reviewed === "earlier" ? "recorded" : reported ? "reported" : reading?.status === "confirmed" ? "confirmed"
         : claim.workStatus === "proposed" ? "proposal" : claim.workStatus === "planned" ? reading?.status === "proposal" ? "proposal" : "planned"
         : reading?.status ?? "draft";
-      facts.push({claim, role, sectionId: section.id, status, historical: false, sourceChanged, ...axis,
-        adoption: reading?.status === "confirmed" || claim.userDecided ? "accepted" : reading?.status === "proposal" || claim.workStatus === "proposed" ? "proposed" : "unknown",
+      facts.push({claim, role, sectionId: section.id, status, historical: reviewed === "earlier", sourceChanged, ...axis,
+        adoption: reviewed ? reviewed === "decided" ? "accepted" : reviewed === "ai" ? "proposed" : "unknown"
+          : reading?.status === "confirmed" || claim.userDecided ? "accepted" : reading?.status === "proposal" || claim.workStatus === "proposed" ? "proposed" : "unknown",
         implementation: reading?.reported ? "reported" : claim.workStatus === "planned" || reading?.status === "planned" ? "planned" : "unknown"});
     }
   }
-  const authoritative = (fact: ProjectKnowledgeFact) => !fact.sourceChanged && fact.status !== "uncertain" &&
+  const authoritative = (fact: ProjectKnowledgeFact) => !fact.sourceChanged && fact.status !== "uncertain"
+    && !(fact.claim.checked && ["earlier", "ai", "open"].includes(fact.claim.holder ?? "")) &&
     (fact.role === "stage" ? Boolean(wikiSourceReading(session, fact.claim)?.currentStage) : fact.adoption === "accepted" || fact.implementation === "reported");
   const relations:ProjectKnowledgeRelation[]=[];
   for(const fact of facts.filter(authoritative)){

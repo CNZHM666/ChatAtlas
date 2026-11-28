@@ -1,3 +1,4 @@
+import type { WikiWritingMode } from "./wiki-knowledge";
 import type { FocusSection } from "./focus-session";
 import type { WikiClaim } from "./wiki-claims";
 import { wikiDocumentBlocks } from "./wiki-document-blocks";
@@ -5,6 +6,10 @@ import { withoutEmptyWikiHeadings } from "./wiki-editorial-cleanup";
 import { wikiTableCells } from "./wiki-table-source";
 
 export type WikiEdition = "brief" | "handoff" | "archive";
+
+export function wikiExportEdition(mode?: WikiEdition | WikiWritingMode): WikiEdition | undefined {
+  return mode === "concise" ? "brief" : mode === "audit" ? "archive" : mode;
+}
 
 const HISTORY = /^(?:早先版本|此前(?:方案|版本)|讨论记录|讨论与历史|此前讨论|参考示例|Earlier versions|Discussion records|Discussion and history|Reference examples)$/iu;
 const PROPOSED = /^(?:\*\*)?(?:AI\s*建议|讨论中的建议|一份提案(?:指出|建议|提出)|一项提案|一份分析(?:指出|建议)|此前曾(?:讨论|建议)|AI proposal|Proposal from the discussion)[：:，,\s]*/iu;

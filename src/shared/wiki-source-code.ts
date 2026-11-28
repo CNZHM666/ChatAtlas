@@ -331,8 +331,8 @@ export function wikiSourceTableRole(code: WikiSourceCode): "delivery" | "compari
   const columns = cellsOf(code.text.trim().split("\n")[0]);
   if (columns.some(column => /功能|能力|模块|\b(?:features?|capabilit(?:y|ies)|modules?)\b/iu.test(column))
     && columns.some(column => /开放|可用|上线|交付|首发|纳入|\b(?:availability|release|shipping|included|enabled)\b/iu.test(column))) return "delivery";
-  if (columns.some(column => /^(?:竞品(?:名称)?|对标产品|产品(?:名称)?|工具(?:名称)?|competitor|product|tool)$/iu.test(column))
-    && columns.some(column => /对比|对照|定位|优势|劣势|特点|能力|\b(?:comparison|strengths?|weaknesses?|features?|positioning)\b/iu.test(column))
+  if (columns.some(column => /^(?:竞品(?:名称)?|对标产品|产品(?:名称)?|公司(?:\s*[/／]\s*产品)?|工具(?:名称)?|competitor|company(?:\s*\/\s*product)?|product|tool)$/iu.test(column))
+    && columns.some(column => /对比|对照|定位|优势|劣势|特点|能力|融资|\b(?:comparison|strengths?|weaknesses?|features?|positioning|funding)\b/iu.test(column))
     || columns.some(column => /^(?:项目(?:名称)?|project)$/iu.test(column))
     && columns.some(column => /对比|对照|相似度|和.{0,12}相似|\b(?:comparison|similarity)\b/iu.test(column))
     && columns.some(column => /做什么|借鉴|学什么|\b(?:what it does|lessons?|takeaways?)\b/iu.test(column))) return "comparison";

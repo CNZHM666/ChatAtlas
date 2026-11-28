@@ -142,10 +142,10 @@ export function originalEvidenceClaims(session:FocusSession,ref:FocusEvidence,me
   return [...claims,...records.map(item=>({...item,text:"text" in item?item.text:item.title}))].filter(item=>item.evidenceIds.some(id=>ids.has(id)));
 }
 
-export function originalEvidenceHighlights(session:FocusSession,ref:FocusEvidence,message:ConversationMessage,explicit?:string,scope?:HighlightScope):EvidenceHighlight[]{
+export function originalEvidenceHighlights(session:FocusSession,ref:FocusEvidence,message:ConversationMessage,explicit?:string,scope?:HighlightScope & { allowStale?: boolean }):EvidenceHighlight[]{
   const identities=[message.id,message.platformMessageId];
   const expected=ref.sourceSignature??(!ref.sourceVersionId||ref.sourceVersionId===session.sourceVersionIds?.[ref.conversationId]?session.sourceSignatures?.[ref.conversationId]?.[ref.messageId]:undefined);
-  if(ref.conversationId!==message.conversationId||!identities.includes(ref.messageId)||expected&&expected!==sourceMessageSignature(message.content))return [];
+  if(ref.conversationId!==message.conversationId||!identities.includes(ref.messageId)||!scope?.allowStale&&expected&&expected!==sourceMessageSignature(message.content))return [];
   if(scope?.sectionId){const section=session.sections.find(item=>item.id===scope.sectionId);if(!section||!chapterEvidence(session,section).some(item=>evidenceSnapshotKey(session,item)===evidenceSnapshotKey(session,ref)&&identities.includes(item.messageId)))return [];}
   const claims=originalEvidenceClaims(session,ref,message,scope);
   const anchors=explicit!==undefined?[{quote:explicit,claimIndex:claims.findIndex(item=>item.quote===explicit)}]:claims.map((item,claimIndex)=>({quote:item.quote,claimIndex}));

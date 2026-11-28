@@ -8,17 +8,40 @@ import { isCurrentHydrationComplete } from "./import-state";
 
 class NativeImportPaused extends Error {}
 const active = (job: ImportJob) => ["discovering", "syncing", "connecting", "reconciling"].includes(job.status);
+const RETRYABLE_TRANSPORT_ERROR = /429|50[0234]|network|fetch|timed?\s*out|timeouterror|abort|读取超时|连接超时/iu;
+
+export interface NativeImportRunnerOptions {
+  /** Base retry step (ms); multiplied by attempt and steps. Defaults to 300ms (2.4s then 5.4s). */
+  retryStepMs?: number;
+  /** Minimum per-source spacing (ms) after a completed request to avoid platform tarpits. Defaults to 180ms. */
+  paceMs?: number;
+}
 
 /** One durable queue across selected platforms. Up to four conversations run
  * concurrently, capped at two per source; each transcript keeps sequential pagination. */
-export function createNativeImportRunner(transport: NativeTransport, broadcast: (job: ImportJob) => Promise<void>) {
+export function createNativeImportRunner(transport: NativeTransport, broadcast: (job: ImportJob) => Promise<void>, options: NativeImportRunnerOptions = {}) {
+  const retryStepMs = options.retryStepMs ?? 300;
+  const paceMs = options.paceMs ?? 180;
   let flight: Promise<void> | undefined, paused = false, current: ImportJob | undefined;
   let commands: Promise<unknown> = Promise.resolve();
   let publications: Promise<void> = Promise.resolve();
   let wakeScheduler: (() => void) | undefined, queueRevision = 0;
   const sourceLimits = new Map<string, number>();
+  const sourceHealthy = new Map<string, number>();
+  const sourceNextReadyAt = new Map<string, number>();
   const serialize = <T>(work: () => Promise<T>) => { const next = commands.catch(() => undefined).then(work); commands = next; return next; };
   const check = () => { if (paused) throw new NativeImportPaused(); };
+  const waitCancellable = async (totalMs: number) => {
+    const step = Math.max(20, Math.min(250, retryStepMs));
+    let remaining = totalMs;
+    while (remaining > 0) {
+      check();
+      const slice = Math.min(step, remaining);
+      await new Promise(resolve => setTimeout(resolve, slice));
+      remaining -= slice;
+    }
+    check();
+  };
   const publish = async (job: ImportJob) => {
     job.updatedAt = Date.now();
     job.failed = job.failedIds.length;
@@ -38,16 +61,47 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
     for (const id of selected) if (job.failureReasons) delete job.failureReasons[id];
     queueRevision++;
   };
-  const adapter = (source: NativeImportSource) => new NativeHistoryAdapter(source, async (target, request) => {
+  const adapter = (source: NativeImportSource, conversationId?: string, job?: ImportJob) => new NativeHistoryAdapter(source, async (target, request) => {
+    const waitForPace = async () => {
+      if (paceMs <= 0) return;
+      const readyAt = sourceNextReadyAt.get(target.id) ?? 0;
+      const delay = readyAt - Date.now();
+      if (delay > 0) await waitCancellable(delay);
+    };
     for (let attempt = 0; ; attempt++) {
       check();
-      try { return await transport(target, request); }
-      catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        if (/429|50[0234]|network|fetch|timeout/iu.test(detail)) sourceLimits.set(target.id, 1);
-        if (attempt >= 2 || !/429|50[0234]|network|fetch|timeout/iu.test(detail)) throw error;
-        // Cancellable short waits; no busy loop or unbounded rate-limit retries.
-        for (let step = 0; step < (attempt + 1) * 10; step++) { check(); await new Promise(resolve => setTimeout(resolve, 300)); }
+      await waitForPace();
+      try {
+        const reply = await transport(target, request);
+        if (paceMs > 0) sourceNextReadyAt.set(target.id, Date.now() + paceMs);
+        if (conversationId && job?.retryingIds?.includes(conversationId)) {
+          job.retryingIds = job.retryingIds.filter(item => item !== conversationId);
+          await setConversationHydrationState(conversationId, "syncing");
+          await publish(job);
+        }
+        const limit = sourceLimits.get(target.id) ?? 2;
+        if (limit < 2) {
+          const okCount = (sourceHealthy.get(target.id) ?? 0) + 1;
+          if (okCount >= 4) { sourceLimits.set(target.id, 2); sourceHealthy.set(target.id, 0); }
+          else sourceHealthy.set(target.id, okCount);
+        }
+        return reply;
+      } catch (error) {
+        const detail = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+        const retryable = RETRYABLE_TRANSPORT_ERROR.test(detail);
+        if (retryable) {
+          sourceLimits.set(target.id, 1);
+          sourceHealthy.set(target.id, 0);
+        }
+        if (attempt >= 2 || !retryable) throw error;
+        if (conversationId && job) {
+          job.retryingIds = [...new Set([...(job.retryingIds ?? []), conversationId])];
+          await setConversationHydrationState(conversationId, /429/u.test(detail) ? "rate_limited" : "retry_wait");
+          await publish(job);
+        }
+        // Cancellable exponential backoff with light jitter; never busy-loops.
+        const backoffMs = (attempt === 0 ? 7 : 17) * retryStepMs + Math.round(Math.random() * retryStepMs);
+        await waitCancellable(backoffMs);
       }
     }
   }, check);
@@ -111,7 +165,7 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
           if (!conversation) throw Error("来源记录缺失 / Source record missing");
           const source = job.native!.sources.find(item => item.id === conversation.nativeHistorySourceId);
           if (!source) throw Error("未找到对应的 AI 来源，请重新导入标题 / Rescan the source AI");
-          const reader = adapter(source);
+          const reader = adapter(source, id, job);
           // Bind/revalidate the login before comparing the saved account receipt.
           const capture = await reader.detail(conversation);
           check();
@@ -136,6 +190,7 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
           }
         }
         if (!keepPending) job.pendingIds = job.pendingIds.filter(item => item !== id);
+        job.retryingIds = (job.retryingIds ?? []).filter(item => item !== id);
         await publish(job);
       };
       let fatal: unknown;
@@ -175,6 +230,7 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
       wakeScheduler = undefined;
       await Promise.allSettled(inFlight.values());
       job.activeIds = [];
+      job.retryingIds = [];
       await publish(job);
     }
   };
@@ -186,7 +242,7 @@ export function createNativeImportRunner(transport: NativeTransport, broadcast: 
     }
   };
   const launch = async (job: ImportJob) => {
-    paused = false; sourceLimits.clear(); current = job; await publish(job);
+    paused = false; sourceLimits.clear(); sourceHealthy.clear(); sourceNextReadyAt.clear(); current = job; await publish(job);
     const activity = setInterval(() => {
       if (typeof chrome !== "undefined") void chrome.runtime.getPlatformInfo?.().catch(() => undefined);
     }, 20000);

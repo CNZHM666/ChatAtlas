@@ -1,6 +1,7 @@
-import { wikiLedgerUnits, type WikiKnowledgeLedger, type WikiKnowledgeUnit } from "./wiki-knowledge";
+import { wikiLedgerSourceBlock, wikiLedgerUnits, type WikiKnowledgeLedger, type WikiKnowledgeUnit } from "./wiki-knowledge";
 import { messageCode } from "./wiki-source-code";
 import {wikiUiCopy,wikiUiCopySupports} from "./wiki-ui-copy";
+import { codeRanges } from "./markdown-code-ranges";
 
 /** A message as the sections pass reads it. */
 export interface WikiSectionMessage { id: string; conversationId: string; messageIndex: number; content: string }
@@ -14,7 +15,7 @@ const MAX_HEADING = 40;
 
 /** A heading's own words: numbering ("十二、", "14. ", "九、") and marks dropped. */
 function headingWords(text: string): string {
-  return text.replace(/\*\*/gu, "").replace(/^\s*(?:第?[一二三四五六七八九十百\d]+(?:\.\d+)*[章节部分]?[、.．:：)）]?)\s*/u, "").replace(/[:：]\s*$/u, "").trim();
+  return text.replace(/\*\*/gu, "").replace(/^\s*第?[一二三四五六七八九十百\d]+(?:\.\d+)*(?:章|节|部分)?(?:[、．:：)）][ \t]*|\.(?!\d)[ \t]*|[ \t]+)/u, "").replace(/[:：]\s*$/u, "").trim();
 }
 
 /** The heading a line is, given the lines around it, if it is one. */
@@ -42,15 +43,17 @@ function headingLine(lines: string[], at: number): string | undefined {
 
 /** Where a quote starts in its message: as given, else by its first characters with whitespace ignored. */
 function quoteStart(content: string, quote: string): number {
-  const direct = content.indexOf(quote.trim().slice(0, 80));
-  if (direct >= 0) return direct;
+  const literal = quote.trim();
+  if (!literal) return -1;
+  const direct = content.indexOf(literal);
+  if (direct >= 0) return direct === content.lastIndexOf(literal) ? direct : -1;
   const head = quote.replace(/\s+/gu, "").slice(0, 30);
   if (head.length < 6) return -1;
   const positions: number[] = [];
   let bare = "";
   for (let index = 0; index < content.length; index++) if (!/\s/u.test(content[index])) { bare += content[index]; positions.push(index); }
   const at = bare.indexOf(head);
-  return at < 0 ? -1 : positions[at];
+  return at < 0 || at !== bare.lastIndexOf(head) ? -1 : positions[at];
 }
 
 /** The heading a quote stands under in its message ("首页 Header" over "Header 高度：约 56~64px"): a heading the quote
@@ -58,7 +61,16 @@ function quoteStart(content: string, quote: string): number {
 export function messageSection(content: string, quote: string): string | undefined {
   const start = quoteStart(content, quote);
   if (start < 0) return undefined;
-  const quoteLines = content.slice(start).split("\n");
+  const ranges = codeRanges(content), lines = content.split("\n");
+  let offset = 0;
+  const headings = lines.map(line => {
+    const position = offset;
+    offset += line.length + 1;
+    return ranges.some(([from, to]) => from <= position && position < to && to - from >= line.trim().length) ? "" : line;
+  });
+  const anchor = content.slice(0, start).split("\n").length - 1;
+  const inCode = ranges.some(([from, to]) => from <= start && start < to && /^ {0,3}(?:`{3,}|~{3,})/u.test(content.slice(from, from + 8)));
+  const quoteLines = inCode ? [] : headings.slice(anchor);
   // Headings the quote itself opens with, before its first line of content.
   let lead: string | undefined;
   for (let index = 0, seen = 0; index < quoteLines.length && seen < 6; index++) {
@@ -72,9 +84,8 @@ export function messageSection(content: string, quote: string): string | undefin
     lead = heading;
   }
   if (lead) return lead;
-  const before = content.slice(0, start).split("\n");
-  for (let index = before.length - 1; index >= 0; index--) {
-    const heading = headingAt(before, index);
+  for (let index = anchor; index >= 0; index--) {
+    const heading = headingAt(headings, index);
     if (heading) return heading;
   }
   return undefined;
@@ -84,23 +95,26 @@ export function messageSection(content: string, quote: string): string | undefin
  * not given keeps what it had; one whose statement already names the heading needs none. */
 export function withWikiSections(ledger: WikiKnowledgeLedger, messages: WikiSectionMessage[]): WikiKnowledgeLedger {
   if (!messages.length) return ledger;
-  const byId = new Map(messages.map(message => [message.id, message]));
-  const byIndex = new Map(messages.map(message => [`${message.conversationId}:${message.messageIndex}`, message]));
+  const byId = new Map(messages.map(message => [JSON.stringify([message.conversationId, message.id]), message]));
+  const byIndex = new Map(messages.map(message => [JSON.stringify([message.conversationId, message.messageIndex]), message]));
   let changed = false;
   const sectioned = (unit: WikiKnowledgeUnit): WikiKnowledgeUnit => {
-    const message = byId.get(unit.evidence.messageId) ?? byIndex.get(`${unit.evidence.conversationId}:${unit.evidence.messageIndex}`);
+    const exact = byId.get(JSON.stringify([unit.evidence.conversationId, unit.evidence.messageId]));
+    const legacy = !exact && byIndex.get(JSON.stringify([unit.evidence.conversationId, unit.evidence.messageIndex]));
+    const quote = unit.evidence.quote.trim();
+    const message = exact ?? (legacy && quote.length >= 16 && legacy.content.includes(quote) && legacy.content.indexOf(quote) === legacy.content.lastIndexOf(quote) ? legacy : undefined);
     if (!message) return unit;
     return withCode(withSection(unit, message), message);
   };
   // The code block the quote stands in or introduces, shown as written after the paragraph citing it.
   const withCode = (unit: WikiKnowledgeUnit, message: WikiSectionMessage): WikiKnowledgeUnit => {
-    const candidate = messageCode(message.content, unit.evidence.quote), had = unit.evidence.code;
+    const candidate = messageCode(message.content, unit.evidence.quote), had = wikiLedgerSourceBlock(ledger, unit);
     const code=candidate&&wikiUiCopy(candidate)&&!wikiUiCopySupports(candidate,unit)?undefined:candidate;
     if (code ? had?.language === code.language && had.text === code.text : !had) return unit;
     changed = true;
-    if (code) return { ...unit, evidence: { ...unit.evidence, code } };
-    const { code: _dropped, ...evidence } = unit.evidence;
-    void _dropped;
+    const { code: _dropped, codeRef: _ref, ...evidence } = unit.evidence;
+    void _dropped; void _ref;
+    if (code) return { ...unit, evidence: { ...evidence, code } };
     return { ...unit, evidence };
   };
   const withSection = (unit: WikiKnowledgeUnit, message: WikiSectionMessage): WikiKnowledgeUnit => {

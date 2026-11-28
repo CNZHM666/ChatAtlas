@@ -27,8 +27,11 @@ export function ProjectVersionPicker({ versions, currentId, zh, disabled, onSele
     if (selecting) close();
     try { await action(id); } finally { setPending(false); }
   };
-  return <details ref={ref} className="project-result-picker" onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } }}>
-    <summary role="button" aria-label={zh ? "整理版本" : "Result versions"} aria-controls={panelId} aria-disabled={disabled || pending} onClick={event => { if (disabled || pending) event.preventDefault(); }}><span><small className="project-result-picker-label">{zh ? `整理版本 · 共 ${versions.length} 个` : `Versions · ${versions.length}`}</small><strong>{current ? metadata(current) : ""}</strong></span><ChevronDown size={15} aria-hidden="true" /></summary>
+  return <details ref={ref} className={`project-result-picker${versions.length === 1 ? " is-single" : ""}`} onKeyDown={event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } }}>
+    <summary role="button" aria-label={zh ? "整理版本" : "Result versions"} aria-controls={panelId} aria-disabled={disabled || pending} onClick={event => { if (disabled || pending) event.preventDefault(); }}>
+      <span>{versions.length > 1 ? <small className="project-result-picker-label">{zh ? `整理版本 · 共 ${versions.length} 个` : `Versions · ${versions.length}`}</small> : null}<strong>{current ? metadata(current) : ""}</strong></span>
+      <ChevronDown size={14} aria-hidden="true" />
+    </summary>
     <div id={panelId} className="project-version-options" role="group" aria-label={zh ? "选择或删除版本" : "Choose or delete a version"}>
       {versions.map(item => <div className={`project-version-option${item.id === currentId ? " is-current" : ""}`} key={item.id}>
         <button type="button" className="project-version-open" aria-current={item.id === currentId ? "true" : undefined} aria-label={`${zh ? "切换到" : "Switch to"} ${labels.get(item.id)}`} disabled={disabled || pending} onClick={() => void run(onSelect, item.id, true)}><span><strong>{metadata(item)}</strong>{sameTitle ? null : <small>{item.title}</small>}</span>{item.id === currentId ? <Check size={14} aria-hidden="true" /> : null}</button>

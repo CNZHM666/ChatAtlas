@@ -17,3 +17,16 @@
   .demo-actions .demo-github { font-size: 0; }
   .demo-badge { display: none; }
 }
+.demo-continuation-trigger { display:inline-flex; align-items:center; gap:5px; color:var(--text); background:var(--surface-muted); border:0; border-radius:8px; padding:6px 10px; font:inherit; white-space:nowrap; cursor:pointer; }
+@media (max-width: 480px) { .demo-continuation-trigger { padding:6px; } .demo-continuation-trigger span { display:none; } }
+.demo-continuation { width:min(480px,calc(100% - 28px)); border:1px solid var(--border); border-radius:14px; padding:0; color:var(--text); background:var(--surface-solid); }
+.demo-continuation::backdrop { background:#15181b50; }
+.demo-continuation > header { display:flex; justify-content:space-between; align-items:center; padding:10px 16px; border-bottom:1px solid var(--border); }
+.demo-continuation-inner { padding:16px; }
+.demo-continuation-inner h2 { margin:4px 0 12px; font-size:20px; }
+.demo-continuation-inner h3 { font-size:15px; }
+.demo-continuation-inner small { color:var(--muted); }
+.demo-continuation-inner textarea { width:100%; padding:10px; resize:vertical; border:1px solid var(--border); border-radius:8px; background:var(--surface-muted); color:var(--text); font:inherit; }
+.demo-continuation-inner footer { display:flex; justify-content:flex-end; margin-top:16px; }
+.demo-continuation-inner footer button { display:inline-flex; align-items:center; gap:5px; border:0; border-radius:8px; padding:7px 11px; background:var(--accent); color:white; font:inherit; cursor:pointer; }
+.demo-continuation-inner summary { cursor:pointer; }

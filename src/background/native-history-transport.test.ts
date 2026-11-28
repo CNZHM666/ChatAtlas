@@ -59,3 +59,36 @@ it("reads through another open tab of the same AI when the detected tab has clos
   query.mockResolvedValue([]);
   await expect(nativeHistoryRequest({ ...moved, tabId: 3 }, { path: "/api/v0/chat_session/fetch_page" })).rejects.toThrow("请先在浏览器中打开 DeepSeek");
 });
+it("caches ChatGPT session token in page memory, tolerates same-origin navigation, and formats timeout errors clearly", async () => {
+  delete (window as Window & { __chatAtlasSessionCache?: unknown }).__chatAtlasSessionCache;
+  vi.stubGlobal("location", new URL("https://chatgpt.com/c/first"));
+  let tabUrl = "https://chatgpt.com/c/first";
+  vi.stubGlobal("chrome", {
+    tabs: { get: vi.fn(async () => ({ id: 3, url: tabUrl })) },
+    scripting: { executeScript: vi.fn(async (options: { func: (...args: unknown[]) => unknown; args: unknown[] }) => [{ result: await options.func(...options.args) }]) },
+  });
+  const chatgpt: NativeImportSource = { id: "chatgpt", platform: "chatgpt", origin: "https://chatgpt.com", tabId: 3, label: "ChatGPT" };
+  let sessionCalls = 0;
+  const fetch = vi.fn(async (input: string) => {
+    if (input === "/api/auth/session") {
+      sessionCalls += 1;
+      return { ok: true, status: 200, json: async () => ({ accessToken: `tok-${sessionCalls}`, user: { id: "user-1" } }) };
+    }
+    // Simulate user switching to another conversation on the same origin while in flight.
+    tabUrl = "https://chatgpt.com/c/second";
+    return { ok: true, status: 200, json: async () => ({ items: [] }) };
+  });
+  vi.stubGlobal("fetch", fetch);
+  await nativeHistoryRequest(chatgpt, { path: "/backend-api/conversations?offset=0&limit=50" });
+  await nativeHistoryRequest(chatgpt, { path: "/backend-api/conversations?offset=50&limit=50" });
+  expect(sessionCalls).toBe(1);
+
+  // Timeout error is mapped to a friendly bilingual message that still triggers retry.
+  fetch.mockRejectedValueOnce(Object.assign(new Error("signal timed out"), { name: "TimeoutError" }));
+  await expect(nativeHistoryRequest(chatgpt, { path: "/backend-api/conversation/abc" })).rejects.toThrow(/读取超时.*timed out/u);
+
+  // Navigating to another origin still aborts the import.
+  fetch.mockImplementationOnce(async () => { tabUrl = "https://example.com/"; return { ok: true, status: 200, json: async () => ({ items: [] }) }; });
+  await expect(nativeHistoryRequest(chatgpt, { path: "/backend-api/conversations?offset=0&limit=50" })).rejects.toThrow(/Source page changed/u);
+  delete (window as Window & { __chatAtlasSessionCache?: unknown }).__chatAtlasSessionCache;
+});

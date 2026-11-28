@@ -3,6 +3,7 @@ import { replaceParagraph } from "../shared/wiki-body-text";
 import { claimSupported } from "./wiki-claim-support";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { rowFields } from "../shared/wiki-row-sentence";
+import { wikiStageLabels } from "../shared/wiki-roadmap-scope";
 import { wikiHistoricalTransition } from "../shared/wiki-history-layout";
 
 const bare = (text: string) => text.toLowerCase().replace(/[\s*`"'“”‘’]/gu, "").replace(/[.。]$/u, "");
@@ -100,6 +101,7 @@ const folded = (text: string) => new Set([...knowledgeTerms(text)].map(term => t
 export function droppedUnrelatedParagraphs(chapters: WikiDraftChapter[], unitOf: (id: string) => WikiKnowledgeUnit | undefined): number {
   let dropped = 0;
   for (const chapter of chapters) {
+    const removed: string[] = [];
     chapter.paragraphs = chapter.paragraphs.filter(paragraph => {
       const text = paragraph.text.trim();
       if (!paragraph.unitIds.length || /\n/u.test(text) || /^(?:[-*+]\s|\d+\.\s|\||>|`{3}|~{3}|\*[^*\s])/u.test(text)) return true;
@@ -108,9 +110,14 @@ export function droppedUnrelatedParagraphs(chapters: WikiDraftChapter[], unitOf:
       if (own.size < UNRELATED_MIN_TERMS) return true;
       const cited = folded(paragraph.unitIds.flatMap(id => { const unit = unitOf(id); return unit ? [unit.statement, unit.evidence.quote, ...unit.details] : []; }).join(" "));
       if (!cited.size || [...own].filter(term => cited.has(term)).length / own.size >= UNRELATED_SHARE) return true;
+      removed.push(text, ...paragraph.claims?.map(claim => claim.text) ?? []);
       chapter.body = chapter.body.includes(`\n\n${paragraph.text}`) ? chapter.body.replace(`\n\n${paragraph.text}`, () => "") : replaceParagraph(chapter.body, paragraph.text, () => "");
       dropped++;
       return false;
+    });
+    if (removed.length) chapter.problems = chapter.problems.filter(problem => {
+      const head = /^(?:claim )?"(.+?)…?" (?:has |drops |tells |states |repeats|credits |borrows |changes )/u.exec(problem)?.[1];
+      return !head || head.length < 12 || chapter.body.includes(head) || !removed.some(text => text.includes(head));
     });
   }
   return dropped;
@@ -824,6 +831,35 @@ export function earlierVersionsLast(chapters: WikiDraftChapter[], statusOf: (id:
  * apps. Bank syncing, receipt OCR, AI coaching, native mobile apps, complex reports, … are excluded from v1/beta scope."
  * The item ("native mobile apps") goes from the list, its claim kept in step. Returns how many items went. */
 const EXCLUSION_LIST = /^(\s*)(.+?)(\s+(?:are|is)\s+(?:excluded|out of scope|not included)\b.*)$/su;
+/** A release limit repeated in another chapter by the very same units has one home. */
+export function droppedCrossChapterLimits(chapters: WikiDraftChapter[], home: ReadonlyMap<string, string>): number {
+  const occurrences = new Map<string, Array<{ chapter: WikiDraftChapter; paragraph: WikiDraftChapter["paragraphs"][number] }>>();
+  for (const chapter of chapters) for (const paragraph of chapter.paragraphs) {
+    const {text, unitIds} = paragraph;
+    if (!unitIds.length || !wikiStageLabels(text).length || /\n/u.test(text)
+      || !/(?:不(?:做|纳入|包含|支持|开放)|禁止|排除|\b(?:excluded?|does not support|out of scope)\b)/iu.test(text)
+      || /^\s*(?:\||>|#{1,6}\s|~~~)/u.test(text)
+      || (paragraph.claims ?? []).some(claim => !claim.markOnly && !claim.unitIds.every(id => unitIds.includes(id)))) continue;
+    const key = JSON.stringify([[...new Set(unitIds)].sort(), bare(text.replace(/^\s*(?:[-*+]|\d+\.)\s+/u, ""))]);
+    const list = occurrences.get(key) ?? [];
+    list.push({chapter, paragraph});
+    occurrences.set(key, list);
+  }
+  let dropped = 0;
+  for (const list of occurrences.values()) {
+    if (new Set(list.map(({chapter})=>chapter.id)).size < 2) continue;
+    const owner = list.find(({chapter,paragraph})=>paragraph.unitIds.every(id=>home.get(id)===chapter.id)) ?? list[0];
+    for (const {chapter,paragraph} of list) {
+      if (chapter === owner.chapter || !chapter.body.includes(paragraph.text)
+        || chapter.paragraphs.filter(item=>item!==paragraph&&chapter.body.includes(item.text)).length===0) continue;
+      chapter.body = replaceParagraph(chapter.body, paragraph.text, "");
+      chapter.paragraphs = chapter.paragraphs.filter(item=>item!==paragraph);
+      dropped++;
+    }
+  }
+  return dropped;
+}
+
 export function droppedRepeatedExclusions(chapters: WikiDraftChapter[]): number {
   let dropped = 0;
   for (const chapter of chapters) for (const paragraph of chapter.paragraphs) {

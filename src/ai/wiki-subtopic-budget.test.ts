@@ -1,11 +1,19 @@
 import {expect,it} from "vitest";
-import {mergeThinWikiChapters,mergeThinWikiSubtopics,renameWikiSubheadings,wikiProseScale,wikiSubtopicBudget} from "./wiki-subtopic-budget";
+import {foldAdjacentWikiNotes,mergeThinWikiChapters,mergeThinWikiSubtopics,renameWikiSubheadings,wikiProseScale,wikiSubtopicBudget} from "./wiki-subtopic-budget";
 import {nameMergedSubheadings} from "./wiki-subheading-names";
 import type {StructuredAIRequest} from "./provider";
 import type {FocusSection} from "../shared/focus-session";
 
 const zh=(size:number,mark="甲")=>mark.repeat(size)+"。";
 const headings=(body:string)=>body.match(/^## .+$/gmu)??[];
+
+it("folds a short related note without losing its text or merging a different topic",()=>{
+ const body="### 数据存储结构\n\n数据存储使用本地索引，数据存储结构约束写入顺序。\n\n### 数据存储细节\n\n压缩旧版本快照。\n\n### KiCad 集成\n\n首版不需要接入 KiCad。";
+ const result=foldAdjacentWikiNotes(body);
+ expect(result.folded).toEqual(new Map([["数据存储细节","数据存储结构"]]));
+ expect(result.body).toContain("**数据存储细节**\n\n压缩旧版本快照。");
+ expect(result.body).toContain("### KiCad 集成");
+});
 
 it("joins a thin subsection with its smaller neighbour and keeps the fuller title",()=>{
  const body=["开头概述。","## 主线",zh(400),"## 片段",zh(40,"乙"),"## 另一面",zh(420,"丙")].join("\n\n");

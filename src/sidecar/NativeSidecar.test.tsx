@@ -3,7 +3,7 @@ import {afterEach,expect,it,vi} from "vitest";
 import {SidecarHeader} from "./SidecarHeader";
 import {NativeSidecar} from "./NativeSidecar";
 import {sendSidecarMessage} from "./host";
-vi.mock("./SidecarProject",()=>({SidecarProject:(props:{zh:boolean;onToggleLanguage:()=>void})=><><SidecarHeader zh={props.zh} onToggleLanguage={props.onToggleLanguage} showBrand={false}/><output data-testid="panel-props">{JSON.stringify(props)}</output></>}));
+vi.mock("./NativeProjects",()=>({NativeProjects:(props:{zh:boolean;onToggleLanguage:()=>void})=><><SidecarHeader zh={props.zh} onToggleLanguage={props.onToggleLanguage} showBrand={false}/><output data-testid="panel-props">{JSON.stringify(props)}</output></>}));
 afterEach(()=>{cleanup();localStorage.removeItem("atlas-locale");vi.unstubAllGlobals();});
 it("follows only its own window, keeps search available on other platforms and binds supported insertions",async()=>{
  const query=vi.fn().mockResolvedValue([{id:42,windowId:7,active:true,url:"https://chatgpt.com/c/current",title:"Current discussion"}]);

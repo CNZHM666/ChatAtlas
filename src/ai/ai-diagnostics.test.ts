@@ -1,7 +1,6 @@
 import { expect,it } from "vitest";
 import { classifyAIRequest,usageFeature } from "./ai-diagnostics";
 import { analyzeAILifecycle,aiRequestExport,aiDiagnosticExport } from "./lifecycle-analysis";
-import { runAIChainLocalChecks } from "../canvas/ai-chain-local-checks";
 import type { AIUsageEvent } from "../shared/types";
 import type { OrganizationRun } from "../shared/types";
 const event=(id:string,extra:Partial<AIUsageEvent>):AIUsageEvent=>({id,createdAt:5000,taskType:"other",providerId:"fixture",modelId:"fixture",conversationIds:["PRIVATE"],inputTokens:4,outputTokens:2,tokenSource:"provider",attempt:1,status:"completed",...extra});
@@ -39,10 +38,9 @@ it("separates concurrent wall time, retries and free cache reuse",()=>{
  const data=analyzeAILifecycle(rows);expect(data.requestWallMs).toBe(2500);expect(data.activeMs).toBe(2500);expect(data.durationMs).toBe(4000);expect(data.queueMs).toBe(200);expect(data.backoffMs).toBe(500);expect(data.findings).toContain("retry");
  expect(data.stages.reduce((sum,row)=>sum+row.requests,0)).toBe(2);expect(data.stages.reduce((sum,row)=>sum+row.cached,0)).toBe(1);
 });
-it("exports only allowed metadata and all builtin diagnostic checks pass without providers",()=>{
+it("exports only allowed metadata without leaking private fields",()=>{
  const row={...event("privacy",{}),prompt:"PRIVATE PROMPT",system:"PRIVATE SYSTEM",apiKey:"PRIVATE KEY",title:"PRIVATE TITLE",note:"PRIVATE NOTE"};
  expect(JSON.stringify(aiRequestExport([row]))).not.toContain("PRIVATE");
- expect(runAIChainLocalChecks().filter(check=>!check.passed)).toEqual([]);
 });
 it("exports local phases with request timings while excluding project content and private annotations",()=>{
  const run={id:"run",title:"PRIVATE TITLE",targetIds:["PRIVATE SOURCE"],notes:"PRIVATE NOTE",startedAt:1,updatedAt:2,pipelineSpans:[{id:"span",feature:"wiki",phase:"source:load",startedAt:1,durationMs:12,status:"completed",result:"PRIVATE CONTENT"}]} as unknown as OrganizationRun;

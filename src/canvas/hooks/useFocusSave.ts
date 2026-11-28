@@ -1,26 +1,40 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { FocusSession } from "../../shared/focus-session";
-import { saveFocusSession } from "../../storage/focus-sessions";
+import { focusEditSignature, saveFocusSession } from "../../storage/focus-sessions";
 
 /** Update the editor immediately; coalesce whole-result writes while typing. */
-export function useFocusSave(onSaved: (session: FocusSession) => void, onStatus: (state: "saving" | "saved" | "failed") => void) {
+export function useFocusSave(onSaved: (session: FocusSession) => void, onStatus: (state: "saving" | "saved" | "failed") => void, initial?: FocusSession) {
   const callbacks = useRef({ onSaved, onStatus });
   callbacks.current = { onSaved, onStatus };
   const pending = useRef<FocusSession>();
   const timer = useRef<ReturnType<typeof setTimeout>>();
-  const writes = useRef<Promise<void>>(Promise.resolve());
+  const saved = useRef(new Map<string, string>());
+  const seeded = useRef<string>();
+  if (initial && seeded.current !== initial.id) {
+    seeded.current = initial.id;
+    saved.current.set(initial.id, focusEditSignature(initial));
+  }
+  const adoptPersisted = useCallback((session: FocusSession) => {
+    saved.current.set(session.id, focusEditSignature(session));
+  }, []);
+  const writes = useRef<Promise<FocusSession | undefined>>(Promise.resolve(undefined));
   const mounted = useRef(true);
   const version = useRef(0);
   const enqueue = useCallback((session: FocusSession) => {
     const currentVersion = ++version.current;
-    const operation = writes.current.catch(() => undefined).then(() => saveFocusSession(session));
+    const operation = writes.current.catch(() => undefined).then(async () => {
+      const expected = saved.current.get(session.id);
+      const stored = await (expected ? saveFocusSession(session, expected) : saveFocusSession(session));
+      if (stored) adoptPersisted(stored);
+      return stored;
+    });
     writes.current = operation;
-    void operation.then(() => {
-      callbacks.current.onSaved(session);
+    void operation.then(stored => {
+      callbacks.current.onSaved(stored ?? session);
       if (mounted.current && currentVersion === version.current && !pending.current) callbacks.current.onStatus("saved");
     }).catch(() => { if (mounted.current && currentVersion === version.current) callbacks.current.onStatus("failed"); });
     return operation;
-  }, []);
+  }, [adoptPersisted]);
   const flush = useCallback(() => {
     clearTimeout(timer.current);
     timer.current = undefined;
@@ -44,5 +58,5 @@ export function useFocusSave(onSaved: (session: FocusSession) => void, onStatus:
       timer.current = setTimeout(() => { void flush().catch(() => undefined); }, 300);
       return Promise.resolve();
     }, [flush]);
-  return { flush, save };
+  return { flush, save, adoptPersisted };
 }

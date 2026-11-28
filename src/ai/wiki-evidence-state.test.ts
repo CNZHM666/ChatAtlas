@@ -66,3 +66,22 @@ it("keeps conflicting credential storage requirements explicitly unresolved",()=
  expect(result[0].body).toContain("需先确认允许保存的位置");
  expect(reviewWikiEvidenceStates(result,l)).toEqual(result);
 });
+
+it("removes retired quantity labels from reports, confirmed decisions and unrelated counts",()=>{
+ const chosen=unit("answer:quantity:yes","首版限制在20–30个常用模块。");
+ const competing=unit("competing","首版支持50–100个常用模块。");
+ const confirmed=unit("confirmed","首版的目标是在5分钟内完成一次方案。");
+ const unrelated=unit("unrelated","首版支持50个项目。");
+ const report={...unit("report","已支持6个本地元件。"),kind:"report" as const,delivery:"user_reported" as const};
+ const l=ledger([chosen,competing,confirmed,unrelated,report]);
+ l.decisions={[chosen.id]:{verdict:"confirmed",at:2},[confirmed.id]:{verdict:"confirmed",at:1}};
+ l.userAnswers=[{questionId:"quantity",question:"元件库规模？",answer:"20–30个常用模块",optionId:"yes",at:2,unitIds:[competing.id]}];
+ l.writingQuestions=[{id:"quantity",organization:1,about:"元件库规模",ask:"元件库规模？",unitIds:[competing.id],options:[]}];
+ l.organization={version:1,generatedAt:1,status:"complete",subjects:[{id:"s",name:"项目范围",aliases:[],
+  unitIds:l.batches[0].units.map(point=>point.id)}],chapters:[],relations:[],merged:[],report:{}};
+ const tagged=(point:WikiKnowledgeUnit)=>chapter("范围待核对的候选建议："+point.statement,[point.id]);
+ expect(reviewWikiEvidenceStates([tagged(confirmed),tagged(report),tagged(unrelated)],l).map(item=>item.body))
+  .toEqual([confirmed.statement,report.statement,unrelated.statement]);
+ expect(reviewWikiEvidenceStates([chapter(competing.statement,[competing.id])],l)[0].body)
+  .toBe("范围待核对的候选建议："+competing.statement);
+});

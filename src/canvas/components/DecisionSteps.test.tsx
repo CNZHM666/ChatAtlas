@@ -1,11 +1,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { DecisionSteps } from "./DecisionSteps";
+import { wikiProjectQuestions } from "../../ai/wiki-project-decisions";
 import type { WikiKnowledgeLedger, WikiKnowledgeUnit } from "../../shared/wiki-knowledge";
 
 afterEach(cleanup);
 
-it("asks the writer's questions one at a time, moves on after an answer, and starts writing from the last", () => {
+it("keeps options editable and saves all submitted decisions together when writing starts", () => {
   const unit = (index: number, statement: string): WikiKnowledgeUnit => ({ id: `u${index}`, subject: "存储", statement, kind: "decision", details: [], evidence: { evidenceId: `e${index}`, conversationId: "c", messageId: `m${index}`, messageIndex: index, role: "assistant", pasted: false, quote: statement }, adoption: { status: "proposal" }, delivery: "unknown" });
   const units = [unit(1, "索引放在内存里。"), unit(2, "索引改放 IndexedDB。"), unit(3, "第一版使用 MIT 许可证开源。")];
   const ledger = { version: 1, generatedAt: 1, status: "complete", materials: 3, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }],
@@ -19,22 +20,25 @@ it("asks the writer's questions one at a time, moves on after an answer, and sta
     ] } as WikiKnowledgeLedger;
   let saved = ledger;
   const onDone = vi.fn();
-  render(<DecisionSteps ledger={ledger} zh onChange={change => { saved = change(saved); }} onDone={onDone} />);
+  render(<DecisionSteps ledger={ledger} zh onDone={(counts, apply) => { saved = apply(saved); onDone(counts); }} />);
   expect(screen.getByText("1 / 2")).toBeVisible();expect(screen.getByRole("button", { name: "全部跳过" })).toBeVisible();
   fireEvent.click(screen.getByRole("radio", { name: /放 IndexedDB/u }));
+  expect(screen.getByText("1 / 2")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "下一题" }));
   expect(screen.getByText("2 / 2")).toBeVisible();expect(screen.getByText("第一版用 MIT 开源吗？")).toBeVisible();
-  expect(saved.decisions).toMatchObject({ u2: { verdict: "confirmed" }, u1: { verdict: "rejected" } });
+  expect(saved.decisions).toBeUndefined();
   expect(screen.getByRole("heading", { name: "开源许可" })).toHaveFocus();
   fireEvent.click(screen.getByRole("radio", { name: /用 MIT/u }), { detail: 2 });
-  expect(screen.getByRole("radio", { name: /用 MIT/u })).toHaveAttribute("aria-checked", "false");
-  fireEvent.click(screen.getByRole("radio", { name: /用 MIT/u }));
-  expect(saved.decisions).toMatchObject({ u3: { verdict: "confirmed" } });
-  expect(screen.getByRole("button", { name: "直接写作" })).toBeVisible();
+  expect(screen.getByRole("radio", { name: /用 MIT/u })).toHaveAttribute("aria-checked", "true");
+  expect(saved.decisions).toBeUndefined();
+  expect(screen.getByRole("button", { name: "开始写作" })).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "上一题" }));
   expect(screen.getByRole("radio", { name: /放 IndexedDB/u })).toHaveAttribute("aria-checked", "true");
   fireEvent.click(screen.getByRole("radio", { name: /放 IndexedDB/u }));
+  expect(saved.userAnswers).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "直接写作" }));
   expect(saved.userAnswers).toHaveLength(2);
-  fireEvent.click(screen.getByRole("button", { name: "开始写作" }));
+  expect(saved.decisions).toMatchObject({ u2: { verdict: "confirmed" }, u3: { verdict: "confirmed" } });
   expect(onDone).toHaveBeenCalled();
 });
 
@@ -47,17 +51,18 @@ it("asks the writer's own questions first, and takes an answer in the user's own
     writingQuestions: [{ id: "ask:5:1", about: "API Key 存储", ask: "允许存 localStorage 吗？", unitIds: ["u1", "u2"], organization: 5,
       options: [{ id: "o1", label: "一律禁止", actions: [{ do: "confirm", units: ["u2"] }, { do: "reject", units: ["u1"] }] }, { id: "o2", label: "可选保存", actions: [{ do: "confirm", units: ["u1"] }] }] }] } as WikiKnowledgeLedger;
   let saved = ledger;
-  render(<DecisionSteps ledger={ledger} zh onChange={change => { saved = change(saved); }} onDone={vi.fn()} />);
+  render(<DecisionSteps ledger={ledger} zh onDone={(_counts, apply) => { saved = apply(saved); }} />);
   // Only the writer's question: no fixed version question about the same points.
   expect(screen.getByText("1 / 1")).toBeVisible();
   expect(screen.getByText("API Key 存储")).toBeVisible();expect(screen.getByText("允许存 localStorage 吗？")).toBeVisible();
-  expect(screen.getByText("禁止写入 localStorage。")).toBeVisible();
+  expect(screen.getAllByText("禁止写入 localStorage。")).toHaveLength(2);
+  fireEvent.click(screen.getByText("查看原话"));
   fireEvent.change(screen.getByRole("textbox", { name: "用自己的话回答" }), { target: { value: "会话内可记住，跨会话不保存" } });
   fireEvent.click(screen.getByRole("button", { name: "确定" }));
-  expect(saved.userAnswers?.[0]).toMatchObject({ unitIds: ["u1", "u2"], answer: "会话内可记住，跨会话不保存" });
-  fireEvent.click(screen.getByRole("radio", { name: /一律禁止/u }));
-  expect(saved.decisions).toMatchObject({ u2: { verdict: "confirmed" }, u1: { verdict: "rejected" } });
-  expect(saved.userAnswers).toHaveLength(1);
+  expect(saved.decisionArbitrations).toBeUndefined();
+  fireEvent.click(screen.getByRole("button", { name: "开始写作" }));
+  expect(saved.decisionArbitrations?.["ask:5:1"]).toMatchObject({ text: "会话内可记住，跨会话不保存", mode: "custom", unitIds: ["u1", "u2"] });
+  expect(wikiProjectQuestions(saved, true)).toEqual([]);
 });
 
 it("first lists the other products and projects named, to tick those left out, with no model", () => {
@@ -66,18 +71,22 @@ it("first lists the other products and projects named, to tick those left out, w
   const ledger = { version: 1, generatedAt: 1, status: "complete", materials: 3, batches: [{ sourceIds: [], status: "ok", units, rejected: {} }],
     organization: { version: 1, generatedAt: 2, status: "complete", subjects: [{ id: "s", name: "s", aliases: [], unitIds: ["u1", "u2", "u3"] }], merged: [], report: {}, relations: [], chapters: [{ id: "a", title: "技术", question: "?", group: "", subtopics: [{ title: "s", subjectIds: ["s"] }] }] } } as WikiKnowledgeLedger;
   let saved = ledger;
-  render(<DecisionSteps ledger={ledger} zh onChange={change => { saved = change(saved); }} onDone={vi.fn()} />);
+  render(<DecisionSteps ledger={ledger} zh onDone={(_counts, apply) => { saved = apply(saved); }} />);
   expect(screen.getByText("排除项目")).toBeVisible();
+  expect(screen.queryByText("1 / 1")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "全部跳过" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "开始写作" })).toBeVisible();
   expect(screen.getByRole("checkbox", { name: /ChatAtlas.*另一个项目/u })).toHaveAttribute("aria-checked", "false");
   expect(screen.getByRole("checkbox", { name: /Boardly.*竞品/u })).toBeVisible();
   fireEvent.click(screen.getByRole("checkbox", { name: /ChatAtlas/u }));
   expect(screen.getByRole("checkbox", { name: /ChatAtlas/u })).toHaveAttribute("aria-checked", "true");
-  expect(saved.scopeAnswers).toEqual({ chatatlas: "exclude" });
+  expect(saved.scopeAnswers).toBeUndefined();
   fireEvent.change(screen.getByRole("textbox", { name: "输入要排除的名字" }), { target: { value: "灵犀造物" } });
   fireEvent.click(screen.getByRole("button", { name: "排除" }));
-  expect(saved.scopeAnswers).toEqual({ chatatlas: "exclude", "灵犀造物": "exclude" });
+
   expect(screen.getByRole("checkbox", { name: /灵犀造物/u })).toHaveAttribute("aria-checked", "true");
   fireEvent.click(screen.getByRole("checkbox", { name: /ChatAtlas/u }));
+  fireEvent.click(screen.getByRole("button", { name: "开始写作" }));
   expect(saved.scopeAnswers).toEqual({ "灵犀造物": "exclude" });
 });
 
@@ -88,7 +97,7 @@ it("does not interrupt writing with chapter questions or ask them before writing
     organization: { version: 1, generatedAt: 4, status: "complete", subjects: [{ id: "s", name: "s", aliases: [], unitIds: ["u1", "u2"] }], merged: [], report: {}, relations: [], chapters: [{ id: "a", title: "计划", question: "?", group: "", subtopics: [{ title: "s", subjectIds: ["s"] }] }] } } as WikiKnowledgeLedger;
   const ask = (id: string, about: string) => ({ id, about, ask: `${about}按哪一套？`, unitIds: ["u1", "u2"], organization: 4, stage: "writing" as const, options: [{ id: "o1", label: "Phase", actions: [{ do: "confirm" as const, units: ["u1"] }] }, { id: "o2", label: "里程碑", actions: [{ do: "confirm" as const, units: ["u2"] }] }] });
   ledger.writingQuestions = [ask("w1", "核心流程"), ask("w2", "验收标准")];
-  render(<DecisionSteps ledger={ledger} zh onChange={vi.fn()} onDone={vi.fn()} />);
+  render(<DecisionSteps ledger={ledger} zh onDone={vi.fn()} />);
   expect(screen.queryByText("核心流程")).toBeNull();
   expect(screen.queryByText("验收标准")).toBeNull();
 });

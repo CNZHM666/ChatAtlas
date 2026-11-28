@@ -14,6 +14,12 @@ const settings = (provider: AISettings["provider"], baseUrl: string): AISettings
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("AI provider model discovery", () => {
+  it("gives an unreadable sidecar response a format error code", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "Here are the project updates." } }] }))));
+    const provider = createAIProvider({ ...settings("openai-compatible", "https://fixture.invalid/v1"), model: "fixture" });
+    await expect(provider.generateStructured({ taskType: "other", system: "Return JSON", prompt: JSON.stringify({ presentation: "sidecar_project_update" }), validate: value => value }))
+      .rejects.toMatchObject({ code: "PROVIDER_SCHEMA_invalid_json" });
+  });
   it("reports missing chapter fields without persisting provider prose or inventing a repair", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ title: "Result", sections: [{ title: "Section", body: "", kind: "review", transition: "", evidenceIds: ["e1"] }] }) } }], usage: { prompt_tokens: 100, completion_tokens: 100 } }), { headers: { "Content-Type": "application/json" } })));
     const provider = createAIProvider({ ...settings("openai-compatible", "https://fixture.invalid/v1"), model: "fixture" });

@@ -7,15 +7,17 @@ import { listCards } from "./cards";
 export async function projectReader(project: AtlasCanvas): Promise<FocusSession> {
   const db = await getDatabase();
   const saved = db.transaction("focusSessions").store.index("by-updated");
-  let preview:FocusSession|undefined, empty:FocusSession|undefined;
+  let accepted:FocusSession|undefined, preview:FocusSession|undefined, empty:FocusSession|undefined;
   for(let cursor=await saved.openCursor(null,"prev");cursor;cursor=await cursor.continue()){
     const session=cursor.value;
     if(session.canvasId!==project.id||session.deletedAt||session.ledgerTest)continue;
-    if(session.sections.length&&session.status!=="preview")return session;
-    if(session.sections.length)preview??=session;
+    if((session.sections.length||session.livingProject)&&session.status!=="preview"){
+      if(!accepted||session.createdAt>accepted.createdAt)accepted=session;
+    }
+    else if(session.sections.length)preview??=session;
     else empty??=session;
   }
-  if(preview||empty)return preview??empty!;
+  if(accepted||preview||empty)return accepted??preview??empty!;
   const now = Date.now();
   const legacyCards = (await db.getAll("cards")).filter(card => card.canvasId === project.id);
   const hidden = new Set(legacyCards.filter(card => card.ghost || card.kind === "portal").map(card => card.id));

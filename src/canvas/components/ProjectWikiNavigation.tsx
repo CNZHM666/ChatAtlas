@@ -6,8 +6,9 @@ import { wikiSections, localizedWikiTitle } from "../../shared/wiki-navigation";
 import {wikiNavigationHeadings} from "../wiki-document";
 import {useProjectReadingCache} from "../project-reading-cache";
 
-export function ProjectWikiNavigation({ session, activeId, zh, onRead, adjusting = false, onDone, onCollapse, onEdit, onMove, onCreateGroup, onCreatePage, onDropPage, disabled = false }: {
+export function ProjectWikiNavigation({ session, activeId, zh, onRead, onPrefetch, adjusting = false, onDone, onCollapse, onEdit, onMove, onCreateGroup, onCreatePage, onDropPage, disabled = false }: {
   session: FocusSession; activeId?: string; zh: boolean; onRead: (id: string,heading?:string) => void;
+  onPrefetch?: (id: string) => void;
   adjusting?: boolean; onDone?: () => void; onCollapse?: (group: string, collapsed: boolean) => void;
   onEdit?: (id: string, title: string, group: string, displayTitle?: string) => Promise<void>;
   onMove?: (ids: string[]) => Promise<void>;
@@ -31,7 +32,7 @@ export function ProjectWikiNavigation({ session, activeId, zh, onRead, adjusting
   const [saving, setSaving] = useState(false), [error, setError] = useState("");
   const [localCollapsed, setLocalCollapsed] = useState(session.wikiCollapsedGroups ?? {});
   const groupListId = useId();
-  const grouped = wikiSections(session, zh ? "zh-CN" : "en");
+  const grouped = wikiSections(session, zh ? "zh-CN" : "en").filter(section => !section.continuationLoose);
   const rank=new Map((session.wikiOrder??session.sections.map(section=>section.id)).map((id,index)=>[id,index]));
   const ordered = categorized ? grouped : [...grouped].sort((a,b)=>(rank.get(a.id)??session.sections.findIndex(section=>section.id===a.id))-(rank.get(b.id)??session.sections.findIndex(section=>section.id===b.id)));
   const sections = ordered;
@@ -79,6 +80,8 @@ export function ProjectWikiNavigation({ session, activeId, zh, onRead, adjusting
             onPointerMove={event => { const start = pointerStart.current; if (!start || start.id !== section.id) return; if (!dragging.current && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return; dragging.current = section.id; const target = destinationAt(event.clientX, event.clientY); setDropTarget(target ? target.before ?? `group:${target.group}` : undefined); }}
             onPointerUp={event => { const id = dragging.current, target = id ? destinationAt(event.clientX, event.clientY) : undefined; pointerStart.current = undefined; dragging.current = undefined; setDropTarget(undefined); if (id === section.id) { skipClick.current = true; if (onDropPage && target && target.before !== id) void save(() => onDropPage(id, target.group, target.before)); } }}
             onPointerCancel={() => { pointerStart.current = undefined; dragging.current = undefined; setDropTarget(undefined); }}
+            onPointerEnter={() => onPrefetch?.(section.id)}
+            onFocus={() => onPrefetch?.(section.id)}
             onClick={event => { if (skipClick.current && event.detail !== 0) { skipClick.current = false; return; } skipClick.current = false; if(categorized)toggle(group, false); onRead(section.id); }}><span>{ordered.findIndex(page => page.id === section.id) + 1}</span><strong title={section.title}>{section.wikiDisplayTitle || localizedWikiTitle(section,zh)}</strong></button>
           {!adjusting&&Boolean(subtopics.get(section.id)?.length)?<button type="button" className="wiki-subtopic-toggle" disabled={disabled||saving} aria-label={zh?`${openSubtopics[section.id]?"收起":"展开"}${section.title}的子主题`:`${openSubtopics[section.id]?"Collapse":"Expand"} subtopics of ${section.title}`} title={zh?`${subtopics.get(section.id)!.length} 个子主题`:`${subtopics.get(section.id)!.length} subtopics`} aria-expanded={Boolean(openSubtopics[section.id])} aria-controls={`${groupListId}-topics-${encodeURIComponent(section.id)}`} onClick={()=>setOpenSubtopics(current=>({...current,[section.id]:!current[section.id]}))}>{openSubtopics[section.id]?<ChevronDown size={16} aria-hidden="true"/>:<ChevronRight size={16} aria-hidden="true"/>}</button>:null}</div>
           {!adjusting&&Boolean(subtopics.get(section.id)?.length)?<nav className="wiki-subtopics" hidden={!openSubtopics[section.id]} id={`${groupListId}-topics-${encodeURIComponent(section.id)}`} aria-label={`${section.title} · ${zh?"子主题":"Subtopics"}`}>{subtopics.get(section.id)!.map((heading,index)=><button type="button" key={`${heading.title}:${index}`} onClick={()=>onRead(section.id,heading.title)}>{heading.title}</button>)}</nav>:null}
@@ -89,6 +92,6 @@ export function ProjectWikiNavigation({ session, activeId, zh, onRead, adjusting
     })}
     {onCreatePage?<div className="wiki-create-page">{!newPage?<button type="button" className="wiki-create-button" disabled={disabled||saving||Boolean(draft)||newGroup!==undefined} onClick={()=>{setError("");setNewPage({title:"",body:"",group:""});}}><Plus size={15} aria-hidden="true"/>{zh?"新增章节":"Add chapter"}</button>:<form className="wiki-page-editor" onSubmit={event=>{event.preventDefault();if(newPage.title.trim())void save(async()=>{const id=await onCreatePage(newPage.title.trim(),newPage.body,newPage.group);setNewPage(undefined);onRead(id);});}}><label>{zh?"章节标题":"Chapter title"}<input autoFocus required maxLength={180} disabled={saving} value={newPage.title} onChange={event=>setNewPage({...newPage,title:event.target.value})}/></label><label>{zh?"章节内容（可选）":"Chapter content (optional)"}<textarea rows={4} disabled={saving} value={newPage.body} onChange={event=>setNewPage({...newPage,body:event.target.value})}/></label>{categorized?<label>{zh?"分类（可选）":"Category (optional)"}<select disabled={saving} value={newPage.group} onChange={event=>setNewPage({...newPage,group:event.target.value})}><option value="">{zh?"不分类":"Uncategorized"}</option>{availableGroups.filter(Boolean).map(group=><option key={group}>{group}</option>)}</select></label>:null}<div><button type="submit" className="primary" disabled={saving||!newPage.title.trim()}>{zh?"创建":"Create"}</button><button type="button" disabled={saving} onClick={()=>{setNewPage(undefined);setError("");}}>{zh?"取消":"Cancel"}</button></div></form>}</div>:null}
     <datalist id={`${groupListId}-choices`}>{availableGroups.filter(Boolean).map(group => <option key={group} value={group} />)}</datalist>
-    {error ? <p role="alert">{error}</p> : null}{!groups.length ? <p className="muted">{zh ? "暂无 Wiki 页面" : "No Wiki pages yet"}</p> : null}
+    {error ? <p role="alert">{error}</p> : null}{!groups.length ? <p className="muted">{zh ? "暂无章节" : "No chapters yet"}</p> : null}
   </div>;
 }

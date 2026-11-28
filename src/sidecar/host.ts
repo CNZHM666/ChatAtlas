@@ -13,8 +13,3 @@ export const sendSidecarMessage=async(message:AtlasMessage)=>{
   throw error;
  }
 };
-
-export async function sendComposerReference(conversationId: string, text: string, undo = false) {
- const result = await sendSidecarMessage({ type: "ATLAS_SIDECAR_HANDOFF", conversationId, text, ...(undo ? { undo: true } : {}) }) as { ok?: boolean; reason?: string; error?: string };
- if (!result?.ok) throw new Error(result?.reason ?? result?.error);
-}

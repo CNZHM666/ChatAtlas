@@ -220,5 +220,8 @@ it("respects a selected shortcut action before validating unrelated project IDs"
   const provider = providerFor({ action: "continue", queries: ["控制学习"], projectId: "not-a-real-project" });
   const plan = await planHomeTask(provider, "控制学习", [source("one")], [], true, new AbortController().signal, "answer");
   expect(plan).toEqual({ action: "answer", queries: ["控制学习"] });
+  expect(provider.generateStructured).not.toHaveBeenCalled();
+  const followUp = await planHomeTask(provider, "控制学习最终怎么安排？", [source("one")], [], true, new AbortController().signal, "answer");
+  expect(followUp.action).toBe("answer");
   expect(JSON.parse(vi.mocked(provider.generateStructured).mock.calls[0][0].prompt).requestedAction).toBe("answer");
 });

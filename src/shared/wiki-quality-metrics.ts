@@ -7,7 +7,11 @@ import {pairedWikiTitle} from "../ai/wiki-title-pass";
 import {wholeKeyStatement} from "./wiki-key-claims";
 import {WIKI_MIN_SUBTOPIC_CHARACTERS,wikiProseScale,wikiSubtopicBudget} from "../ai/wiki-subtopic-budget";
 
-export const WIKI_QUALITY_TERMS=["IndexedDB","Orama","本地优先","BYOK","不得自动发送"];
+const CORE_TERMS_LIMIT=12;
+const TERM_METADATA=/^(?:项目总览|核心功能|主要流程|参考示例|来源|正文|简介|概述|相关说明|核心机制|项目背景|功能介绍|overview|introduction|summary|references|section|AI|UI)$/iu;
+const exactTerm=(text:string)=>text.trim().replace(/\s+/gu," ");
+const technologyNames=(text:string)=>[...text.matchAll(/\b[A-Za-z][\w.+#-]{2,36}\b/gu)].map(match=>match[0])
+ .filter(name=>/[A-Z]{2,}|[a-z][A-Z]|\d|[.+#]/u.test(name)&&!TERM_METADATA.test(name));
 const parser=unified().use(remarkParse).use(remarkGfm, GFM_OPTIONS);
 const textOf=(node:RootContent):string=>"value" in node?node.value:"children" in node?node.children.map(child=>textOf(child as RootContent)).join(""):"";
 const normalize=(text:string)=>text.normalize("NFKC").replace(/\s/gu,"");
@@ -26,7 +30,7 @@ const sourceCaption=/^(?:对照表|命令|数据结构|代码示例|代码|界�
 /** ## chapters and ### subtopics in an exported document. Project overview is
  * measured separately, not counted as a Wiki chapter. Fenced code/quotes are not prose.
  * Ratios are 0–1; density uses non-whitespace visible prose characters. */
-export function wikiQualityMetrics(markdown:string,terms:readonly string[]=WIKI_QUALITY_TERMS){
+export function wikiQualityMetrics(markdown:string,terms?:readonly string[],coreLabels:readonly string[]=[]){
  /** subtopicProse: visible prose characters under each ### subtopic; leadParagraphs: paragraphs before the first one. */
  /** sentences: running prose only, for the duplicate checks; prose: paragraphs before the chapter's appended
   * blocks; keyItems: the chapter's listed key conclusions. */
@@ -68,6 +72,24 @@ export function wikiQualityMetrics(markdown:string,terms:readonly string[]=WIKI_
  }
  const wiki=chapters.filter(chapter=>!overviewTitle(chapter.title));
  const titles=wiki.flatMap(chapter=>[chapter.title,...chapter.subtopics]);
+ const termCandidates=new Map<string,{text:string;score:number}>();
+ for(const [labels,score] of [[coreLabels,3],[titles,2],[wiki.flatMap(chapter=>technologyNames(chapter.prose.join("\n"))),1]] as const){
+  for(const text of new Set(labels.flatMap(label=>[exactTerm(label),...technologyNames(label)]))){
+   if(text.length<3||text.length>36||TERM_METADATA.test(text)||/\s{2}|[。！？；：|]/u.test(text))continue;
+   const key=text.toLocaleLowerCase(),previous=termCandidates.get(key);
+   if(!previous||score>previous.score)termCandidates.set(key,{text,score});
+  }
+ }
+ const termCounts=(term:string)=>{
+  const needle=term.toLocaleLowerCase();
+  const counts=wiki.map(chapter=>chapter.paragraphs.join("\n").toLocaleLowerCase().split(needle).length-1);
+  return {term,chapters:counts.filter(count=>count>0).length,occurrences:counts.reduce((sum,count)=>sum+count,0)};
+ };
+ const repeatedTerms=terms?terms.filter(term=>term.trim()).map(termCounts):[...termCandidates.values()]
+  .map(({text,score})=>({...termCounts(text),score}))
+  .filter(term=>term.occurrences>1)
+  .sort((a,b)=>b.score-a.score||b.chapters-a.chapters||b.occurrences-a.occurrences||a.term.localeCompare(b.term))
+  .slice(0,CORE_TERMS_LIMIT).map(({term,chapters,occurrences})=>({term,chapters,occurrences}));
  const sibling_suffix_pairs:Array<{first:string;second:string;suffix:string}>=[];
  for(let i=0;i<wiki.length;i++)for(let j=i+1;j<wiki.length;j++){
   const a=Array.from(normalize(wiki[i].title)),b=Array.from(normalize(wiki[j].title));let size=0;
@@ -130,14 +152,14 @@ export function wikiQualityMetrics(markdown:string,terms:readonly string[]=WIKI_
   subtopic_avg_chars:subtopicProse.length?subtopicProse.reduce((sum,size)=>sum+size,0)/subtopicProse.length:0,
   short_subtopics:subtopicProse.filter(size=>size<WIKI_MIN_SUBTOPIC_CHARACTERS*scale).length,
   over_budget_chapters:wiki.filter(chapter=>chapter.subtopics.length>1&&chapter.subtopics.length>Math.max(1,wikiSubtopicBudget(chapter.subtopicProse.reduce((sum,size)=>sum+size,0),scale))).length,
-  repeated_terms:terms.map(term=>{const needle=term.toLocaleLowerCase();const counts=wiki.map(chapter=>chapter.paragraphs.join("\n").toLocaleLowerCase().split(needle).length-1);return {term,chapters:counts.filter(count=>count>0).length,occurrences:counts.reduce((sum,count)=>sum+count,0)};}),
+  repeated_terms:repeatedTerms,
  };
 }
 
 /** CSV deliberately includes counts only; sentence/title examples stay in the
  * explicitly requested local Markdown report. Never persist these projections. */
-export function wikiQualityCsvMetrics(markdown:string){
- const {sibling_suffix_pairs,cross_chapter_duplicates,intra_chapter_duplicates,repeated_terms,...metrics}=wikiQualityMetrics(markdown);
+export function wikiQualityCsvMetrics(markdown:string,coreLabels?:readonly string[]){
+ const {sibling_suffix_pairs,cross_chapter_duplicates,intra_chapter_duplicates,repeated_terms,...metrics}=wikiQualityMetrics(markdown,undefined,coreLabels);
  return {...metrics,sibling_suffix_pairs:sibling_suffix_pairs.length,cross_chapter_duplicates:cross_chapter_duplicates.length,intra_chapter_duplicates:intra_chapter_duplicates.length,repeated_terms:JSON.stringify(repeated_terms)};
 }
 export const WIKI_QUALITY_CSV_COLUMNS=["chapter_count","subtopic_count","paired_title_rate","sibling_suffix_pairs","bold_count","bold_avg_chars","bold_max_chars","ai_advice_density","meta_overview_count","cross_chapter_duplicates","overview_verbatim_overlap","repeated_terms","intra_chapter_duplicates","raw_citation_markers","orphan_advice_subjects","double_openings","subtopic_avg_chars","short_subtopics","over_budget_chapters"] as const;

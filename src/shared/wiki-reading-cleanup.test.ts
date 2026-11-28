@@ -31,6 +31,13 @@ it("keeps a subtopic's only paragraph though the opening said it first", () => {
   expect(wikiReadingCleanup(body, {})).toContain("### pytest测试\n\n仅测试单一数据");
 });
 
+it("keeps an original table cell verbatim when earlier prose repeats part of it", () => {
+  const point = "Sketch Helper 在 CAD 环境中理解设计意图、预测下一步草图操作并能加速 2.5 倍。";
+  const table = `| 产品 | 特点 | 来源 |\n| --- | --- | --- |\n| Hestus | 专注草图工具。${point} | [-1](https://example.org) |`;
+  const body = `Hestus 提供一款草图工具。${point}\n\n${table}`;
+  expect(wikiReadingCleanup(body, generated)).toContain(table);
+});
+
 it("numbers a list opening a subtopic from 1", () => {
   const body = "开场。\n\n### 短期里程碑\n\n2. **第2周**：学习 NumPy。\n3. **第3周**：学习 pytest。";
   expect(wikiReadingCleanup(body, {})).toContain("### 短期里程碑\n\n1. **第2周**：学习 NumPy。\n2. **第3周**：学习 pytest。");

@@ -34,45 +34,27 @@ export function normalizeWikiSupplementHeadings(body:string):string {
 const clean=(value:string)=>value.replace(/[<>&\n]/gu," ").replace(/\*\*/gu,"").replace(/\s+/gu," ").trim();
 const short=(value:string)=>{const text=clean(value);return text.length<=72?text:text.slice(0,72).replace(/\s+\S*$/u,"")+"…";};
 const COMMAND_LANGUAGE=/^(?:bash|sh|shell|powershell|ps1|cmd|console)$/iu;
-const PIN_MAPPING=/^.+?\s*(?:→|->)\s*(GPIO\s*\d+)$/iu;
 
 /** Title the example by what it illustrates. Only structured identifiers
  * (such as the name of a type) may be taken verbatim from its payload. */
 export function wikiSupplementTitle(code:{language:string;text:string},caption:string,zh:boolean,topic=""){
  const lines=code.text.split(/\r?\n/u).map(line=>line.trim()).filter(Boolean);
  const directory=lines.filter(line=>/(?:^|[ ├└─])(?:[\w.@-]+\/|[\w.@-]+\.[a-z]{1,5}$)/iu.test(line)).length>=2;
- const declaration=/^\s*(?:export\s+)?(interface|type|class)\s+([\w$]+)/mu.exec(code.text);
- const pins=lines.map(line=>PIN_MAPPING.exec(line)?.[1].replace(/\s+/gu,"").toUpperCase());
- const aiPanel=lines.some(line=>/^(?:AI\s*助手|AI assistant)\b|^AI\s*助手/iu.test(line));
- const editPreview=aiPanel&&/修改设计|修改已应用|撤销|apply changes|undo/iu.test(code.text);
- const connected=aiPanel&&/已连接|\bconnected\b/iu.test(lines[0]??"");
+ const declaration=/^\s*(?:export\s+)?(interface|type|class|enum)\s+([\w$]+)/mu.exec(code.text);
+ const schema=/^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"']?([\w.-]+)[`"']?/imu.exec(code.text);
  const flow=plainBlockLayout(code.text)?.kind==="flow"||lines.some(line=>/^(?:↓|⬇|├─|└─)$|[┬┴┼]/u.test(line));
  const ui=wikiUiCopy(code);
  let title:string;
- if(editPreview)title=zh?"AI 修改方案预览":"AI change preview";
- else if(connected)title=zh?"AI 连接状态示例":"AI connection state";
- else if(pins.length>1&&pins.every(pin=>pin&&pin===pins[0]))title=zh?"GPIO 引脚冲突示例":"GPIO pin conflict";
- else if(/选择模型服务|choose (?:a )?provider/iu.test(code.text))title=zh?"模型服务商选择":"Provider selection";
- else if(/需求整理完成|元件匹配完成|正在构建设计/u.test(code.text))title=zh?"方案生成进度":"Design generation progress";
- else if(/工作方式/u.test(code.text)&&/需要[：:]/u.test(code.text))title=zh?"方案草稿与工作原理":"Draft design and operation";
- else if(/复制采购清单|推荐搜索规格|购买清单|还缺\s*\d+\s*个|shopping list/iu.test(code.text))title=zh?"缺件提示与采购清单":"Missing parts and shopping list";
- else if(/Base URL/iu.test(code.text)&&/Model ID/iu.test(code.text))title=zh?"自定义模型配置字段":"Custom model settings fields";
- else if(lines.some(line=>/^我的零件$/u.test(line))&&/[×x]\s*\d+/u.test(code.text))title=zh?"零件库存与数量":"Inventory and quantities";
- else if(/VERIFIED/u.test(code.text)&&/NEEDS_REVIEW/u.test(code.text))title=zh?"校验状态与继续条件":"Validation states and continuation";
- else if(lines.length>1&&lines.every(line=>/^[^→\n]+→\s*(?:GPIO\d+|\d(?:\.\d+)?V|GND)\s*$/iu.test(line)))title=zh?"端点与引脚对应":"Endpoints and pins";
- else if(/Purpose/u.test(code.text)&&/Connection/u.test(code.text))title=zh?"元件详情与接线说明":"Component details and wiring";
- else if(/High(?:-| )risk|Low(?:-| )risk operation|低风险操作/iu.test(code.text)&&/Preview|预览/iu.test(code.text))title=zh?"按风险选择修改流程":"Edit flow by risk";
- else if(/\bValidator\b/iu.test(code.text)&&/\bRollback\b|回滚/u.test(code.text))title=zh?"修改校验与回滚流程":"Validation and rollback";
- else if(/可能是[：:]|候选元件/u.test(code.text)&&/确认|置信度/u.test(code.text))title=zh?"元件识别候选确认":"Confirming component matches";
- else if(directory)title=zh?"目录结构":"File layout";
+ if(directory)title=zh?"目录结构":"File layout";
  else if(declaration)title=zh?`${declaration[2]} ${declaration[1]==="interface"?"接口":"定义"}`:`${declaration[2]} ${declaration[1]}`;
+ else if(schema)title=zh?`${schema[1]} 数据表结构`:`${schema[1]} schema`;
  else if(ui==="placeholder")title=zh?"输入提示文案":"Input placeholder";
  else if(ui==="actions")title=zh?"操作文案":"Action labels";
  else if(ui==="progress")title=zh?"进度文案":"Progress copy";
  else if(COMMAND_LANGUAGE.test(code.language))title=zh?"终端命令":"Terminal commands";
  else if(/json/iu.test(code.language))title=zh?"JSON 示例":"JSON example";
  else if(flow)title=zh?"流程示例":"Flow example";
- else if(/[┌┐└┘│┃]/u.test(code.text)||aiPanel)title=zh?"界面草图":"UI sketch";
+ else if(/[┌┐└┘│┃]/u.test(code.text))title=zh?"界面草图":"UI sketch";
  else if(code.language&&!/^(?:text|txt|plaintext|md|markdown)$/iu.test(code.language))title=zh?"代码示例":"Code example";
  else title=zh?"参考示例":"Reference example";
  const subject=short(topic.replace(/^#{1,6}\s+/u,""));

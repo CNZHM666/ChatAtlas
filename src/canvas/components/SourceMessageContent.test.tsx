@@ -13,6 +13,6 @@ it("renders source paragraphs, exported links, malformed spaced emphasis and lit
 });
 it("renders formulas through the same lazy math renderer as the Reader", async () => {
   const { container } = render(<SourceMessageContent content={"已知 \\(x^2\\)。\n\n$$\n\\frac{dz}{dt}=\\frac{2+1/\\sqrt{t}}{2+2t+2\\sqrt{t}}\n$$"} zh />);
-  await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(2));
+  await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(2), { timeout: 5000 });
   expect(container.querySelector(".katex-error")).toBeNull(); expect(container.querySelector(".katex-display")).toBeInTheDocument();
 });

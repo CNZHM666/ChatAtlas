@@ -1,10 +1,12 @@
 import {unified} from "unified";
 import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import {GFM_OPTIONS} from "./markdown-gfm";
 import type {FocusSection} from "./focus-session";
 import {isSourceCaption} from "./wiki-source-code";
 import {wikiExplanatorySentenceCount,wikiSentenceCoverage,wikiSentenceRepeats} from "./wiki-cross-duplicates";
 
-const parser=unified().use(remarkParse);
+const parser=unified().use(remarkParse).use(remarkGfm,GFM_OPTIONS);
 /** A batch-written chapter introduction ("本章概述/说明/梳理…"). */
 const META=/^(?:本章|这一章|本节)/u;
 /** Paragraphs this short carry too little to judge as a repeat. */

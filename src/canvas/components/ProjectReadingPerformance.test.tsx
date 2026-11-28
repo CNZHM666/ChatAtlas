@@ -74,4 +74,11 @@ it("switches immediately during background loading and reuses one result for bot
  fireEvent.click(screen.getByText("查看账本"));
  expect(screen.queryByText("正在加载知识点…")).toBeNull();
  expect(workers).toHaveLength(1);
+
+ cleanup();
+ render(<Workspace/>);
+ fireEvent.click(screen.getByText("查看账本"));
+ expect(screen.queryByText("正在加载知识点…")).toBeNull();
+ expect(screen.getByText("索引实现")).toBeVisible();
+ expect(workers).toHaveLength(1);
 });

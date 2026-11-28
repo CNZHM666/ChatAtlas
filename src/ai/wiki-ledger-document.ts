@@ -1,6 +1,7 @@
 import { confirmedRoadmapText, confirmedRoadmaps, withPinnedRoadmapChapters } from "../shared/wiki-confirmed-roadmap";
 import { LEAVES_OUT } from "../shared/negation";
 import {cleanWikiDraftClaims,cleanWikiDraftDisplay,retainWikiDecisions,reviewWikiEditorial,wikiInternalDraftLabel} from "./wiki-editorial-review";
+import { refineWikiResearchChapters } from "./wiki-research-organization";
 import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
 import {placeWikiChoices} from "./wiki-choice-placement";
 import {wikiUnconfirmedWorkflowFeedback} from "./wiki-workflow-scope";
@@ -21,6 +22,8 @@ import type { WikiClaim } from "../shared/wiki-claims";
 import { conditionKept, DECIDING_KINDS, groupMemberConditions, statesCore, wikiLedgerUnits, type WikiDraftClaim, type WikiKnowledgeLedger, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { wikiTechnicalContext } from "./wiki-knowledge-select";
+import { trimWikiEditorialRepeats } from "./wiki-editorial-repetitions";
+import { tidiedMarkdown } from "./wiki-markdown-tidy";
 import { wikiHolderOf } from "../shared/wiki-holder";
 import { knowledgeTerms } from "../shared/knowledge-subject";
 import { removeParagraph, replaceParagraph, tableCells, withoutTableRows } from "../shared/wiki-body-text";
@@ -211,13 +214,14 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
   if (!savedDraft || !organization) return { sections: [], evidence: [] };
   const units = new Map(all.map(unit => [unit.id, unit]));
   const draft = { ...savedDraft, chapters: savedDraft.chapters.map(chapter => {
-    if (!chapter.problems.some(problem => problem.endsWith("not in the paragraph"))) return chapter;
+    if (!chapter.problems.some(problem => problem.endsWith("not in the paragraph"))) return { ...chapter };
     return { ...chapter, paragraphs: chapter.paragraphs.map(paragraph => ({ ...paragraph, claims: paragraph.claims?.map(claim => {
       const cited = claim.unitIds.flatMap(id => units.get(id) ?? []);
       const text = cited.length === claim.unitIds.length ? expandedWikiIdentifierClaim(claim.text, paragraph.text, cited) : undefined;
       return text ? { ...claim, text } : claim;
     }) })) };
   }) };
+  const zhDraft = /\p{Script=Han}/u.test(draft.chapters.map(chapter => chapter.title).join(""));
   const acceptedRoadmaps = confirmedRoadmaps(reading);
   const groupConditions = new Map<string, string[]>();
   for (const group of organization.groups ?? []) for (const member of group.members) {
@@ -850,7 +854,6 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     return changed ? { ...chapter, body, paragraphs } : chapter;
   };
   // Plans the discussion left differing, shown as open after the first paragraph telling one of them.
-  const zhDraft = /\p{Script=Han}/u.test(draft.chapters.map(chapter => chapter.title).join(""));
   const differing = [...differingPlans(all, id => statuses.get(id), zhDraft, wikiDecidedTopics(organization.topics, reading.decisions)), ...lengthAgainstDecided(all, id => statuses.get(id), zhDraft)], placedNotes = new Set<string>();
   // A line telling only what a note tells (「- **中央入口**：用户提议……；另有建议称……」 above the note naming both, 「- **任务简化**：
   // 将“今日任务0/7”改为“今日重点0/1”……」 in another chapter) said it a second and third time: the note stands in its place.
@@ -2866,15 +2869,24 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
   if (ledger.documentType !== "learning") rehomedStrayParagraphs(chapters, organization, editorialSubjects, units);
   const reviewed = ledger.documentType === "learning" ? chapters : placeWikiChoices(retainWikiDecisions(reviewWikiEditorial(chapters, reading), reading, new Set(confirmed.map(unit => unit.id)), zhDraft), reading);
   if (ledger.documentType !== "learning") {
+    trimWikiEditorialRepeats(reviewed, reading, units);
     retainCapabilityReports(reviewed, all, statuses);
     trimRehomedStandardsFromReferenceOpenings(reviewed, units);
+    refineWikiResearchChapters(reviewed, reading, units, zhDraft);
   }
   if (ledger.documentType !== "learning") for (const chapter of reviewed) {
     chapter.body = wikiProjectVoice(chapter.body);
     chapter.paragraphs = chapter.paragraphs.map(paragraph => ({ ...paragraph, text: wikiProjectVoice(paragraph.text), claims: paragraph.claims?.map(claim => ({ ...claim, text: wikiProjectVoice(claim.text) })) }));
   }
+  tidiedMarkdown(reviewed);
   const pinned = new Map(acceptedRoadmaps.map(({ plan }) => [confirmedRoadmapText(plan, zhDraft), plan.unitId]));
-  const sections = withPinnedRoadmapChapters(reviewed, reading, zhDraft).filter(chapter => chapter.paragraphs.length).map((draftChapter): FocusSection => {
+  const openingOnly = (chapter: Chapter) => !chapter.paragraphs.length && (chapter.openingUnitIds ?? []).some(id => {
+    const unit = units.get(id);
+    return unit?.evidence.role === "user" && !unit.evidence.pasted && !unit.about && statuses.get(id) !== "history"
+      && wikiDocumentBlocks(chapter.body).some(block => block.kind === "paragraph" &&
+        saysMostOf(knowledgeTerms(block.text), unit.statement) && claimSupported(block.text, [unit]));
+  });
+  const sections = withPinnedRoadmapChapters(reviewed, reading, zhDraft).filter(chapter => chapter.paragraphs.length || openingOnly(chapter)).map((draftChapter): FocusSection => {
     const composed = ledger.documentType === "learning" ? draftChapter : mergeWikiRelatedParagraphs(draftChapter, editorialSubjects, statuses, editorialGroups, id => {
       const unit = units.get(id);
       return unit ? [JSON.stringify(wikiParagraphScope(unit))] : [];
@@ -2897,7 +2909,8 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
     const mostlyDecided = (sentence: string) => { const own = knowledgeTerms(sentence); let shared = 0; for (const term of own) if (decidedTerms.has(term)) shared++; return shared / Math.max(1, own.size) >= OPENING_DECIDED; };
     for (const id of chapter.openingUnitIds ?? []) {
       const unit = units.get(id);
-      if (!unit || statuses.get(id) !== "confirmed" && !ownDecision(unit)) continue;
+      const personalOpening = !chapter.paragraphs.length && unit?.evidence.role === "user" && !unit.evidence.pasted && !unit.about && statuses.get(id) !== "history";
+      if (!unit || !personalOpening && statuses.get(id) !== "confirmed" && !ownDecision(unit)) continue;
       const whole = opening.split(/(?:(?<=[。！？!?])|(?<=[A-Za-z0-9)\]"'’*%`]\.)(?<!\b(?:e\.g|i\.e|vs|etc|incl|approx|cf)\.)(?=\s))(?![^“”「」\n]*[”」])/u).map(item => item.trim()).find(item => item && saysMostOf(knowledgeTerms(item), unit.statement));
       // A sentence the decision says up to a semicolon, a stage limit after it ("……及链接的功能；本阶段不包含比价。"): the
       // claim ends there, so 〔已定〕 does not take in the limit, which is not the user's decision.
@@ -2905,9 +2918,16 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
       // version, and the key decisions listed it so.
       const clause = /[；;]/u.test(unit.statement) ? undefined : whole?.split(/(?<=[；;])/u).map(item => item.replace(/[；;]$/u, "").trim()).find(item => item.length >= SPLIT_CHARS && saysMostOf(knowledgeTerms(item), unit.statement));
       const sentence = whole && clause && clause !== whole.replace(/[。！？!?]$/u, "") ? clause : whole;
-      if (sentence && mostlyDecided(sentence)) openingUnits.set(sentence, [...openingUnits.get(sentence) ?? [], id]);
+      if (sentence && (personalOpening ? claimSupported(sentence, [unit]) : mostlyDecided(sentence))) openingUnits.set(sentence, [...openingUnits.get(sentence) ?? [], id]);
     }
-    const openingClaims = [...openingUnits].flatMap(([sentence, ids]) => [claimOn(sentence, ids, true)].flatMap(claim => claim ? [{ ...claim, holderMark: true }] : []));
+    const openingClaims = [...openingUnits].flatMap(([sentence, ids]) => {
+      const personalSource = ids.some(id => {
+        const unit = units.get(id);
+        return unit?.evidence.role === "user" && !unit.evidence.pasted && statuses.get(id) !== "confirmed" && !ownDecision(unit);
+      });
+      const claim = claimOn(sentence, ids, !personalSource);
+      return claim ? [{ ...claim, holderMark: true }] : [];
+    });
     const claims = [...openingClaims, ...chapter.paragraphs.flatMap(paragraph => {
       const written = paragraph.claims?.length ? paragraph.claims.map(answerOwnWords).flatMap(claim => splitMixed(claim.text, decisionsSaid(claim.text, claim.unitIds, paragraph.unitIds)).flatMap(part => claimOn(part.text, part.unitIds, claim.markOnly, chapterUnits, itemLabel(paragraph.text, part.text)) ?? [])) : [];
       // A block shown as it was sent (a caption over a fence or a table) states no sentence of its own: its first
@@ -2934,7 +2954,7 @@ export function ledgerDocument(ledger: WikiKnowledgeLedger, conversationTitles: 
       }
       return [source, id];
     });
-    const body = ledger.documentType === "learning" ? chapter.body : cleanWikiDraftDisplay(chapter.body);
+    const body = ledger.documentType === "learning" ? chapter.body : cleanWikiDraftDisplay(openingOnly(chapter) ? opening.trim() : chapter.body);
     const subtopics = [...new Set(body === chapter.body ? chapter.paragraphs.map(paragraph => paragraph.subtopic)
       : wikiDocumentBlocks(body).flatMap(block => block.kind === "heading" && /^### /u.test(block.text) ? block.text.slice(4) : []))];
     const title = wikiInternalDraftLabel(chapter.title)

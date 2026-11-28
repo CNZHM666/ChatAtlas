@@ -13,7 +13,7 @@ export class ChatGPTSyncAdapter {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const response = await fetch("https://chatgpt.com/api/auth/session", { credentials: "include", signal: AbortSignal.timeout(15_000) });
+      const response = await fetch("https://chatgpt.com/api/auth/session", { credentials: "include", signal: AbortSignal.timeout(20_000) });
       if (!response.ok) return false;
       const session = await response.json() as { accessToken?: string; user?: unknown };
       this.sessionChecked = true;
@@ -24,7 +24,7 @@ export class ChatGPTSyncAdapter {
 
   private async accessToken(): Promise<string | null> {
     if (this.sessionChecked) return this.token;
-    const response = await fetch("https://chatgpt.com/api/auth/session", { credentials: "include", signal: AbortSignal.timeout(15_000) });
+    const response = await fetch("https://chatgpt.com/api/auth/session", { credentials: "include", signal: AbortSignal.timeout(20_000) });
     this.sessionChecked = true;
     if (!response.ok) return null;
     const session = await response.json() as { accessToken?: string };
@@ -35,8 +35,18 @@ export class ChatGPTSyncAdapter {
   private async get<T>(path: string): Promise<T> {
     const request = async () => {
       const token = await this.accessToken();
-      try { return await fetch(`https://chatgpt.com${path}`, { credentials: "include", headers: token ? { authorization: `Bearer ${token}` } : undefined, signal: AbortSignal.timeout(30_000) }); }
-      catch { throw new ChatGPTSyncError("ChatGPT history request lost its network connection.", true, "network"); }
+      try { return await fetch(`https://chatgpt.com${path}`, { credentials: "include", headers: token ? { authorization: `Bearer ${token}` } : undefined, signal: AbortSignal.timeout(55_000) }); }
+      catch (error) {
+        const message = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+        const timedOut = /timed?\s*out|timeouterror|abort/iu.test(message);
+        throw new ChatGPTSyncError(
+          timedOut
+            ? "读取 ChatGPT 历史超时，请保持来源页打开并稍后重试 / ChatGPT history request timed out."
+            : "ChatGPT history request lost its network connection.",
+          true,
+          "network",
+        );
+      }
     };
     let response = await request();
     if (response.status === 401 && this.token) { this.token = null; this.sessionChecked = false; response = await request(); }

@@ -1,13 +1,48 @@
 import { describe, expect, it } from "vitest";
-import { reanchorWikiUnit, repairedStatements, statementDrift, trimmedQuote, wikiCompleteDetail } from "./wiki-unit-fidelity";
+import { reanchorWikiUnit, statementDrift, trimmedQuote, wikiCompleteDetail } from "./wiki-unit-fidelity";
 import type { WikiKnowledgeUnit } from "../shared/wiki-knowledge";
-import type { StructuredAIRequest } from "./provider";
-import { AIProviderResponseError } from "./provider-errors";
 
 const unit = (statement: string, quote: string, role: "user" | "assistant" = "assistant"): WikiKnowledgeUnit => ({ id: `u:${statement.length}`, subject: "订单", statement, kind: "plan", details: [], delivery: "unknown", adoption: { status: role === "assistant" ? "proposal" : "unknown" },
   evidence: { evidenceId: "e", conversationId: "c", messageId: "m", messageIndex: 1, role, pasted: false, quote } });
 
 describe("statements saying more than their source", () => {
+  it("recovers a clipped technical parameter only from the supporting section of the same message", () => {
+    const quote = "校验接口先读取总线配置，然后连接 OLED 屏幕。";
+    const statement = quote + "OLED 的 I2C 地址为 0x3C。";
+    const message = "### OLED 总线配置\n\n"+quote+"\n\n"+"初始化时读取设备。".repeat(15)+"\n\nOLED 的 I2C 地址为 0x3C。";
+    const original = {...unit(statement,quote),subject:"OLED 总线配置"};
+    const repaired=reanchorWikiUnit(original,message);
+    expect(repaired.statement).toBe(statement);
+    expect(repaired.evidence.quote).toContain("OLED 的 I2C 地址为 0x3C。");
+    expect(reanchorWikiUnit(original,message.replace("OLED 的 I2C 地址为 0x3C。","### 无关设备\n\n无关设备的 I2C 地址为 0x3C。"))).toBe(original);
+  });
+
+  it("expands a clipped reference license inside its own bold section and never borrows another project's license", () => {
+    const quote = "- 直接操作 KiCad 底层的 S 表达式，产生清晰的行级差异。";
+    const claim = { ...unit("Copperhead 直接操作 KiCad 底层的 S 表达式，采用 Apache-2.0 协议。", quote),
+      subject: "Copperhead", about: { name: "Copperhead", role: "reference" as const } };
+    const source = `### 开源项目\n\n**1. Copperhead — 架构参考**\\\n操作对象\n\n${quote}\n- ${"细节说明。".repeat(25)}\n- 协议：Apache-2.0，核心完全开源。\n\n**2. Forma — 工作区**\n\n- 协议：MIT。`;
+    const expanded = reanchorWikiUnit(claim, source);
+    expect(expanded.statement).toBe(claim.statement);
+    expect(expanded.evidence.quote).toContain("协议：Apache-2.0");
+    expect(expanded.evidence.quote).not.toContain("Forma");
+    expect(statementDrift(expanded, source)).toEqual([]);
+    const conflicting = source.replace("Apache-2.0，", "GPL-3.0，").replace("MIT。", "Apache-2.0。");
+    const mechanism = reanchorWikiUnit(claim, conflicting);
+    expect(mechanism.statement).toBe("Copperhead 直接操作 KiCad 底层的 S 表达式。");
+    expect(mechanism.evidence.quote).toBe(quote);
+    const cited = source.replace(`\n\n${quote}`, `\n\n[-6](https://example.test/source)\n\n${quote}`).replace("**1. Copperhead — 架构参考**", "1. Copperhead — 架构参考");
+    const older = { ...mechanism, evidence: { ...mechanism.evidence, quote: `[-6](https://example.test/source)\n\n${quote}` } };
+    expect(reanchorWikiUnit(older, cited, "Apache-2.0").evidence.quote).toMatch(/^1\. Copperhead/u);
+    expect(reanchorWikiUnit(older, cited.replace("Apache-2.0", "MIT"), "Apache-2.0").statement).toBe(older.statement);
+  });
+  it("distinguishes a known technology version from an unsupported count", () => {
+    const quote="学习 Topic、Node 和 Service。";
+    const source="学习 ROS2。\n\n" + "后续课程。".repeat(100) + quote;
+    expect(statementDrift(unit("学习 ROS 2 的 Topic、Node 和 Service。",quote),source)).not.toContainEqual(expect.stringMatching(/^figures:/u));
+    expect(statementDrift(unit("学习 ROS 2，需要 2 周。",quote),source)).toContainEqual(expect.stringMatching(/^figures: 2/u));
+    expect(statementDrift(unit("学习 ROS 3 的 Topic、Node 和 Service。",quote),source)).toContainEqual(expect.stringMatching(/^figures: 3/u));
+  });
   it("reanchors a clipped receipt to a complete original section without accepting a reversed prohibition", () => {
     const detail = "右侧 Inspector 展示详情。";
     const allowed = "画布节点选中使用蓝色边框，右侧 Inspector 展示详情。";
@@ -91,45 +126,4 @@ describe("quotes trimmed to the blocks stating their point", () => {
     expect(trimmedQuote("支付前确认商户资质，开放7天体验后销售月度套餐。", quote)).toBe(quote);
     expect(trimmedQuote("用户留存偏低。", quote)).toBe(quote);
   });
-});
-
-it("takes a rewrite only when it drifts less, and keeps the statement when the request fails", async () => {
-  const body = "退款审核时不要让客服直接改金额。", drifting = unit("严禁客服直接修改退款金额。", body), other = unit("必须让客服直接改退款金额，并提升30%效率。", body);
-  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>) => request.validate!({ units: [{ id: "u1", statement: "不要让客服直接修改退款金额。" }, { id: "u2", statement: "必须让客服直接改退款金额，提升30%效率。" }] }) as T };
-  const flagged = [drifting, other].map(item => ({ unit: item, body, reasons: statementDrift(item, body) }));
-  const { statements } = await repairedStatements(flagged, ai, "zh-CN", new AbortController().signal);
-  expect([...statements]).toEqual([[drifting.id, "不要让客服直接修改退款金额。"]]);
-  const failing = { generateStructured: async () => { throw new Error("down"); } };
-  expect(await repairedStatements(flagged, failing, "zh-CN", new AbortController().signal)).toMatchObject({ failed: 1, requests: 1 });
-});
-
-it("does not accept an unrelated true statement as a repair", async () => {
-  const quote = "线条尽量保持灰色。右侧 Inspector 建议宽度为 320px。";
-  const original = { ...unit("线条必须保持灰色。", quote), subject: "线条样式" };
-  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>) => request.validate({
-    units: [{ id: "u1", statement: "右侧 Inspector 建议宽度为 320px。" }],
-  }) };
-  const result = await repairedStatements([{ unit: original, body: quote, reasons: statementDrift(original, quote) }], ai, "zh-CN", new AbortController().signal);
-  expect(result.statements.size).toBe(0);
-});
-
-it("splits truncated repairs and keeps the successful half", async () => {
-  const body = "建议本地保存配置。";
-  const flagged = Array.from({ length: 4 }, (_, index) => {
-    const source = { ...unit("必须本地保存配置。", body), id: "point-" + index };
-    return { unit: source, body, reasons: statementDrift(source, body) };
-  });
-  const sizes: number[] = [];
-  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
-    const rows = JSON.parse(request.prompt).units as Array<{ id: string; statement: string }>;
-    sizes.push(rows.length);
-    if (rows.length > 2) throw new AIProviderResponseError("PROVIDER_OUTPUT_TRUNCATED");
-    if (sizes.length === 3) throw new Error("offline");
-    return request.validate({ units: rows.map(row => ({ id: row.id, statement: body })) });
-  } };
-  const result = await repairedStatements(flagged, ai, "zh-CN", new AbortController().signal);
-  expect(sizes).toEqual([4, 2, 2]);
-  expect(result.statements.size).toBe(2);
-  expect(result.checked.size).toBe(2);
-  expect(result.failed).toBe(1);
 });

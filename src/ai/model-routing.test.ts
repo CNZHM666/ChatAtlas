@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AdaptiveConcurrency, isReadingRequest, providerConcurrencyCeiling, usesMainModelForPlanning } from "./model-routing";
 import { createAtlasAI } from "./atlas-ai";
+import { AIProviderValidationError } from "./provider-errors";
 import { getDatabase } from "../storage/db";
 import type { AISettings } from "../shared/types";
 
@@ -57,6 +58,31 @@ describe("AtlasAI model routing", () => {
     await ai.decide({ taskType: "other", system: "Plan the directory", prompt: JSON.stringify({ presentation: "wiki_topic_plan", sections: [] }), validate: value => value });
     await ai.decide({ taskType: "other", system: "Review", prompt: JSON.stringify({ presentation: "home_task_review" }), validate: value => value });
     expect(models).toEqual(["economy-model", "main-model", "economy-model"]);
+  });
+
+  it("retries a sidecar format error with the failing field and caches the repaired batch", async () => {
+    const prompts: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      prompts.push(JSON.parse(String(init?.body)).messages[0].content);
+      const value = prompts.length === 1 ? { changes: null } : { changes: [] };
+      return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify(value) } }] }), { headers: { "Content-Type": "application/json" } });
+    }));
+    const request = {
+      taskType: "other" as const, system: "Return JSON changes.", prompt: JSON.stringify({ presentation: "sidecar_project_update" }),
+      validate: (value: unknown) => {
+        if (value && typeof value === "object" && "changes" in value && Array.isArray(value.changes)) return value.changes;
+        const error = new AIProviderValidationError("sidecar_changes");
+        error.fieldPaths = ["changes"];
+        throw error;
+      },
+    };
+    const ai = createAtlasAI(settings("sidecar-format"));
+    expect(await ai.generateStructured(request)).toEqual([]);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain("100 characters for title and 700 for text");
+    expect(prompts[1]).toContain("Invalid fields: changes.");
+    expect(await ai.generateStructured(request)).toEqual([]);
+    expect(prompts).toHaveLength(2);
   });
 
   it("reuses a batch the main model already read instead of paying the economy model again", async () => {

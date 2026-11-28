@@ -23,6 +23,7 @@ export default defineConfig(({ command }) => ({
         atlas: "atlas.html",
         sidecar: "sidecar.html",
         readerPreview: "reader-preview.html",
+        firstWiki: "first-wiki.html",
       },
     },
   },

@@ -8,7 +8,8 @@ import type { Conversation, ConversationGraph, ConversationMessage, QuestionSnap
 import { isInternalSearchQueryMessage } from "../../shared/conversation-text";
 import { loadConversationGraph } from "../conversation-graph";
 import { getDatabase } from "../../storage/db";
-import { platformName } from "../../shared/platforms";
+import { conversationPlatformGroup, platformName } from "../../shared/platforms";
+import { AIPlatformIcon } from "./AIPlatformIcon";
 import { QuestionReader } from "./QuestionReader";
 import { ConversationSidebar } from "./ConversationSidebar";
 import { usePreferences } from "../preferences";
@@ -19,7 +20,7 @@ import { RelatedProjects } from "./RelatedProjects";
 import { sourceReadingPosition, saveSourceReadingPosition } from "../source-reading-position";
 import { ReaderToolbarProvider, ReaderToolbarSlot } from "./ReaderToolbar";
 import { readerCitations, type ReaderCitation } from "../reader-citations";
-import { ArrowUpRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowUp, ArrowUpRight, ChevronLeft, ChevronRight } from "lucide-react";
 
 /** Stepping through a chapter's originals without leaving the full Reader. */
 export interface ReaderEvidenceSteps { index: number; total: number; onPrevious: () => void; onNext: () => void; onChapter: () => void; chapterLabel: string }
@@ -45,12 +46,15 @@ export function OriginalReader({ conversation, conversations, messages, loading,
   const [focusId, setFocusId] = useState(targetMessageId);
   const [focusVersion, setFocusVersion] = useState(0);
   const [currentQuestionId, setCurrentQuestionId] = useState<string>();
+  const [stickyQuestionId, setStickyQuestionId] = useState<string>();
   const readingBody = useRef<HTMLElement>(null);
   const scrollFrame = useRef(0);
   const jumpingUntil = useRef(0);
   const resumedConversation = useRef<string>();
   const locatedTarget = useRef<string>();
   const readable = useMemo(() => messages.filter((message) => !isInternalSearchQueryMessage(message)), [messages]);
+  const questions = useMemo(() => readable.filter((message) => message.role === "user"), [readable]);
+  const questionOrder = useMemo(() => new Map(questions.map((item, idx) => [item.id, idx])), [questions]);
   const messageById = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const questionByMessage = useMemo(() => readerQuestionIndex(readable), [readable]);
   const citations = useMemo(() => onOpenChapter ? readerCitations(conversation.id, messages, reviews) : undefined, [onOpenChapter, conversation.id, messages, reviews]);
@@ -111,14 +115,25 @@ export function OriginalReader({ conversation, conversations, messages, loading,
       const end = displayed[displayed.length - 1].hasAttribute("data-reader-message-id") ? displayed.length : displayed.length - 1;
       const index = readerPosition(end - first, (position) => displayed[position + first].getBoundingClientRect().top, boundary);
       const question = questionByMessage.get(displayed[index + first]?.getAttribute("data-reader-message-id") ?? "");
-      if (question) rememberQuestion(question);
+      if (question) {
+        rememberQuestion(question);
+        const questionEl = body.querySelector<HTMLElement>(`[data-reader-message-id=${JSON.stringify(question)}]`);
+        const bodyTop = body.getBoundingClientRect().top;
+        const scrolledPastQuestion = Boolean(questionEl && questionEl.getBoundingClientRect().bottom < bodyTop + 12);
+        setStickyQuestionId(scrolledPastQuestion ? question : undefined);
+      } else {
+        setStickyQuestionId(undefined);
+      }
     });
   };
   const jumpTo = useCallback((message: ConversationMessage) => {
     jumpingUntil.current = performance.now() + 700;
+    setStickyQuestionId(undefined);
     setFocusId(message.id); rememberQuestion(message.id); setFocusVersion((value) => value + 1);
   }, [rememberQuestion]);
   const selectedQuestion = currentQuestionId ?? (focusId ? questionByMessage.get(focusId) : undefined) ?? readable.find((message) => message.role === "user")?.id;
+  const stickyQuestion = stickyQuestionId ? messageById.get(stickyQuestionId) : undefined;
+  const stickyQuestionText = stickyQuestion ? (questionTitles.get(stickyQuestion.id) || stickyQuestion.content.replace(/\s+/gu, " ").trim()) : "";
   const activeHit = hits.find(hit => hit.messageId === focusId);
   const toggleSidebar = () => setCollapsed(value => { localStorage.setItem("atlas-conversation-sidebar-collapsed", value ? "0" : "1"); return !value; });
   const returnOutline = () => { setMatchOutline(false); setCollapsed(false); };
@@ -141,10 +156,11 @@ export function OriginalReader({ conversation, conversations, messages, loading,
     {!collapsed ? <ReaderSidebarResize width={sidebarWidth} zh={zh} onChange={(width) => { setSidebarWidth(width); try { localStorage.setItem(sidebarWidthKey, String(width)); } catch { /* Resizing works without persistence. */ } }} /> : null}
     <div className="source-reader-content">
       <header className="source-reader-header">
-        <div className="source-reader-title">{collapsed || searchContext ? <ReaderBackButton className="original-back" onClick={searchContext && collapsed && !backLabel ? matchOutline ? returnOutline : () => { setMatchOutline(true); setCollapsed(false); } : onBack} label={backLabel ?? (searchContext && collapsed ? matchOutline ? zh ? "返回原目录" : "Original outline" : zh ? "返回命中目录" : "Search matches" : (zh ? searchContext ? "返回对话列表" : "全部对话" : searchContext ? "Back to the list" : "All conversations"))} /> : null}<h1 title={conversation.title}>{conversation.title}</h1></div>
+        <div className="source-reader-title">{collapsed || searchContext ? <ReaderBackButton className="original-back" onClick={searchContext && collapsed && !backLabel ? matchOutline ? returnOutline : () => { setMatchOutline(true); setCollapsed(false); } : onBack} label={backLabel ?? (searchContext && collapsed ? matchOutline ? zh ? "返回原目录" : "Original outline" : zh ? "返回命中目录" : "Search matches" : (zh ? searchContext ? "返回对话列表" : "全部对话" : searchContext ? "Back to the list" : "All conversations"))} /> : null}<h1 title={conversation.title}>{conversation.title}</h1><span className="source-reader-meta"><AIPlatformIcon platform={conversationPlatformGroup(conversation.platform)} /><span>{nativeName}</span>{questions.length > 0 ? <small>{zh ? `· ${questions.length} 轮问答` : `· ${questions.length} turns`}</small> : null}</span></div>
         <ReaderToolbarSlot />
         <div className="source-library-actions">{onOpenReview ? <RelatedProjects sessions={reviews} zh={zh} onOpen={onOpenReview} /> : null}{nativeHref ? <a className="source-native-link" href={nativeHref} target="_blank" rel="noopener noreferrer" aria-disabled={nativeBusy || undefined} title={zh ? "在原平台打开并定位当前问答" : "Open on the original platform at the current question"} onClick={event => { if (typeof chrome !== "undefined" && typeof chrome.tabs?.query === "function") { event.preventDefault(); void readNative(); } }}>{nativeBusy ? zh ? "正在打开…" : "Opening…" : zh ? `在 ${nativeName} 中打开` : `Open in ${nativeName}`}<ArrowUpRight size={14} aria-hidden="true" /></a> : null}</div>
       </header>
+    {stickyQuestion && stickyQuestionText ? <div className="original-sticky-question"><button type="button" onClick={() => jumpTo(stickyQuestion)} title={zh ? "回到这条提问顶部" : "Jump back to this question"}><span className="original-sticky-badge">Q{(questionOrder.get(stickyQuestion.id) ?? 0) + 1}</span><span className="original-sticky-text">{stickyQuestionText}</span><ArrowUp size={14} aria-hidden="true" /></button></div> : null}
     <main ref={readingBody} className="original-reading-body" onScroll={updateReadingPosition}>
       {conversation.source===`${conversation.platform}_dom`?<p className="muted">{zh?"网页采集：这里保留的是网页已加载过的消息，可能不包含整段历史。可在原平台加载更早消息后补充。":"Page capture: these are messages loaded on the website; earlier history may be missing. Load earlier messages on the original platform to add them."}</p>:null}
       {nativeNotice ? <p role="status" className="muted">{nativeNotice}</p> : null}

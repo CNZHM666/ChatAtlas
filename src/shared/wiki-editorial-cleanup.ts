@@ -1,17 +1,78 @@
 import type { FocusSection } from "./focus-session";
 import type { WikiClaim } from "./wiki-claims";
 import { wikiDocumentBlocks } from "./wiki-document-blocks";
-import type { WikiKnowledgeLedger, WikiUnitStatus } from "./wiki-knowledge";
+import type { WikiKnowledgeLedger, WikiKnowledgeUnit, WikiUnitStatus } from "./wiki-knowledge";
 import { knowledgeTerms } from "./knowledge-subject";
 import { wikiQuoteAsksOnlyForFeedback } from "./wiki-said-in-quote";
 import { wikiStageLabels } from "./wiki-roadmap-scope";
 import { repairGeneratedWikiTable } from "./wiki-table-source";
 
+/** Reviews of a previously exported artifact stay in the source conversation. */
+export function wikiIsDocumentReviewTable(text: string): boolean {
+  const header = text.split("\n", 1)[0];
+  return /(?:评估维度|评审维度|evaluation (?:dimension|criteria))/iu.test(header)
+    && /评分|score/iu.test(header)
+    && /(?:文档|稿件|导出|Codex\s*开发指导|结构与信息密度|document|draft|export)/iu.test(text)
+    && /\d\s*\/\s*10\b/u.test(text);
+}
+
+const DOCUMENT_REVIEW = /(?:上一版|这版|这份|当前|本次|重新组织成.{0,8}层).{0,28}(?:文档|导出稿|知识库)|(?:文档|导出稿|知识库).{0,12}(?:评分|组织建议|重组|完整度|区分.{0,12}Implemented)|Codex\s*开发指导价值|(?:draft|export|generated document).{0,20}(?:review|rating|score)/iu;
+const ARTIFACT_STATUS_TAXONOMY = /(?:知识库|导出稿|文档).{0,35}\bImplemented\b.{0,48}\bReported\b.{0,48}\bPlanned\b.{0,48}\bExperimental\b/iu;
+const DOC_FILES = /\b(?:PROJECT_OVERVIEW|DECISIONS_AND_HISTORY|ARCHITECTURE)\.md\b/giu;
+const CAREER_SECTION = /(?:你.{0,5}(?:适合|该选|最适合)的.{0,8}(?:技术栈|方向|路线)|(?:大二|大三|在校|转行).{0,16}(?:学习|就业|路线)|(?:学习|求职|就业|职业|实习).{0,6}(?:规划|路线|建议)|career(?: path| advice| plan))/iu;
+const CAREER_CONTENT = /(?:大二|大三|就业|专业壁垒|职业|高薪岗位|找工作|学习路线|适合你的|行业前景|工业机器人.{0,28}(?:安装量|需求)|career|job market)/iu;
+
+export function wikiIsProjectAside(unit: Pick<WikiKnowledgeUnit, "statement" | "subject" | "facet" | "adoption" | "about"> & {
+  evidence: Pick<WikiKnowledgeUnit["evidence"], "role" | "section" | "quote" | "code">;
+}): boolean {
+  if (unit.adoption.status === "user_decision" || unit.adoption.status === "user_adopted") return false;
+  if (unit.evidence.code?.language === "table" && wikiIsDocumentReviewTable(unit.evidence.code.text)) return true;
+  const point = [unit.subject, unit.facet, unit.statement].join(" ");
+  const context = [unit.evidence.section, unit.evidence.quote].join(" ");
+  if (ARTIFACT_STATUS_TAXONOMY.test(point) && unit.evidence.role === "assistant" && /评审|导出|文档结构|重新组织|计划做什么.{0,25}已经做了什么/u.test(context)) return true;
+  const review = DOCUMENT_REVIEW.test(point)
+    && (DOCUMENT_REVIEW.test(context) || /\d\s*\/\s*10\b/u.test(point))
+    && (/\bImplemented\b.{0,45}\b(?:Reported|Planned)\b/iu.test(point)
+      || [...point.matchAll(DOC_FILES)].length >= 2
+      || /评分|导出稿|文档组织建议|Codex\s*开发指导价值|评审维度|score|rating/iu.test(point));
+  if (review) return true;
+  return unit.evidence.role === "assistant" && !unit.about
+    && CAREER_SECTION.test(unit.evidence.section ?? "") && CAREER_CONTENT.test(point);
+}
+
+/** Remove surviving generated sentences of projected-out units in older drafts. */
+export function withoutWikiProjectAsideProse(body: string, asides: readonly WikiKnowledgeUnit[]) {
+  const key = (text: string) => text.normalize("NFKC").replace(/[\s\p{P}\p{S}]/gu,"").toLowerCase();
+  const anchors = asides.map(unit => key(unit.statement)).filter(text => text.length >= 24);
+  for (const block of wikiDocumentBlocks(body).reverse()) {
+    if (block.kind === "table" && wikiIsDocumentReviewTable(block.text)) {
+      body = body.slice(0,block.start) + body.slice(block.end);
+      continue;
+    }
+    if (block.kind !== "paragraph" && block.kind !== "list") continue;
+    const sentences = block.text.split(/(?<=[。！？])|(?<=[.!?])(?=\s)|(?<=\n)(?=\s*(?:[-*+]|\d+\.)\s)/u);
+    const kept = sentences.filter(sentence => {
+      const value = key(sentence);
+      return !anchors.some(anchor => value===anchor || value.startsWith(anchor.slice(0,18)) && value.endsWith(anchor.slice(-12)));
+    }).join("");
+    if (kept===block.text) continue;
+    const text=kept.trim().replace(/^\s*(?:[-*+]|\d+\.)\s*$/gmu,"");
+    if (text!==block.text) body = body.slice(0,block.start) + text + body.slice(block.end);
+  }
+  return body;
+}
+
 const PROCESS = /^(?:(?:用户|项目发起人|发起人)(?:曾)?(?:展示|上传|提供)(?:了)?(?:一张|一组|当前|现有|项目的|小程序的|页面的|当前小程序的|界面|页面|设计稿){0,4}(?:截图|图片)[。.]?|(?:the )?(?:user|project author) (?:showed|uploaded|provided) (?:a |the )?(?:(?:current|app|UI) )*screenshots?[.!]?)$/iu;
 const ARTIFACT_REQUEST = /^(?:(?:用户|项目发起人|发起人)\s*)?(?:请|需要|希望|要求|可以|能否)?\s*(?:帮我|给我)?\s*(?:提供|给|写|生成|整理)\s*(?:一个|一份)?\s*(?:准确|完整|具体|最终|合适)?的?\s*(?:提示词|开发提示词)(?:[，,]\s*(?:并|可以)?\s*(?:参考|借鉴)(?:现有的?)?(?:开源)?(?:项目|方案))?[。.!？?]?$/iu;
 const OBSERVATION = /^(?:(?:此外|当时)[，,]\s*)?(?:项目发起人|发起人|用户)(?:指出|表示|感觉|观察到)[^。！？\n]{0,18}(?:星期一|周一|周二|工作日)[^。！？\n]{0,24}(?:较少|更少|减少|不多)[。.]?$/u;
 const PAST_REJECTION = /[，,；;]\s*(?:该|这一|此)(?:历史)?方案已被否决[。.]?$/u;
-const STATIC_DECISION = /^>\s*(?:\*\*)?(?:版本未定|范围有分歧|Not settled|Scope is disputed)(?=\s|[：:*·])/iu;
+const STATIC_DECISION = /^>\s*(?:\*\*)?(?:版本未定|范围有分歧|Not settled|Scope is disputed)(?=\s|[：:*·]|$)/iu;
+
+export function withoutWikiVersionCards(body: string) {
+  const cards = wikiDocumentBlocks(body).filter(block => block.kind === "blockquote" &&
+    STATIC_DECISION.test(block.text) && /^>\s*(?:\*\*)?(?:版本未定|Not settled)/iu.test(block.text));
+  return cards.reverse().reduce((text, card) => text.slice(0, card.start) + text.slice(card.end), body);
+}
 const AUDIT_NOTE = /以上数据为讨论中引用的外部信息，未独立核验。|下文为讨论时的竞品记录。来源链接与核实日期以原文为准，未明确核实的能力仍待核验。|Competitor information reflects the discussion\. Links and verification dates come from its sources\. Capabilities without explicit verification remain unverified\./giu;
 const DEFINITE = /(?<!未|尚未|并未)(?:已(?:经)?确认(?:采用)?|已决定(?:采用)?|确认为|\b(?:was|is|has been) confirmed(?: as)?\b)/iu;
 const trim = (text: string) => text.trim().replace(/[\s*]/gu, "").replace(/[。.!?！？]$/u, "");
@@ -51,7 +112,7 @@ export function withoutEmptyWikiHeadings(body: string) {
     return true;
   });
   if (!edits.length) return body;
-  return edits.reverse().reduce((text, block) => text.slice(0, block.start) + text.slice(block.end), body).replace(/\n{3,}/gu, "\n\n").trim();
+  return edits.reverse().reduce((text, block) => text.slice(0, block.start) + text.slice(block.end).replace(/^\n{3,}/u, "\n\n"), body).trim();
 }
 
 /** This projection changes generated prose while keeping the source ledger. */
@@ -200,24 +261,12 @@ function wikiDecisionParagraphs(blocks: ReturnType<typeof wikiDocumentBlocks>, a
       && claim.unitIds.every(id => ids.has(id)) && trim(block.text) === trim(claim.text))));
 }
 
-export function wikiCanApplyDecisionLocally(sections: FocusSection[], action: WikiDecisionAction) {
-  const target = sections.find(section => section.id === action.chapterId);
-  if (!target || target.userEdited || target.origin || !action.evidenceIds?.length) return false;
-  const ids = new Set(action.unitIds);
-  const touches = (claim: { unitIds?: string[] }) => claim.unitIds?.some(id => ids.has(id));
-  if (sections.some(section => section.id !== target.id && section.claims?.some(touches))) return false;
-  const blocks = wikiDocumentBlocks(target.body, target.claims);
-  const replaced = new Set(wikiDecisionParagraphs(blocks, action));
-  return replaced.size > 0 && blocks.every(block => !block.claims.some(touches) || replaced.has(block))
-    && !(target.claims ?? []).some(claim => touches(claim) && ![...replaced].some(block => block.claims.includes(claim)));
-}
-
 /** A choice changes only original option prose in its own generated
  * chapter. Technical clauses and mixed-status paragraphs remain intact. */
 export function wikiAppliedDecisions(section: FocusSection, ledger: WikiKnowledgeLedger, zh: boolean, reopened: ReadonlySet<string> = new Set()): FocusSection {
   if(section.userEdited||section.origin)return section;
   const actions=Object.entries(ledger.decisionArbitrations??{}).flatMap(([id,action])=>
-    action.chapterId===section.id&&action.mode&&!reopened.has(id)?[action]:[]);
+    action.chapterId===section.id&&action.mode&&!action.deferredToDraft&&!reopened.has(id)?[action]:[]);
   if(!actions.length)return section;
   let body=section.body, claims=[...section.claims??[]];
   for(const action of actions){

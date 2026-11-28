@@ -64,18 +64,23 @@
 .focus-workspace.has-original-panel > .project-reading-base > .reading-outline { flex-basis: 210px; }
 /* Highlighter colours are solid, not see-through: a translucent yellow over the purple of the user's message mixed into
    a third colour, and two marks over one word mixed again. Where marks overlap, the stronger one (by priority) shows. */
-:root { --atlas-mark: #fde68a; --atlas-mark-text: #1c1917; --atlas-mark-soft: #fef3c7; }
-:root[data-theme="dark"] { --atlas-mark: #facc15; --atlas-mark-text: #1c1917; --atlas-mark-soft: #3f3412; }
+:root { --atlas-mark: #fde68a; --atlas-mark-text: #1c1917; --atlas-mark-soft: #fef3c7; --atlas-mark-soft-text: #1c1917; --atlas-mark-similar-line: color-mix(in srgb, #a16207 55%, transparent); --atlas-support-mark: rgba(16, 185, 129, 0.22); --atlas-support-text: inherit; }
+:root[data-theme="dark"] { --atlas-mark: #facc15; --atlas-mark-text: #111827; --atlas-mark-soft: rgba(250, 204, 21, 0.30); --atlas-mark-soft-text: #fef9c3; --atlas-mark-similar-line: rgba(250, 204, 21, 0.85); --atlas-support-mark: rgba(52, 211, 153, 0.34); --atlas-support-text: #ecfdf5; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --atlas-mark: #facc15; --atlas-mark-text: #111827; --atlas-mark-soft: rgba(250, 204, 21, 0.30); --atlas-mark-soft-text: #fef9c3; --atlas-mark-similar-line: rgba(250, 204, 21, 0.85); --atlas-support-mark: rgba(52, 211, 153, 0.34); --atlas-support-text: #ecfdf5; }
+}
 ::highlight(atlas-original-proof) { background: var(--atlas-mark); color: var(--atlas-mark-text); text-decoration: none; }
-::highlight(atlas-original-context) { background: var(--atlas-mark-soft); color: inherit; }
+::highlight(atlas-original-context) { background: var(--atlas-mark-soft); color: var(--atlas-mark-soft-text); }
 ::highlight(atlas-original-related) { background: transparent; color: inherit; text-decoration: underline dashed #94a3b8; }
-.workspace-source-body table[data-atlas-table-active] { outline: 2px solid var(--accent); outline-offset: -2px; }
-.workspace-source-panel .workspace-source-table-scroll { max-width: 100%; overflow-x: auto; margin-block: 14px; }
+::highlight(atlas-original-support) { background: var(--atlas-support-mark); color: var(--atlas-support-text); }
+.workspace-source-panel .workspace-source-table-scroll { max-width: 100%; overflow-x: auto; margin-block: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid); }
+.workspace-source-panel .workspace-source-table-scroll:has(> table[data-atlas-table-active]) { border-color: color-mix(in srgb, var(--accent) 68%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.workspace-source-body table[data-atlas-table-active] { outline: none; }
 .workspace-source-panel .source-message-content .workspace-source-table-scroll > table {
   display: table; width: auto; max-width: none; margin: 0;
 }
 .workspace-source-highlight.is-context { background:#facc1515; }
-.workspace-source-highlight.is-related { background:#facc1555; border-bottom:2px dashed #dc2626; }
+.workspace-source-highlight.is-related { background:#fef08a66; border-bottom:1.5px dashed color-mix(in srgb, #a16207 48%, transparent); }
 .workspace-source-highlight.is-support { background:transparent; border-bottom:1.5px dotted #94a3b8; }
 .workspace-source-claims { flex:0 0 auto; max-height:24vh; overflow:auto; padding:12px 20px; border-bottom:1px solid var(--border); }
 .workspace-source-claims p { margin:0 0 8px; font-size:13px; color:var(--muted); }
@@ -249,22 +254,30 @@
 .workspace-source-panel.is-context .workspace-source-message.is-source-target { opacity: 1; }
 /* One question about the sentence and its answers: answering is how a wrong status is fixed. The current answer is
    pressed; answering moves on to the next point. */
-.workspace-source-holder { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-.workspace-source-holder > span { color: var(--text); font-size: 14px; font-weight: 600; }
-.workspace-source-holder > span small { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; font-weight: 400; }
-.workspace-source-comparison { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; margin: 0; padding: 8px 10px; max-height: 8rem; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); font-size: 13px; }
-.workspace-source-comparison dt { color: var(--muted); }
-.workspace-source-comparison dd { margin: 0; overflow-wrap: anywhere; }
+.workspace-source-holder { display: grid; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.workspace-source-holder > span { color: var(--text); font-size: 14.5px; font-weight: 650; line-height: 1.45; }
+.workspace-source-holder > span small { display: block; margin-top: 3px; color: var(--muted); font-size: 12.5px; font-weight: 400; line-height: 1.5; }
+.workspace-source-comparison { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: baseline; gap: 6px 10px; margin: 0; padding: 10px 12px; max-height: 8.5rem; overflow: auto; border: 1px solid color-mix(in srgb, var(--border) 90%, transparent); border-radius: 10px; background: var(--surface-solid); font-size: 13.5px; line-height: 1.65; }
+.workspace-source-comparison dt { color: var(--muted); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.workspace-source-comparison dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
 .workspace-source-holder > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.workspace-source-holder button { min-height: 32px; padding: 4px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid, transparent); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
-.workspace-source-holder button:hover { background: var(--surface-muted); }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-holder button,
+.workspace-source-holder button { min-height: 34px; padding: 5px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid, transparent); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: background-color .14s, border-color .14s, color .14s; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-holder button:hover,
+.workspace-source-holder button:hover { background: var(--surface-muted); border-color: color-mix(in srgb, var(--text) 16%, var(--border)); }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-holder button[aria-pressed="true"],
 .workspace-source-holder button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-holder button.is-holder-open[aria-pressed="true"],
 .workspace-source-holder button.is-holder-open[aria-pressed="true"] { border-color: #d97706; background: color-mix(in srgb, #d97706 14%, transparent); color: #b45309; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-holder button.is-holder-earlier[aria-pressed="true"],
 .workspace-source-holder button.is-holder-earlier[aria-pressed="true"] { border-color: var(--muted); background: var(--surface-muted); color: var(--muted); }
+.workspace-source-holder-secondary { display: inline-flex; align-items: center; gap: 2px; margin-inline-start: auto; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-holder button.workspace-source-holder-more,
 .workspace-source-holder button.workspace-source-holder-more,
-.workspace-source-holder-change { min-height: 32px; padding: 4px 6px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.workspace-source-holder-change { min-height: 30px; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-holder button.workspace-source-holder-more:hover,
 .workspace-source-holder button.workspace-source-holder-more:hover,
-.workspace-source-holder-change:hover { color: var(--text); background: transparent; text-decoration: underline; }
+.workspace-source-holder-change:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); text-decoration: none; }
 .workspace-source-holder button.is-quiet { border-color: transparent; background: transparent; color: var(--muted); }
 .workspace-source-holder-done { display: flex; align-items: center; gap: 4px; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 13px; }
 .workspace-source-holder-done b { color: var(--text); font-weight: 600; }
@@ -282,13 +295,13 @@
 .workspace-source-panel.is-card.is-overlay { inset: 12px 12px 12px auto; margin: 0; height: auto; width: min(460px, calc(100% - 24px)); box-shadow: 0 16px 40px #0f172a29; }
 .workspace-source-panel.is-card:has(> .wiki-source-dock:not(:empty)) { --wiki-dock-width: 49px; padding-inline-start: var(--wiki-dock-width); }
 .workspace-source-panel.is-card:not(.is-overlay):has(> .wiki-source-dock:not(:empty)) { position: relative; }
-.workspace-source-panel.is-card:has(> .wiki-source-dock .wiki-status-panel:not([hidden])) { --wiki-dock-width: 104px; }
-.wiki-source-dock { position: absolute; inset-block: 0; inset-inline-start: 0; width: var(--wiki-dock-width); overflow: auto; padding: 10px 5px; border-inline-end: 1px solid var(--border); background: var(--surface-solid); }
+.workspace-source-panel.is-card:has(> .wiki-source-dock .wiki-status-panel:not([hidden])) { --wiki-dock-width: 132px; }
+.wiki-source-dock { position: absolute; inset-block: 0; inset-inline-start: 0; width: var(--wiki-dock-width); overflow: auto; padding: 10px 6px; border-inline-end: 1px solid var(--border); background: var(--surface-solid); transition: width 0.16s ease; }
 .wiki-source-dock:empty { display: none; }
 .wiki-source-dock > .wiki-tool-rail { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .wiki-source-dock .wiki-status-control { display: flex; width: 100%; flex-direction: column; align-items: center; gap: 6px; }
-.wiki-source-dock .wiki-status-panel { position: static; width: 100%; max-width: none; padding: 0; border: 0; border-radius: 0; box-shadow: none; }
-:is(.focus-workspace,.focus-preview) .wiki-source-dock .wiki-status-key { justify-content: space-between; min-height: 29px; padding: 3px 5px; font-size: 12px; white-space: normal; line-height: 1.25; color: var(--holder,var(--muted)); background: color-mix(in srgb, currentColor 9%, var(--surface-solid)); border-color: color-mix(in srgb, currentColor 40%, var(--border)); }
+.wiki-source-dock .wiki-status-panel { position: static; width: 100%; min-width: 0; max-width: none; padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+:is(.focus-workspace,.focus-preview) .wiki-source-dock .wiki-status-key { justify-content: space-between; min-height: 30px; padding: 4px 6px; gap: 5px; font-size: 11.5px; white-space: nowrap; line-height: 1.25; color: var(--holder,var(--muted)); background: color-mix(in srgb, currentColor 8%, var(--surface-solid)); border-color: color-mix(in srgb, currentColor 32%, var(--border)); }
 .workspace-source-content > .workspace-context-more { display: flex; margin: 8px auto 16px; }
 .workspace-source-content > .workspace-context-more:last-child { margin: 16px auto 8px; }
 :root[data-theme="dark"] .workspace-source-panel.is-card:not(.is-embedded) { box-shadow: 0 10px 30px #00000059; }
@@ -316,24 +329,112 @@
 /* The question sits under the original; a flagged point's question is tinted so it reads as the thing to do. */
 .workspace-source-ask { flex: 0 0 auto; border-top: 1px solid var(--border); background: var(--surface-solid); }
 .workspace-source-ask .workspace-source-holder, .workspace-source-ask .workspace-source-holder-done { border-bottom: 0; }
-.workspace-source-ask.is-asking { background: color-mix(in srgb, #f59e0b 7%, var(--surface-solid)); }
-.workspace-source-ask .workspace-source-holder button.is-primary { border-color: var(--accent); background: var(--accent); color: var(--surface-solid); font-weight: 600; }
-.workspace-source-ask .workspace-source-holder button.is-primary:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
+.workspace-source-ask.is-asking { border-top-color: color-mix(in srgb, #f59e0b 24%, var(--border)); background: color-mix(in srgb, #f59e0b 5%, var(--surface-solid)); }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-ask .workspace-source-holder button.is-primary,
+.workspace-source-ask .workspace-source-holder button.is-primary { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; box-shadow: 0 1px 2px rgb(15 23 42 / .08); }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-ask .workspace-source-holder button.is-primary:hover,
+.workspace-source-ask .workspace-source-holder button.is-primary:hover { border-color: color-mix(in srgb, var(--accent) 88%, #000); background: color-mix(in srgb, var(--accent) 88%, #000); color: #fff; }
+:root[data-theme="dark"] :is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-ask .workspace-source-holder button.is-primary,
+:root[data-theme="dark"] .workspace-source-ask .workspace-source-holder button.is-primary { color: #14201a; }
 .workspace-source-panel > footer.workspace-source-legend { display: flex; flex: none; flex-wrap: wrap; gap: 4px 14px; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 .workspace-source-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .workspace-source-legend i { display: inline-block; width: 16px; height: 10px; border-radius: 2px; }
 .workspace-source-legend i.is-proof { background: var(--atlas-mark); }
 .workspace-source-legend i.is-table { border: 2px solid var(--accent); }
 .workspace-source-legend i.is-similar { background: var(--atlas-mark); border-bottom: 2px dashed #dc2626; border-radius: 2px 2px 0 0; }
-.workspace-source-legend i.is-support { background: transparent; border-bottom: 2px dotted #94a3b8; border-radius: 0; }
+.workspace-source-legend i.is-support { background: var(--atlas-support-mark); border-bottom: 2px dotted #10b981; border-radius: 2px; }
 .workspace-source-legend i.is-cue { background: transparent; border-bottom: 2px solid #dc2626; border-radius: 0; }
 .workspace-source-panel.is-card > .workspace-source-next-chapter { width: calc(100% - 32px); margin: 4px 16px 8px; }
 
-/* Close wording is filled like the quote, so it is easy to find, and underlined in dashed red, so it never reads as the
-   quote itself (a solid red line is the condition cue); the rest of the exchange is a faint dotted line. */
-::highlight(atlas-original-similar) { background: var(--atlas-mark); color: var(--atlas-mark-text); text-decoration: underline dashed #dc2626 2px; text-underline-offset: 4px; }
-::highlight(atlas-original-support) { background: transparent; color: inherit; text-decoration: underline dotted #94a3b8 1.5px; text-underline-offset: 4px; }
-.workspace-source-body[data-related-focus] ::highlight(atlas-original-support) { background: #94a3b838; }
-.workspace-source-body[data-related-focus] .workspace-source-highlight.is-support { background: #94a3b838; }
-::highlight(atlas-original-cue) { color: inherit; text-decoration: underline solid #dc2626 2px; text-underline-offset: 4px; }
+/* Close wording uses a calm amber wash with a soft muted dash instead of alarming red error lines. */
+::highlight(atlas-original-similar) { background: var(--atlas-mark-soft); color: var(--atlas-mark-soft-text); text-decoration: underline dashed var(--atlas-mark-similar-line) 1.5px; text-underline-offset: 4px; }
+::highlight(atlas-original-support) { background: var(--atlas-support-mark); color: var(--atlas-support-text); text-decoration: underline dotted #10b981 1.5px; text-underline-offset: 4px; }
+.workspace-source-body[data-related-focus] ::highlight(atlas-original-support) { background: var(--atlas-support-mark); }
+.workspace-source-body[data-related-focus] .workspace-source-highlight.is-support { background: var(--atlas-support-mark); }
+::highlight(atlas-original-cue) { color: inherit; text-decoration: underline solid #d97706 2px; text-underline-offset: 4px; }
 .workspace-source-highlight.is-quote { background: #facc1566; }
+
+/* Review progress bar, claim anchor, clean context timeline, back-to-quote pill, and 1-click status bar. */
+.workspace-source-check-progress { flex: 0 0 auto; height: 2.5px; margin: 2px 16px 4px; border-radius: 999px; background: var(--surface-muted); overflow: hidden; }
+.workspace-source-check-progress > span { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .2s ease; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel button.workspace-source-claim-anchor,
+.workspace-source-panel button.workspace-source-claim-anchor {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 8px;
+  width: calc(100% - 32px); min-height: 0; margin: 4px 16px 6px; padding: 8px 11px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface-muted);
+  text-align: left; cursor: pointer;
+}
+.workspace-source-claim-anchor > small { font-size: 11px; font-weight: 650; color: var(--muted); white-space: nowrap; }
+.workspace-source-claim-anchor > span {
+  font-size: 12.5px; line-height: 1.55; color: var(--text);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
+}
+.workspace-source-claim-anchor.is-expanded > span { display: block; -webkit-line-clamp: unset; }
+.workspace-source-check-done {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+  margin: 4px 16px 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 10px; background: color-mix(in srgb, var(--accent) 8%, var(--surface-solid));
+}
+.workspace-source-check-done > svg { flex: none; color: var(--accent); }
+.workspace-source-check-done > div { flex: 1 1 160px; min-width: 0; display: grid; gap: 1px; }
+.workspace-source-check-done strong { font-size: 13px; font-weight: 650; color: var(--text); }
+.workspace-source-check-done small { font-size: 11.5px; color: var(--muted); }
+.workspace-source-check-done > .workspace-source-next-chapter { width: auto; margin: 0; padding: 5px 11px; font-size: 12.5px; font-weight: 600; }
+
+.workspace-source-turn-index { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.workspace-source-target-badge {
+  display: inline-flex; align-items: center; padding: 0 7px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; line-height: 1.7;
+}
+.workspace-source-panel.is-context .workspace-source-message {
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid);
+}
+.workspace-source-panel.is-context .workspace-source-message + .workspace-source-message {
+  margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.workspace-source-panel.is-context .workspace-source-message.is-user-message {
+  background: color-mix(in srgb, var(--surface-muted) 88%, var(--surface-solid));
+}
+.workspace-source-panel.is-context .workspace-source-message.is-source-target {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-left: 3px solid var(--accent); padding-left: 13px;
+  background: var(--surface-solid); opacity: 1;
+}
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel button.workspace-source-back-to-quote,
+.workspace-source-panel button.workspace-source-back-to-quote {
+  position: sticky; bottom: 10px; float: right; z-index: 6;
+  display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: 999px;
+  background: var(--surface-solid); color: var(--accent); font-size: 12px; font-weight: 600;
+  box-shadow: 0 6px 18px rgb(15 23 42 / .14); cursor: pointer;
+}
+.workspace-source-panel button.workspace-source-back-to-quote:hover { background: var(--accent-soft); }
+
+.workspace-source-holder-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 16px; background: var(--surface-solid);
+}
+.workspace-source-holder-label { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.workspace-source-holder-pills { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+:is(.focus-workspace,.focus-preview,.project-context-dialog) .workspace-source-panel .workspace-source-holder-pills button,
+.workspace-source-holder-pills button {
+  min-height: 26px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px;
+  background: transparent; color: var(--muted); font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.workspace-source-holder-pills button:hover { background: var(--surface-muted); color: var(--text); }
+.workspace-source-holder-pills button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft);
+  color: var(--accent); font-weight: 600;
+}
+.workspace-source-holder-pills button.is-holder-open[aria-pressed="true"] {
+  border-color: color-mix(in srgb, #d97706 45%, var(--border)); background: color-mix(in srgb, #d97706 13%, transparent);
+  color: #b45309;
+}
+.workspace-source-holder-pills button.is-holder-ai[aria-pressed="true"] {
+  border-color: color-mix(in srgb, #6366f1 42%, var(--border)); background: color-mix(in srgb, #6366f1 11%, transparent);
+  color: #4f46e5;
+}
+:root[data-theme="dark"] .workspace-source-holder-pills button.is-holder-open[aria-pressed="true"] { color: #fbbf24; }
+:root[data-theme="dark"] .workspace-source-holder-pills button.is-holder-ai[aria-pressed="true"] { color: #a5b4fc; }
+.workspace-source-holder.is-review-card { padding: 12px 16px 14px; }
+.workspace-source-holder-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }

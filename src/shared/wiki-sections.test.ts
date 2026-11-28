@@ -36,3 +36,10 @@ it("gives each unit its section unless its statement names it already", () => {
   expect(out.batches[0].units.map(item => item.evidence.section)).toEqual(["首页 Header", undefined]);
   expect(withWikiSections(ledger, [])).toBe(ledger);
 });
+
+it("keeps Chinese heading words intact and ignores headings inside fenced code", () => {
+  const source = "# 第一版千万不要做 PCB\n\n仅展示设计方案。\n\n```ts\n# 第四优先级\nstring;\n```\n\n# 2. 验收";
+  expect(messageSection(source, "仅展示设计方案。")).toBe("第一版千万不要做 PCB");
+  expect(messageSection(source, "string;")).toBe("第一版千万不要做 PCB");
+  expect(messageSection(source, "# 2. 验收")).toBe("验收");
+});

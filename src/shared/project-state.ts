@@ -152,6 +152,18 @@ export interface ProjectMatterDetails {
   linkedKnowledgeIds?: string[];
   resolutionHistory?: Array<{ resolution: string; reason: string; status: "open" | "resolved" | "dismissed"; recordedAt: number }>;
 }
+export interface OverviewDecisionOverride {
+  text: string;
+  status: "decided" | "ai" | "open";
+  at: number;
+  sectionId?: string;
+  heading?: string;
+  originalText?: string;
+  unitIds?: string[];
+  evidenceIds?: string[];
+  receiptId?: string;
+}
+
 export interface ProjectMaintenance {
   /** User-approved navigation scopes; never evidence or decision confirmation. */
   evolutionScopes?: { signature:string; groups:Array<{id:string;title:string;eventIds:string[]}> };
@@ -160,6 +172,8 @@ export interface ProjectMaintenance {
   overview?: string;
   /** The plan the user wants readers to follow, independent of discussion and implementation status. */
   currentPlan?: string;
+  /** Explicit overview edits leave the published prose and its evidence intact. */
+  overviewDecisions?: Record<string, OverviewDecisionOverride>;
   /** Questions temporarily set aside in the overview, independent of their decision status. */
   deferredOverviewQuestions?: string[];
   modules?: Record<string, ProjectModule & { basisSignature?: string; wikiSectionIds?: string[] }>;

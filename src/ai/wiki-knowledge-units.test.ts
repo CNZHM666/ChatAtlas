@@ -1,8 +1,8 @@
 import "fake-indexeddb/auto";
 import { expect, it } from "vitest";
-import { comparedProducts, discussedProjects, droppedExceptions, movedCodes, extractWikiKnowledge, fittingQuote, ownNamesTaggedAsOthers, wikiUnitBatches, wikiUnitRequest, droppedFigures, uncoveredSentences } from "./wiki-knowledge-units";
+import { comparedProducts, discussedProjects, droppedExceptions, movedCodes, extractWikiKnowledge, fittingQuote, ownNamesTaggedAsOthers, wikiProofBlocks, wikiUnitBatches, wikiUnitRequest, droppedFigures, uncoveredSentences } from "./wiki-knowledge-units";
 import { projectProofBlocks } from "../shared/atlas/project-knowledge.js";
-import { missingWikiConditions, pastedUserText, quotedDetails, wikiUnitConditions, wikiUncoveredMessageCount, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { missingWikiConditions, pastedUserText, quotedDetails, wikiBlockedUnitIds, wikiUnitConditions, wikiUncoveredMessageCount, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import type { CoverageMaterial } from "./focus-coverage";
 import type { StructuredAIRequest } from "./provider";
 import { AIProviderHttpError, AIProviderResponseError } from "./provider-errors";
@@ -174,7 +174,7 @@ it("recovers a separate conditional proposal quoted with an experiment, includin
   expect(reused.ledger.batches[0].units.map(point=>point.id)).toEqual(ledger.batches[0].units.map(point=>point.id));
 });
 
-it("restores a narrowed limit from a cached unit without a fresh extraction", async () => {
+it("blocks a scope expanded in a cached unit without rewriting it or requesting the model", async () => {
   const quote = "仅限 CSV 导入，单文件上限 20 MB。";
   const materials = [material(0, "assistant", quote)];
   const { ledger } = await extractWikiKnowledge({ materials, locale: "zh-CN", signal, ai: { generateStructured: async request => request.validate({ units: [unit({ statement: quote, kind: "constraint", details: [] })] }) } });
@@ -183,7 +183,8 @@ it("restores a narrowed limit from a cached unit without a fresh extraction", as
   const previous = { ...ledger, batches: [{ ...ledger.batches[0], units: [broadened] }] };
   const reused = await extractWikiKnowledge({ materials, locale: "zh-CN", signal, previous, ai: { generateStructured: async () => { throw new Error("unexpected extraction"); } } });
   expect(reused.report).toMatchObject({ requests: 0, reused: 1 });
-  expect(reused.ledger.batches[0].units[0]).toMatchObject({ id: point.id, statement: quote });
+  expect(reused.ledger.batches[0].units[0]).toMatchObject({ id: point.id, statement: broadened.statement });
+  expect(wikiBlockedUnitIds(reused.ledger).has(point.id)).toBe(true);
 });
 
 it("accepts an adoption only from a later, unpasted user reply to that single proposal", () => {
@@ -214,7 +215,7 @@ it("never takes a decision from assistant text or pasted material, but lets past
   expect(result.rejected.adoption_downgraded).toBe(2);
 });
 
-it("keeps a user's own unpasted statement as a decision and rejects invented quotes, details and context citations", () => {
+it("keeps a user's own decision and ignores auxiliary words outside the statement", () => {
   const all = [material(0, "user", "我的项目还有个功能就是所有 AI 的管家，在输入区输入就能找到不同 AI 的聊天。"), material(1, "assistant", proposal), material(2, "user", "嗯")];
   const result = reply(all.slice(0, 2), all, { units: [
     { subject: "对话管家", statement: "产品提供所有 AI 对话管家。", kind: "decision", details: ["输入区", "语音输入"], quoteKey: "p1:1", adoption: "user_decision" },
@@ -222,10 +223,9 @@ it("keeps a user's own unpasted statement as a decision and rejects invented quo
     unit({ quoteKey: "c1:1" }),
   ] });
   expect(result.units).toHaveLength(1);
-  expect(result.units[0]).toMatchObject({ subject: "对话管家", adoption: { status: "user_decision" }, details: ["输入区"], evidence: { role: "user", messageId: "m0" } });
-  expect(result.rejected).toMatchObject({ quote: 2, detail_not_in_source: 1 });
-  expect(result.rejectedSamples.map(sample => sample.reason)).toEqual(["detail_not_in_source", "quote", "quote"]);
-  expect(result.rejectedSamples[1].keys).toContain("p9:1");
+  expect(result.units[0]).toMatchObject({ subject: "对话管家", adoption: { status: "user_decision" }, details: [], evidence: { role: "user", messageId: "m0" } });
+  expect(result.rejected).toEqual({ quote: 2 });
+  expect(result.rejectedSamples[0].keys).toContain("p9:1");
 });
 
 it("reads labels written with brackets, as ranges or under the old approval name, and never lets a question decide", () => {
@@ -248,11 +248,11 @@ ${"Orama 负责全文索引，每 30 秒增量更新一次。".repeat(12)}`;
   expect(result.rejected.quote).toBeUndefined();
 });
 
-it("reads details given as one string and adds identifiers and counts the quote states", () => {
+it("keeps the stated interval and ignores free-form details about other claims", () => {
   const all = [material(0, "assistant", "每条消息保存 `contentHash`，首轮邀请 10 个真实用户，每 30 秒增量更新。")];
   const result = reply(all, all, { units: [unit({ details: "30 秒，增量", statement: "索引每 30 秒增量更新。" })] });
-  // Code the quote states is kept; its loose counts ("10 个") are not stored as details.
-  expect(result.units[0].details).toEqual(["30 秒", "增量", "contentHash"]);
+  expect(result.units[0].details).toEqual([]);
+  expect(result.units[0].statement).toContain("30 秒");
   // Rendering markup beside the knowledge is layout, never a detail.
   expect(quotedDetails('<caption textAlign="center" maxWidth={120px}>示意</caption> 官网首屏只放 3 个入口，支持 10,000 条消息。', "官网")).toEqual(["3 个", "10,000 条"]);
 });
@@ -277,7 +277,7 @@ it("gives a unit the same ID whatever its wording, and batches materials by size
 });
 
 it("records a failed batch without failing the ledger and reports coverage", async () => {
-  const all = Array.from({ length: 4 }, (_, index) => material(index, "assistant", `${proposal}${"细节".repeat(2900)}`));
+  const all = Array.from({ length: 4 }, (_, index) => material(index, "assistant", `${proposal}\n\n第 ${index + 1} 轮。${"细节".repeat(2900)}`));
   let calls = 0;
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
     // The provider stays down after the first batch: the second fails whole and as halves.
@@ -536,31 +536,170 @@ it("packs all 92 unresolved passages by the full request budget and reuses the r
  expect(retry.report).toMatchObject({coverageNoKnowledge:92,uncoveredMessages:0});
 });
 
-it("resumes only the fidelity statements whose request failed", async () => {
-  const body = "不要让客服直接修改退款金额。", all = [material(0, "assistant", body)];
-  const units: WikiKnowledgeUnit[] = Array.from({ length: 12 }, (_, index) => ({
-    id: "repair-" + index, subject: "退款审核", statement: "严禁客服直接修改退款金额。", kind: "constraint", details: [],
-    adoption: { status: "proposal" }, delivery: "unknown",
-    evidence: { evidenceId: all[0].id, conversationId: "c1", messageId: "m0", messageIndex: 0, role: "assistant", pasted: false, quote: body },
-  }));
-  const previous = { version: 1 as const, generatedAt: 1, status: "complete" as const, materials: 1,
-    batches: [{ sourceIds: [all[0].id], status: "ok" as const, units, rejected: {} }] };
-  let failing = true;
-  const sizes: number[] = [];
+it("quarantines a wrong quote without rewriting the statement or making another model request", async () => {
+  const body = "# 21. 右侧 Inspector\n\n右侧 Inspector 宽度约 280–340px。";
+  const materials = [material(17, "assistant", body)];
+  const statement = "节点选中时必须保持红色。";
+  const calls: string[] = [];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    calls.push(JSON.parse(request.prompt).presentation);
+    return request.validate({ units: [unit({ subject: "Node 视觉规范", statement, kind: "constraint", details: [] })] });
+  } };
+  const first = await extractWikiKnowledge({ materials, locale: "zh-CN", signal, ai });
+  const saved = first.ledger.batches[0].units[0];
+  expect(saved.statement).toBe(statement);
+  expect(saved.evidence.messageIndex).toBe(17);
+  expect(wikiBlockedUnitIds(first.ledger)).toEqual(new Set([saved.id]));
+  expect(first.ledger.status).toBe("partial");
+  expect(first.ledger.batches[0].fidelityResults?.[saved.id].reasons?.length).toBeGreaterThan(0);
+  expect(calls).toEqual(["wiki_unit_extract"]);
+  const next = await extractWikiKnowledge({ materials, previous: first.ledger, locale: "zh-CN", signal, ai });
+  expect(calls).toHaveLength(1);
+  expect(next.report).toMatchObject({ reused: 1, fidelityPendingUnits: 1 });
+});
+
+it("keeps table rows intact and recovers unselected competitors without a second extraction", async () => {
+  const first = `| Flux | PCB | ${"浏览器电子设计与原理图自动化。".repeat(21)} | 3700万美元 |`;
+  const second = "| Hestus | 机械 CAD | 预测草图约束 | YC 孵化 |";
+  const source = `| 公司/产品 | 领域 | 核心定位 | 关键信号 |\n| --- | --- | --- | --- |\n${first}\n${second}`;
+  expect(wikiProofBlocks(source).map(block => block.text.trim()).slice(-2)).toEqual([first, second]);
+  const materials = [material(0, "assistant", source)];
+  const wrongRow = reply(materials, materials, { units: [unit({ subject: "Hestus", kind: "fact", statement: "Hestus 预测草图约束。",
+    about: { name: "Hestus", role: "competitor" }, quoteKey: "p1:3", details: [] })] });
+  expect(wrongRow.units[0].evidence.quote).toBe(second);
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    expect(JSON.parse(request.prompt).products).toBeUndefined();
+    return request.validate({ units: [] });
+  } };
+  const { ledger } = await extractWikiKnowledge({ materials, locale: "zh-CN", signal, ai, goal: "提供竞品调研" });
+  expect(ledger.extraction).toMatchObject({ requests: 1, recoveredTableRows: 2 });
+  expect(ledger.batches[0].units.map(row => row.evidence.quote)).toEqual([first, second]);
+  expect(wikiBlockedUnitIds(ledger).size).toBe(0);
+});
+
+it("reads adjacent identical assistant messages once while preserving changed tables as new evidence", async () => {
+  const text = "| 产品 | 定位 |\n| --- | --- |\n| Flux | 浏览器 PCB 设计 |";
+  const first = material(1, "assistant", text), copy = material(2, "assistant", text);
+  const changed = material(3, "assistant", text.replace("浏览器 PCB 设计", "嵌入式固件验证"));
+  const prompts: Array<{ passages: Array<{ text: string }> }> = [];
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    prompts.push(JSON.parse(request.prompt));
+    return request.validate({ units: [] });
+  } };
+  const { ledger, report } = await extractWikiKnowledge({ materials: [first, copy, changed], locale: "zh-CN", signal, ai, goal: "竞品调研" });
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0].passages).toHaveLength(2);
+  expect(ledger.batches[0].coverage?.[copy.id]?.status).toBe("duplicate");
+  expect(ledger.batches[0].units.map(item => item.evidence.evidenceId)).toEqual([first.id, changed.id]);
+  expect(ledger.batches[0].units.every(item => item.researchUse === "comparison")).toBe(true);
+  expect(report.coverageDuplicate).toBe(1);
+});
+
+it("skips an identical assistant reply across batch boundaries without dropping its source", async () => {
+  const table = "| 产品 | 定位 |\n| --- | --- |\n| Flux | 浏览器 PCB 设计 |";
+  const text = `${"对话背景。".repeat(1220)}\n\n${table}`;
+  const first = material(1, "assistant", text), copy = material(2, "assistant", text);
+  expect(wikiUnitBatches([first, copy])).toHaveLength(2);
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => request.validate({ units: [] }) };
+  const { ledger } = await extractWikiKnowledge({ materials: [first, copy], locale: "zh-CN", signal, ai, goal: "竞品调研" });
+  expect(ledger.extraction).toMatchObject({ requests: 1, recoveredTableRows: 1, duplicateSources: 1 });
+  expect(ledger.batches[1].sourceIds).toEqual([copy.id]);
+  expect(ledger.batches[1].coverage?.[copy.id]).toMatchObject({ status: "duplicate" });
+});
+
+it("recovers separate mechanisms from a cited open-source comparison list", async () => {
+  const source = [
+    "### 开源项目：可复用的架构",
+    "",
+    "**4. Reflow & circuit-agent — 约束生成**",
+    "",
+    "- Reflow：从 TypeScript 配置文件出发，编排多个专用代理，并通过硬件清单保持各子系统同步。[-13](https://example.com/reference)",
+    "- circuit-agent：预验证电路积木，模型负责选择，由引擎生成网表。",
+    "- 操作建议：可以优先试用开源实现并记录自己的实际需求。",
+    "",
+    "### 设计启示",
+    "",
+    "- Reflow：这里是对下一步的讨论，不能作为开源机制写入。",
+  ].join("\n");
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => request.validate({ units: [] }) };
+  const { ledger } = await extractWikiKnowledge({ materials: [material(0, "assistant", source)], locale: "zh-CN", signal, ai, goal: "竞品调研" });
+  expect(ledger.extraction).toMatchObject({ requests: 1, recoveredReferenceItems: 2 });
+  expect(ledger.batches[0].units.map(row => row.about?.name)).toEqual(["Reflow", "circuit-agent"]);
+  expect(ledger.batches[0].units[0]).toMatchObject({ researchUse: "reference",
+    statement: "Reflow — 从 TypeScript 配置文件出发，编排多个专用代理，并通过硬件清单保持各子系统同步。",
+    evidence: { quote: expect.stringContaining("[-13]"), messageId: "m0" },
+  });
+  expect(wikiBlockedUnitIds(ledger).size).toBe(0);
+});
+
+it("binds cross-platform citation labels to raw rows and skips a pasted copy of the table", async () => {
+  const rows = [
+    "| **Flux**[-37](https://example.org/funding_(2026)) | PCB | 融资 3700 万美元 |",
+    "| [Hestus](https://example.org/product) [[2]](https://example.org/paper) | 机械 CAD | 预测草图约束 |",
+    "| Embedder\uE200cite\uE202turn0search2\uE201 | 固件 | 真实硬件闭环验证 |",
+    "| `Tool_ID`[1](https://example.org/ref) | 原型 | 提供公开预览 |",
+  ];
+  const table = ["| 公司/产品 | 定位 | 关键信号 |", "| --- | --- | --- |", ...rows].join("\n");
+  const assistant = material(1, "assistant", table);
+  const copy = material(2, "user", table + "\n\n## 另一条说明\n\n从配置文件生成预览。");
+  const raw = wikiUnitRequest([assistant, copy], [assistant, copy], "zh-CN", signal, item => item === copy);
+  const prompt = JSON.parse(raw.prompt);
+  expect(prompt.passages[0].text).toContain("[p1:3]");
+  expect(prompt.passages[0].text).not.toContain("funding_(2026)");
+  expect(prompt.passages[0].text).toContain("[Hestus](https://example.org/product)");
+  expect(prompt.passages[1].text).not.toContain("3700");
+  expect(prompt.passages[1].text).toContain("从配置文件生成预览");
+  const names = ["Flux", "Hestus", "Embedder", "Tool_ID"];
+  const result = raw.validate({ units: names.map((name, index) => unit({
+    subject: name, kind: "fact", statement: `${name} 的定位见原文。`,
+    about: { name, role: "competitor" }, quoteKey: `p1:${index + 3}`,
+  })) });
+  expect(result.rejected.table_row_not_found).toBeUndefined();
+  expect(result.units.map(item => item.evidence.quote)).toEqual(rows);
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => request.validate({ units: [] }) };
+  const run = await extractWikiKnowledge({ materials: [assistant], locale: "zh-CN", signal, ai });
+  expect(run.ledger.batches[0].units.map(item => item.about?.name)).toEqual(names);
+  expect(run.ledger.batches[0].units[0].statement).toContain("3700 万美元");
+});
+
+it("checks the intent in a competitor question without treating the research request as another choice", () => {
+  const original = material(0, "user", "我想做一个AI硬件版本的cursor，有哪些竞品或者开源项目参考吗");
+  const result = reply([original], [original], { units: [unit({
+    subject: "项目定位", statement: "构建 AI 硬件版本的 Cursor。", kind: "plan", adoption: "unknown",
+  })] });
+  expect(uncoveredSentences([original], result.units, () => false)).toEqual([]);
+  expect(uncoveredSentences([original], [], () => false)[0]?.sentences).toEqual(["我想做一个AI硬件版本的cursor"]);
+});
+
+it("never promotes a cached cross-batch attribution or recovers a distant topic as the user's words", async () => {
+  const query = material(17, "user", "怎么部署我的项目？"), later = material(61, "assistant", "规格未知时用 TODO。" + "其他实现条件。".repeat(1780));
+  const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
+    const raw = JSON.parse(request.prompt);
+    return request.validate({ units: raw.passages[0].role === "user" ? [unit({ subject: "项目部署", statement: "规格未知时用 TODO。", kind: "fact" })] : [] });
+  } };
+  const { ledger } = await extractWikiKnowledge({ materials: [query, later], locale: "zh-CN", signal, ai });
+  expect(ledger.batches).toHaveLength(2);
+  expect(ledger.batches[0].units).toEqual([]);
+});
+
+it("passes a bounded previous index only to a new batch and binds its change to current evidence", async () => {
+  const old = "全文索引使用 Orama。", replacement = "全文索引改用 SQLite，替换原来的 Orama。";
+  const filler = "其他讨论的上下文，供批次长度划分。".repeat(400);
+  const earlier = material(1, "assistant", `${old}\n${filler}`), later = material(2, "assistant", `${replacement}\n${filler}`);
+  const calls: Array<{ earlierIndex?: Array<{ id: string; statement: string }> }> = [];
   const ai = { generateStructured: async <T,>(request: StructuredAIRequest<T>): Promise<T> => {
     const data = JSON.parse(request.prompt);
-    expect(data.presentation).toBe("wiki_unit_fidelity");
-    sizes.push(data.units.length);
-    if (data.units.length === 2 && failing) throw new Error("temporarily offline");
-    return request.validate({ units: data.units.map((row: { id: string }) => ({ id: row.id, statement: body })) });
+    calls.push(data);
+    return request.validate({ units: [data.earlierIndex ? unit({ statement: replacement, adoption: "proposal", details: [],
+      relation: { kind: "replaces", target: data.earlierIndex[0].id } }) : unit({ statement: old, details: [] })] });
   } };
-  const first = await extractWikiKnowledge({ materials: all, previous, locale: "zh-CN", signal, ai });
-  expect(first.report.fidelityUncheckedUnits).toBe(2);
-  expect(Object.keys(first.ledger.batches[0].fidelityResults ?? {})).toHaveLength(10);
-  sizes.length = 0; failing = false;
-  const next = await extractWikiKnowledge({ materials: all, previous: first.ledger, locale: "zh-CN", signal, ai });
-  expect(sizes).toEqual([2]);
-  expect(next.report).toMatchObject({ reused: 1, fidelityUncheckedUnits: 0 });
+  const first = await extractWikiKnowledge({ materials: [earlier], locale: "zh-CN", signal, ai });
+  const next = await extractWikiKnowledge({ materials: [earlier, later], previous: first.ledger, locale: "zh-CN", signal, ai });
+  expect(calls).toHaveLength(2);
+  expect(calls[1].earlierIndex).toMatchObject([{ statement: old }]);
+  expect(next.ledger.batches[1].units[0]).toMatchObject({ statement: replacement, evidence: { evidenceId: later.id },
+    relation: { kind: "replaces", target: first.ledger.batches[0].units[0].id } });
+  expect(next.ledger.extraction).toMatchObject({ reusedBatches: 1, requests: 1 });
 });
 
 it("recovers a short user constraint that the main extraction omitted", async () => {
@@ -783,7 +922,7 @@ it("reads a passage comparing other products once more, for each product it name
   const units = ledger.batches[0].units;
   expect(units.map(item => item.about?.name)).toEqual(["Fritzing", "Boardly", "WireMind"]);
   expect(report).toMatchObject({ productRequests: 1, productUnits: 2, productTagged: 1 });
-  expect(ledger.batches[0].productsChecked).toBe(1);
+  expect(ledger.batches[0].productsChecked).toBe(2);
   // Read again with the earlier ledger, the batch is not asked about its products a second time.
   prompts.length = 0;
   await extractWikiKnowledge({ materials: all, locale: "zh-CN", signal, ai, previous: ledger });

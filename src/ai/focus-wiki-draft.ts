@@ -1,18 +1,20 @@
 import type { FocusSection, FocusSession } from "../shared/focus-session";
 import type { Conversation, ConversationMessage } from "../shared/types";
-import { CRITICAL_PROBLEM, type WikiDraftChapter, type WikiKnowledgeLedger, type WikiWritingMode } from "../shared/wiki-knowledge";
+import { CRITICAL_PROBLEM, wikiExternalResearch, wikiLedgerUnits, wikiResearchUse, type WikiDraftChapter, type WikiKnowledgeLedger, type WikiWritingEvent, type WikiWritingMode } from "../shared/wiki-knowledge";
 import { withWikiSections } from "../shared/wiki-sections";
-import { measureAILocalStep } from "./pipeline-timing";
+import { measureAILocalStep, recordAISkippedStep } from "./pipeline-timing";
 import { resolveWikiReading } from "./wiki-knowledge-reading";
 import { writeLedgerDraft } from "./wiki-knowledge-write";
 import { cleanWikiDraftDisplay, wikiInternalDraftLabel } from "./wiki-editorial-review";
 import { ledgerDocument } from "./wiki-ledger-document";
-import { prewritingWikiQuestions, wikiNamedProjects, withAnswersFrom, withAnswersRevisited, withWriterQuestions, withWritingQuestions } from "./wiki-writing-questions";
+import { wikiNamedProjects, withAnswersRevisited, withWriterQuestions, withWritingQuestions } from "./wiki-writing-questions";
+import { wikiPrewritingProjectQuestions } from "./wiki-project-decisions";
 
 export interface FocusWikiDraftCallbacks {
   onKeyDecisions?: (ledger: WikiKnowledgeLedger) => Promise<WikiKnowledgeLedger>;
   onWritingMode?: (current: WikiWritingMode) => Promise<WikiWritingMode>;
   onPartial?: (session: FocusSession) => void;
+  onWritingEvent?: (event: WikiWritingEvent) => void;
 }
 
 type DraftContext = Pick<Parameters<typeof writeLedgerDraft>[1], "ai" | "locale" | "signal" | "project" | "previous" | "progress">
@@ -22,27 +24,43 @@ type DraftContext = Pick<Parameters<typeof writeLedgerDraft>[1], "ai" | "locale"
     sources: Conversation[];
     preview: Pick<FocusSession, "goal" | "mode" | "scope" | "locale" | "sourceConversationIds" | "sourceVersionIds" | "sourceSignatures" | "sourceRoles" | "sourceMessageOrder" | "wikiProjectBoundary">;
     title: (ledger: WikiKnowledgeLedger) => string;
-    placement?: { ready: Promise<WikiKnowledgeLedger>; stable: ReadonlySet<string>; pending: () => boolean };
   };
 
 /** Generation and updates share the decision prompts, live directory and chapter previews. */
 export async function writeFocusWikiDraft(planned: WikiKnowledgeLedger, context: DraftContext) {
-  const { ai, signal, locale, runId, originals, project, progress, previous, placement, onKeyDecisions, onPartial } = context;
+  const { ai, signal, locale, runId, originals, project, progress, previous, onKeyDecisions, onPartial } = context;
   const chooseMode = planned.documentType !== "learning" ? context.onWritingMode : undefined;
   const report: Record<string, number> = {};
-  const asked = onKeyDecisions
+  const projectUnits = wikiLedgerUnits(planned).filter(unit => !wikiExternalResearch(unit));
+  const projectIds = new Set(projectUnits.filter(unit => !unit.about).map(unit => unit.id));
+  const competingProjectPlans = planned.organization?.relations.some(relation => relation.status === "unresolved"
+    && projectIds.has(relation.older) && projectIds.has(relation.newer))
+    || planned.organization?.topics?.some(topic => topic.open && topic.current.filter(id => projectIds.has(id)).length > 1);
+  const unconflictedResearch = planned.selectionIntent === "research"
+    && planned.documentType !== "learning" && planned.writingMode !== "audit"
+    && !planned.userAnswers?.length && !Object.keys(planned.decisions ?? {}).length
+    && projectUnits.every(unit => !unit.relation && unit.kind !== "question" && unit.kind !== "history"
+      && unit.about?.role !== "other_project" && !["user_adopted", "user_decision", "rejected"].includes(unit.adoption.status)
+      && (unit.evidence.role === "user" ? unit.kind !== "constraint" : Boolean(wikiResearchUse(unit)) || unit.kind === "fact"));
+  const structuredResearch = planned.status === "complete" && planned.organization
+    && (planned.organization.report.source_structure_used || unconflictedResearch)
+    && !competingProjectPlans && !wikiPrewritingProjectQuestions(planned, locale === "zh-CN").length;
+  const asked = onKeyDecisions && !structuredResearch
     ? await measureAILocalStep(runId, "wiki", "wiki:decision-questions", () => withWritingQuestions(planned, { ai, signal, locale, runId, report }), () => report)
     : planned;
-  const questions = onKeyDecisions ? prewritingWikiQuestions(asked) : [];
-  const scopeGate = asked.documentType === "learning" || wikiNamedProjects(asked).length > 0
-    || questions.some(question => question.options.some(option => option.actions.some(action => action.do === "owner")));
-  const decision = onKeyDecisions ? measureAILocalStep(runId, "wiki", "wiki:decision-review", () => onKeyDecisions(asked)) : undefined;
-  const pendingDecisions = decision && !chooseMode && !scopeGate && questions.length
-    ? { units: new Set(questions.flatMap(question => [...question.unitIds, ...question.options.flatMap(option => option.actions.flatMap(action => action.units))])),
-        ready: decision.then(answered => withWikiSections(withAnswersRevisited(answered), originals)) }
-    : undefined;
-  pendingDecisions?.ready.catch(() => undefined);
-  let organized = withAnswersRevisited(decision && !pendingDecisions ? await decision : asked);
+  if (onKeyDecisions && structuredResearch) {
+    await recordAISkippedStep(runId, "wiki", "wiki:decision-questions", "Structured research has no unresolved project decisions");
+  }
+  const questions = onKeyDecisions ? wikiPrewritingProjectQuestions(asked, locale === "zh-CN") : [];
+  const names = onKeyDecisions ? wikiNamedProjects(asked) : [];
+  const scopeGate = asked.documentType === "learning" || names.some(project => !structuredResearch || project.role === "other_project" || project.excluded)
+    || questions.some(item => item.kind === "writing" && item.question.options.some(option => option.actions.some(action => action.do === "owner")));
+  const decision = onKeyDecisions && (!structuredResearch || questions.length || scopeGate)
+    ? measureAILocalStep(runId, "wiki", "wiki:decision-review", () => onKeyDecisions(asked)) : undefined;
+  if (onKeyDecisions && !decision) {
+    await recordAISkippedStep(runId, "wiki", "wiki:decision-review", "No project questions or scope choices");
+  }
+  let organized = withAnswersRevisited(decision ? await decision : asked);
   signal.throwIfAborted();
   if (chooseMode) {
     const mode = await measureAILocalStep(runId, "wiki", "wiki:writing-mode", () => chooseMode(organized.writingMode ?? "concise"));
@@ -71,15 +89,9 @@ export async function writeFocusWikiDraft(planned: WikiKnowledgeLedger, context:
   } : undefined;
   if (onChapters) onChapters([], resolveWikiReading(organized).ledger);
 
-  const pendingPlacement = placement && { stable: placement.pending() || pendingDecisions ? placement.stable : new Set<string>(),
-    ready: Promise.all([placement.ready, pendingDecisions?.ready ?? organized]).then(([placed, reviewed]) => {
-      const answered = withAnswersFrom({ ...placed, writingMode: reviewed.writingMode, writingQuestions: reviewed.writingQuestions, writingQuestionRun: reviewed.writingQuestionRun }, reviewed);
-      return withWikiSections(answered, originals);
-    }) };
   const draft = await writeLedgerDraft(withWikiSections(organized, originals), {
-    ai, locale, signal, runId, project, progress, onChapters, previous, pendingDecisions, pendingPlacement,
+    ai, locale, signal, runId, project, progress, onChapters, onWritingEvent: context.onWritingEvent, previous,
   });
-  if (placement) await placement.ready;
   const { ledger } = withWriterQuestions(draft);
   return { ledger, title: context.title(ledger) };
 }

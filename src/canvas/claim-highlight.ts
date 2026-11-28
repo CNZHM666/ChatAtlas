@@ -334,28 +334,42 @@ export function paintClaimHighlights(root: HTMLElement | null, keys: string[], p
   return ranges;
 }
 
-const HOLDERS = ["decided", "open", "earlier", "user", "material", "corrected"] as const;
-/** With holder marks shown, the text each mark covers (back to the previous mark in its paragraph) is tinted in the
- * mark's colour, so whose a sentence is reads at a glance instead of by finding its mark. Painted under the claim
- * highlight of evidence checking; cleared when the marks are hidden. Returns how many runs were tinted. */
-export function paintHolderRuns(root: HTMLElement | null, shown: boolean): number {
+const HOLDERS = ["decided", "open", "earlier", "ai", "user", "material", "corrected"] as const;
+/** With holder marks shown, each claim tints only its own sentence or matched phrase (never blindly sweeping
+ * unrelated preceding sentences). When activeHolder is specified, only that status is highlighted so the reader
+ * can scan one category cleanly across the chapter. */
+export function paintHolderRuns(root: HTMLElement | null, shown: boolean, phrasesOf?: (key: string) => string[], activeHolder?: string): number {
   const registry = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS?.highlights, Paint = (globalThis as { Highlight?: new (...ranges: Range[]) => { priority?: number } }).Highlight;
   if (!registry || !Paint) return 0;
-  for (const holder of HOLDERS) registry.delete(`atlas-holder-${holder}`);
-  if (!root || !shown) return 0;
-  const runs = new Map<string, Range[]>(HOLDERS.map(holder => [holder, []]));
-  for (const block of root.querySelectorAll<HTMLElement>("p, li")) {
-    const markers = [...block.querySelectorAll<HTMLElement>("button.wiki-claim-marker.is-holder")].filter(marker => marker.closest("p, li") === block);
-    let start: { node: Node; offset: number } = { node: block, offset: 0 };
+  const colors = [...HOLDERS, "source"] as const;
+  if (!root || !shown) {
+    for (const holder of colors) registry.delete(`atlas-holder-${holder}`);
+    return 0;
+  }
+  const runs = new Map<string, Range[]>(colors.map(holder => [holder, []]));
+  const blocks = "p, li, td";
+  const markerSelector = "button.wiki-claim-marker.is-holder:not(.is-approximate)";
+  for (const block of root.querySelectorAll<HTMLElement>(blocks)) {
+    const markers = [...block.querySelectorAll<HTMLElement>(markerSelector)].filter(marker => marker.closest(blocks) === block);
     for (const marker of markers) {
       const holder = HOLDERS.find(name => marker.classList.contains(`is-holder-${name}`));
-      const range = block.ownerDocument.createRange();
-      range.setStart(start.node, start.offset); range.setEndBefore(marker);
-      if (holder && range.toString().trim()) runs.get(holder)!.push(range);
-      start = { node: marker.parentNode!, offset: [...marker.parentNode!.childNodes].indexOf(marker) + 1 };
+      if (!holder) continue;
+      if (activeHolder && holder !== activeHolder) continue;
+      const phrases = phrasesOf ? phrasesOf(marker.dataset.claimKey ?? "") : [];
+      const range = (phrases.length ? phraseRange(block, phrases, marker) : undefined) ?? claimRange(marker);
+      if (range?.toString().trim()) runs.get(holder)!.push(range);
     }
   }
   let count = 0;
-  for (const [holder, ranges] of runs) if (ranges.length) { const paint = new Paint(...ranges); paint.priority = -1; registry.set(`atlas-holder-${holder}`, paint); count += ranges.length; }
+  for (const [holder, ranges] of runs) {
+    if (ranges.length) {
+      const paint = new Paint(...ranges);
+      paint.priority = -1;
+      registry.set(`atlas-holder-${holder}`, paint);
+      count += ranges.length;
+    } else {
+      registry.delete(`atlas-holder-${holder}`);
+    }
+  }
   return count;
 }

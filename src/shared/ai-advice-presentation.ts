@@ -26,6 +26,8 @@ export function aiAdvicePresentation(body:string,originalTexts:string[]=[]):stri
    const start=node.position.start.offset!,end=node.position.end.offset!,raw=body.slice(start,end);
    const text=raw.replace(/(?:AI\s*|人工智能)?助手[ \t]*|AI[ \t]+(?=(?:\*\*|__)?建议|$)/gu,(match,offset:number)=>{
     const at=start+offset;if(quotations.some(range=>at>=range.start&&at<range.end))return match;
+    const lead=body.slice(Math.max(0,at-32),at);
+    if(/助手/u.test(match)&&at>0&&!/(?:^|[\n。！？!?，,；;：:]|\.\s+)\s*(?:(?:[-*>+]\s+|\d+[.)]\s+))?(?:但(?:是)?|不过|而|随后|接着|同时|随后由|由|据)?\s*(?:\*\*|__)?$/u.test(lead))return match;
     // A product called 智能助手/客服助手 is not a narrator role.
     if(match.trim()==="助手"&&/(?:智能|客服|语音|编程|代码|学习|教学|小)$/u.test(body.slice(0,at)))return match;
     // So is a product named with a dash ("克己-戒色助手", which read 克己-戒色AI), or a bold item label ending in 助手.

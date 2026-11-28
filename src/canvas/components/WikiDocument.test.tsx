@@ -136,18 +136,18 @@ const TOPICS=[
  "阅读页默认只显示标题、正文和来源，编辑控件收在单独的入口里。左侧目录使用简短名称，完整标题在悬停时显示。窄屏下目录折叠到顶部按钮中，正文宽度随窗口调整。滚动区域只有正文一层，避免出现多层滚动条，键盘焦点在切换章节后回到正文开头。深色模式下的配色单独定义，代码块和引用块在两种模式下都保持足够的对比度，打印时隐藏导航。来源标记点击后在右侧面板展示原文，面板关闭后阅读位置保持不变，便于继续往下阅读同一章节。",
  "扩展发布前要在每个支持的平台上手工验收导入、查找和插入。权限只申请当前功能需要的范围。商店说明写清哪些数据保存在本地、哪些会发送给用户配置的模型服务。版本号只在用户确认发布后更新，变更说明列出新增功能和已知限制，回滚包在发布前准备好。用户反馈集中记录在一个表格里，按影响范围排序，每周复查一次是否需要修复版本。发布说明同时提供中文和英文两种语言，截图使用示例数据，不包含任何真实的私人对话内容。",
 ];
-it("docks tools and cycles evidence of the selected status in reading order",()=>{
- const session=projectSession(),open=vi.fn(),host=document.createElement("div");
+it("places chapter tools in the header and cycles evidence of the selected status in reading order",()=>{
+ const session=projectSession(),open=vi.fn();
  const quotes=["默认保留全文检索。","导出文件保留原始引用。"];
  const section={...session.sections[0],body:quotes.join("\n\n"),claims:quotes.map((text,index)=>({text,quote:text,holder:"decided" as const,holderMark:true,evidenceIds:[`e${index}`]}))};
  session.sections=[section];
  session.evidence=quotes.map((text,index)=>({...session.evidence[0],id:`e${index}`,messageId:`m${index}`,excerpt:text}));
- const view=render(<><div ref={node=>{if(node&&!node.contains(host))node.append(host);}}/><WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument toolsHost={host} section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider></>);
- expect(view.container.querySelector(".wiki-document .wiki-tool-rail")).toBeNull();
- const tools=within(host);
- const show=tools.queryByRole("button",{name:"显示出处"});
+ const view=render(<WorkspaceEvidenceContext.Provider value={{open}}><WikiDocument section={section} session={session} zh structure={null} onLocate={vi.fn()} onCurrent={vi.fn()}/></WorkspaceEvidenceContext.Provider>);
+ expect(view.container.querySelector(".wiki-document .wiki-chapter-toolbar")).not.toBeNull();
+ const show=screen.queryByRole("button",{name:"显示出处"});
  if(show)fireEvent.click(show);
- const card=tools.getByRole("button",{name:"已定 2"});
+ expect(screen.queryByRole("button",{name:"全部"})).toBeNull();
+ const card=screen.getByRole("button",{name:"已定 2"});
  fireEvent.click(card);fireEvent.click(card);fireEvent.click(card);
  expect(open.mock.calls.map(([ref,opts])=>[ref.messageId,opts.pointIndex,opts.mode])).toEqual([["m0",0,"view"],["m1",1,"view"],["m0",0,"view"]]);
  localStorage.removeItem("atlas-wiki-holder-marks-shown");
@@ -440,7 +440,7 @@ it("hides source highlighting until the reader turns it on, and keeps semantic s
 ${TOPICS[1]}`,evidenceIds:[ref.id],claims:[{text,quote:ref.excerpt,evidenceIds:[ref.id],holder:"decided" as const,holderMark:true}]};
  const onLocate=vi.fn();
  const scroller=document.createElement("div");
- let visibleWidth=600;
+ const visibleWidth=600;
  vi.spyOn(scroller,"getBoundingClientRect").mockImplementation(()=>new DOMRect(0,0,visibleWidth,640));
  const view=render(<WikiDocument section={section} session={session} zh scrollRef={{current:scroller}} structure={null} onLocate={onLocate} onCurrent={vi.fn()}/>);
  const article=view.container.querySelector("article.wiki-document")!,toggle=screen.getByRole("button",{name:"显示出处"});
@@ -450,26 +450,16 @@ ${TOPICS[1]}`,evidenceIds:[ref.id],claims:[{text,quote:ref.excerpt,evidenceIds:[
  expect(article.querySelector(".wiki-claim-marker.is-holder-mark")?.textContent).toBe("已定");
  expect(screen.queryByRole("group",{name:"按状态查阅依据"})).toBeNull();
  expect(screen.queryByText("按状态查阅依据")).toBeNull();
- const control=toggle.parentElement!,panel=control.querySelector<HTMLElement>(".wiki-status-panel")!;
- let anchorLeft=260;
- vi.spyOn(control,"getBoundingClientRect").mockImplementation(()=>new DOMRect(anchorLeft,30,36,36));
- vi.spyOn(panel,"getBoundingClientRect").mockReturnValue(new DOMRect(0,0,210,80));
  fireEvent.click(toggle);
  expect(article).not.toHaveClass("hides-holder-marks");expect(screen.getByRole("button",{name:"收起出处"})).toHaveAttribute("aria-pressed","true");
- expect(panel).toBe(screen.getByRole("group",{name:"按状态查阅依据"}));
- expect(panel.dataset.placement).toBe("right");
- visibleWidth=390;
- fireEvent.resize(window);
- expect(panel.dataset.placement).toBe("left");
- visibleWidth=320;anchorLeft=150;
- fireEvent.resize(window);
- expect(panel.dataset.placement).toBe("below");
- expect(panel.style.getPropertyValue("--wiki-status-offset")).toBe("-142px");
- fireEvent.click(within(panel).getByRole("button",{name:"已定 1"}));
+ const strip=screen.getByRole("group",{name:"按状态查阅依据"});
+ expect(strip).toHaveClass("wiki-status-strip");
+ expect(within(strip).queryByRole("button",{name:"全部"})).toBeNull();
+ fireEvent.click(within(strip).getByRole("button",{name:"已定 1"}));
  expect(onLocate).toHaveBeenCalledWith(expect.objectContaining({id:ref.id}));
  expect(localStorage.getItem("atlas-wiki-holder-marks-shown")).toBe("1");
- fireEvent.keyDown(within(panel).getByRole("button",{name:"已定 1"}),{key:"Escape"});
- expect(panel).not.toBeVisible();
+ fireEvent.keyDown(within(strip).getByRole("button",{name:"已定 1"}),{key:"Escape"});
+ expect(strip).not.toBeVisible();
  expect(screen.getByRole("button",{name:"显示出处"})).toHaveFocus();
  localStorage.removeItem("atlas-wiki-holder-marks-shown");
 });

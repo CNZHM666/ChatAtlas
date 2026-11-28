@@ -10,7 +10,7 @@ import {aiAdvicePresentation} from "./ai-advice-presentation";
 import {restoreWikiLiteralPayloads,wikiBlockPresentation} from "./wiki-block-presentation";
 import {wikiDocumentBlocks} from "./wiki-document-blocks";
 import {WIKI_SUPPLEMENT,wikiSupplementRanges} from "./wiki-source-supplements";
-import {NEGATION,protectedDifference, type WikiKnowledgeUnit} from "./wiki-knowledge";
+import {NEGATION,protectedDifference, type WikiKnowledgeUnit, type WikiWritingMode} from "./wiki-knowledge";
 import {withoutUnrelatedScopeNotes} from "./wiki-scope-identity";
 import {consolidateWikiPlanTables} from "./wiki-plan-tables";
 import {orderWikiFeatureReading} from "./wiki-feature-reading";
@@ -28,7 +28,7 @@ function generatedReadingDetails(body:string,section:Pick<FocusSection,"claims">
   if(attachments.some(([start,end])=>block.start>=start&&block.end<=end))continue;
   let text=block.text;
   if(block.kind==="paragraph"||block.kind==="list"){
-   text=text.replace(/^([ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?)(?:\*\*\*\*)(?!\*)(?:[ \t]*[：:][ \t]*)?/gmu,"$1");
+   text=text.replace(/^([ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+)?)(?:\*\*\*\*)(?!\*)(?:[ \t]*[：:][ \t]*)?/gmu,"$1").replace(/(?<!\*)\*\*\*\*(?!\*)/gu,"");
    if(block.kind==="paragraph"){
     for(const claim of block.claims){
      if(claim.holder!=="decided"||claim.checked||/[。.!?]$/u.test(claim.text))continue;
@@ -330,7 +330,7 @@ function promotePseudoHeadings(body:string):string {
  * chapter's evolution card shows them), restated paragraphs go, bare label lines
  * become sub-headings, long paragraphs split. Saved text and personal chapters
  * are unchanged. */
-export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin"|"claims">,options:{zh?:boolean;units?:WikiKnowledgeUnit[];citeTable?:(unit:WikiKnowledgeUnit)=>string;tableSources?:readonly {text:string;link:string}[]}={}):string {
+export function wikiReadingFormat(body:string,section:Pick<FocusSection,"userEdited"|"origin"|"claims">,options:{zh?:boolean;units?:WikiKnowledgeUnit[];citeTable?:(unit:WikiKnowledgeUnit)=>string;tableSources?:readonly {text:string;link:string}[];writingMode?:WikiWritingMode}={}):string {
  // Personal text stays as written; only block captions, which are labels and not its words, read like the rest.
  if(section.userEdited||section.origin)return readableSourceCaptions(body);
  // Narration cleanup runs here too, so exports read like the Reader ("AI发现了", not "AI建议发现了"; no "据讨论，" lead-ins).

@@ -35,3 +35,19 @@ it("places each claim once and keeps list items as positions",()=>{
  expect(output.split(WIKI_CLAIM_MARKER)).toHaveLength(2);
  expect(output).toContain(`第一项包含重复的结论句。${marker("r")}`);
 });
+
+it("keeps short table label cells clean while placing markers on substantive long table cells",()=>{
+ const table=[
+  "| 原阶段/版本 | 适用范围 | 安排/标准 | 状态 |",
+  "| --- | --- | --- | --- |",
+  "| V0.1 Definition of Done | 核心功能交付 | 用户输入自然语言需求后，系统展示完整硬件拓扑并支持保存本地项目。 | 分析报告 |",
+ ].join("\n");
+ const output=render(table,[
+  {key:"label",phrases:["V0.1 Definition of Done"]},
+  {key:"scope",phrases:["核心功能交付"]},
+  {key:"plan",phrases:["用户输入自然语言需求后，系统展示完整硬件拓扑并支持保存本地项目"]},
+ ]);
+ expect(output).not.toContain(`${WIKI_CLAIM_MARKER}label`);
+ expect(output).not.toContain(`${WIKI_CLAIM_MARKER}scope`);
+ expect(output).toContain(`用户输入自然语言需求后，系统展示完整硬件拓扑并支持保存本地项目。${marker("plan")}`);
+});

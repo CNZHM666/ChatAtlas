@@ -4,8 +4,8 @@ import type { FocusAnalysisProgress } from "../../shared/focus-progress";
 import { generationFailureReason } from "../generation-notice";
 import {WikiPlanningStatus} from "./WikiPlanningStatus";
 
-export function FocusGenerationErrorCard({ zh, message, code, progress, diagnostics, onRetry, onSources, onSettings, onAuthorize, status }: {
-  zh: boolean; message: string; code?: string; progress?: FocusAnalysisProgress; diagnostics?: ReactNode;
+export function FocusGenerationErrorCard({ zh, message, code, progress, diagnostics, logAction, onRetry, onSources, onSettings, onAuthorize, status }: {
+  zh: boolean; message: string; code?: string; progress?: FocusAnalysisProgress; diagnostics?: ReactNode; logAction?: ReactNode;
   onRetry?: () => void; onSources: () => void; onSettings: () => void; onAuthorize?: () => void; status?: string;
 }) {
   const directoryError = code !== "PROVIDER_SCHEMA_wiki_directory_missing_owner" && (code?.startsWith("PROVIDER_SCHEMA_wiki_directory") || /Invalid Wiki|Wiki directory must|Wiki subtopic/iu.test(message));
@@ -22,7 +22,7 @@ export function FocusGenerationErrorCard({ zh, message, code, progress, diagnost
     {directoryError?<WikiPlanningStatus progress={progress?.directory} zh={zh} paused/>:null}
     {processed > 0 ? <div className="focus-error-retained"><CheckCircle2 size={17} aria-hidden="true"/><div><strong>{complete ? zh ? `材料分析已完成（${processed} 段）` : `Material analysis complete (${processed} passages)` : zh ? `已分析 ${processed}/${progress?.totalSegments || "…"} 段` : `${processed}/${progress?.totalSegments || "…"} passages analyzed`}</strong>{writing ? <p>{zh ? `正文完成 ${progress.completed}/${progress.total} 个步骤` : `${progress.completed}/${progress.total} writing steps complete`}{progress.recoverySplits ? zh ? "（含分批修复）" : " (including split repairs)" : ""}</p> : null}<p>{zh ? "已完成的批次会复用，重试后继续剩余内容。" : "Completed batches will be reused. Retry continues the remaining work."}</p></div></div> : null}
     <div className="focus-error-actions">{onAuthorize ? <button type="button" className="primary" onClick={onAuthorize}>{zh ? "授权连接" : "Authorize connection"}</button> : null}{onRetry ? <button type="button" className={onAuthorize ? undefined : "primary"} onClick={onRetry}>{recoveryPaused?zh?"继续补写":"Continue writing":routingError && complete ? zh ? "重试目录" : "Retry directory" : zh ? "重试生成" : "Retry"}</button> : null}<button type="button" onClick={onSources}>{zh ? "调整来源" : "Change sources"}</button></div>
-    <div className="focus-error-footer"><div className="focus-error-diagnostics">{diagnostics ?? (reason !== message || code ? <details><summary>{zh ? "诊断信息" : "Diagnostic details"}<ChevronDown size={14}/></summary>{code ? <p>{code}</p> : null}<p>{message}</p>{recoveryPaused ? <p>{zh ? "这是自动修复上限，不是账户余额不足。" : "This is a repair limit, not an account-balance error."}</p> : null}</details> : null)}</div><button type="button" className="focus-error-settings" onClick={onSettings}><Settings size={14} aria-hidden="true" />{zh ? "AI 设置" : "AI settings"}</button></div>
+    <div className="focus-error-footer"><div className="focus-error-diagnostics">{logAction}{diagnostics ?? (reason !== message || code ? <details><summary>{zh ? "诊断信息" : "Diagnostic details"}<ChevronDown size={14}/></summary>{code ? <p>{code}</p> : null}<p>{message}</p>{recoveryPaused ? <p>{zh ? "这是自动修复上限，不是账户余额不足。" : "This is a repair limit, not an account-balance error."}</p> : null}</details> : null)}</div><button type="button" className="focus-error-settings" onClick={onSettings}><Settings size={14} aria-hidden="true" />{zh ? "AI 设置" : "AI settings"}</button></div>
     {status ? <small className="focus-error-status" role="status">{generationFailureReason(status,undefined,zh)}</small> : null}
   </section>;
 }

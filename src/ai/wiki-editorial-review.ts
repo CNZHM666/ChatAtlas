@@ -1,4 +1,5 @@
 import {replaceParagraph} from "../shared/wiki-body-text";
+import {wikiProjectPersonalAside} from "./wiki-knowledge-select";
 import {reviewWikiEvidenceStates} from "./wiki-evidence-state";
 import {wikiDecisionRestatement,wikiLayerDeferral,wikiReleaseDeferral} from "./wiki-confirmation-scope";
 import type { WikiClaim } from "../shared/wiki-claims";
@@ -168,7 +169,7 @@ export function retainWikiDecisions(chapters:WikiDraftChapter[],ledger:WikiKnowl
  const additions=new Map<string,WikiKnowledgeUnit[]>();
  for(const unit of unitsById.values()){
   const id=home.get(unit.id)?.chapterId;
-  if(!confirmed.has(unit.id)||visible.has(unit.id)
+  if(!confirmed.has(unit.id)||visible.has(unit.id)||wikiProjectPersonalAside(unit)
    ||unit.about&&ledger.scopeAnswers?.[aboutNameKey(unit.about.name)]==="exclude")continue;
   const target=chapters.find(chapter=>chapter.id===id)??chapters[0];
   if(target)additions.set(target.id,[...additions.get(target.id)??[],unit]);

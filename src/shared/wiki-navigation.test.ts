@@ -90,9 +90,9 @@ it("localizes generated category aliases without rewriting personal names",()=>{
 
 it("shows a clean reading location without inventing a pending categorization task",()=>{
  const page={...projectSession().sections[0],title:"业务流程与操作",wikiGroup:undefined};
- expect(wikiReadingLocation(page,true)).toBe("Wiki");
- expect(wikiReadingLocation({...page,wikiGroup:"Uncategorized"},true)).toBe("Wiki");
- expect(wikiReadingLocation({...page,wikiGroup:"Hardware execution",wikiQuestion:"执行流程"},true)).toBe("Wiki / Hardware execution");
- expect(wikiReadingLocation({...page,wikiGroupEdited:true,wikiGroup:"我的分组"},true)).toBe("Wiki / 我的分组");
- expect(wikiReadingLocation({...page,wikiGroupEdited:true,wikiGroup:"待归类"},true)).toBe("Wiki / 待归类");
+ expect(wikiReadingLocation(page,true)).toBe("章节");
+ expect(wikiReadingLocation({...page,wikiGroup:"Uncategorized"},true)).toBe("章节");
+ expect(wikiReadingLocation({...page,wikiGroup:"Hardware execution",wikiQuestion:"执行流程"},true)).toBe("章节 / Hardware execution");
+ expect(wikiReadingLocation({...page,wikiGroupEdited:true,wikiGroup:"我的分组"},true)).toBe("章节 / 我的分组");
+ expect(wikiReadingLocation({...page,wikiGroupEdited:true,wikiGroup:"待归类"},true)).toBe("章节 / 待归类");
 });

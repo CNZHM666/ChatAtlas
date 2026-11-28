@@ -1,4 +1,4 @@
-import {reviewSavedWikiEditorial} from "./wiki-saved-editorial";
+import {polishSavedWikiParagraphs, reviewSavedWikiEditorial} from "./wiki-saved-editorial";
 import { restoreWikiSourceNegation } from "../shared/wiki-source-negation";
 import type { FocusSection, FocusSession } from "../shared/focus-session";
 import type { WikiClaim } from "../shared/wiki-claims";
@@ -33,6 +33,7 @@ import { reviewWikiHistory } from "./wiki-history-review";
 import { assertsWikiReplacement, wikiCredentialStorageOpening, wikiCredentialStorageProse, wikiReplacementSupported } from "./wiki-version-conflict";
 import { withStop } from "../shared/wiki-sentences";
 import { wikiAppliedDecisions, wikiEditorialCleanup, wikiOpenDecisionProse, withoutSettledOpeningQuestions } from "../shared/wiki-editorial-cleanup";
+import { wikiLedgerAtPublishedDraft } from "../shared/wiki-decision-receipts";
 import { wikiProjectDecisionVoice, wikiProjectVoice } from "../shared/wiki-project-voice";
 import { applySavedWikiRoutes, savedWikiRoutes } from "./wiki-saved-routes";
 import { wikiHistoricalStageTable } from "../shared/wiki-plan-tables";
@@ -379,6 +380,8 @@ export function wikiChapterReviewContext(session: FocusSession, projected?: Retu
     sources: () => sources ??= new Map(session.evidence.filter(ref => availableWikiEvidence(session, ref)).map(ref => [wikiEvidenceKey(ref), ref])) };
 }
 
+const publishedChapterReviews = new WeakMap<FocusSession, ReturnType<typeof wikiChapterReviewContext>>();
+
 function keepScopedReportDates(body: string, section: FocusSection, retained: ReadonlySet<string>, units: ReadonlyMap<string, WikiKnowledgeUnit>) {
   const shape = (table: string) => {
     const [header, , ...rows] = table.split("\n").map(wikiTableCells);
@@ -405,7 +408,13 @@ function keepScopedReportDates(body: string, section: FocusSection, retained: Re
 export function reviewWikiChapter(section: FocusSection, session: FocusSession, zh = session.locale !== "en", diagnostics?: { resolved: Set<string>; scopeProblems: Set<string> }, context = wikiChapterReviewContext(session)): FocusSection {
   const resolvedProblems = diagnostics?.resolved;
   if (section.userEdited || section.origin) return section;
-  const ledger = session.wikiKnowledge;
+  const savedLedger = session.wikiKnowledge;
+  const ledger = savedLedger && wikiLedgerAtPublishedDraft(savedLedger);
+  if (ledger && ledger !== savedLedger) {
+    const cached = publishedChapterReviews.get(session);
+    context = cached ?? wikiChapterReviewContext({ ...session, wikiKnowledge: ledger });
+    if (!cached) publishedChapterReviews.set(session, context);
+  }
   const chapter = ledger?.draft?.chapters.find(item => item.id === section.id);
   if (!ledger || !chapter) return restoreWikiSourceNegation(section, session);
   const tidy = tidyGeneratedWikiMarkdown(section.body);
@@ -678,7 +687,7 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
     }
     const owned = new Map(reading.units.filter(unit => unit.about && unit.about.role !== "other_project").map(unit => [unit.id, unit]));
     if (owned.size) {
-      let body = current.body;
+      const body = current.body;
       const rawClaims = chapter.paragraphs.flatMap(paragraph => paragraph.claims ?? []).filter(claim =>
         claim.unitIds.some(id => owned.has(id)) && !current.claims?.some(saved => saved.text === claim.text) && body.includes(claim.text));
       const addedRefs = new Set<string>();
@@ -698,21 +707,12 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
             ? eligibleSource(other, sourceOf(other) ?? context.sources().get(wikiEvidenceKey({...other.evidence, excerpt: other.evidence.quote}))) ?? [] : [];
         });
         if (refs.length !== ids.length) return keep();
-        const at = body.indexOf(claim.text), end = at + claim.text.length;
-        const detail = ids.length === 1 ? wikiStatementWithConditions(unit, zh) : claim.text;
-        const statement = /[。.!?！？]/u.test(body[end] ?? "") ? detail.replace(/[。.!?！？]$/u, "") : detail;
-        const text = zh ? `外部参考（${unit.about.name}）：${statement}` : `External reference (${unit.about.name}): ${statement}`;
-        const terminal = body.slice(end).match(/^[。.!?！？]/u)?.[0] ?? "";
-        const left = body.slice(0, at), right = body.slice(end + terminal.length);
-        const prior = /[。.!?！？][ \t]*$/u.test(left) ? "\n\n" : "";
-        const next = /[。.!?！？]$/u.test(text + terminal) && /^[ \t]*[^\s\n]/u.test(right) ? "\n\n" : "";
-        body = (prior ? left.trimEnd() : left) + prior + text + terminal + next + (next ? right.trimStart() : right);
+        if (!claimSupported(claim.text, ids.map(id => owned.get(id)!))) return keep();
         for (const ref of refs) addedRefs.add(ref.id);
-        return [{ ...claim, text, quote: unit.evidence.quote, evidenceIds: [...new Set(refs.map(ref => ref.id))],
-          formulations: undefined, holder: "ai" as const, holderMark: true, workStatus: undefined, sourceReading: undefined,
-          verification: claimSupported(statement, ids.map(id => owned.get(id)!)) ? "supported" as const : claim.verification }];
+        return [{ ...claim, quote: unit.evidence.quote, evidenceIds: [...new Set(refs.map(ref => ref.id))],
+          holder: "ai" as const, holderMark: true, workStatus: undefined, sourceReading: undefined, verification: "supported" as const }];
       });
-      if (body !== current.body) current = { ...current, body, claims, evidenceIds: [...new Set([...current.evidenceIds, ...addedRefs])] };
+      if (addedRefs.size) current = { ...current, claims, evidenceIds: [...new Set([...current.evidenceIds, ...addedRefs])] };
     }
     if (zh && ledger.userAnswers?.length) {
       const draft = chapter.paragraphs.flatMap(paragraph => paragraph.claims ?? []);
@@ -736,7 +736,7 @@ export function reviewWikiChapter(section: FocusSection, session: FocusSession, 
       ledger,zh,new Set(reading.conflicts.filter(item=>!item.selected).map(item=>item.id))),
       reading.statuses, reading.arbitrationStatuses, zh, confirmedQuestions);
     const known = new Map(reading.units.filter(unit=>scopeSource(unit)).map(unit=>[unit.id,unit]));
-    const composed = composeSavedWikiParagraphs(checked, reading.organization, known, reading.statuses);
+    const composed = polishSavedWikiParagraphs(composeSavedWikiParagraphs(checked, reading.organization, known, reading.statuses), reading.ledger, scopeSource, known);
     if (!composed.claims?.length) return composed;
     const referenceOnly = wikiReferenceOnlyUnits(reading.ledger);
     let body = composed.body;

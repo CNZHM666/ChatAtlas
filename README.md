@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  <b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <b>v0.1.7 Alpha</b>
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <b>v0.1.8 Alpha</b>
 </p>
 
 <p align="center">
   <a href="https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans"><b>Live demo</b></a>
-  · <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip">Download v0.1.7 ZIP</a>
+  · <a href="https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.8/ChatAtlas-extension-v0.1.8.zip">Download v0.1.8 ZIP</a>
   · <a href="#preview">Preview</a>
   · <a href="#install-on-chrome-or-edge">Install</a>
   · <a href="docs/en/CHANGELOG.md">Changelog</a>
@@ -16,59 +16,60 @@
 </p>
 
 <p align="center">
-  <strong>Combine conversations from different AI platforms into one project handoff with verifiable citations.</strong><br>
-  A local-first Chrome extension. Connect your own model API to generate a wiki, then export the Markdown you need for teammates, <strong>Codex</strong>, or <strong>Claude Code</strong>.
+  <strong>Start a project in ChatGPT, continue in Claude, and keep one verifiable Markdown document.</strong><br>
+  ChatAtlas is a local-first Chrome / Edge extension. Turn multi-platform AI chats into a structured project wiki with verifiable citations, a knowledge ledger, project files, and three Markdown export modes built for teammates, <strong>Codex</strong>, or <strong>Claude Code</strong>.
 </p>
 
 > [!NOTE]
-> **Alpha · Chrome / Edge.** Local reading, keyword search, and export require no AI key. Wiki generation uses your own model connection (BYOK). Long conversations can take a while to process, and output quality varies with the model and source material. Check key conclusions against their citations and back up your data before upgrading.
+> **Alpha · Chrome / Edge.** Local reading, keyword search, project files, sticky notes, and Markdown export require no AI key. Wiki generation and incremental updates use your own model connection (BYOK). Check key conclusions against their citations and back up your data before upgrading.
 
 ## Why use ChatAtlas?
 
-- **Build one wiki from multiple conversations.** Select threads from ChatGPT, Claude, Gemini, and other supported platforms. The wiki labels confirmed decisions, AI suggestions, and user reports. Open **Check evidence** to jump to the original passage in its conversation and resolve key conflicts yourself.
-- **Knowledge ledger with incremental updates.** ChatAtlas extracts knowledge in batches and links each entry to its source message ID. Updates reuse eligible, validated reads and focus follow-up reads on uncovered material. You can preview affected chapters before applying changes.
-- **Markdown built for project handoffs.** Export the project overview and selected chapters as a `.md` file, with citation IDs or original excerpts, ready for a teammate, Codex, or Claude Code. [See the Markdown template →](docs/en/examples/project-context-template.md)
-- **Local-first, with AI on demand.** Conversations, the ledger, and the wiki are stored in your browser's IndexedDB. Reading, keyword search, and export run locally. When you generate or update a wiki, ChatAtlas sends the necessary material from your selected sources directly to your configured provider.
+- **Native sidebar workspace beside your AI chats.** Create projects, review incremental updates from the current conversation, read chapters with an in-chapter outline and source markers, and keep **Files** (with drag, paste, and auto-saved chat uploads) and **Sticky Notes** right next to the chat—separate from formal wiki prose.
+- **Full Workbench for deep review and traceability.** Browse the one-page project **Overview**, filter **Your Decisions** vs **AI Suggestions** in the **Knowledge Ledger**, and inspect every claim side by side with the original conversation message and surrounding context.
+- **Three Markdown export modes (copy or download).** Switch between **Brief** (clean reading & quick context), **Handoff** (technical specs, confirmed decisions, and compact locators for Codex / Claude Code), and **Audit** (full overview, attribution marks, excerpts, and check details) in both the Workbench and the sidebar—without regenerating.
+- **Local-first, with BYOK AI on demand.** Conversations, the knowledge ledger, wiki versions, files, and notes stay in your browser's IndexedDB. Reading, keyword search, and export run locally. When you generate or update a wiki, only the selected material is sent directly to your configured provider.
 
 ## Preview
 
-**[Try the English demo](https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans)** · No installation or API key required. Circuit Studio turns six fictional conversations from ChatGPT, Claude, and Gemini into five wiki chapters. Use **Check evidence** to trace the approval-before-execution decision to Claude, then open the original recovery rules and table in Gemini. Export Markdown with original quotes from the project toolbar.
+**[Try the English demo](https://cnzhm666.github.io/ChatAtlas/?lang=en#/wiki/operation-plans)** · No installation or API key required.
 
 <p align="center">
-  <img src="docs/images/citation-check.gif" alt="Turn on source markers in the wiki and open the cited passage" width="920">
-  <br><sub>Turn on source markers and click a citation to open the original conversation</sub>
+  <img src="docs/images/project-overview.png" alt="Project overview with one-page chapter cards, confirmed decisions, and open review items" width="920">
+  <br><sub>Project overview: one-page chapter cards, confirmed decisions, and items awaiting review</sub>
 </p>
 
 <p align="center">
-  <img src="docs/images/wiki-chapter-light.png" alt="A project wiki chapter with the evidence review panel open on the right" width="920">
-  <br><sub>Review a wiki claim alongside the original message and its surrounding context</sub>
+  <img src="docs/images/evidence-review.png" alt="Review a wiki chapter side by side with the original conversation quote and surrounding context" width="920">
+  <br><sub>Evidence review: inspect attribution marks alongside the original message and surrounding context</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/sidecar-project.png" alt="ChatAtlas native sidebar beside ChatGPT with Document, Files, and Sticky Notes tabs" width="920">
+  <br><sub>Native sidebar: Document, Files, and Sticky Notes tabs, writing mode selector, incremental update, and Markdown export</sub>
 </p>
 
 <details>
-<summary>Import demo and more screenshots</summary>
+<summary>More screenshots: Workbench home, Knowledge Ledger, and Sidebar chapter reading</summary>
 
-<p align="center">
-  <img src="docs/images/import-demo.gif" alt="Import conversations in the workbench" width="840">
-  <br><sub>Import multi-platform conversations in the workbench</sub>
-</p>
-
-| Project overview | Conversation reader in dark mode |
+| Project Workbench | Knowledge Ledger |
 |:---:|:---:|
-| ![Project overview and wiki chapters](docs/images/project-overview-light.png) | ![Original messages in the dark-mode reader](docs/images/reader-dark.png) |
-| **Workbench** | **Web sidebar** |
-| ![Workspace home in Chinese](docs/images/home-zh-light.png) | ![ChatAtlas sidebar on ChatGPT](docs/images/sidecar-chatgpt-light.png) |
+| ![Project Workbench home](docs/images/workbench-home.png) | ![Knowledge Ledger filtering decisions and AI suggestions](docs/images/knowledge-ledger.png) |
+| **Sidebar chapter reading & source marks** | **Multi-platform sidebar workspace** |
+| ![Sidebar chapter reading with source marks](docs/images/sidecar-chapter.png) | ![Native sidebar project view](docs/images/sidecar-project.png) |
 
 </details>
 
 ## Quick start
 
-1. **Choose your sources.** Configure and test a model in **Settings → AI connection**. Import your conversations, choose **Organize into a project document** in the workbench, then select your sources and describe your goal.
-2. **Check the evidence.** Open **Check evidence** in a chapter to inspect the original passage in context and confirm decisions that affect next steps.
-3. **Export Markdown.** In **Export**, pick the overview and chapters you need, include original excerpts if helpful, and share the file with a teammate or coding agent.
+1. **Start a project.** Open the ChatAtlas side panel on any supported AI site and click **New** (or organize existing conversations from the **Project Workbench**). Configure a model in **Settings → AI settings** when you are ready to generate or update a wiki.
+2. **Generate or review updates.** Generate a first wiki from the current conversation in the background, or click the update icon to preview new/changed points with verbatim source quotes before saving.
+3. **Keep files & notes beside your chat.** Switch to the **Files** tab to auto-save uploads from the chat (or drop / `Ctrl+V` files directly) and drag saved assets back into another AI composer; jot quick thoughts in **Sticky Notes**.
+4. **Export in the right mode.** Open **Export** in either the sidebar or Workbench, choose **Brief**, **Handoff**, or **Audit**, and copy Markdown or download the `.md` file.
 
 ## Supported platforms and sources
 
-| Source | File import | Automatic web capture |
+| Source | File import | Automatic web capture & sidebar |
 | :--- | :--- | :--- |
 | **ChatGPT** | ✅ Official export | ✅ Supported, with dedicated history sync |
 | **Claude** | ✅ Official export | 🧪 Experimental |
@@ -76,31 +77,30 @@
 | **DeepSeek** | ✅ Official export | 🧪 Experimental |
 | **Doubao** | — | 🧪 Experimental |
 | **Kimi** | — | 🧪 Experimental |
-| **Qwen (including the international site)** | — | 🧪 Experimental |
+| **Qwen (including Qwen Intl)** | — | 🧪 Experimental |
 | **Generic Markdown / JSON** | ✅ Compatible conversation files | — |
 
-Web capture turns on by default once the browser grants access to a supported site and can be paused anytime in Settings. Experimental capture only saves messages currently loaded on the page, so older history may be incomplete.
+Web capture runs by default once the browser grants access to a supported site. To stop capture for a site, change ChatAtlas’s site access in the browser. Experimental capture only saves messages currently loaded on the page, so older history may be incomplete.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  A["Choose conversations and scope"] --> B["Extract knowledge in batches<br/>Keep quotes and message IDs"]
-  B --> C["Group by topic<br/>Ask about key conflicts"]
-  C --> D["Write the wiki and validate citations"]
-  D --> E["Review and edit"]
-  E --> F["Export Markdown"]
+  A["Create or open project in sidebar"] --> B["Sync & review chat updates"]
+  B --> C["Save decisions & citations to ledger"]
+  C --> D["Read, check sources & manage versions in Workbench"]
+  C --> E["Export Brief / Handoff / Audit Markdown"]
 ```
 
-- **Source material and generated content stay separate.** Original messages and versions, generated prose, and personal edits are stored as distinct records. Each confirmation is tied to its question, selected answer, and supporting evidence.
-- **Updates preserve personal edits.** For chapters you have edited, ChatAtlas keeps your text intact and presents newly generated updates for review.
-- **BYOK requests go directly to your provider.** API keys are stored in your browser. Wiki generation, optional semantic search, sidebar AI Q&A, and connection tests send requests directly to the provider you configure.
+- **Source material and generated prose stay separate.** Original messages, source versions, knowledge units, generated chapters, personal edits, project files, and sticky notes are stored as distinct records. Every confirmation records its question, answer, and source quote.
+- **Updates protect personal edits.** Manually edited chapters are never silently overwritten; incremental updates preview every proposed addition or revision before writing.
+- **BYOK requests go directly to your provider.** API keys stay in your browser. Generation, incremental previews, optional semantic search, and connection tests talk directly to the provider you configure.
 
 [Architecture](docs/en/ARCHITECTURE.md) · [AI workflow](docs/en/AI_WORKFLOWS.md) · [Privacy](docs/en/PRIVACY.md)
 
 ## Install on Chrome or Edge
 
-**[Download v0.1.7 Alpha (ZIP)](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip)** · [Release notes](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.7)
+**[Download v0.1.8 Alpha (ZIP)](https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.8/ChatAtlas-extension-v0.1.8.zip)** · [Release notes](https://github.com/CNZHM666/ChatAtlas/releases/tag/v0.1.8)
 
 Chrome and Edge share the same ZIP. During Alpha, the extension is distributed via GitHub and loaded manually.
 
@@ -114,14 +114,14 @@ Chrome and Edge share the same ZIP. During Alpha, the extension is distributed v
 Paste this prompt into an AI coding agent with terminal access, then load the folder it returns in your browser.
 
 ```text
-Download the ChatAtlas v0.1.7 Alpha extension ZIP from this URL.
-https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.7/ChatAtlas-extension-v0.1.7.zip
+Download the ChatAtlas v0.1.8 Alpha extension ZIP from this URL.
+https://github.com/CNZHM666/ChatAtlas/releases/download/v0.1.8/ChatAtlas-extension-v0.1.8.zip
 Extract it to a folder I can keep. Verify that the folder directly contains manifest.json, then give me its absolute path and the steps to load it in Chrome or Edge.
 ```
 
 </details>
 
-**Upgrading an existing install.** Back up your data in **Settings → Capture & data**, replace the files in your existing extension folder, and click reload on the Extensions page.
+**Upgrading an existing install.** Back up your data in **Settings → Local data**, replace the files in your existing extension folder, and click reload on the Extensions page.
 
 ## Build from source
 

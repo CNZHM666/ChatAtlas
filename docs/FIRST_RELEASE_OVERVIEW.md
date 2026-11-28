@@ -2,7 +2,7 @@
 
 **简体中文** · [English](en/FIRST_RELEASE_OVERVIEW.md)
 
-版本为 0.1.6 Alpha，适用于 Chrome 和 Edge。以下为可用入口和实际限制。
+版本为 0.1.8 Alpha，适用于 Chrome 和 Edge。以下为可用入口和实际限制。
 
 ## 支持平台
 

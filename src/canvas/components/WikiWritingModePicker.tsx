@@ -1,11 +1,28 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { FileCheck2, FileCode2, FolderArchive } from "lucide-react";
+import { Check, FileCheck2, FileCode2, FolderArchive } from "lucide-react";
 import type { WikiWritingMode } from "../../shared/wiki-knowledge";
+import { WIKI_WRITING_MODES } from "../../shared/wiki-writing-modes";
+import "../decision-steps.css";
 
 const MODES = [
-  { id: "concise", icon: FileCheck2, title: ["精简定稿", "Concise Wiki"], description: ["项目主线、关键决定与待决事项。", "Project direction, key decisions, and open questions."] },
-  { id: "handoff", icon: FileCode2, title: ["开发规格", "Development spec"], description: ["给开发者和 Coding Agent 的约束、字段、流程与验收条件。", "Constraints, fields, workflows, and acceptance criteria for developers and coding agents."] },
-  { id: "audit", icon: FolderArchive, title: ["完整审计", "Full audit"], description: ["保留提案、历史方案、确认记录与核验说明。", "Proposals, earlier versions, confirmation records, and verification notes."] },
+  {
+    id: "concise",
+    icon: FileCheck2,
+    tag: ["推荐 · 快速阅读", "Recommended · Quick read"],
+    description: ["项目主线、关键决定与待决事项。", "Project direction, key decisions, and open questions."],
+  },
+  {
+    id: "handoff",
+    icon: FileCode2,
+    tag: ["研发 / Agent 交接", "Dev / Agent handoff"],
+    description: ["给开发者和 Coding Agent 的约束、字段、流程与验收条件。", "Constraints, fields, workflows, and acceptance criteria for developers and coding agents."],
+  },
+  {
+    id: "audit",
+    icon: FolderArchive,
+    tag: ["完整追溯", "Full trail"],
+    description: ["保留提案、历史方案、确认记录与核验说明。", "Proposals, earlier versions, confirmation records, and verification notes."],
+  },
 ] as const;
 
 export function WikiWritingModePicker({ current, zh, onChoose, onCancel }: {
@@ -47,11 +64,18 @@ export function WikiWritingModeOptions({ mode, zh, onChange }: {
 }) {
   const id = useId();
   const lang = zh ? 0 : 1;
-  return <fieldset aria-label={zh ? "写作模式" : "Writing mode"}>
-      {MODES.map(({ id: value, icon: Icon, title, description }) => <label key={value}>
-        <input type="radio" name={id} value={value} checked={mode === value} onChange={() => onChange(value)}/>
-        <Icon size={18} aria-hidden="true"/>
-        <span><strong>{title[lang]}</strong><small>{description[lang]}</small></span>
+  return <fieldset className="wiki-writing-mode-grid" aria-label={zh ? "写作模式" : "Writing mode"}>
+      {MODES.map(({ id: value, icon: Icon, tag, description }) => <label key={value} className={mode === value ? "is-selected" : undefined}>
+        <input type="radio" className="sr-only" name={id} value={value} checked={mode === value} onChange={() => onChange(value)}/>
+        <div className="wiki-writing-mode-card-head">
+          <span className="wiki-writing-mode-icon" aria-hidden="true"><Icon size={17} /></span>
+          <span className="wiki-writing-mode-check" aria-hidden="true">{mode === value ? <Check size={12} /> : null}</span>
+        </div>
+        <span className="wiki-writing-mode-copy">
+          <strong>{WIKI_WRITING_MODES[value][zh ? "zh" : "en"]}</strong>
+          <em className="wiki-writing-mode-tag">{tag[lang]}</em>
+          <small>{description[lang]}</small>
+        </span>
       </label>)}
     </fieldset>;
 }

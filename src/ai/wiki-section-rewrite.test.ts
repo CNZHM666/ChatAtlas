@@ -67,6 +67,50 @@ it("protects personal prose, missing sources, and oversize inputs before sending
   expect(()=>prepareWikiRewrite(session,session.sections[0],[{...raw,content:"Long original. ".repeat(20000)}],"",ai,signal)).toThrow(expect.objectContaining({code:"WIKI_REWRITE_BUDGET",sectionId:session.sections[0].id,maxInputTokens:8000,sourceMessages:1}));
   expect(ai.generateStructured).not.toHaveBeenCalled();
 });
+it("prepares a non-destructive candidate for an explicitly selected personal chapter", async () => {
+  const session = projectSession();
+  const chapter = session.sections[0] = { ...session.sections[0], origin: "user", userEdited: true, body: "我补充的限制：先验证核心流程，才扩展。" };
+  const before = structuredClone(session), ai = provider({ ...output, title: "模型的新标题" });
+  const instruction = "缩短说明，保留先验证再扩展的条件";
+  const result = await rewriteWikiSection(session, chapter, [raw], instruction, ai, new AbortController().signal, { allowUserEditedCandidate: true });
+  const request = ai.generateStructured.mock.calls[0][0];
+  expect(JSON.parse(request.prompt)).toMatchObject({ editorialRequest: instruction, chapter: { authorEdited: true, body: chapter.body } });
+  expect(request.system).toContain("preserve the user's explicit facts");
+  expect(result).toMatchObject({ id: chapter.id, title: chapter.title, userEdited: true, origin: "user", body: output.body,
+    evidenceReview: { invalidClaims: 0 }, claims: [expect.objectContaining({ evidenceIds: ["e1"] })] });
+  expect(session).toEqual(before);
+});
+
+it("checks original quotations even when a candidate belongs to a personal chapter", async () => {
+  const session = projectSession(), section = { ...session.sections[0], userEdited: true };
+  const ai = provider({ ...output, claims: [{ ...output.claims[0], quote: "This was never in the supplied original." }] });
+  await expect(rewriteWikiSection(session, section, [raw], "保留条件", ai, new AbortController().signal,
+    { allowUserEditedCandidate: true })).rejects.toThrow("引用未匹配原文");
+});
+
+it("forwards a personal rewrite instruction when the case must be written in batches", async () => {
+  const session = projectSession(), original = session.sections[0];
+  session.sections[0] = { ...original, userEdited: true,
+    body: Array.from({ length: 50 }, (_, index) => `第 ${index + 1} 项。 ${"先验证核心流程，再扩展功能。".repeat(8)}`).join("\n\n") };
+  const before = structuredClone(session);
+  const requests: StructuredAIRequest<unknown>[] = [];
+  const ai = { modelId: "fixture", generateStructured: async <T,>(request: StructuredAIRequest<T>) => {
+    requests.push(request as StructuredAIRequest<unknown>);
+    const payload = JSON.parse(request.prompt);
+    expect(payload.presentation).toBe("wiki_revision_batch");
+    return request.validate({ blocks: payload.units.map((unit: { id: string; topic: string }) => ({
+      topic: unit.topic, unitIds: [unit.id], body: output.body, claims: [],
+    })) });
+  } } as AtlasAIProvider;
+  const instruction = "保留型号和先决条件";
+  const result = await rewriteWikiSection(session, session.sections[0], [raw], instruction, ai, new AbortController().signal,
+    undefined, { allowUserEditedCandidate: true });
+  expect(requests.length).toBeGreaterThan(1);
+  expect(requests.every(request => JSON.parse(request.prompt).editorialRequest.includes(instruction))).toBe(true);
+  expect(result).toMatchObject({ userEdited: true, wikiRevisionReceipt: { batches: requests.length } });
+  expect(session).toEqual(before);
+});
+
 it("retains personal diagram edits and their previous basis when replacing generated prose", async () => {
   const session=projectSession(), section={...session.sections[0],structureEdited:true,semanticStructure:{nodes:[],relations:[]},semanticBodySignature:"previous body",personalExplanation:"My explanation"};
   const result=await rewriteWikiSection(session,section,[raw],"",provider(output),new AbortController().signal);

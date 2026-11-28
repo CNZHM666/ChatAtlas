@@ -1,5 +1,6 @@
 import type { FocusMode, FocusScope } from "../shared/focus-session";
 import type { FocusAnalysisProgress } from "../shared/focus-progress";
+import type { WikiWritingMode } from "../shared/wiki-knowledge";
 import { getDatabase } from "./db";
 import type { AIUsageEvent } from "../shared/types";
 import {focusTaskResult} from "../shared/focus-task-result";
@@ -7,6 +8,8 @@ import {focusTaskResult} from "../shared/focus-task-result";
 export interface FocusGenerationTask {
   id: string; runId: string; goal: string; mode: FocusMode; sourceIds: string[];
   scope?: FocusScope; scopeCanvasId?: string;
+  writingMode?: WikiWritingMode;
+  organizationInstruction?: string;
   status: "running" | "paused" | "failed" | "preview";
   progress?: FocusAnalysisProgress; errorCode?: string; sessionId?: string;
   /** Old versions logged batches but did not persist the user's goal/scope. */

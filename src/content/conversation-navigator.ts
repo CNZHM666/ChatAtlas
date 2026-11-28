@@ -58,16 +58,34 @@ export class ConversationNavigator {
     const button = this.trigger?.isConnected ? this.trigger : this.button("", "atlas-navigator-trigger", () => { if (this.host) this.setCollapsed(!this.collapsed); else void this.open(); });
     const className=`atlas-navigator-trigger${target.variant ? ` atlas-navigator-trigger--${target.variant}` : ""}`;
     if(button.className!==className)button.className=className;
+    button.dataset.atlasPlatform = "chatgpt";
+    button.dataset.atlasTheme = this.dark ? "dark" : "light";
     button.setAttribute("aria-label", this.zh ? "ChatAtlas 知识助手" : "ChatAtlas knowledge companion"); button.title = `${button.getAttribute("aria-label")} · Ctrl+Shift+Y`; button.setAttribute("aria-expanded", String(Boolean(this.host) && !this.collapsed));
     if (!document.getElementById("atlas-navigator-trigger-style")) {
       const style = document.createElement("style"); style.id = "atlas-navigator-trigger-style";
       style.textContent = ATLAS_TRIGGER_STYLE;
       (document.head??document.documentElement).append(style);
     }
-    const placed=this.trigger === button && (target.placement === "after" ? anchor.nextElementSibling === button : target.placement === "before" ? anchor.previousElementSibling === button : anchor.firstElementChild === button);
+    const placed=this.trigger === button && (target.placement === "before" ? anchor.previousElementSibling === button : anchor.firstElementChild === button);
     if(placed&&(target.variant==="edge"||chatGPTEntryVisible(button)))return;
     if (!button.firstChild) { const mark = document.createElement("span"); mark.className = "atlas-trigger-mark"; mark.append(this.logoImage()); mark.setAttribute("aria-hidden", "true"); const label=document.createElement("span");label.className="atlas-trigger-label";label.textContent="ChatAtlas";button.append(mark,label); }
-    if(!placed){if(target.placement === "after")anchor.after(button);else if(target.placement === "before")anchor.before(button);else anchor.prepend(button);}this.trigger = button;
+    if (target.variant === "toolbar") {
+      const rect = anchor.getBoundingClientRect();
+      if (rect.height >= 16) {
+        const size = Math.round(Math.min(38, Math.max(28, rect.height)));
+        const icon = Math.round(Math.min(22, Math.max(18, size * 0.64)));
+        button.style.setProperty("--atlas-trigger-size", `${size}px`);
+        button.style.setProperty("--atlas-trigger-icon", `${icon}px`);
+      }
+      const radius = getComputedStyle(anchor).borderRadius;
+      if (radius && radius !== "0px") button.style.setProperty("--atlas-trigger-radius", radius);
+      else button.style.removeProperty("--atlas-trigger-radius");
+    } else {
+      button.style.removeProperty("--atlas-trigger-size");
+      button.style.removeProperty("--atlas-trigger-icon");
+      button.style.removeProperty("--atlas-trigger-radius");
+    }
+    if(!placed){if(target.placement === "before")anchor.before(button);else anchor.prepend(button);}this.trigger = button;
     if(target.variant!=="edge"&&!chatGPTEntryVisible(button)){
       this.clippedAnchors.add(anchor);button.className="atlas-navigator-trigger atlas-navigator-trigger--edge";document.body.prepend(button);
     }
@@ -108,6 +126,7 @@ export class ConversationNavigator {
     this.dark = dark;
     const logo = chrome.runtime.getURL(brandLogos[dark ? "dark" : "light"].replace(/^\//u, ""));
     for (const image of [this.trigger?.querySelector<HTMLImageElement>("img"), this.host?.shadowRoot?.querySelector<HTMLImageElement>(".brand img")]) if (image && image.getAttribute("src") !== logo) image.src = logo;
+    if (this.trigger) this.trigger.dataset.atlasTheme = dark ? "dark" : "light";
     this.host?.classList.toggle("dark", dark); this.frame?.contentWindow?.postMessage({ type: "ATLAS_SIDECAR_APPEARANCE", theme: dark ? "dark" : "light" }, "*");
   }
   private setWidth(value: number): void { this.width = Math.min(480, Math.max(280, Math.round(value))); if (this.host && !this.collapsed) this.host.style.width = `${this.width}px`; }

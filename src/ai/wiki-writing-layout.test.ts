@@ -137,6 +137,17 @@ it("labels list items and prefers a labelled list for parallel rules, checks and
  expect(wikiWritingLayout(units).rule).toContain("labelled");
 });
 
+it("renders coherent linear flows and only supported Mermaid formats",()=>{
+ const known=new Set(["k1"]);
+ const items=["读取材料","核对来源","写入文档"].map(text=>({text,unitIds:["k1"]}));
+ const flow=readWikiWritingBlock({type:"flow",items},known);
+ expect(flow.text).toBe("\x60\x60\x60atlas-flow\n读取材料\n核对来源\n写入文档\n\x60\x60\x60");
+ expect(flow.claims).toHaveLength(3);
+ expect(readWikiWritingBlock({type:"diagram",text:"flowchart LR\nA --> B",unitIds:["k1"]},known).text).toContain("\x60\x60\x60mermaid");
+ expect(()=>readWikiWritingBlock({type:"diagram",text:"sequenceDiagram\nA->>B: ping",unitIds:["k1"]},known)).toThrow();
+ expect(()=>readWikiWritingBlock({type:"diagram",text:"flowchart LR\nA --> B\nclick A callback",unitIds:["k1"]},known)).toThrow();
+});
+
 it("never cuts a sentence at a question mark inside its quotation",()=>{
  const paragraph="首页主标题为“你今天想做什么硬件？”，中央为大输入框。其余保持不变。";
  expect(claimSentence(paragraph,{sentence:1,starts:"首页主标题为"})).toBe("首页主标题为“你今天想做什么硬件？”，中央为大输入框。");

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createWebCaptureManager } from "./web-capture";
-import { WEB_CAPTURE_KEY, WEB_CAPTURE_PAUSED_KEY, webCapturePatterns } from "../shared/web-capture";
+import { WEB_CAPTURE_KEY, webCapturePatterns } from "../shared/web-capture";
 import type { ConversationCapture } from "../shared/types";
 let values:Record<string,unknown>,registered:chrome.scripting.RegisteredContentScript[],grants:Set<string>;
 const execute=vi.fn(),register=vi.fn(),unregister=vi.fn(),update=vi.fn();
@@ -11,30 +11,30 @@ beforeEach(()=>{
 });
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();});
 it("automatically enables supported websites after browser permission without opt-in",async()=>{
- grants.add("https://claude.ai/*");const manager=createWebCaptureManager("capture.js");await manager.restore();expect(register).toHaveBeenCalledOnce();expect((await manager.status())[0]).toMatchObject({enabled:true,permitted:true});expect(values[WEB_CAPTURE_KEY]).toEqual(["claude"]);
+ grants.add("https://claude.ai/*");const manager=createWebCaptureManager("capture.js");await manager.restore();expect(register).toHaveBeenCalledOnce();expect(values[WEB_CAPTURE_KEY]).toEqual(["claude"]);
 });
-it("requires browser permission, injects into existing tabs, and persists explicit pauses",async()=>{
- const manager=createWebCaptureManager("capture.js");await expect(manager.set("claude",true)).rejects.toThrow("not granted");expect(values[WEB_CAPTURE_KEY]).toBeUndefined();
- grants.add("https://claude.ai/*");await manager.set("claude",true);expect(values[WEB_CAPTURE_KEY]).toEqual(["claude"]);expect(register).toHaveBeenCalledWith([expect.objectContaining({matches:["https://claude.ai/*"],js:["capture.js"],persistAcrossSessions:true})]);expect(execute).toHaveBeenCalledWith({target:{tabId:42},files:["capture.js"]});
- await manager.set("claude",false);expect(values[WEB_CAPTURE_KEY]).toEqual([]);expect(unregister).toHaveBeenCalledWith({ids:["atlas-web-capture-claude"]});
- expect(values[WEB_CAPTURE_PAUSED_KEY]).toEqual(["claude"]);await createWebCaptureManager("capture.js").restore();expect(values[WEB_CAPTURE_KEY]).toEqual([]);
+it("injects into existing tabs after permission and resumes sites paused in older releases",async()=>{
+ const manager=createWebCaptureManager("capture.js");values["atlas-web-capture-paused-platforms"]=["claude"];
+ await manager.restore();expect(register).not.toHaveBeenCalled();expect(values[WEB_CAPTURE_KEY]).toEqual([]);
+ grants.add("https://claude.ai/*");await manager.restore();expect(values[WEB_CAPTURE_KEY]).toEqual(["claude"]);expect(register).toHaveBeenCalledWith([expect.objectContaining({matches:["https://claude.ai/*"],js:["capture.js"],persistAcrossSessions:true})]);expect(execute).toHaveBeenCalledWith({target:{tabId:42},files:["capture.js"]});
+ grants.clear();await manager.restore();expect(values[WEB_CAPTURE_KEY]).toEqual([]);expect(unregister).toHaveBeenCalledWith({ids:["atlas-web-capture-claude"]});
 });
 it("restores opted-in platforms after restart and disables revoked permissions without affecting others",async()=>{
  values[WEB_CAPTURE_KEY]=["claude","gemini"];grants.add("https://claude.ai/*");registered=[{id:"atlas-web-capture-claude",js:["old.js"]},{id:"atlas-web-capture-gemini",js:["old.js"]}];
  await createWebCaptureManager("new.js").restore();expect(values[WEB_CAPTURE_KEY]).toEqual(["claude"]);expect(registered).toEqual([expect.objectContaining({id:"atlas-web-capture-claude",js:["new.js"]})]);
 });
-it("serializes changes so enabling two platforms does not lose either selection",async()=>{
- grants=new Set(["https://claude.ai/*","https://chat.deepseek.com/*"]);const manager=createWebCaptureManager("reader.js");await Promise.all([manager.set("claude",true),manager.set("deepseek",true)]);expect(values[WEB_CAPTURE_KEY]).toEqual(["claude","deepseek"]);
+it("restores every permitted platform when permission notifications overlap",async()=>{
+ grants=new Set(["https://claude.ai/*","https://chat.deepseek.com/*"]);const manager=createWebCaptureManager("reader.js");await Promise.all([manager.restore(),manager.restore()]);expect(values[WEB_CAPTURE_KEY]).toEqual(["claude","deepseek"]);
 });
 it("accepts only enabled captures matching the sender platform and conversation",async()=>{
  values[WEB_CAPTURE_KEY]=["claude"];grants.add("https://claude.ai/*");const manager=createWebCaptureManager("reader.js"),capture={conversation:{platform:"claude",id:"claude:thread",source:"claude_dom",url:"https://claude.ai/chat/thread"}} as ConversationCapture;
  expect(await manager.accepts(capture,"https://claude.ai/chat/thread")).toBe(true);expect(await manager.accepts(capture,"https://claude.ai/chat/other")).toBe(false);expect(await manager.accepts(capture,"https://claude.ai.example/chat/thread")).toBe(false);
  expect(await manager.accepts({...capture,conversation:{...capture.conversation,url:"https://claude.ai/chat/other"}},"https://claude.ai/chat/thread")).toBe(false);
  expect(await manager.accepts({...capture,conversation:{...capture.conversation,url:"invalid"}},"https://claude.ai/chat/thread")).toBe(false);
- await manager.set("claude",false);expect(await manager.accepts(capture,"https://claude.ai/chat/thread")).toBe(false);
+ grants.clear();expect(await manager.accepts(capture,"https://claude.ai/chat/thread")).toBe(false);
 });
-it("registers all Kimi aliases under one opt-in and rejects mismatched origins",async()=>{
- grants=new Set(webCapturePatterns("kimi"));const manager=createWebCaptureManager("reader.js");await manager.set("kimi",true);
+it("registers all Kimi aliases with website permission and rejects mismatched origins",async()=>{
+ grants=new Set(webCapturePatterns("kimi"));const manager=createWebCaptureManager("reader.js");await manager.restore();
  expect(register).toHaveBeenCalledWith([expect.objectContaining({matches:webCapturePatterns("kimi")})]);
  const capture={conversation:{platform:"kimi",id:"kimi:abc",source:"kimi_dom",url:"https://kimi.com/chat/abc?chat_enter_method=history"}} as ConversationCapture;
  expect(await manager.accepts(capture,"https://kimi.com/chat/abc")).toBe(true);
@@ -62,11 +62,11 @@ it("reports disconnected layouts and refuses inspection/capture after permission
  const manager=createWebCaptureManager("reader.js");expect((await manager.tabs("claude"))[0].state).toBe("disconnected");
  grants.clear();await expect(manager.tabs("claude")).rejects.toThrow("revoked");await expect(manager.captureTab("claude",7,"claude:id")).rejects.toThrow("revoked");
 });
-it("resumes after renewed website permission but retains an explicit pause",async()=>{
+it("resumes after renewed website permission",async()=>{
  const manager=createWebCaptureManager("reader.js");await manager.restore();expect(values[WEB_CAPTURE_KEY]).toEqual([]);
  grants.add("https://claude.ai/*");await manager.restore();expect(values[WEB_CAPTURE_KEY]).toEqual(["claude"]);
- await manager.set("claude",false);grants.clear();await manager.restore();grants.add("https://claude.ai/*");await manager.restore();expect(values[WEB_CAPTURE_KEY]).toEqual([]);
- await manager.set("claude",true);expect(values[WEB_CAPTURE_KEY]).toEqual(["claude"]);
+ grants.clear();await manager.restore();expect(values[WEB_CAPTURE_KEY]).toEqual([]);
+ grants.add("https://claude.ai/*");await manager.restore();expect(values[WEB_CAPTURE_KEY]).toEqual(["claude"]);
 });
 it("does not reinject an already connected reader when its worker restarts",async()=>{
  grants.add("https://claude.ai/*");Object.assign(chrome.tabs,{sendMessage:async()=>({state:"ready",messageCount:2})});

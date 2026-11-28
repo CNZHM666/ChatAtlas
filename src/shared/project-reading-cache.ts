@@ -8,6 +8,19 @@ export function sameProjectReadingInputs(before: FocusSession, after: FocusSessi
   const keys = new Set([...Object.keys(before), ...Object.keys(after)] as Array<keyof FocusSession>);
   return [...keys].every(key => NAVIGATION.has(key) || Object.is(before[key], after[key]));
 }
+
+function sectionFingerprint(session: FocusSession): string {
+  let out = `${session.sections.length}|${session.wikiKnowledge?.decisionsAt ?? ""}|`;
+  for (const section of session.sections) {
+    out += `${section.id}:${section.title.length}:${section.body.length}:${section.body.slice(0, 24)}:${section.body.slice(-24)}:${section.claims?.length ?? 0}:${section.userEdited ? 1 : 0};`;
+  }
+  out += `|${session.evidence.length}|`;
+  for (const ref of session.evidence) {
+    out += `${ref.id}:${ref.excerpt.length}:${ref.excerpt.slice(0, 16)}:${ref.excerpt.slice(-16)};`;
+  }
+  return out;
+}
+
 const record = (value: object) => Object.entries(value).flatMap(([key, item]) => [key, item]);
 function contentTokens(session: FocusSession): unknown[] {
   return [
@@ -21,16 +34,36 @@ function contentTokens(session: FocusSession): unknown[] {
 /** A workspace-owned cache. Navigation shares results; changing content, scope,
  * source receipts or verdicts invalidates them. No serialized ledgers or global retention. */
 export function createProjectReadingCache() {
+  let lastSession: FocusSession | undefined;
+  let lastFingerprint = "";
   let tokens: unknown[] = [];
   const values = new Map<string, unknown>();
   return {
+    has(session: FocusSession, key: string): boolean {
+      if (!lastSession || !values.has(key)) return false;
+      const fingerprint = sectionFingerprint(session);
+      return fingerprint === lastFingerprint && (lastSession === session || sameProjectReadingInputs(lastSession, session));
+    },
     get<T>(session: FocusSession, key: string, compute: () => T): T {
-      const next = contentTokens(session);
-      if (tokens.length !== next.length || next.some((value, at) => !Object.is(value, tokens[at]))) {
-        values.clear(); tokens = next;
+      const fingerprint = sectionFingerprint(session);
+      const fastHit = Boolean(
+        lastSession
+        && fingerprint === lastFingerprint
+        && (lastSession === session || sameProjectReadingInputs(lastSession, session)),
+      );
+      if (!fastHit) {
+        const next = contentTokens(session);
+        if (fingerprint !== lastFingerprint || tokens.length !== next.length || next.some((value, at) => !Object.is(value, tokens[at]))) {
+          values.clear();
+          tokens = next;
+        }
+        lastSession = session;
+        lastFingerprint = fingerprint;
       }
       if (values.has(key)) return values.get(key) as T;
-      const value = compute(); values.set(key, value); return value;
+      const value = compute();
+      values.set(key, value);
+      return value;
     },
   };
 }

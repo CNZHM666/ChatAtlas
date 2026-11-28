@@ -57,7 +57,7 @@ it("shows a saved decision and the affected Wiki section until the article catch
   expect(screen.getByRole("status")).toHaveTextContent("已保存的决定待写入正文");
   expect(screen.getByText("涉及章节：组件选型")).toBeVisible();
   expect(onUpdate).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "开始更新" }));
+  fireEvent.click(screen.getByRole("button", { name: "预览正文更新" }));
   expect(onUpdate).toHaveBeenCalledOnce();
   const updated = { ...session, wikiKnowledge: { ...session.wikiKnowledge, decisionsAt: 2 } };
   view.rerender(<SourceUpdateNotice session={updated} zh changes={[]} conversations={[]} overview onUpdate={onUpdate}/>);

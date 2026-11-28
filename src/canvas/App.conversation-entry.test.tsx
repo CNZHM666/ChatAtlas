@@ -41,18 +41,24 @@ beforeEach(async () => {
   await saveConversation({ id: "entry-one", platform: "chatgpt", title: "Map entry test", url: "https://chatgpt.com/c/entry-one", updatedAt: Date.now(), messageCount: 1, importState: "complete", hydrationState: "hydrated" });
 });
 
-it("keeps sync selections out of the composer until explicitly used, and clears materials independently", async () => {
+it("shows the project composer without history search and uses sync selections only on request", async () => {
   localStorage.setItem("atlas-workbench-selected-conversations", JSON.stringify(["entry-one"]));
   render(<PreferencesProvider><App /></PreferencesProvider>);
-  const input = await screen.findByRole("textbox", { name: "Search or organize past conversations" });
-  fireEvent.focus(input);
-  expect(screen.queryByRole("group", { name: "Selected materials" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Source materials and sync" }));
+  expect(await screen.findByRole("heading", { name: "Project workbench" })).toBeVisible();
+  fireEvent.keyDown(window, { ctrlKey: true, key: "k" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Find history" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Instructions" }));
+  const input = screen.getByRole("textbox", { name: "Organization instructions" });
+  expect(input).toBeVisible();
+  expect(input).toHaveValue("");
+  fireEvent.click(screen.getByRole("button", { name: "Add chats" }));
+  const submit = screen.getByRole("button", { name: "Organize project" });
+  expect(submit).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Use 1 for this task" }));
-  expect(screen.getByRole("group", { name: "Selected materials" })).toBeVisible();
+  expect(submit).toBeEnabled();
   fireEvent.click(screen.getByRole("button", { name: "Clear materials" }));
-  fireEvent.focus(input);
-  expect(screen.queryByRole("group", { name: "Selected materials" })).toBeNull();
+  expect(submit).toBeDisabled();
   expect(JSON.parse(localStorage.getItem("atlas-workbench-selected-conversations")!)).toEqual(["entry-one"]);
   expect(JSON.parse(localStorage.getItem("atlas-workbench-project-sources")!)).toEqual([]);
 });
@@ -88,28 +94,24 @@ describe("conversation entry", () => {
     const sendMessage = vi.fn(async (command: AtlasMessage) => command.type === "ATLAS_IMPORT_SELECT" ? { ...job, priorityPendingIds: ["entry-one"] } : job);
     vi.stubGlobal("chrome", { runtime: { id: "test-extension", sendMessage, onMessage: { addListener: vi.fn(), removeListener: vi.fn() } } });
     render(<PreferencesProvider><App /></PreferencesProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Source materials and sync" }));
     const sources = await screen.findByRole("group", { name: "Choose conversations for this task" });
     fireEvent.click(within(sources).getByRole("checkbox"));
     expect(sendMessage.mock.calls.some(([command]) => command.type === "ATLAS_IMPORT_SELECT")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Prioritize 1 selected" }));
     await waitFor(() => expect(sendMessage).toHaveBeenCalledWith({ type: "ATLAS_IMPORT_SELECT", conversationIds: ["entry-one"] }));
   });
-  it("continues organization with an editable revision request while excluding sibling results outside the chosen pool", async () => {
-    const db = await getDatabase();
-    const project: FocusSession = { id: "home-project", canvasId: "home-canvas", title: "Hardware project", mode: "work", goal: "Hardware", sourceConversationIds: ["entry-one"], sections: [], evidence: [], activeSectionId: "", completedSectionIds: [], notes: "", createdAt: 1, updatedAt: 1 };
-    await db.put("focusSessions", project);
-    await db.put("focusSessions", { ...project, id: "excluded-sibling", sourceConversationIds: ["not-selected"] });
+  it("submits selected writing mode and optional instructions directly without planning a separate home task", async () => {
     localStorage.setItem("atlas-workbench-project-sources", JSON.stringify(["entry-one"]));
-    vi.mocked(planHomeTask).mockResolvedValueOnce({ action: "continue", queries: [], projectId: project.id });
+    vi.mocked(planHomeTask).mockClear();
     render(<PreferencesProvider><App /></PreferencesProvider>);
-    await screen.findByRole("button", { name: /^Remove material:/ });
-    fireEvent.change(await screen.findByRole("textbox", { name: "Search or organize past conversations" }), { target: { value: "Continue my hardware project" } });
-    fireEvent.click(screen.getByRole("button", { name:/^(Organize project|Search history|Continue project|Review)$/ }));
-    const workspace = await screen.findByTestId("submitted-focus");
-    expect(workspace).toHaveAttribute("data-reading-session", project.id);
-    expect(workspace).toHaveAttribute("data-home-revision", "Continue my hardware project");
-    expect(workspace).toHaveAttribute("data-project-sessions", project.id);
-    expect(workspace.textContent).not.toContain('"sourceIds"');
+    fireEvent.change(await screen.findByRole("combobox", { name: "Writing mode" }), { target: { value: "handoff" } });
+    fireEvent.click(screen.getByRole("button", { name: "Instructions" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Organization instructions" }), { target: { value: "Focus on hardware specs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Organize project" }));
+    const submitted = JSON.parse((await screen.findByTestId("submitted-focus")).textContent!);
+    expect(submitted).toMatchObject({ goal: "Focus on hardware specs", sourceIds: ["entry-one"], writingMode: "handoff", organizationInstruction: "Focus on hardware specs" });
+    expect(planHomeTask).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem("atlas-workbench-project-sources")!)).toEqual(["entry-one"]);
   });
   it("opens a Sidecar saved-result link directly at the requested route chapter", async () => {
@@ -124,7 +126,7 @@ describe("conversation entry", () => {
   it("reloads a saved Sidecar result created while the workbench was already open", async () => {
     const listeners = new Set<(message: AtlasMessage) => void>();
     vi.stubGlobal("chrome", { runtime: { id: "test-extension", sendMessage: vi.fn(async () => null), onMessage: { addListener: (listener: (message: AtlasMessage) => void) => listeners.add(listener), removeListener: (listener: (message: AtlasMessage) => void) => listeners.delete(listener) } } });
-    render(<PreferencesProvider><App /></PreferencesProvider>); await screen.findByRole("heading", { name:/What would you like to find or continue|Make past AI conversations useful again/ });
+    render(<PreferencesProvider><App /></PreferencesProvider>); await screen.findByRole("heading", { name: "Project workbench" });
     await (await getDatabase()).put("focusSessions", { id: "new-linked", title: "New saved result", goal: "Review", mode: "review", sourceConversationIds: ["entry-one"], sections: [{ id: "first", title: "Start", body: "", transition: "", kind: "review", evidenceIds: [] }], evidence: [], activeSectionId: "first", completedSectionIds: [], notes: "", createdAt: 1, updatedAt: 1 });
     act(() => listeners.forEach(listener => listener({ type: "ATLAS_FOCUS_REVIEW", sessionId: "new-linked", sectionId: "first" })));
     await waitFor(() => expect(screen.getByTestId("submitted-focus")).toHaveAttribute("data-reading-session", "new-linked"));
@@ -142,8 +144,10 @@ describe("conversation entry", () => {
     await waitFor(() => expect(screen.getByTestId("submitted-focus")).toHaveAttribute("data-reading-session", "direct-result"));
     expect(screen.getByTestId("submitted-focus")).toHaveAttribute("data-active-section", "second");
     expect(screen.queryByRole("button", { name: "Continue a saved result →" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Back to Workbench" }));
-    expect(await screen.findByRole("heading", { name:/What would you like to find or continue|Make past AI conversations useful again/ })).toBeVisible();
+    act(() => { window.location.hash = "home=1"; window.dispatchEvent(new HashChangeEvent("hashchange")); });
+    expect(await screen.findByRole("heading", { name: "Project workbench" })).toBeVisible();
+    expect(window.location.hash).toBe("");
+    expect(screen.getByRole("button", { name: "Instructions" })).toBeVisible();
   });
   it("shows a failed generation after refresh and resumes only its original selected sources", async () => {
     const db = await getDatabase();
@@ -159,16 +163,17 @@ describe("conversation entry", () => {
     render(<PreferencesProvider><App /></PreferencesProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Unfinished organization.*Confirm goal and sources/ }));
     expect(screen.queryByTestId("submitted-focus")).not.toBeInTheDocument();
-    fireEvent.change(await screen.findByRole("textbox", { name: "Search or organize past conversations" }), { target: { value: "Review the original decisions" } });
-    fireEvent.click(screen.getByRole("button", { name:/^(Organize project|Search history|Continue project|Review)$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Instructions" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Organization instructions" }), { target: { value: "Review the original decisions" } });
+    fireEvent.click(screen.getByRole("button", { name: "Organize project" }));
     expect(JSON.parse((await screen.findByTestId("submitted-focus")).textContent!)).toMatchObject({ id: "legacy", runId: "legacy-run", sourceIds: ["entry-one"], goal: "Review the original decisions" });
   });
   it("starts a full-content generation directly from checked Workbench sources", async () => {
     localStorage.setItem("atlas-workbench-project-sources", JSON.stringify(["entry-one"]));
     render(<PreferencesProvider><App /></PreferencesProvider>);
-    await screen.findByRole("button", { name: /^Remove material:/ });
-    fireEvent.change(await screen.findByRole("textbox", { name: "Search or organize past conversations" }), { target: { value: "Organize all selected conversations" } });
-    fireEvent.click(screen.getByRole("button", { name:/^(Organize project|Search history|Continue project|Review)$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Instructions" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Organization instructions" }), { target: { value: "Organize all selected conversations" } });
+    fireEvent.click(screen.getByRole("button", { name: "Organize project" }));
     const submitted = JSON.parse((await screen.findByTestId("submitted-focus")).textContent!);
     expect(submitted).toMatchObject({ goal: "Organize all selected conversations", sourceIds: ["entry-one"], scope: { kind: "all", sourceConversationIds: ["entry-one"] } });
     expect(submitted.autoLocate).toBeUndefined();
@@ -199,7 +204,7 @@ describe("conversation entry", () => {
     await db.put("conversations", { ...(await db.get("conversations", "entry-one"))!, importState: "discovered", hydrationState: "queued" });
     window.history.replaceState({}, "", "/#conversation=entry-one");
     render(<PreferencesProvider><App /></PreferencesProvider>);
-    expect(await screen.findByRole("heading", { name:/What would you like to find or continue|Make past AI conversations useful again/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Project workbench" })).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-map")).not.toBeInTheDocument();
     expect(screen.queryByTestId("conversation-reader")).not.toBeInTheDocument();
     const materials = await screen.findByRole("group", { name: "Choose conversations for this task" });
@@ -214,7 +219,7 @@ describe("conversation entry", () => {
     await db.put("conversations", { ...(await db.get("conversations", "entry-one"))!, importState: "discovered", hydrationState: "queued" });
     render(<PreferencesProvider><App /></PreferencesProvider>);
     act(() => listeners.forEach((listener) => listener({ type: "ATLAS_FOCUS_CONVERSATION", conversationId: "entry-one" })));
-    expect(await screen.findByRole("heading", { name:/What would you like to find or continue|Make past AI conversations useful again/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Project workbench" })).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-map")).not.toBeInTheDocument();
     // The workbench heading already exists before the asynchronous IndexedDB
     // source lookup completes; await the actual message side effect.

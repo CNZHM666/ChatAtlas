@@ -133,7 +133,7 @@ async function persistDiagnostics(job: ImportJob, events: ImportDiagnostics["eve
     persisted: job.persisted, hydrated: job.hydrated, failed: job.failed,
     retried: events.reduce((count, item) => count + Number(Boolean(item.retryCount)), 0),
     rateLimitCount: events.filter((item) => item.category === "rate_limit").length,
-    timeoutCount: events.filter((item) => /timeout|took too long/i.test(item.message ?? "")).length,
+    timeoutCount: events.filter((item) => /timed?\s*out|timeouterror|took too long|读取超时/iu.test(item.message ?? "")).length,
     averageRequestDuration: requestDurations.length ? Math.round(requestDurations.reduce((sum, duration) => sum + duration, 0) / requestDurations.length) : undefined,
     currentConcurrency: job.currentConcurrency, pendingIds: [...job.pendingIds], failedIds: [...job.failedIds],
     duration: Date.now() - job.startedAt, finalState: job.status, events: events.slice(-250), reconciliation: job.reconciliation, updatedAt: Date.now(),

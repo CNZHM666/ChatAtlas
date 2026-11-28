@@ -7,6 +7,13 @@
 [简体中文](../../CHANGELOG.md) · **English**
 
 
+## 0.1.8 — Alpha
+
+- **Three Markdown export modes across Workbench and Sidebar**: Shared **Brief**, **Handoff**, and **Audit** presets with one-click copy or `.md` download; automatically prunes orphan locators, merges split ordered lists, deduplicates overlapping tables, and hoists uniform decided badges.
+- **Upgraded native sidebar workspace**: Every project now provides **Document / Files / Sticky Notes** tabs; supports dropping, pasting, and auto-saving chat file uploads (including Office docs, archives, and code files); adds in-chapter outline navigation, reading progress, refined narrow-column typography, and real-time version sync with the Workbench.
+- **Platform-adaptive launchers and sync resilience**: Adapted sidebar trigger styling per AI platform (ChatGPT, Claude, Gemini, DeepSeek, Doubao, Kimi, Qwen), redesigned background sync status feedback, and fixed long-conversation sync timeouts (`signal timed out`).
+- **Higher-fidelity generation pipeline**: Filters off-topic and personal-career noise out of project specs, eliminates duplicate confirmation restatements and false scope prefixes, raises chapter-fit output budgets to cut truncations, and reduces false-positive repair retries.
+
 ## 0.1.7 — Alpha
 
 - Choose a concise wiki, development spec, or full audit before writing. Switch modes later using the existing knowledge ledger.

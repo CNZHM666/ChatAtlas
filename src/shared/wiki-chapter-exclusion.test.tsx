@@ -1,10 +1,7 @@
-import {cleanup,fireEvent,render,screen} from "@testing-library/react";
-import {afterEach,expect,it,vi} from "vitest";
+import {expect,it} from "vitest";
 import {excludeWikiChapter,excludeWikiMaterial} from "./wiki-scope-review";
-import {WikiScopeNotice} from "../canvas/components/WikiScopeNotice";
 import {contextKnowledge} from "../test/context-fixture";
 import type {FocusSession} from "./focus-session";
-afterEach(cleanup);
 
 const session=():FocusSession=>{
  const base=contextKnowledge().session;
@@ -19,15 +16,6 @@ it("leaves a chapter out locally and records its notes as exclusions",()=>{
  // Personal chapters and chapters without known notes stay.
  const personal={...session(),sections:session().sections.map(section=>({...section,userEdited:true}))};
  expect(excludeWikiChapter(personal,"out",true)).toBe(personal);
-});
-
-it("brings every note of a left-out chapter back when the reader includes it again",()=>{
- const apply=vi.fn();
- render(<WikiScopeNotice session={excludeWikiChapter(session(),"out",true)} zh onApply={apply} onSource={vi.fn()}/>);
- fireEvent.click(screen.getByText(/^旁支/u,{selector:"summary"}));
- fireEvent.click(screen.getByRole("button",{name:"保留本项目"}));
- fireEvent.click(screen.getByRole("button",{name:/应用 1 项选择/u}));
- expect(apply).toHaveBeenCalledWith({includeKeys:expect.arrayContaining(["other","k2","k3"]),excludeKeys:[]});
 });
 
 it("records a declined flagged material as an exclusion without touching the chapters",()=>{

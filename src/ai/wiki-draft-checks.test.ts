@@ -5,19 +5,21 @@ import type { WikiDraftChapter, WikiKnowledgeUnit } from "../shared/wiki-knowled
 const chapter = (id: string, title: string, texts: string[]): WikiDraftChapter => ({ id, title, question: "", group: "", problems: [], body: texts.join("\n\n"), paragraphs: texts.map(text => ({ subtopic: "s", text, unitIds: [] })) });
 
 it("keeps numbered proposals from different sources as separate roadmap rows", () => {
-  const body = "1. **第一阶段**：整理目录。\n2. **第二阶段**：核对来源。";
+  const body = "1. **第一阶段**：整理目录。\n2. **第二阶段**：核对来源。\n3. **第三阶段**：发布本地版。";
   const draft = chapter("plan", "路线图", [body]);
   draft.paragraphs[0].subtopic = "版本路线";
-  draft.paragraphs[0].unitIds = ["a", "b"];
-  const points = [["a", "Phase A 整理目录。"], ["b", "Milestone 3.2 核对来源。"]].map(([id, statement]): WikiKnowledgeUnit => ({
+  draft.paragraphs[0].unitIds = ["a", "b", "c"];
+  const points = [["a", "Phase A 整理目录。"], ["b", "Milestone 3.2 核对来源。"], ["c", "V0.1 发布本地版。"]].map(([id, statement]): WikiKnowledgeUnit => ({
     id, subject: "路线", statement, details: [], kind: "plan", adoption: { status: "proposal" }, delivery: "planned",
     evidence: { evidenceId: id, conversationId: "c", messageId: id, messageIndex: 1, role: "assistant", pasted: false, quote: statement },
   }));
   const units = new Map(points.map(unit => [unit.id, unit]));
   const table = separateUnconfirmedWikiPlans(draft, units, new Set());
-  expect(table.body).toContain("| Phase A | Phase A 整理目录。 | 讨论中 |");
-  expect(table.body).toContain("| Milestone 3.2 | Milestone 3.2 核对来源。 | 讨论中 |");
-  expect(table.paragraphs[0].claims?.map(claim => claim.unitIds)).toEqual([["a"], ["b"]]);
+  expect(table.body).toContain("| 原阶段或版本 | 讨论中的安排 |");
+  expect(table.body).toContain("| Phase A | Phase A 整理目录。 |");
+  expect(table.body).toContain("| Milestone 3.2 | Milestone 3.2 核对来源。 |");
+  expect(table.body).toContain("| V0.1 | V0.1 发布本地版。 |");
+  expect(table.paragraphs[0].claims?.map(claim => claim.unitIds)).toEqual([["a"], ["b"], ["c"]]);
   expect(separateUnconfirmedWikiPlans(draft, units, new Set(["a"]))).toBe(draft);
 });
 

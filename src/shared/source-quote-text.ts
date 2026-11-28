@@ -2,12 +2,49 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import { GFM_OPTIONS } from "./markdown-gfm";
+import { withoutPlatformCitations } from "./conversation-text";
 
 const parser = unified().use(remarkParse).use(remarkGfm, GFM_OPTIONS);
 const cache = new Map<string, string>();
 const TEXT_CACHE_ENTRIES = 512;
 interface TextNode { type: string; value?: string; children?: TextNode[]; position?: { start: {offset?:number}; end: {offset?:number} } }
 const visibleText = (node: TextNode): string => node.type === "html" ? "" : node.value ?? (node.children ?? []).map(visibleText).join("");
+
+const citationLabel = /^\[?\s*[-−]?\d{1,3}(?:\s*[,，、]\s*[-−]?\d{1,3})*\s*\]?$/u;
+const numberedLink = (node: TextNode) => (node.type === "link" || node.type === "linkReference")
+  && citationLabel.test(visibleText(node).normalize("NFKC"));
+const citationSiblings = (children: TextNode[]) => children.some(node => !numberedLink(node) && /[\p{L}\p{N}]/u.test(visibleText(node)));
+
+/** Keep raw offsets for the extraction labels while hiding provider citation syntax. */
+export function wikiSourceWithoutCitations(value: string, preserveOffsets = false): string {
+  const source = withoutPlatformCitations(value, undefined, preserveOffsets);
+  if (!/\[\s*\[?\s*[-−]?\d/u.test(source)) return source;
+  const ranges: Array<[number, number]> = [];
+  const visit = (node: TextNode, inText = false) => {
+    const start = node.position?.start.offset, end = node.position?.end.offset;
+    if (inText && numberedLink(node) && start !== undefined && end !== undefined) ranges.push([start, end]);
+    else if (node.children) {
+      const inline = !["root", "list", "listItem", "blockquote", "table", "tableRow"].includes(node.type);
+      const attached = inline && (inText || citationSiblings(node.children));
+      node.children.forEach(child => visit(child, attached));
+    }
+  };
+  visit(parser.parse(source) as TextNode);
+  return ranges.reverse().reduce((result, [start, end]) => result.slice(0, start)
+    + (preserveOffsets ? source.slice(start, end).replace(/[^\r\n]/g, " ") : "") + result.slice(end), source);
+}
+
+/** Compare rendered labels without the numbered citation links added by chat platforms. */
+export function wikiSourceLabel(markdown: string): string {
+  const read = (node: TextNode): string => {
+    if (node.type === "html") return "";
+    if (node.type === "text") return (node.value ?? "").replace(/\[\^[\w-]+\]/gu, "");
+    return node.value ?? (node.children ?? []).map(read).join("");
+  };
+  const source = wikiSourceWithoutCitations(markdown);
+  if (!/[<>&[\x60*_\\]/u.test(source)) return source.trim();
+  return read(parser.parse(source) as TextNode).trim();
+}
 
 /** Match the Markdown renderer, retaining underscores and punctuation inside code. */
 export function sourceQuoteText(value: string): string {

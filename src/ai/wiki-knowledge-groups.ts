@@ -50,7 +50,8 @@ export function recallGroupCandidates(units: WikiKnowledgeUnit[], index?: WikiCa
     for (const term of own) { const holders = byTerm.get(term)!; if (holders.length > common) continue; for (const other of holders) if (other !== unit.id) shared.set(other, (shared.get(other) ?? 0) + 1); }
     const best = [...shared].flatMap(([other, count]) => {
       const candidate = byId.get(other)!, overlap = count / Math.max(1, Math.min(own.size, terms.get(other)!.size));
-      if (overlap < GROUP_MIN_OVERLAP || aboutKey(unit) !== aboutKey(candidate) || modalityConflict(unit.statement, candidate.statement)) return [];
+      if (overlap < GROUP_MIN_OVERLAP || aboutKey(unit) !== aboutKey(candidate) || modalityConflict(unit.statement, candidate.statement)
+        || index?.compare(unit, candidate) === "separate") return [];
       return [{ other, overlap }];
     }).sort((x, y) => y.overlap - x.overlap || x.other.localeCompare(y.other)).slice(0, GROUP_CANDIDATES);
     for (const { other, overlap } of best) {
@@ -85,7 +86,7 @@ export function groupCandidateClusters(candidates: GroupCandidate[]): string[][]
 type AI = WikiBudgetModel & { generateStructured?: <T>(request: StructuredAIRequest<T>) => Promise<T> };
 /** A group's fingerprint: rules, core, and each member's id and statement. Any change means the group is redone. */
 export const groupSignature = (core: string, members: Array<{ unitId: string }>, byId: Map<string, WikiKnowledgeUnit>) => sourceMessageSignature(JSON.stringify([GROUP_RULES, core, members.map(member => [member.unitId, byId.get(member.unitId)?.statement ?? ""])]));
-export interface GroupInput { ai: AI; locale: string; signal: AbortSignal; progress?: WikiProgressFn; previous?: WikiExplanationGroup[] }
+export interface GroupInput { ai: AI; locale: string; signal: AbortSignal; progress?: WikiProgressFn; previous?: WikiExplanationGroup[]; candidates?: WikiCandidateIndex }
 type Member = WikiExplanationGroup["members"][number];
 interface Draft { core: string; members: Member[] }
 
@@ -348,7 +349,7 @@ export async function updateExplanationGroups(previous: WikiExplanationGroup[], 
   const touched = new Set(fresh);
   const touch = (group: WikiExplanationGroup) => group.members.forEach(member => { if (byId.has(member.unitId)) touched.add(member.unitId); });
   previous.filter(group => affected.has(group.id)).forEach(touch);
-  const candidates = recallGroupCandidates(units);
+  const candidates = recallGroupCandidates(units, input.candidates);
   // A candidate reaching from a touched unit into a kept group opens that group; a few rounds settle it.
   for (let round = 0; round < 4; round++) {
     let grew = false;

@@ -1,10 +1,10 @@
-import type { EvidenceAttention } from "../shared/claim-meaning";
+import { evidenceRequiresConfirmation, type EvidenceAttention } from "../shared/claim-meaning";
 import { createContext } from "react";
 import type { FocusEvidence } from "../shared/focus-session";
 import type { WikiClaimSource } from "../shared/wiki-chapter-status";
 
 /** One checkable point: a claim in the prose and only the originals that support it. */
-export interface EvidencePoint { key: string; claim: string; quote?: string; source: WikiClaimSource; label?: string; reference: FocusEvidence; references: FocusEvidence[]; placed: boolean;
+export interface EvidencePoint { key: string; claimId?: string; claim: string; quote?: string; source: WikiClaimSource; label?: string; reference: FocusEvidence; references: FocusEvidence[]; placed: boolean;
   /** Named items in the bound Wiki sentence, even when the saved conclusion paraphrases the list. */
   listedItems?: string[];
   /** Stable source bindings survive read-time changes to the wording. */
@@ -15,12 +15,15 @@ export interface EvidencePoint { key: string; claim: string; quote?: string; sou
   holder?: import("../shared/wiki-holder").WikiHolder; holderMark?: boolean;
   /** Why this point needs the reader's look; points without it passed the local check (their quote is in the original). */
   attention?: EvidenceAttention;
+  /** The quoted passage was located in a cited original or a retained excerpt of it. */
+  sourceLocated?: boolean;
   /** The user answered it while checking: it is not asked about again. */
   checked?: boolean }
 /** A point only the user can settle, not yet answered: a local check flagged it (written as decided with no
  * confirmation, a quote not found, a negation dropped…), or it is still open. Every other point has its original found
  * and needs no answer: checking asks about these, not about every sentence. */
-export const needsConfirmation = (point: Pick<EvidencePoint, "attention" | "checked">) => !point.checked && Boolean(point.attention);
+export const needsConfirmation = (point: Pick<EvidencePoint, "attention" | "checked" | "sourceLocated">) =>
+  !point.checked && evidenceRequiresConfirmation(point.attention, point.sourceLocated);
 export interface WorkspaceEvidenceOptions { references?: FocusEvidence[]; quote?: string; claim?: string; sectionId?:string;
   /** The exact overview entry and the quoted passages belonging to each of its references. */
   overviewEntryId?: string;

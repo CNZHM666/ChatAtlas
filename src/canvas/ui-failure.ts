@@ -8,6 +8,7 @@ export function recordUiFailure(error:unknown,scope:string){
  const kind=/dynamically imported module|Loading (?:CSS )?chunk|Importing a module script failed|Unable to preload CSS/iu.test(value.message)?"resource" as const:"render" as const;
  const entry:Failure={at:Date.now(),scope,kind,name:/^(?:TypeError|ReferenceError|RangeError|SyntaxError|Error)$/u.test(value.name)?value.name:"Error",frames};
  try{const rows=readUiFailures();rows.push(entry);sessionStorage.setItem(KEY,JSON.stringify(rows.slice(-LIMIT)));}catch{/* Diagnostics must never break recovery. */}
+ return entry;
 }
 export function readUiFailures():Failure[]{
  try{const rows:unknown=JSON.parse(sessionStorage.getItem(KEY)??"[]");return Array.isArray(rows)?rows.slice(-LIMIT).filter(row=>row&&typeof row.at==="number"&&typeof row.scope==="string"&&Array.isArray(row.frames)):[];}catch{return [];}

@@ -4,7 +4,7 @@ import {LEARNING_HOLDERS,learningTitle,wikiHolderLabel,type WikiHolder} from "..
 
 interface NotesInput {
  title:string;savedAt:string;verification:WikiVerification;
- quality?:{passed:boolean;critical:number;problems:number;uncovered?:number};partial:boolean;
+ quality?:{passed:boolean;critical:number;problems:number;uncovered?:number;criticalCoverage?:number;failedBatches?:number};partial:boolean;
  selected:number;total:number;excerpts:boolean;sourceNote?:string;warnings:string[];marked:boolean;
  referenceMarks?:{sources:boolean;confirmations:boolean};
  confirmationCount?:number;
@@ -18,6 +18,16 @@ interface NotesInput {
 
 const cell=(text:string)=>text.replace(/\|/gu,"\\|").replace(/\n+/gu," ").trim();
 const day=(at:number,zh:boolean)=>new Date(at).toLocaleDateString(zh?"zh-CN":"en-US",zh?undefined:{year:"numeric",month:"short",day:"numeric"});
+
+export function wikiQualityStatus(quality: NonNullable<NotesInput["quality"]>, partial: boolean, zh: boolean) {
+ if (quality.critical > 0) return zh ? "质量检查未通过" : "Key draft checks failed";
+ if (quality.failedBatches || quality.criticalCoverage) return zh ? "关键来源待核对" : "Key sources need review";
+ if (partial || quality.uncovered) {
+  if (quality.uncovered) return zh ? "正文关键检查通过，部分来源待核对" : "Key draft checks passed. Some sources need review.";
+  return zh ? (quality.problems ? "正文关键检查通过，仍有整理步骤待完成" : "当前成稿检查未发现问题，仍有整理步骤待完成") : "No key issues found in the current draft. Some organizing steps remain.";
+ }
+ return zh ? `质量检查${quality.passed?"通过":"未通过"}` : `quality ${quality.passed?"passed":"not passed"}`;
+}
 
 /** The closing notes of an export: what the document is as a two-column table, the sentence marks as a list, and the
  * cautions one per line. One quotation of long sentences ("Source scope: 1 conversation, 28 cited messages, …; 7 points
@@ -36,7 +46,7 @@ export function documentNotes(input:NotesInput,zh:boolean):string{
   ...input.confirmationCount?[[l("整理确认记录","Confirmation records"),l(`${input.confirmationCount} 组，按导出中有引用的确认操作计数`,`${input.confirmationCount} cited confirmation actions`)] as [string,string]]:[],
   [l("章节","Chapters"),l(`已选 ${input.selected}/${input.total} 章`,`${input.selected} of ${input.total} selected`)+" · "+(input.sourceNote??(input.excerpts?l("附来源摘录与已保存引文（非完整对话）","excerpts and saved quotes included (not full conversations)"):l("未附来源摘录","no excerpts")))],
   ...input.learning?[]:[[l("实现核对","Implementation check"),l("未进行：正文中的「已完成」只代表你的报告","Not performed: “completed” in the text means you reported it")] as [string,string]],
-  ...quality?[[l("自动检查","Automatic checks"),[l(`质量检查${quality.passed?"通过":"未通过"}`,`quality ${quality.passed?"passed":"not passed"}`),l(`整理完整性${input.partial?"部分完成":"完整"}`,`organizing ${input.partial?"partial":"complete"}`),l(`关键检查未通过 ${quality.critical} 项`,`${quality.critical} key checks failing`),l(`提示 ${quality.problems} 项`,`${quality.problems} notices`),...quality.uncovered?[l(`${quality.uncovered} 条消息待补读或核对`,`${quality.uncovered} of your messages still need recovery or review`)]:[]].join(" · ")] as [string,string]]:[],
+  ...quality?[[l("自动检查","Automatic checks"),[wikiQualityStatus(quality,input.partial,zh),l(`整理完整性${input.partial?"部分完成":"完整"}`,`organizing ${input.partial?"partial":"complete"}`),l(`关键检查未通过 ${quality.critical} 项`,`${quality.critical} key checks failing`),l(`提示 ${quality.problems} 项`,`${quality.problems} notices`),...quality.uncovered?[l(`${quality.uncovered} 条消息待补读或核对`,`${quality.uncovered} of your messages still need recovery or review`)]:[]].join(" · ")] as [string,string]]:[],
  ];
  const table=[`| ${l("项目信息","Item")} | ${l("说明","Detail")} |`,"|---|---|",...rows.map(([name,value])=>`| ${cell(name)} | ${cell(value)} |`)].join("\n");
  const holders:WikiHolder[]=input.learning?LEARNING_HOLDERS:["decided","open","earlier","user","material"];

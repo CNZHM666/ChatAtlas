@@ -4,19 +4,19 @@
 
 Follow the [three-step installation guide](../../README.md#install-on-chrome-or-edge) to load ChatAtlas in Chrome or Edge.
 
-File import accepts official exports from ChatGPT, Claude, Gemini (Google Takeout JSON) and DeepSeek, plus Markdown/JSON transcripts from other AIs. Beta website adapters for Claude, Gemini, DeepSeek, Doubao, Kimi and Qianwen (including Qwen international) run automatically after browser website permission, with pause/resume controls. They support the native sidebar, local search, project association, loaded-message sync, source location and composer insertion. Website history import reads loaded titles and saves loaded bodies one at a time; it saves currently loaded messages, not guaranteed full history. ChatGPT retains its dedicated history inventory and body sync. The new adapters still need signed-in live-site acceptance; BYOK model providers are independent of conversation-source support.
+File import accepts official exports from ChatGPT, Claude, Gemini (Google Takeout JSON) and DeepSeek, plus Markdown/JSON transcripts from other AIs. Beta website adapters for Claude, Gemini, DeepSeek, Doubao, Kimi and Qianwen (including Qwen international) run automatically after browser website permission. They support the native sidebar, project association, loaded-message sync, source location and composer insertion. Website history import reads loaded titles and saves loaded bodies one at a time; it saves currently loaded messages, not guaranteed full history. ChatGPT retains its dedicated history inventory and body sync. The new adapters still need signed-in live-site acceptance; BYOK model providers are independent of conversation-source support.
 
-Supported AI websites run automatically after installation/update and browser website permission. Use **Settings → Capture & data → Automatic page capture** to pause or resume a platform. Open a signed-in conversation to save loaded messages locally as the page changes. Capture makes no model calls and never rewrites documents automatically. The home source list has AI category filters; sync counts follow the selected category. ChatGPT, Claude, Gemini, DeepSeek and GLM have direct categories; Kimi, Doubao, Qwen, Grok, Yuanbao and other sources are available in the icon-based More AIs menu. Categories filter imported sources and do not imply automatic page capture for every listed platform.
+Supported AI websites run automatically after installation/update and browser website permission. You can stop capture for a site by revoking its browser website permission. Open a signed-in conversation to save loaded messages locally as the page changes. Capture makes no model calls and never rewrites documents automatically. The home source list has AI category filters; sync counts follow the selected category. ChatGPT, Claude, Gemini, DeepSeek and GLM have direct categories; Kimi, Doubao, Qwen, Grok, Yuanbao and other sources are available in the icon-based More AIs menu. Categories filter imported sources and do not imply automatic page capture for every listed platform.
 
-## Import and find discussions
+## Manage projects and sources
 
 Load the extension from source or a published Release, then open the workbench from its icon. Import, local search, reading, existing knowledge and the example do not need an API key.
 
 Scan ChatGPT conversation titles and sync selected text, or import a ChatGPT ZIP/JSON export. Web sync needs a signed-in ChatGPT browser session; file import is a fallback. A visible title does not mean its complete text has been saved, and visible webpage messages do not represent all history.
 
-Search saved titles and text in the home source list. The read button at the end of a row opens the matching user question and its answers in original order. Rows name their projects, and a selection can join an existing project. Returning preserves reading position. Routine keyword search needs no embedding setup.
+The workbench has a project composer and a saved projects list. Choose **Add chats** in the composer to select sources.
 
-## Organize your first project
+## Organize existing material
 
 1. In **Settings → AI connection**, choose a provider, enter your key, select a model, test and save. Advanced settings accept an exact model ID for compatible endpoints.
 2. Select your source scope and wait for its text to be available. A scope supports up to 24 conversations.
@@ -36,9 +36,13 @@ Open **Review evidence** to read the original quote and surrounding conversation
 
 ChatGPT retains its page entries. The six other supported AI website adapters automatically show a ChatAtlas button after browser website permission. Open the native sidebar from that button, the extension icon or Ctrl+Shift+Y.
 
-The sidebar shows the current conversation, local search and project association. Import or update this conversation, search saved material, then locate an original question or read continuously in Reader. Linking a conversation does not automatically rewrite project documents. Export the overview and Wiki from the workbench.
+Choose **New** to create an empty project. When the discussion makes progress, select the update icon, inspect the source quotes and apply the selected entries. Keep entries as project notes or append them to an existing chapter. New chapters are optional suggestions. Use **Mark as decided** to confirm an entry as a decision. The side panel also supports undoing the last write.
 
-Enter a keyword, then locate a matching message or open it in Reader. ChatGPT navigation can try to load earlier messages; the new adapters locate loaded messages. After an upgrade, reload the extension, accept browser website permissions and refresh the AI pages to replace old scripts.
+In another AI tab, open the same project in the sidebar and select the update icon to review the new discussion before adding it. Open a chapter to read or edit it, or select **Export** to download the saved Markdown. Choose **Open workspace** to review the full citations.
+
+**Files** keeps images, PDFs, code, and text handy. When you attach a file in a linked chat, confirm the small on-page prompt to save it. Enable **Auto-save uploads in this chat** to automatically collect supported files up to 20 MB. Larger files require confirmation, and the per-file limit is 64 MB. Try dragging a file into the composer, or download it. Use **Notes** for quick ideas and questions.
+
+After an upgrade, reload the extension, accept browser website permissions and refresh the AI pages to replace old scripts.
 
 The composer adapters support ChatGPT and the six Beta websites. Explicit insertion fills an empty composer without sending and preserves existing drafts. The new adapters still need signed-in live-site acceptance.
 
@@ -48,7 +52,7 @@ Open **Export** in the workbench, select the overview and relevant Wiki chapters
 
 ## Backups and troubleshooting
 
-Download a backup in **Settings → Capture & data** before uninstalling, clearing data or changing extension identity. Restore replaces local knowledge. API keys are excluded.
+Download a backup in **Settings → Local data** before uninstalling, clearing data or changing extension identity. Restore replaces local knowledge. API keys are excluded.
 
 - Cannot generate: check selected sources, saved text, goal and AI connection.
 - Cannot list models: check provider, region and permissions, or enter the provider's documented exact model ID.

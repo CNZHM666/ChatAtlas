@@ -59,5 +59,5 @@ it("includes retained originals in backup and restores them without stale readin
   await getMessagesForConversation("source-version");
   await restoreAtlasBackup(backup);
   expect((await getMessagesForConversation("source-version"))[0].content).toBe("原方案 A");
-  expect((await getDatabase()).getAll("sourceVersions")).resolves.toHaveLength(1);
+  await expect((await getDatabase()).getAll("sourceVersions")).resolves.toHaveLength(1);
 });

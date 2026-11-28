@@ -2,7 +2,7 @@ import {wikiEditorialTitle} from "./wiki-title";
 import type { FocusSection, FocusSession } from "./focus-session";
 
 const generatedGroups: Record<string, string> = {
-  "product positioning": "产品定位", "project positioning": "项目定位", "project goals": "项目定位",
+  "product": "产品定位", "product positioning": "产品定位", "project positioning": "项目定位", "project goals": "项目定位",
   "product strategy": "产品战略", "technical architecture": "技术架构", "technology architecture": "技术架构",
   "product design": "产品设计", "implementation planning": "实施计划", "implementation plan": "实施计划",
   "development planning": "开发计划", "development plan": "开发计划", "development progress": "开发进度",
@@ -39,8 +39,9 @@ export function wikiCategory(section: FocusSection): string | undefined {
 
 /** Missing automatic taxonomy is not a reading task or an error. */
 export function wikiReadingLocation(section:FocusSection,zh:boolean){
+ const base=zh?"章节":"Chapters";
  const group=section.wikiGroupEdited?section.wikiGroup:localizedWikiGroup(wikiCategory(section),zh);
- return group?.trim()&&(section.wikiGroupEdited||!/^(?:待归类|未分类|uncategorized)$/iu.test(group.trim()))?`Wiki / ${group.trim()}`:"Wiki";
+ return group?.trim()&&(section.wikiGroupEdited||!/^(?:待归类|未分类|uncategorized)$/iu.test(group.trim()))?`${base} / ${group.trim()}`:base;
 }
 
 /** Consecutive chapters of wikiSections() under their part. A single part, or

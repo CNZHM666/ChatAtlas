@@ -4,6 +4,21 @@ import remarkGfm from "remark-gfm";
 import type { WikiClaim } from "./wiki-claims";
 
 const parser = unified().use(remarkParse).use(remarkGfm);
+/** Markdown syntax whose bytes should survive prose formatting, including nested code. */
+export function wikiMarkdownLiteralRanges(body: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const walk = (node: import("mdast").Root | import("mdast").RootContent) => {
+    const isCitation = node.type === "link" && /^#(?:source|confirmation)-/u.test(node.url);
+    if (!isCitation && node.position && ["code", "inlineCode", "html", "definition", "link", "image"].includes(node.type)) {
+      ranges.push({ start: node.position.start.offset!, end: node.position.end.offset! });
+    } else if ("children" in node) {
+      for (const child of node.children) walk(child);
+    }
+  };
+  walk(parser.parse(body));
+  return ranges;
+}
+
 const plain = (text: string) => text.replace(/\*\*|__/gu, "");
 const parsedBlocks = new Map<string, ReturnType<typeof parseBlocks>>();
 

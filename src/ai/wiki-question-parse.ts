@@ -2,6 +2,7 @@ import { UNDECIDED } from "../shared/open-words";
 import { wikiMeasure } from "../shared/wiki-section-status";
 import { knowledgeOverlap, knowledgeScopesAgree, knowledgeTerms, knowledgeVersion } from "../shared/knowledge-subject";
 import type { WikiAnswerAction, WikiKnowledgeLedger, WikiKnowledgeUnit, WikiScopeAnswer, WikiUnitStatus, WikiUserAnswer, WikiWritingQuestion } from "../shared/wiki-knowledge";
+import { DECIDING_KINDS, wikiExternalResearch } from "../shared/wiki-knowledge";
 import { sourceMessageSignature } from "../shared/source-signature";
 import { wikiChoiceTrigger, wikiConfirmationCovers, wikiLayerDeferral, wikiReleaseChecklistStatement, wikiReleaseDeferral, wikiUnitConfirmationDetails } from "./wiki-confirmation-scope";
 import { wikiWorkflowScopes } from "./wiki-workflow-scope";
@@ -13,11 +14,12 @@ import { distinctWikiStageScopes, wikiStageLabels } from "../shared/wiki-roadmap
 const ACTIONS = new Set(["confirm", "reject", "open", "both", "owner"]), OWNER_ANSWERS = new Set<WikiScopeAnswer>(["exclude", "related", "reference", "project"]), MAX_OPTIONS = 4;
 const ALIAS = /\bk\d+\b/u;
 const text = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
-export function readQuestions(value: unknown, real: Map<string, string>, organization: number, options: { prefix?: string; limit?: number; stage?: "writing" } = {}): WikiWritingQuestion[] {
+export function readQuestions(value: unknown, real: Map<string, string>, organization: number, options: { prefix?: string; limit?: number; stage?: "writing"; scoped?: true } = {}): WikiWritingQuestion[] {
   const raw = (value as { questions?: unknown })?.questions, limit = options.limit ?? 6;
   if (!Array.isArray(raw)) return [];
   const asked = new Set<string>(), questions: WikiWritingQuestion[] = [];
   for (const item of raw.slice(0, limit * 2)) {
+    if (!item || typeof item !== "object") continue;
     const question = item as { about?: unknown; ask?: unknown; unitIds?: unknown; options?: unknown };
     const about = text(question.about, 24), ask = text(question.ask, 120);
     const unitIds = (Array.isArray(question.unitIds) ? question.unitIds : []).flatMap(id => typeof id === "string" && real.has(id) ? [real.get(id)!] : []);
@@ -29,8 +31,11 @@ export function readQuestions(value: unknown, real: Map<string, string>, organiz
       const label = text((option as { label?: unknown })?.label, 60);
       if (!label || ALIAS.test(label)) return [];
       const actions = (Array.isArray((option as { actions?: unknown }).actions) ? (option as { actions: unknown[] }).actions : []).flatMap((action): WikiAnswerAction[] => {
-        const entry = action as { do?: unknown; units?: unknown; name?: unknown; answer?: unknown };
-        const units = (Array.isArray(entry.units) ? entry.units : []).flatMap(id => typeof id === "string" && real.has(id) ? [real.get(id)!] : []);
+        const entry = (action ?? {}) as { do?: unknown; units?: unknown; name?: unknown; answer?: unknown };
+        const units = (Array.isArray(entry.units) ? entry.units : []).flatMap(id => {
+          const unit = typeof id === "string" ? real.get(id) : undefined;
+          return unit && (!options.scoped || unitIds.includes(unit)) ? [unit] : [];
+        });
         if (typeof entry.do !== "string" || !ACTIONS.has(entry.do) || !units.length) return [];
         if (entry.do === "both") return units.length === 2 ? [{ do: "both", units: [units[0], units[1]] }] : [];
         if (entry.do === "owner") { const name = text(entry.name, 40), answer = entry.answer as WikiScopeAnswer; return name && OWNER_ANSWERS.has(answer) ? [{ do: "owner", units, name, answer }] : []; }
@@ -41,7 +46,8 @@ export function readQuestions(value: unknown, real: Map<string, string>, organiz
     if (answers.length < 2) continue;
     asked.add(key);
     const identity = sourceMessageSignature(JSON.stringify([about, ask, key, answers]));
-    questions.push({ id: `ask:${organization}:${options.prefix ? `${options.prefix}:` : ""}${identity}`, about, ask, unitIds: [...new Set(unitIds)], options: answers, organization, ...(options.stage ? { stage: options.stage } : {}) });
+    questions.push({ id: `ask:${organization}:${options.prefix ? `${options.prefix}:` : ""}${identity}`, about, ask, unitIds: [...new Set(unitIds)], options: answers, organization,
+      ...(options.stage ? { stage: options.stage } : {}), ...(options.scoped ? { scoped: true } : {}) });
     if (questions.length >= limit) break;
   }
   return questions;
@@ -196,10 +202,32 @@ function selectedAnswerUnits(ledger: WikiKnowledgeLedger): Set<string> {
 }
 const ownerKey = (name: string) => name.normalize("NFKC").toLocaleLowerCase().replace(/\s+/gu, "");
 
-/** A question as it can be put to the user: an owner answer naming the project itself does nothing (the project is
- * not another project), an answer contradicting the point it confirms goes, and a question left with one answer is
- * not asked: both its points said the same. undefined: not a question. */
+/** Ownership may be clarified, but outside work cannot be accepted or rejected as project policy. */
+export function wikiQuestionUsesExternalAlternative(question: WikiWritingQuestion, unitOf: (id: string) => WikiKnowledgeUnit | undefined): boolean {
+  const external = (id: string) => {
+    const unit = unitOf(id);
+    return Boolean(unit && (unit.about || wikiExternalResearch(unit)));
+  };
+  const actions = question.options.flatMap(option => option.actions);
+  return actions.some(action => action.do !== "owner" && action.units.some(external))
+    || question.unitIds.some(external) && !actions.some(action => action.do === "owner");
+}
+
+/** An explicit verdict can cover a whole proposition only when the choice
+ * covers every independent clause and the material is project policy. */
+export function wikiChoiceCoversUnit(unit: WikiKnowledgeUnit, question: WikiWritingQuestion, label: string, verdict: "confirm" | "reject" | "open" | "both") {
+  if (unit.about || wikiExternalResearch(unit) || !DECIDING_KINDS.includes(unit.kind)) return false;
+  const parts = unit.statement.split(/[；;。！？\n]+|[，,]\s*(?=还需|同时|另需|另外|并且|also\b|additionally\b)/iu)
+    .map(part => part.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    if (parts.some(part => knowledgeOverlap(part, label).length < 2)) return false;
+  }
+  return verdict === "reject" ? !answerLeavesRejectionOpen(unit, label) : !answerLeavesDetailsOpen(unit, question, label);
+}
+
+/** Remove contradictory choices and ownership actions that name the project itself. */
 export function soundQuestion(question: WikiWritingQuestion, statementOf: (id: string) => string | undefined, project?: string, unitOf?: (id: string) => WikiKnowledgeUnit | undefined, selectedId?: string): WikiWritingQuestion | undefined {
+  if (unitOf && !selectedId && wikiQuestionUsesExternalAlternative(question, unitOf)) return undefined;
   // Figures of the project said on different days ("日活只有25", "每天稳定在22人", "日活卡在40了") are its history, not two
   // versions to choose from: asked "当前日活是25人、30人还是40人？", the answer turned one figure into a decision 〔已定〕 and
   // rejected the others, which the chapters still told with their dates.
@@ -228,20 +256,37 @@ export function withSoundAnswers(ledger: WikiKnowledgeLedger): WikiKnowledgeLedg
   const answers = new Map(ledger.userAnswers?.map(answer => [answer.questionId, answer]));
   for (const question of ledger.writingQuestions) {
     const answer = answers.get(question.id);
+    if (answer?.scope?.targets.some(target => {
+      const unit = units.get(target.unitId);
+      return !unit || unit.evidence.conversationId !== target.conversationId || unit.evidence.messageId !== target.messageId
+        || unit.statement !== target.claim || sourceMessageSignature(unit.evidence.quote) !== target.quote;
+    })) {
+      sound.set(question.id, undefined);
+      continue;
+    }
     sound.set(question.id, restoredQuestion(question) && answer
       ? question : soundQuestion(question, id => units.get(id)?.statement, project, id => units.get(id), answer?.optionId));
   }
   if ([...sound].every(([id, question]) => question === ledger.writingQuestions!.find(item => item.id === id))) return ledger;
   const decisions = { ...ledger.decisions };
+  const inactivePairs = new Set<string>();
   const userAnswers = (ledger.userAnswers ?? []).filter(answer => {
     const question = ledger.writingQuestions!.find(item => item.id === answer.questionId);
-    if (!question || !answer.optionId) return true;
+    if (!question || !answer.optionId && !answer.scope) return true;
     const kept = sound.get(question.id);
-    if (kept?.options.some(option => option.id === answer.optionId)) return true;
-    for (const id of new Set(question.options.flatMap(option => option.actions.flatMap(action => action.do === "owner" ? [] : action.units)))) if (decisions[id]?.at === answer.at) delete decisions[id];
+    if (kept && (!answer.optionId || kept.options.some(option => option.id === answer.optionId))) return true;
+    if (answer.scope) for (const action of question.options.find(option => option.id === answer.optionId)?.actions ?? []) {
+      if (action.do === "both" && action.units.every(id => decisions[id]?.at === answer.at && !decisions[id]?.wholeUnit)) {
+        inactivePairs.add(`${action.units[0]}>${action.units[1]}`);
+      }
+    }
+    for (const id of new Set(question.options.flatMap(option => option.actions.flatMap(action => action.do === "owner" ? [] : action.units)))) {
+      if (decisions[id]?.at === answer.at && !decisions[id]?.wholeUnit) delete decisions[id];
+    }
     return false;
   });
   const next: WikiKnowledgeLedger = { ...ledger, decisions, userAnswers, writingQuestions: ledger.writingQuestions.flatMap(question => sound.get(question.id) ?? []) };
+  if (inactivePairs.size && next.coexisting) next.coexisting = next.coexisting.filter(pair => !inactivePairs.has(pair));
   if (!Object.keys(decisions).length) delete next.decisions;
   if (!userAnswers.length) delete next.userAnswers;
   return next;
@@ -357,7 +402,8 @@ export function withAnsweredChoices(ledger: WikiKnowledgeLedger): WikiKnowledgeL
       }
       continue;
     }
-    const scoped = confirmed.some(unit => !decisions[unit.id] && answerLeavesDetailsOpen(unit, question, answer.answer));
+    const scoped = confirmed.some(unit => !decisions[unit.id] && (answer.scope
+      ? !wikiChoiceCoversUnit(unit, question, answer.answer, "confirm") : answerLeavesDetailsOpen(unit, question, answer.answer)));
     if (!confirmed.length || confirmed.some(unit => DECIDING.includes(unit.kind) && (!scoped || decisions[unit.id]?.verdict === "confirmed"))) continue;
     if (added.has(confirmed[0].id)) continue;
     for (const unit of confirmed) if (decisions[unit.id]?.verdict === "confirmed" && decisions[unit.id]?.at === answer.at) delete decisions[unit.id];

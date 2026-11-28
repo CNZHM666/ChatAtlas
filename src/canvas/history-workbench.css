@@ -121,6 +121,9 @@
 .home-task-composer:focus-within form { border-color:var(--accent); }
 .home-task-workspace .home-task-composer button { flex:none; width:36px; height:36px; padding:6px; }
 .home-recall-answer { padding:22px 24px; border:1px solid var(--border); border-radius:12px; background:var(--surface-solid); box-shadow:0 1px 2px #18181b06; }
+.home-recall-sources button { display:grid; gap:4px; width:100%; padding:10px 0; border:0; border-top:1px solid var(--border); background:transparent; color:inherit; text-align:start; overflow-wrap:anywhere; }
+.home-recall-sources button:hover strong { text-decoration:underline; }
+.home-recall-sources button span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; }
 .home-answer-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px; color:var(--muted); font-size:var(--text-xs); }
 .home-answer-heading details { position:relative; }
 .home-answer-heading details[open] { max-width:360px; }

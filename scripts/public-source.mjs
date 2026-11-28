@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const rootFiles = ["package.json", "package-lock.json", "tsconfig.json", "tsconfig.app.json", "tsconfig.node.json", "atlas.html", "sidecar.html", "reader-preview.html", "manifest.config.ts", "vite.config.ts", "vitest.config.ts", "vitest.slow.config.ts", "eslint.config.js", "README.md", "README.en.md", "README.zh-CN.md", "ARCHITECTURE.md", "AI_WORKFLOWS.md", "PRODUCT_PRINCIPLES.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "LICENSE", ".gitignore", ".gitattributes", ".env.example"];
+const rootFiles = ["package.json", "package-lock.json", "tsconfig.json", "tsconfig.app.json", "tsconfig.node.json", "atlas.html", "sidecar.html", "first-wiki.html", "reader-preview.html", "manifest.config.ts", "vite.config.ts", "vitest.config.ts", "vitest.slow.config.ts", "eslint.config.js", "README.md", "README.en.md", "README.zh-CN.md", "ARCHITECTURE.md", "AI_WORKFLOWS.md", "PRODUCT_PRINCIPLES.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "LICENSE", ".gitignore", ".gitattributes", ".env.example"];
 const docs = ["README.md", "GETTING_STARTED.md", "PRIVACY.md", "RELEASE_CHECKLIST.md", "FIRST_RELEASE_OVERVIEW.md", "CONTEXT.md", "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_LICENSES.txt", "licenses/remark-math-MIT.txt", "examples/project-context-template.md", "NATIVE_HISTORY_IMPORT.md"];
 const englishDocs=["README.md","GETTING_STARTED.md","PRIVACY.md","RELEASE_CHECKLIST.md","FIRST_RELEASE_OVERVIEW.md","CONTEXT.md","ARCHITECTURE.md","AI_WORKFLOWS.md","PRODUCT_PRINCIPLES.md","CONTRIBUTING.md","CHANGELOG.md","examples/project-context-template.md"];
 async function walk(directory) {

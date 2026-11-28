@@ -4,7 +4,8 @@ import { wikiUnitHome } from "./wiki-unit-routing";
 import { isSourceCodeParagraph } from "../shared/wiki-source-code";
 import { openingSentenceMarks, saysMostOf } from "./wiki-ledger-document";
 import { knowledgeTerms } from "../shared/knowledge-subject";
-import { assistantRequest, personalDirection, statesCore, type WikiDraftChapter, type WikiKnowledgeOrganization, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
+import { wikiProjectPersonalAside } from "./wiki-knowledge-select";
+import { assistantRequest, statesCore, type WikiDraftChapter, type WikiKnowledgeOrganization, type WikiKnowledgeUnit, type WikiUnitStatus } from "../shared/wiki-knowledge";
 
 /** The user's own direction (personalDirection) is not the project's, confirmed or not: restored, it was listed among the
  * project's decisions beside 第一版禁止 STM32. */
@@ -20,7 +21,7 @@ export function ensureWikiDecisions(chapters: WikiDraftChapter[], organization: 
   const live = new Set(organization.subjects.flatMap(subject => subject.unitIds)), byId = new Map(units.map(unit => [unit.id, unit]));
   let restored = 0;
   for (const unit of units) {
-    if (!live.has(unit.id) || unit.about || statuses.get(unit.id) !== "confirmed" || assistantRequest(unit.statement) || personalDirection(unit.statement)) continue;
+    if (!live.has(unit.id) || unit.about || statuses.get(unit.id) !== "confirmed" || assistantRequest(unit.statement) || wikiProjectPersonalAside(unit)) continue;
     const covered = chapters.flatMap(chapter => chapter.paragraphs).flatMap(paragraph => paragraph.claims ?? []).find(claim => claim.unitIds.includes(unit.id)
       && claimSupported(claim.text, [unit]) && (trimmed.has(unit.id) || statesCore(unit.statement, claim.text) && mostlyOf(claim.text, unit.statement, true)) && claim.unitIds.every(id => statuses.get(id) === "confirmed"));
     if (covered) { if (covered.markOnly) { delete covered.markOnly; restored++; } continue; }

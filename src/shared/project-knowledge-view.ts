@@ -36,7 +36,8 @@ export function relatedProjectFacts(session:FocusSession,sectionId:string,query:
 /** Shared current knowledge; source reports and chosen plans remain separate. */
 export function projectKnowledgeView(session:FocusSession){
  const view=projectKnowledgeFacts(session);
- const candidates=view.current.filter(fact=>!fact.contested&&["purpose","scope"].includes(fact.role??"")&&completeProjectIntroduction(fact.claim.text)&&introductionPriority(fact.claim.text)>=0&&!/已完成|已实现|\bcompleted\b/iu.test(fact.claim.text));
+ const loose=new Set(session.sections.filter(section=>section.continuationLoose).map(section=>section.id));
+ const candidates=view.current.filter(fact=>!loose.has(fact.sectionId)&&!fact.contested&&["purpose","scope"].includes(fact.role??"")&&completeProjectIntroduction(fact.claim.text)&&introductionPriority(fact.claim.text)>=0&&!/已完成|已实现|\bcompleted\b/iu.test(fact.claim.text));
  const ranked=candidates.sort((a,b)=>introductionPriority(b.claim.text)-introductionPriority(a.claim.text)||Number(b.claim.overviewRole==="purpose")-Number(a.claim.overviewRole==="purpose"));
  const purpose=ranked[0];
  const questions=projectMatters(session).filter(matter=>matter.status==="open"&&matterNeedsAttention(session,matter));
@@ -100,7 +101,8 @@ export function projectIntroduction(session:FocusSession):ProjectIntroduction{
  const view=projectKnowledgeView(session),chosen:ProjectKnowledgeFact[]=[];
  if(view.purpose){
   chosen.push(view.purpose);
-  for(const fact of view.current.filter(fact=>fact!==view.purpose&&!fact.contested&&fact.role==="purpose")){
+  const loose=new Set(session.sections.filter(section=>section.continuationLoose).map(section=>section.id));
+  for(const fact of view.current.filter(fact=>fact!==view.purpose&&!loose.has(fact.sectionId)&&!fact.contested&&fact.role==="purpose")){
    const text=projectPurposeText(fact.claim.text),key=factTextKey(text);
    if(!completeProjectIntroduction(text)||introductionPriority(text)<0||chosen.some(previous=>factTextKey(projectPurposeText(previous.claim.text)).includes(key)||key.includes(factTextKey(projectPurposeText(previous.claim.text)))))continue;
    if(chosen.length>=2||chosen.reduce((length,row)=>length+projectPurposeText(row.claim.text).length,0)+text.length>520)continue;
@@ -109,7 +111,7 @@ export function projectIntroduction(session:FocusSession):ProjectIntroduction{
   return {text:chosen.map(fact=>knowledgeFactText(fact,session.locale!=="en",projectPurposeText(fact.claim.text))).join("\n\n"),evidenceIds:[...new Set(chosen.flatMap(fact=>fact.claim.evidenceIds))],sectionIds:[...new Set(chosen.map(fact=>fact.sectionId))],source:"claims"};
  }
  const candidates=session.sections.flatMap(section=>{
-  if(section.origin||section.userEdited||section.reviewIssue||!section.evidenceIds.length||!/定位|概况|项目介绍|产品介绍|positioning|overview|introduction/iu.test(section.title))return [];
+  if(section.continuationLoose||section.origin||section.userEdited||section.reviewIssue||!section.evidenceIds.length||!/定位|概况|项目介绍|产品介绍|positioning|overview|introduction/iu.test(section.title))return [];
   return projectIntroductionParagraphs(section.body).filter(text=>!/已完成|已实现|\b(?:completed|implemented)/iu.test(text)).map(text=>({text,section}));
  }).sort((a,b)=>introductionPriority(b.text)-introductionPriority(a.text));
  const candidate=candidates.find(candidate=>introductionPriority(candidate.text)>=0);
@@ -171,7 +173,8 @@ export function projectKnowledgeReading(section:FocusSection,session:FocusSessio
   ?wikiDocumentBlocks(ref.excerpt).flatMap(block=>block.kind==="table"
    ?[{text:block.text,link:`[${zh?"来源":"Source"}](${wikiEvidenceHref(ref,wikiTableSignature(block.text))})`}]
    :[]):[]):undefined;
- let body=wikiChapterLinks(wikiReadingFormat(projected.body,projected,{zh,units,citeTable:linkTable,tableSources}),projected,reviewed,zh,homes);
+ const writingMode=session.wikiKnowledge?.writingMode??session.wikiKnowledge?.draft?.writingMode;
+ let body=wikiChapterLinks(wikiReadingFormat(projected.body,projected,{zh,units,citeTable:linkTable,tableSources,writingMode}),projected,reviewed,zh,homes);
  if(session.wikiKnowledge&&/\|\s*(?:交付主题|Delivery topic)\s*\|/iu.test(body)){
   for(const {plan} of confirmedRoadmaps(session.wikiKnowledge))if(units.some(unit=>unit.id===plan.unitId))
    body=groupWikiConfirmedRoadmap(body,plan,zh);

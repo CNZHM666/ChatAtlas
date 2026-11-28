@@ -150,3 +150,19 @@ it("reads an already synced, unchanged conversation again only when asked to syn
   await runner.select(["deepseek:a"], [], true); await idle(runner);
   expect((await getMessagesForConversation("deepseek:a"))[0].content).toBe("Read again");
 });
+it("retries transient signal timed out errors with backoff and tracks retryingIds before succeeding", async () => {
+  let detailAttempts = 0;
+  const seenRetrying: string[][] = [];
+  const runner = createNativeImportRunner(async (_s, req) => {
+    if (req.path.includes("fetch_page")) return { account: "account-a", data: listing };
+    detailAttempts += 1;
+    if (detailAttempts === 1) throw Error("signal timed out");
+    return { account: "account-a", data: body("Recovered after timeout") };
+  }, async job => { if (job.retryingIds?.length) seenRetrying.push([...job.retryingIds]); }, { retryStepMs: 5, paceMs: 0 });
+  await runner.start([source]); await idle(runner);
+  await runner.select(["deepseek:a"]); await idle(runner);
+  expect(detailAttempts).toBe(2);
+  expect(seenRetrying.some(ids => ids.includes("deepseek:a"))).toBe(true);
+  expect(await getImportJob()).toMatchObject({ status: "completed", failedIds: [], retryingIds: [] });
+  expect((await getMessagesForConversation("deepseek:a"))[0].content).toBe("Recovered after timeout");
+});

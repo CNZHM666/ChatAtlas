@@ -226,6 +226,10 @@ export interface AIUsageEvent {
   directoryValidation?: {missing:number;duplicate:number;unknown:number;parentMismatch:number};
   citationDiagnostics?: { allowedEvidenceCount: number; unknownEvidenceCount: number; citationPaths: string[]; returnedSectionCount?: number; returnedNoteCount?: number };
   estimatedInputTokens?: number;
+  budgetedInputTokens?: number;
+  inputBudgetScale?: number;
+  /** Original organization for a request tracked as a separate background run. */
+  relatedRunId?: string;
   inputTokenLimit?: number;
   plannedOutputTokens?: number;
   predictedOutputTokens?: number;

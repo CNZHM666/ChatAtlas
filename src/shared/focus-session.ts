@@ -62,6 +62,10 @@ export interface SemanticRelation {
 export interface SemanticStructure { nodes: SemanticConcept[]; relations: SemanticRelation[] }
 
 export interface FocusSection {
+  /** Accepted in the side panel. Keep this text when reorganizing generated chapters. */
+  continuation?: true;
+  /** A project note displayed inline until it has a chapter. */
+  continuationLoose?: true;
   wikiRevisionReceipt?:WikiRevisionReceipt;
   wikiTitleReview?: WikiTitleReview;
   id: string;
@@ -183,6 +187,13 @@ export interface WikiScopeReview {
 export interface WikiTitleReview {version:2;policyVersion?:3;status:"ready"|"partial"|"failed"|"skipped";requested:number;accepted:number;rejected:Array<{id:string;reason:string}>}
 export interface WikiRevisionReceipt {version:1;basisSessionId:string;batches:number;cachedBatches:number;draftUnits:number;sourceUnits:number;/** Draft units kept exactly as saved because even alone they exceed one request. */keptDraftUnits?:number;references:Array<{conversationId:string;messageId:string;start:number;end:number;evidenceIds:string[];excerpt:string;reason:string}>}
 export interface FocusSession {
+  /** Preferences for the next side panel update. Previously saved prose is a separate revision. */
+  sidecarWritingMode?: import("./wiki-knowledge").WikiWritingMode;
+  /** Can be opened and continued before the first conversation is added. */
+  livingProject?: true;
+  /** An explicitly applied side panel revision, with a retained parent for undo. */
+  continuationUpdate?: { conversationId: string; at: number; sectionIds?: string[] };
+  sidecarGenerationLog?: import("../sidecar/project-update-log").ProjectUpdateLogEntry[];
   wikiRevisionReceipt?:WikiRevisionReceipt;
   /** Explicit content revision preview; navigation metadata, never source proof. */
   wikiContentReview?:{version:1;basisSessionId:string;moves:Array<{fromId:string;topicTitle:string;toId:string}>};
@@ -237,6 +248,8 @@ export interface FocusSession {
   wikiOrganization?: {version:1|2|3|4|5|6;status:"organized"|"deferred"|"unchanged"|"protected";signature:string;mergedSections:number;reason?:string;pendingSectionIds?:string[];inputSections?:number;protectedSections?:number;plannedChapters?:number;finalSections?:number};
   /** Current-edition writing policy; older projects rebuild only on explicit update. */
   wikiEdition?:"current-v1"|"current-v2";
+  /** Saved project state that a generated update preview was based on. */
+  wikiPublishBasis?: { id: string; signature: string; editSignature?: string; sidecarWritingMode?: FocusSession["sidecarWritingMode"] };
   /** Explanation ownership, block checks and repair semantics this document was
    * produced with. Separate from wikiEdition (organization) and writing versions. */
   wikiSemanticVersion?:number;

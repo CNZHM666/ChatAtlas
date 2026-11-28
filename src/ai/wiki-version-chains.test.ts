@@ -93,6 +93,30 @@ it("builds version chains from the model's answer, held to each group", async ()
   expect(report.topics).toBe(1);
 });
 
+it("splits a truncated topic request without separating the members of a group", async () => {
+  const units = [
+    unit("a", "首屏显示一个快捷入口。"), unit("b", "首屏显示三个快捷入口。"),
+    unit("c", "更新前清除缓存目录。"), unit("d", "更新前保留缓存目录。"),
+  ];
+  const ledger=ledgerOf(units,{subjects:[{id:"one",name:"界面与文件",aliases:[],unitIds:units.map(unit=>unit.id)}]});
+  const requests:number[]=[];
+  const ai=fakeAI(request=>{
+    const {groups}=JSON.parse(request.prompt as string) as {groups:Array<{group:string;units:Array<{id:string;statement:string}>}>};
+    requests.push(groups.length);
+    if(groups.length>1)throw Object.assign(new Error("truncated"),{code:"PROVIDER_OUTPUT_TRUNCATED"});
+    return {topics:groups.map(({group,units})=>({group,name:units[0].statement.slice(0,3),current:[units[1].id],earlier:[units[0].id]}))};
+  });
+  const report:Record<string,number>={};
+  const checks: NonNullable<WikiKnowledgeOrganization["topicChecks"]>={};
+  const input={ai,locale:"zh-CN",signal:new AbortController().signal};
+  const topics=await wikiTopicChains(ledger.organization!,ledger,{...input,checks},report);
+  expect(await wikiTopicChains(ledger.organization!,ledger,{...input,previousChecks:checks},{})).toEqual(topics);
+  expect(requests).toEqual([2,1,1]);
+  expect(topics.map(topic=>[...topic.earlier,...topic.current])).toEqual([["a","b"],["c","d"]]);
+  expect(report.topic_batch_splits).toBe(1);
+  expect(report.topic_failed).toBeUndefined();
+});
+
 it("reuses an unchanged version check and asks again when a user verdict changes", async () => {
   const units = [unit("a", "首屏显示一个快捷入口。", { at: 2 }), unit("b", "首屏显示三个快捷入口。", { at: 3 })];
   const ledger = ledgerOf(units, { subjects: [{ id: "s", name: "首页", aliases: [], unitIds: ["a", "b"] }] });
@@ -152,6 +176,31 @@ it("moves a point the chapter check is sure of, and keeps doubts and a chapter e
   const kept = await checkedChapterFit(organization, ledgerOf(units, {}), { ai: greedy, locale: "zh-CN", signal: new AbortController().signal }, {});
   expect(kept.subjects.find(subject => subject.id === "v")!.unitIds).toHaveLength(3);
   expect(kept.placementDoubts).toHaveLength(3);
+});
+
+it("retries a single point after a local input limit with the full compact directory", async () => {
+  const units = [unit("timer", "每轮专注 25 分钟。"), unit("store", "保存近七天的学习记录。")];
+  const subjects = units.map(item => ({ id: item.id, name: item.subject, aliases: [], unitIds: [item.id] }));
+  const chapters = subjects.map((subject, index) => ({
+    id: `c${index + 1}`, title: index === 0 ? "计时逻辑" : "数据存储", question: "这个章节应覆盖哪些规则？", group: "",
+    subtopics: [{ title: subject.name, subjectIds: [subject.id] }],
+  }));
+  const ledger = ledgerOf(units, { subjects, chapters });
+  const sent: Array<{ chapters: Array<{ question?: string }>; units: Array<{ statement: string }> }> = [];
+  const ai = fakeAI(request => {
+    const data = JSON.parse(request.prompt);
+    sent.push(data);
+    if (data.chapters.some((chapter: { question?: string }) => chapter.question)) {
+      throw Object.assign(new Error("request locally blocked"), { code: "LOCAL_INPUT_BUDGET" });
+    }
+    return { moves: [] };
+  });
+  const report: Record<string, number> = {};
+  const result = await checkedChapterFit(ledger.organization!, ledger, { ai, locale: "zh-CN", signal: new AbortController().signal }, report);
+  expect(report.fit_compact_retries).toBe(2);
+  expect(report.fit_failed).toBeUndefined();
+  expect(Object.keys(result.fitUnitChecks ?? {})).toHaveLength(2);
+  expect(sent.every(data => data.chapters.length === 2 && data.units.length === 1)).toBe(true);
 });
 
 it("rechecks only the changed chapter and preserves placement doubts from an unchanged chapter", async () => {

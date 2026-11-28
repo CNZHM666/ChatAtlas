@@ -252,10 +252,14 @@ it("splits a broad subject into coherent parts from its units' original topics, 
   expect(result.subjects.map(subject => [subject.name, subject.unitIds.length])).toEqual([["存储持久化", 15], ["检索排序", 15], ["成功指标", 15]]);
   expect(result.report).toMatchObject({ split_requests: 1, split_subjects: 1 });
   expect(calls.find(call => call.presentation === "wiki_subject_split")!.system).toContain("never the project's name");
-  // One part, or only the project's name, is no split.
+  // Generic names or the project's name provide no useful assignment.
   const kept = await run(units, { wiki_subject_merge: broad, wiki_subject_split: () => ({ parts: [{ name: "Atlas", names: ["n1"] }, { name: "全部", names: ["n2"] }] }), wiki_unit_merge: noMerges, wiki_subject_plan: oneChapterPerSubject });
   expect(kept.result.subjects.map(subject => subject.name)).toEqual(["检索技术要求"]);
-  expect(kept.result.report.split_failed).toBe(1);
+  expect(kept.result.report).toMatchObject({ split_failed: 1, split_schema_failed: 1 });
+  const coherent = await run(units, { wiki_subject_merge: broad, wiki_subject_split: () => ({ parts: [] }), wiki_unit_merge: noMerges, wiki_subject_plan: oneChapterPerSubject });
+  expect(coherent.result.subjects.map(subject => subject.name)).toEqual(["检索技术要求"]);
+  expect(coherent.result.report.split_kept).toBe(1);
+  expect(coherent.result.report.split_failed).toBeUndefined();
 });
 
 it("splits a large subject in windows: later windows reuse the parts, and a failed later window keeps the split", async () => {
@@ -267,12 +271,14 @@ it("splits a large subject in windows: later windows reuse the parts, and a fail
   const windows = calls.filter(call => call.presentation === "wiki_subject_split") as unknown as Array<{ count: number; parts?: string[] }>;
   expect(windows.map(call => [call.count, call.parts])).toEqual([[50, undefined], [10, ["存储持久化", "检索排序"]]]);
   expect(result.subjects.map(subject => [subject.name, subject.unitIds.length])).toEqual([["存储持久化", 30], ["检索排序", 30]]);
-  // The second window fails: its entries join the largest part, and the split stands.
+  // Without a reliable assignment, the failed window keeps its original subject.
   let seen = 0;
   const flaky: Handler = data => { if (seen++) throw new Error("truncated"); return byArea(data); };
   const partial = await run(units, { wiki_subject_merge: broad, wiki_subject_split: flaky, wiki_unit_merge: noMerges, wiki_subject_plan: oneChapterPerSubject });
   expect(partial.result.subjects.map(subject => subject.unitIds.length).reduce((sum, count) => sum + count, 0)).toBe(60);
-  expect(partial.result.subjects).toHaveLength(2);expect(partial.result.report).toMatchObject({ split_subjects: 1, split_windows_failed: 1 });
+  expect(partial.result.subjects.find(subject => subject.name === "系统架构")?.unitIds).toHaveLength(10);
+  expect(partial.result.subjects).toHaveLength(3);
+  expect(partial.result.report).toMatchObject({ split_subjects: 1, split_windows_failed: 1 });
 });
 
 it("merges synonymous subjects before planning, never across what units are about or into one too large", async () => {

@@ -11,18 +11,18 @@ beforeEach(async()=>{
 });
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
-it("separates usage, diagnostics and tests without duplicate totals or calling a provider",async()=>{
+it("separates usage and diagnostics without developer tests, duplicate totals or calling a provider",async()=>{
  const fetch=vi.spyOn(globalThis,"fetch");render(<UsageLedger locale="zh-CN"/>);
  const overview=screen.getByRole("region",{name:"用量概览"});await within(overview).findByText("100");
  expect(within(overview).getAllByText("120")).toHaveLength(2); // Total and the selected feature row, not three repeated statistic cards.
  expect(screen.queryByText("统计说明")).toBeNull();expect(screen.queryByText("按对话查看")).toBeNull();expect(screen.queryByText("展开开发者测试分析")).toBeNull();
+ expect(screen.queryByRole("button",{name:"开发者测试"})).toBeNull();
  expect(screen.queryByLabelText("按 AI 功能筛选")).toBeNull();
  fireEvent.click(screen.getByRole("button",{name:"任务诊断"}));
  const diagnostics=screen.getByRole("region",{name:"任务诊断"});const filter=within(diagnostics).getByLabelText("按 AI 功能筛选");
  await waitFor(()=>expect(within(diagnostics).queryByText("读取中…")).toBeNull());
  fireEvent.change(filter,{target:{value:"wiki"}});
- fireEvent.click(screen.getByRole("button",{name:"开发者测试"}));expect(screen.queryByRole("region",{name:"任务诊断"})).toBeNull();
- expect(within(screen.getByRole("region",{name:"开发者测试"})).getByRole("button",{name:"运行本地回归"})).toBeVisible();
+ fireEvent.click(screen.getByRole("button",{name:"用量概览"}));
  fireEvent.click(screen.getByRole("button",{name:"任务诊断"}));expect(screen.getByLabelText("按 AI 功能筛选")).toHaveValue("wiki");
  expect(fetch).not.toHaveBeenCalled();
 });

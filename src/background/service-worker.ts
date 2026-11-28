@@ -13,8 +13,9 @@ import { ChatGPTSyncError } from "../sync/chatgpt-sync-adapter";
 import { ensureContentConnection, selectChatGPTTab } from "./chatgpt-connection";
 import { executeSidecarAction } from "./sidecar-actions";
 import { respondAsync } from "./async-response";
+import { handleProjectFile } from "./project-files";
 import {registerChatGPTEntryRecovery} from "./entry-recovery";
-import {isNativePanelSite,openNativeSidePanel,registerNativeSidePanels} from "./side-panel";
+import {isNativePanelSite,openNativeSidePanel} from "./side-panel";
 import { isDeletedProject } from "../storage/project-deletion";
 import webCaptureScript from "../content/multi-ai-content.ts?script&iife";
 import { createWebCaptureManager } from "./web-capture";
@@ -22,6 +23,7 @@ import {webCaptureSite} from "../shared/web-capture";
 import { createNativeImportRunner } from "../sync/native-import-runner";
 import { nativeHistoryRequest } from "./native-history-transport";
 import { nativeImportSources } from "../shared/native-import-sources";
+import { firstWikiCommand } from "./first-wiki-host";
 
 const ATLAS_PAGE = "atlas.html";
 const webCapture = createWebCaptureManager(webCaptureScript);
@@ -34,7 +36,6 @@ chrome.runtime.onStartup.addListener(()=>{void webCapture.restore().catch(()=>un
 chrome.permissions?.onRemoved?.addListener(()=>{void webCapture.restore().catch(()=>undefined);});
 chrome.permissions?.onAdded?.addListener(()=>{void webCapture.restore().catch(()=>undefined);});
 void webCapture.restore().catch(()=>undefined);
-registerNativeSidePanels();
 const entryRecovery=registerChatGPTEntryRecovery({ping:pingChatGPTContent,inject:injectChatGPTContent});
 const CHATGPT_URL = "https://chatgpt.com/*";
 const CHATGPT_TAB_KEY = "atlasChatGPTTabId";
@@ -80,15 +81,20 @@ function importLog(stage: string, details: Record<string, unknown> = {}): void {
   if (import.meta.env.DEV) console.info("[ChatAtlas Import]", { stage, ...details });
 }
 
-async function openAtlas(conversationId?: string, messageId?: string, settings = false, sourceRange?: MessageSourceRange, prepareId?:string, search?: ReaderSearchContext): Promise<void> {
+async function openAtlas(conversationId?: string, messageId?: string, settings = false, sourceRange?: MessageSourceRange, prepareId?:string, search?: ReaderSearchContext, home = false): Promise<void> {
   const baseUrl = chrome.runtime.getURL(ATLAS_PAGE);
   const hash = new URLSearchParams({ ...(conversationId ? { conversation: conversationId, ...(messageId ? { message: messageId, ...(sourceRange ? { location: JSON.stringify(sourceRange) } : {}), ...(search ? { search: JSON.stringify(search) } : {}) } : {}) } : {}), ...(settings ? { settings: "ai" } : {}),...(prepareId?{prepare:prepareId}:{}) });
+  if (home) hash.set("home", "1");
   const url = hash.size ? `${baseUrl}#${hash}` : baseUrl;
   const existing = await chrome.tabs.query({ url: `${baseUrl}*` });
   const tab = existing[0];
 
   if (tab?.id) {
-    await chrome.tabs.update(tab.id, { active: true, ...(hash.size ? { url } : {}) });
+    const goHome = home || (!conversationId && !settings && !prepareId);
+    if (goHome && !hash.has("home")) hash.set("home", "1");
+    const targetUrl = hash.size ? `${baseUrl}#${hash}` : baseUrl;
+    await chrome.tabs.update(tab.id, { active: true, ...(hash.size ? { url: targetUrl } : {}) });
+    if (goHome) void chrome.runtime.sendMessage({ type: "ATLAS_FOCUS_HOME" } satisfies AtlasMessage).catch(() => undefined);
     if (conversationId) void chrome.runtime.sendMessage({ type: "ATLAS_FOCUS_CONVERSATION", conversationId, messageId, sourceRange, search } satisfies AtlasMessage).catch(() => undefined);
     if (settings) void chrome.runtime.sendMessage({ type: "ATLAS_FOCUS_AI_SETTINGS" } satisfies AtlasMessage).catch(() => undefined);
     if (tab.windowId) await chrome.windows.update(tab.windowId, { focused: true });
@@ -383,9 +389,18 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
 
 chrome.runtime.onMessage.addListener((message: AtlasMessage, sender, sendResponse) => {
   const reply = (operation: () => Promise<unknown>) => respondAsync(sendResponse, operation);
+  if (message.type === "ATLAS_FIRST_WIKI_START" || message.type === "ATLAS_FIRST_WIKI_PAUSE") {
+    if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(""))) { sendResponse({ ok: false }); return false; }
+    return reply(() => firstWikiCommand(message.draftId, message.type === "ATLAS_FIRST_WIKI_PAUSE"));
+  }
+  if (message.type === "ATLAS_PROJECT_FILE_CONTEXT" || message.type === "ATLAS_PROJECT_FILE_START" ||
+    message.type === "ATLAS_PROJECT_FILE_CHUNK" || message.type === "ATLAS_PROJECT_FILE_FINISH" ||
+    message.type === "ATLAS_PROJECT_FILE_REUSE" || message.type === "ATLAS_PROJECT_FILE_DROP") {
+    return reply(() => handleProjectFile(message, sender));
+  }
   if (message.type === "ATLAS_OPEN_SIDEPANEL") {
     if (sender.tab?.id === undefined || !isNativePanelSite(sender.url)) { sendResponse({ ok: false, error: "Invalid sidebar caller" }); return false; }
-    return reply(() => openNativeSidePanel(sender.tab!.id!,sender.url!,sender.tab!.windowId));
+    return respondAsync(sendResponse, () => openNativeSidePanel(sender.tab!.id!,sender.url!,sender.tab!.windowId), 4000);
   }
   if (message.type === "ATLAS_SIDECAR_OPEN_ORIGINAL" || message.type === "ATLAS_SIDECAR_LOCATE" || message.type === "ATLAS_SIDECAR_SYNC" || message.type === "ATLAS_SIDECAR_HANDOFF" || message.type === "ATLAS_SIDECAR_CAPTURE") {
     return reply(() => executeSidecarAction(message, sender, {
@@ -401,7 +416,7 @@ chrome.runtime.onMessage.addListener((message: AtlasMessage, sender, sendRespons
     }));
   }
   if (message.type === "ATLAS_OPEN_AI_SETTINGS") return reply(async () => { await openAtlas(undefined, undefined, true); return { ok: true }; });
-  if (message.type === "ATLAS_OPEN") return reply(async () => { await openAtlas(undefined,undefined,false,undefined,message.prepareId); return { ok: true }; });
+  if (message.type === "ATLAS_OPEN") return reply(async () => { await openAtlas(undefined,undefined,false,undefined,message.prepareId,undefined,message.home); return { ok: true }; });
   if (message.type === "ATLAS_OPEN_CONVERSATION") return reply(async () => { await openAtlas(message.conversationId, message.messageId, false, message.sourceRange, undefined, readerSearchContext(message.search)); return { ok: true }; });
   if (message.type === "ATLAS_NAVIGATOR_DATA") return reply(async () => ({ ok: true, data: await navigatorData(message.conversationId) }));
   if (message.type === "ATLAS_SIDECAR_DATA") return reply(async () => ({ ok: true, data: await getSidecarData(message.conversationId) }));
@@ -410,7 +425,6 @@ chrome.runtime.onMessage.addListener((message: AtlasMessage, sender, sendRespons
     void pendingImportMode().then(mode => { if (mode) void retryPendingImport().catch(() => undefined); }).catch(() => undefined);
     return false;
   }
-  if (message.type === "ATLAS_WEB_CAPTURE_STATUS") return reply(async()=>({ok:true,status:await webCapture.status()}));
   if(message.type==="ATLAS_WEB_HISTORY_LIST"||message.type==="ATLAS_WEB_HISTORY_IMPORT"){
     if(sender.id!==chrome.runtime.id||!sender.url?.startsWith(chrome.runtime.getURL(""))){sendResponse({ok:false,error:"Open history import in ChatAtlas."});return false;}
     return message.type==="ATLAS_WEB_HISTORY_LIST"?reply(async()=>({ok:true,page:await webCapture.history(message.platform,message.tabId)})):reply(()=>webCapture.importHistory(message.platform,message.url,message.conversationId));
@@ -421,7 +435,6 @@ chrome.runtime.onMessage.addListener((message: AtlasMessage, sender, sendRespons
       ? reply(async()=>({ok:true,tabs:await webCapture.tabs(message.platform)}))
       : reply(()=>webCapture.captureTab(message.platform,message.tabId,message.conversationId));
   }
-  if (message.type === "ATLAS_WEB_CAPTURE_SET") return reply(async()=>({ok:true,status:await webCapture.set(message.platform,message.enabled)}));
   if (message.type === "ATLAS_CAPTURE_BATCH") return reply(async () => {
     if(message.capture.conversation.platform!=="chatgpt"&&!await webCapture.accepts(message.capture,sender.url??sender.tab?.url))throw Error("Page capture is disabled or does not match this website");
     return persistCapture(message.capture);

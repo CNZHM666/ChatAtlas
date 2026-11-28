@@ -94,11 +94,11 @@ export function wikiWritingLayout(units:WikiKnowledgeUnit[],options:{zh?:boolean
  const competingPlans = new Set(units.flatMap(unit => options.plans?.get(unit.id) ?? [])).size > 1;
  const stages=!competingPlans&&subjects.size<2&&stagedPlan(units),table=competingPlans||subjects.size>=2||stages?undefined:fittingTable(units,options.open??0);
  return {preferred:stages?"stages":competingPlans||subjects.size>=2||table?"comparison":listed?"list":"explanation",
-  allowed:["paragraph","list","comparison","stages"],maxColumns:4,
+  allowed:["paragraph","list","comparison","stages","flow","diagram"],maxColumns:4,
   ...(table?{table:{columns:COLUMNS[table][options.zh===false?1:0],rows:HOW[table]}}:{}),
-  ...(competingPlans ? { table: { columns: options.zh === false ? ["Original stage", "Scope", "Plan", "Status"] : ["原阶段","适用范围","安排","状态"],
-    rows: "One row uses units from only one plan. Keep the exact original stage label and whether it was confirmed. Leave doubtful scope explicit. Do not number all rows as one delivery sequence." } } : {}),
-  rule:"Explain one question per subsection in connected prose. Share a list only when items have the same subject, scope and semantic role; kind alone does not prove parallelism. Separate unrelated mechanisms, operating requirements and checks into their own explanatory blocks. Compare only shared, evidenced dimensions. Keep each item's conditions, status and unitIds. Do not invent cells or repeat the same content in prose. Prefer unlabelled lists; use labels only for field/value mappings. Render short linear stages as an inline arrow flow. Number acceptance cases separately from the overall outcome. Real headings describe topics; avoid bold sentences as pseudo-headings or mechanically bold paragraph openings."
+  ...(competingPlans ? { table: { columns: options.zh === false ? ["Original stage", "Scope", "Plan"] : ["原阶段","适用范围","安排"],
+    rows: "One row uses units from only one plan. Keep the exact original stage label and leave doubtful scope explicit. Do not add a separate status column or number all rows as one delivery sequence." } } : {}),
+  rule:"Answer one question per subsection. Start with its supported conclusion, then explain the mechanism and its limits. End with unresolved choices or changes only when relevant. Group parallel items sharing scope and status. Use labelled items only when the label identifies a distinct field or rule. Keep each item's conditions and unitIds. Compare shared dimensions once. Use inline arrows for short linear flows and number distinct acceptance cases. Use real headings and concise emphasis."
    +(listed&&!stages&&!table?" These units share a topic; use a short list only for genuinely parallel rules, checks or settings. Do not force a label onto each item; explain dependencies and reasons in prose.":"")
    +(stages?" The material is the stages of a plan: write them as one stages block, one item per stage in the plan's order, stage a short label (第一阶段, P0, v0.1) and text what that stage does; put the short answer before it.":"")
    +(table?" table names a table this material fits: write the units it covers as one comparison block with these columns (drop a column no unit fills), rows as described, each row citing its own units; put the short answer before it and only reasons it cannot hold after it. Leave out the table when fewer than two rows can be filled from the units.":"")};
@@ -150,8 +150,21 @@ export function readWikiWritingBlock(value:unknown,known:Set<string>):WritingBlo
   }
   return {text:block.text.trim(),unitIds,claims};
  }
+ if(block.type==="diagram"){
+  const unitIds=idsOf(block.unitIds), text=typeof block.text==="string"?block.text.trim():"";
+  if(!unitIds.length||unitIds.some(id=>!known.has(id))||text.length>1500||!(/^(?:flowchart (?:TD|LR)|erDiagram)\s*\n/u.test(text))
+   || /\x60{3}|~{3}|^\s*(?:click|style|classDef|linkStyle)\b|<[/!a-z]/imu.test(text))throw new WikiWritingParagraphError("invalid_visual",unitIds);
+  return {text:["\x60\x60\x60mermaid",text,"\x60\x60\x60"].join("\n"),unitIds,claims:[{text,unitIds}]};
+ }
  let rows:WritingBlock[],text:string;
- if(block.type==="list"){
+ if(block.type==="flow"){
+  const items=Array.isArray(block.items)?block.items:[];
+  if(items.length<3||items.length>12||items.some(row=>!singleLine(record(row).text)||/[\x60<>]|\s→\s/u.test(String(record(row).text)))){
+   throw new WikiWritingParagraphError("invalid_visual",items.flatMap(row=>idsOf(record(row).unitIds)));
+  }
+  rows=items.map(item);
+  text=["\x60\x60\x60atlas-flow",...rows.map(row=>row.text),"\x60\x60\x60"].join("\n");
+ }else if(block.type==="list"){
   if(!Array.isArray(block.items)||!block.items.length)throw Error("invalid_writing_list");
   // A list of one item is a sentence: read as a paragraph, not refused with the rest of the answer.
   if(block.items.length===1&&block.ordered!==true)return item(block.items[0]);
@@ -215,13 +228,13 @@ export function readWikiWritingBlock(value:unknown,known:Set<string>):WritingBlo
    return {...bound,text:`| ${cells.map(cell).join(" | ")} |`,claims:cells.filter(text=>!PLACEHOLDER.test(text.trim())).map(text=>({text:cell(text),unitIds:bound.unitIds}))};
   });
   text=[`| ${columns.map(cell).join(" | ")} |`,`| ${columns.map(()=>"---").join(" | ")} |`,...rows.map(row=>row.text)].join("\n");
- }else throw Error("invalid_writing_block_type");
+ }else throw new WikiWritingParagraphError("invalid_block_type",idsOf(block.unitIds));
  if(text.length>1600)throw Error("writing_block_too_large");
  return {text,unitIds:[...new Set(rows.flatMap(row=>row.unitIds))],claims:rows.flatMap(row=>row.claims)};
 }
 
 export class WikiWritingParagraphError extends Error {
-  constructor(readonly reason: "empty_text" | "text_too_long" | "missing_units" | "unknown_unit", readonly unitIds: string[]) {
+  constructor(readonly reason: "empty_text" | "text_too_long" | "missing_units" | "unknown_unit" | "invalid_visual" | "unbound_visual" | "invalid_block_type", readonly unitIds: string[]) {
     super("invalid_writing_paragraph");
   }
 }
@@ -229,7 +242,9 @@ export class WikiWritingParagraphError extends Error {
 /** A long plan is presentation, not a reason to discard a chapter. Compile every
  * item through the same evidence checks, then split without cutting its text. */
 export function readWikiWritingBlocks(value:unknown,known:Set<string>):WritingBlock[]{
- const block=record(value);
+ const input=record(value);
+ const type=typeof input.type==="string"?input.type.trim().toLowerCase():"";
+ const block:Record<string,unknown>={...input,type:/^(?:text|prose|markdown|p)$/u.test(type)||!type&&typeof input.text==="string"?"paragraph":type};
  // A list or table past the size limit is halved until each part fits: refused, it threw away the part's whole answer
  // (one run lost 6 points). A table keeps two rows a part, so each half still reads as a table.
  if(block.type==="list"||block.type==="comparison"){
@@ -249,7 +264,18 @@ export function readWikiWritingBlocks(value:unknown,known:Set<string>):WritingBl
   };
   return split(block);
  }
- if(block.type!=="stages"||!Array.isArray(block.items)||!block.items.length)return [readWikiWritingBlock(value,known)];
+ if(block.type==="flow"&&Array.isArray(block.items)){
+  try{return [readWikiWritingBlock(block,known)];}
+  catch(error){
+   if(!(error instanceof WikiWritingParagraphError)||error.reason!=="invalid_visual")throw error;
+   const items=block.items.filter(item=>singleLine(record(item).text)
+    &&!/[<>]|\x60{3}|~{3}/u.test(String(record(item).text))
+    &&idsOf(record(item).unitIds).length&&idsOf(record(item).unitIds).every(id=>known.has(id)));
+   if(!items.length)throw error;
+   return readWikiWritingBlocks({type:"list",ordered:true,items},known);
+  }
+ }
+ if(block.type!=="stages"||!Array.isArray(block.items)||!block.items.length)return [readWikiWritingBlock(block,known)];
  const rows=block.items.map(item=>readWikiWritingBlock({type:"stages",items:[item]},known));
  const chunks:WritingBlock[][]=[];
  for(const row of rows){

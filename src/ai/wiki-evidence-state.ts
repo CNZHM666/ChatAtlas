@@ -1,15 +1,52 @@
 import {replaceParagraph} from "../shared/wiki-body-text";
+import {wikiTableCells} from "../shared/wiki-table-source";
 import {wikiDocumentBlocks} from "../shared/wiki-document-blocks";
 import {wikiSupplementRanges} from "../shared/wiki-source-supplements";
 import {wikiLedgerUnits,type WikiDraftChapter,type WikiKnowledgeLedger,type WikiKnowledgeUnit} from "../shared/wiki-knowledge";
 import {knowledgeTerms} from "../shared/knowledge-subject";
+import {wikiUnitStatuses} from "./wiki-knowledge-state";
 import {wikiReleaseDeferral} from "./wiki-confirmation-scope";
 
 const COMPLETE=/已(?:经)?(?:完成|实现|建立|部署|上线)|建立了|实现了|\b(?:has|have) (?:implemented|built|deployed|completed)\b/iu;
 const TENTATIVE=/建议|计划|拟|待(?:确认|核验|核对)|尚未|未实现|\b(?:propos|planned|unverified|not yet)/iu;
-const COUNTS=/(?:\d+(?:\s*[-–～~至]\s*\d+)?|[一二两三四五六七八九十百]+)\s*(?:个|种|人|条|项|items?\b|users?\b|records?\b)/giu;
+const QUANTITY = /(?<![\d.])(\d+(?:\s*[-–～~至]\s*\d+)?)\s*(?:[个种条项名]\s*(?:常用|可选|本地|预置|不同)*\s*([\p{Script=Han}]{2,12}|[a-z][\w-]*)|人(?!工|员|机)|\b(items?|users?|records?)\b)/giu;
 const compact=(s:string)=>s.replace(/[\s*_]/gu,"");
-const counts=(s:string)=>new Set([...s.matchAll(COUNTS)].filter(m=>!/^\s*(?:测试|样例|示例|演示|test\b|sample\b|demo\b)/iu.test(s.slice((m.index??0)+m[0].length))).map(m=>compact(m[0])));
+const quantities=(text:string)=>[...text.matchAll(QUANTITY)].flatMap(([,raw,object,english])=>{
+ const target=(object??english?.replace(/s$/iu,"")??"人数").replace(/^(?:常用|可选|本地|预置|不同)+/u,"");
+ const noun=target.match(/^.*?(?:模块|元件|组件|用户|消息|记录|项目|订单|文件|章节|步骤|规则|测试)/u)?.[0]??target;
+ const key=/^(?:硬件)?(?:模块|元件|组件)$/u.test(noun)?"模块":noun;
+ return /^(?:测试|样例|示例|演示|test|sample|demo)/iu.test(key)?[]:[{key,value:raw.replace(/\s+/gu,"").replace(/[–～~至]/gu,"-")}];
+});
+const SCOPE_LABEL=/^(?:范围待核对的候选建议：|Alternative proposal; its relation to the confirmed scope needs review: )/u;
+
+const PHASE_ONLY = /^(?:本阶段|当前阶段|此阶段|this phase|current phase)$/iu;
+const EXCLUSION = /^(?:禁止开发|暂不(?:支持|开发|实现)|不(?:开发|实现)|do not (?:build|implement)|(?:do|are) not supported)\s*/iu;
+const stageKey = (text:string)=>compact(text).toLowerCase().replace(/->/gu,"→").replace(/[\x60。.!]+$/u,"");
+
+export function separatedRoadmap(text:string, claims:WikiDraftChapter["paragraphs"][number]["claims"], sources:WikiKnowledgeUnit[]):{text:string;claims:WikiDraftChapter["paragraphs"][number]["claims"]}{
+ if(!claims?.length||sources.length<2)return {text,claims};
+ type Claim = NonNullable<WikiDraftChapter["paragraphs"][number]["claims"]>[number];
+ const lines=text.split("\n");
+ for(let index=2;index<lines.length;index++){
+  if(!/^\s*\|/u.test(lines[index]))continue;
+  const cells=wikiTableCells(lines[index]);
+  if(cells.length<2||!PHASE_ONLY.test(cells[0]))continue;
+  const last=cells.length-1;
+  const [flow,excluded,...extra]=cells[last].split(/(?<=[。！])\s*|(?<=\.)\s+(?=[A-Z])/u).filter(Boolean);
+  if(!excluded||extra.length||!EXCLUSION.test(excluded)||!/(?:->|→)/u.test(flow))continue;
+  const step=stageKey(flow.split(/->|→/u).at(-1)??"").match(/^[a-z][\w-]{2,}/u)?.[0];
+  if(!step||!excluded.replace(EXCLUSION,"").split(/[、，,；;。]/u).some(item=>stageKey(item)===step))continue;
+  const anchor:Claim|undefined=claims.find((claim:Claim)=>claim.text===cells[last]);
+  const flowUnit=sources.find(unit=>anchor?.unitIds.includes(unit.id)&&stageKey(unit.statement).includes(stageKey(flow)));
+  const blockedUnit=sources.find(unit=>anchor?.unitIds.includes(unit.id)&&stageKey(unit.statement).includes(stageKey(excluded)));
+  if(!anchor||!flowUnit||!blockedUnit||flowUnit.id===blockedUnit.id)continue;
+  const pending=/\p{Script=Han}/u.test(cells[0])?"讨论顺序（适用阶段待确认）":"Discussed order (stage unconfirmed)";
+  const row=(values:string[])=>"| "+values.join(" | ")+" |";
+  lines[index]=row([...cells.slice(0,last),excluded])+"\n"+row([pending,...cells.slice(1,last),flow]);
+  claims=claims.flatMap((claim:Claim):Claim[]=>claim===anchor?[{text:excluded,unitIds:[blockedUnit.id]},{text:flow,unitIds:[flowUnit.id]}]:[claim]);
+ }
+ return {text:lines.join("\n"),claims};
+}
 
 /** Separate the meaning of a requirement from evidence of implementation.
  * This local pass never invents a release assignment or repository result. */
@@ -28,25 +65,35 @@ export function reviewWikiEvidenceStates(chapters:WikiDraftChapter[],ledger:Wiki
  });
  const capabilityKey=(text:string)=>compact(text).replace(/拍照|照片|视觉/gu,"图像").toLowerCase();
  const credentialStore=[...units.values()].some(unit=>!unit.about&&/(?:API.?Key|凭据|密钥|\btoken\b)/iu.test(unit.statement)&&/(?:保存|存储|store|persist)/iu.test(unit.statement)&&/sessionStorage|localStorage|IndexedDB|credential store/iu.test(unit.statement));
- const alternatives=new Map<string,Set<string>>();
+ const statuses=wikiUnitStatuses([...units.values()],ledger.organization??{relations:[]},ledger.decisions);
+ const protectedUnit=(unit:WikiKnowledgeUnit)=>statuses.get(unit.id)==="confirmed"||unit.kind==="report"||unit.delivery==="user_reported";
+ const alternatives=new Map<string,ReturnType<typeof quantities>>();
  for(const answer of ledger.userAnswers??[]){
   const question=ledger.writingQuestions?.find(q=>q.id===answer.questionId);
   if(!question||!/规模|数量|限额|容量|\b(?:count|size|limit|capacity)\b/iu.test(question.about))continue;
   const decision=units.get(`answer:${question.id}:${answer.optionId}`);
   if(!decision||ledger.decisions?.[decision.id]?.verdict!=="confirmed")continue;
-  const chosen=counts(answer.answer);if(!chosen.size)continue;
+  const chosen=quantities(answer.answer);if(!chosen.length)continue;
+  const differs=({key,value}:ReturnType<typeof quantities>[number])=>chosen.some(quantity=>quantity.key===key)&&!chosen.some(quantity=>quantity.key===key&&quantity.value===value);
   const anchors=new Set([...answer.unitIds,decision.id]);
   const siblings=ledger.organization?.subjects.filter(subject=>subject.unitIds.some(id=>anchors.has(id))).flatMap(subject=>subject.unitIds)??[];
-  for(const id of siblings){const unit=units.get(id);if(unit&&id!==decision.id&&ledger.decisions?.[id]?.verdict!=="confirmed"&&[...counts(unit.statement)].some(n=>!chosen.has(n)))alternatives.set(id,chosen);}
+  for(const id of siblings){
+   const unit=units.get(id);
+   if(!unit||id===decision.id||unit.about||protectedUnit(unit)||!["plan","constraint","decision","analysis"].includes(unit.kind)||/已支持|支持了|已内置|已经|目前已/u.test(unit.statement))continue;
+   const competing=quantities(unit.statement).filter(differs);
+   if(competing.length)alternatives.set(id,[...alternatives.get(id)??[],...competing]);
+  }
  }
  const qualify=(text:string,sources:WikiKnowledgeUnit[])=>{
   if(!sources.length||/^[“「>]|^\s*(`{3}|~{3})/u.test(text))return text;
+  text=text.replace(SCOPE_LABEL,"");
   if(credentialStore&&!/允许保存的位置|permitted storage/iu.test(text)&&/(?:各|所有|全部).{0,8}(?:存储层|存储).{0,12}(?:无|不得|不能|不含).{0,12}(?:API.?Key|密钥|凭据)|all storage.{0,25}(?:no|without|must not).{0,20}(?:key|secret|token)/iu.test(text))return text+(/\p{Script=Han}/u.test(text)?" 该验收项与文中的凭据存储方案范围尚未统一，需先确认允许保存的位置。":" This check and the credential policy need reconciliation of permitted storage.");
   if(COMPLETE.test(text)&&sources.every(unit=>unit.delivery!=="user_reported"&&unit.kind!=="report"&&!COMPLETE.test(unit.statement)&&!COMPLETE.test(unit.evidence.quote))){
    const qualified=text.split(/(?<=[。！？])|(?<=[.!?])(?=\s+[A-Z])/u).map(sentence=>TENTATIVE.test(sentence)?sentence:sentence.replace(/已(?:经)?建立|建立了/gu,"计划建立").replace(/已(?:经)?实现|实现了/gu,"计划实现").replace(/已(?:经)?完成/gu,"计划完成").replace(/已(?:经)?部署/gu,"计划部署").replace(/已(?:经)?上线/gu,"计划上线").replace(/\b(?:has|have) (implemented|built|deployed|completed)\b/giu,(_all,verb:string)=>`plans to ${{implemented:"implement",built:"build",deployed:"deploy",completed:"complete"}[verb.toLowerCase()]}`)).join("");
    if(qualified!==text)return qualified;
   }
-  if(!text.includes("|")&&!TENTATIVE.test(text)&&!/^(?:其他候选记录|范围待核对的候选建议|Alternative record|Alternative proposal)/iu.test(text)&&sources.some(unit=>alternatives.has(unit.id))&&[...counts(text)].some(n=>sources.some(unit=>alternatives.has(unit.id)&&!alternatives.get(unit.id)!.has(n)))){
+  if(!text.includes("|")&&!TENTATIVE.test(text)&&!/^(?:其他候选记录|Alternative record|Alternative proposal)/iu.test(text)
+   &&!sources.some(protectedUnit)&&quantities(text).some(quantity=>sources.some(unit=>alternatives.get(unit.id)?.some(other=>quantity.key===other.key&&quantity.value===other.value)))){
    return /\p{Script=Han}/u.test(text)?`范围待核对的候选建议：${text}`:`Alternative proposal; its relation to the confirmed scope needs review: ${text}`;
   }
   return text;
@@ -99,7 +146,7 @@ export function reviewWikiEvidenceStates(chapters:WikiDraftChapter[],ledger:Wiki
     if(next===claim.text)return claim;
     text=text.replace(claim.text,()=>next);return {...claim,text:next};
    });
-   if(!paragraph.claims?.length)text=qualify(text,paragraph.unitIds.flatMap(id=>units.get(id)??[]));
+   if(!paragraph.claims?.length||SCOPE_LABEL.test(text))text=qualify(text,paragraph.unitIds.flatMap(id=>units.get(id)??[]));
    if(!/^(?:\s*[-*+>]|\s*\|)/u.test(text)&&!text.includes("两份提案的阶段关系待核对")){
     const restriction=text.match(/^(?:在[^。\n]{2,24}方面[，,]\s*)?(?:第一版|首版)仅(?:支持|提供|识别)[^。\n]+[。]/u)?.[0];
     const cited=paragraph.unitIds.flatMap(id=>units.get(id)??[]);

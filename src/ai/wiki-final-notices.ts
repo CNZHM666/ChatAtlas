@@ -1,5 +1,6 @@
 import { wikiDocumentBlocks } from "../shared/wiki-document-blocks";
-import { conditionKept, groupMemberConditions, keepsDetail, type WikiDraftChapter, type WikiExplanationGroup, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
+import { keepsWikiWritingDetail } from "./wiki-number-diagnostics";
+import { conditionKept, groupMemberConditions, type WikiDraftChapter, type WikiExplanationGroup, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 
 const key = (text: string) => text.normalize("NFKC").replace(/\*\*|__|〔[^〕\n]+〕|\[S-\d+-[a-z0-9]+\]/gu, "").replace(/\s+/gu, "");
 const GROUP_CONDITION = /^"([\s\S]+?)…" drops the condition "(.+)" of k\d+/u;
@@ -45,8 +46,8 @@ export function resolvedWikiFinalNotices(chapter: WikiDraftChapter, units: Reado
       const required = details[2].split(/,\s*/u);
       // A diagnostic can cut an identifier. Accept only a full detail that its
       // own source actually gives, never a prefix found elsewhere.
-      if (required.every(detail => cited.some(unit => [unit.statement, ...unit.details].some(value => value.includes(detail)))
-        && keepsDetail(shown, detail))) resolved.add(problem);
+      if (required.every(detail => cited.some(unit => [unit.statement, unit.evidence.quote, ...unit.details].some(value => value.includes(detail))
+        && keepsWikiWritingDetail(shown, detail, unit.statement)))) resolved.add(problem);
     }
   }
   return resolved;

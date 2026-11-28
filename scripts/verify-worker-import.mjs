@@ -11,15 +11,18 @@ import * as idb from "fake-indexeddb";
 const root = await realpath(resolve(dirname(fileURLToPath(import.meta.url)), "../dist"));
 const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
 let listener;
+let onWebPermissionAdded, onWebPermissionRemoved;
+let blockDynamicImports = false;
 const event = { addListener() {} };
 const context = createContext({
   console, ...idb, indexedDB: new idb.IDBFactory(), crypto: webcrypto,
-  TextEncoder, TextDecoder, URL, URLSearchParams, Blob, Response, Request, Headers,
+  TextEncoder, TextDecoder, URL, URLSearchParams, Blob, Response, Request, Headers, atob, btoa,
   AbortController, AbortSignal, DOMException, Event, performance, navigator: {},
-  setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
+  setTimeout: (...args) => setTimeout(...args).unref(), clearTimeout, setInterval, clearInterval, queueMicrotask,
   fetch: () => { throw new Error("Unexpected network request in worker import test"); },
   chrome: {
     action: { onClicked: event }, alarms: { onAlarm: event }, tabs: { onUpdated: event },
+    permissions: { onAdded: { addListener(fn) { onWebPermissionAdded = fn; } }, onRemoved: { addListener(fn) { onWebPermissionRemoved = fn; } } },
     runtime: { onInstalled: event, onStartup: event, onMessage: { addListener(fn) { listener = fn; } }, sendMessage: async () => undefined },
   },
 });
@@ -33,6 +36,7 @@ async function moduleAt(path) {
     context, identifier: path,
     initializeImportMeta(meta) { meta.url = new URL(`file:///${path.replaceAll("\\", "/")}`).href; },
     async importModuleDynamically(specifier, importer) {
+      if (blockDynamicImports) throw new TypeError("Dynamic imports are unavailable in the extension service worker");
       const loaded = await moduleAt(resolve(dirname(importer.identifier), specifier));
       if (loaded.status === "unlinked") await loaded.link(linker);
       if (loaded.status === "linked") await loaded.evaluate();
@@ -113,10 +117,11 @@ try {
   const saved = await read("messages");
   assert.equal(saved.length, 2); assert.ok(saved.some(message => message.content === "Imported JSON source"));
 } finally { clearTimeout(exportTimer); }
-// Optional capture must use the emitted standalone file and reject writes after disable.
+// Website capture uses the emitted standalone file after permission and rejects writes after revocation.
 const optionalSettings = {}, registeredReaders = new Map();
 context.chrome.storage = { local: { get: async () => ({...optionalSettings}), set: async values => Object.assign(optionalSettings, values) } };
-context.chrome.permissions = { contains: async ({origins}) => origins.every(origin => origin === "https://claude.ai/*") };
+let hasClaudePermission = true;
+context.chrome.permissions.contains = async ({origins}) => hasClaudePermission && origins.every(origin => origin === "https://claude.ai/*");
 context.chrome.tabs.query = async () => [];
 context.chrome.scripting = {
   getRegisteredContentScripts: async ({ids}) => ids.flatMap(id => registeredReaders.has(id) ? [registeredReaders.get(id)] : []),
@@ -127,10 +132,17 @@ async function optionalCommand(message, sender = {}) {
   let timer;
   try { return await Promise.race([
     new Promise(resolveReply => listener(message, sender, resolveReply)),
-    new Promise((_, reject) => { timer=setTimeout(()=>reject(new Error("Optional capture did not reply")),5000); }),
+    new Promise((_, reject) => { timer=setTimeout(()=>reject(new Error(`Worker message ${message.type} did not reply`)),5000); }),
   ]); } finally { clearTimeout(timer); }
 }
-assert.equal((await optionalCommand({type:"ATLAS_WEB_CAPTURE_SET",platform:"claude",enabled:true})).ok,true);
+async function waitForReaderCount(count) {
+  for (let attempt = 0; attempt < 100 && registeredReaders.size !== count; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(registeredReaders.size,count);
+}
+onWebPermissionAdded();
+await waitForReaderCount(1);
 const registeredReader=registeredReaders.get("atlas-web-capture-claude");
 assert.ok(registeredReader?.js.length === 1);
 const readerFile=resolve(root,registeredReader.js[0]);
@@ -140,8 +152,9 @@ const optionalCapture={...capture("Optional page content",4),conversation:{...ca
 const optionalSender={url:"https://claude.ai/chat/worker-page"};
 assert.equal((await optionalCommand({type:"ATLAS_CAPTURE_BATCH",capture:optionalCapture},optionalSender)).ok,true);
 assert.ok((await read("messages")).some(message=>message.content==="Optional page content"));
-assert.equal((await optionalCommand({type:"ATLAS_WEB_CAPTURE_SET",platform:"claude",enabled:false})).ok,true);
-assert.equal(registeredReaders.size,0);
+hasClaudePermission = false;
+onWebPermissionRemoved();
+await waitForReaderCount(0);
 assert.equal((await optionalCommand({type:"ATLAS_CAPTURE_BATCH",capture:optionalCapture},optionalSender)).ok,false);
 
 const analysisEntry = (await readdir(resolve(root, "assets"))).find(name => /^project-analysis-worker-.+\.js$/u.test(name));
@@ -166,5 +179,50 @@ try {
   assert.ok(result.csv?.includes(`"${runId}"`));
   assert.ok(!result.csv.includes(otherRunId));
 } finally { clearTimeout(analysisTimer); }
+
+// Exercise real background message dispatch and reassembly with Chrome's worker import restriction.
+const projectId = "worker-file-project";
+const desk = db.transaction(["canvases", "focusSessions"], "readwrite");
+desk.objectStore("canvases").put({ id: projectId, name: "File fixture" });
+desk.objectStore("focusSessions").put({ id: "worker-file-wiki", canvasId: projectId, mode: "work", status: "ready",
+  sourceConversationIds: [conversationId], createdAt: 1, updatedAt: 1 });
+await new Promise((resolveWrite, reject) => { desk.oncomplete = resolveWrite; desk.onabort = () => reject(desk.error); });
+const fileSender = { tab: { id: 42 }, frameId: 0, documentId: "worker-chat-document" };
+const sidebarSender = { url: "chrome-extension://atlas/sidecar.html?native=1&tabId=42" };
+const chunkSize = 256 * 1024;
+const bytes = Buffer.concat([Buffer.alloc(chunkSize, 97), Buffer.from("final chunk")]);
+const info = { name: "fixture.md", type: "text/markdown", size: bytes.length };
+const received = [];
+let armed;
+context.chrome.tabs.sendMessage = async (tabId, message, options) => {
+  assert.equal(tabId, 42);
+  assert.equal(options.frameId, 0);
+  if (message.type === "ATLAS_PROJECT_FILE_DRAG_READY") armed = message;
+  else if (message.type === "ATLAS_PROJECT_FILE_RECEIVE") received.push(message);
+  else throw new Error(`Unexpected file transfer message: ${message.type}`);
+  return { ok: true };
+};
+blockDynamicImports = true;
+try {
+  const start = await optionalCommand({ type: "ATLAS_PROJECT_FILE_START", projectId, conversationId, manual: true, info }, fileSender);
+  assert.equal(start?.ok, true, `Production file collection failed: ${JSON.stringify(start)}`);
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    const response = await optionalCommand({ type: "ATLAS_PROJECT_FILE_CHUNK", token: start.token, offset, data: chunk.toString("base64") }, fileSender);
+    assert.equal(response?.ok, true);
+  }
+  assert.equal((await optionalCommand({ type: "ATLAS_PROJECT_FILE_FINISH", token: start.token }, fileSender))?.ok, true);
+  const [file] = await read("projectFiles");
+  assert.ok(file?.id);
+  const token = webcrypto.randomUUID();
+  assert.equal((await optionalCommand({ type: "ATLAS_PROJECT_FILE_REUSE", projectId, fileId: file.id, conversationId, tabId: 42, token }, sidebarSender))?.ok, true);
+  assert.equal(armed?.token, token);
+  const result = await optionalCommand({ type: "ATLAS_PROJECT_FILE_DROP", conversationId, token }, fileSender);
+  assert.equal(result?.ok, true, `Production file drop failed: ${JSON.stringify(result)}`);
+  assert.deepEqual(received.map(chunk => chunk.offset), [0, chunkSize]);
+  assert.ok(received.every(chunk => chunk.token === token && chunk.conversationId === conversationId));
+  assert.equal(received[0].info.name, info.name);
+  assert.ok(Buffer.concat(received.map(chunk => Buffer.from(chunk.data, "base64"))).equals(bytes));
+} finally { blockDynamicImports = false; }
 db.close();
-console.info("ATLAS_WORKER_IMPORT_OK: production capture, optional reader, JSON import and scoped analysis CSV passed without a DOM or user data.");
+console.info("ATLAS_WORKER_IMPORT_OK: production capture, optional reader, JSON import, scoped analysis CSV and project file transfer passed without a DOM or user data.");

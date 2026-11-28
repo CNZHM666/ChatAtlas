@@ -1,5 +1,4 @@
 export const WEB_CAPTURE_KEY = "atlas-web-capture-platforms";
-export const WEB_CAPTURE_PAUSED_KEY = "atlas-web-capture-paused-platforms";
 export const WEB_CAPTURE_PLATFORMS = [
   { id: "claude", name: "Claude", origin: "https://claude.ai", pattern: "https://claude.ai/*", path: /^\/chat\/([\w-]+)\/?$/u },
   { id: "gemini", name: "Gemini", origin: "https://gemini.google.com", pattern: "https://gemini.google.com/*", path: /^\/app\/([\w-]+)\/?$/u },
@@ -9,7 +8,6 @@ export const WEB_CAPTURE_PLATFORMS = [
   { id: "qwen", name: "通义千问", origin: "https://www.qianwen.com", pattern: "https://www.qianwen.com/*", path: /^\/chat\/([\da-f]{32})\/?$/iu },
 ] as const;
 export type WebCapturePlatform = typeof WEB_CAPTURE_PLATFORMS[number]["id"];
-export interface WebCaptureStatus { platform: WebCapturePlatform; enabled: boolean; permitted: boolean }
 const ALIASES: Array<{ platform: WebCapturePlatform; origin: string; path?: RegExp }> = [
   { platform: "kimi", origin: "https://kimi.com" },
   { platform: "kimi", origin: "https://kimi.moonshot.cn" },

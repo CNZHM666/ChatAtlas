@@ -3,15 +3,22 @@ import { expect, it, vi } from "vitest";
 import { mergeFocusUpdate, planFocusUpdate, planWikiEditionUpdate, generateFocusUpdate } from "./focus-update";
 import { generateFocusSession, ledgerDocumentSession } from "./focus-session";
 import { writeFocusWikiDraft } from "./focus-wiki-draft";
+import { organizeLedger } from "./wiki-knowledge-organize";
 import { reextractSessionKnowledge } from "./wiki-knowledge-session";
 import { sourceMessageSignature } from "../shared/source-signature";
+import { wikiLedgerUnits, type WikiKnowledgeUnit } from "../shared/wiki-knowledge";
 import type { FocusSession } from "../shared/focus-session";
 import type { ConversationMessage } from "../shared/types";
 import { getDatabase } from "../storage/db";
 import { readWikiSources, wikiSourceReading } from "../shared/wiki-source-reading";
-vi.mock("./focus-session", () => ({ generateFocusSession: vi.fn(), ledgerDocumentSession: vi.fn(), requireLedgerDirectory: vi.fn() }));
+vi.mock("./focus-session", async importOriginal => ({
+  ...await importOriginal<typeof import("./focus-session")>(), generateFocusSession: vi.fn(), ledgerDocumentSession: vi.fn(), requireLedgerDirectory: vi.fn(),
+}));
 vi.mock("./focus-wiki-draft", () => ({ writeFocusWikiDraft: vi.fn() }));
 vi.mock("./atlas-ai", async importOriginal => ({ ...await importOriginal<typeof import("./atlas-ai")>(), createAtlasAI: vi.fn(() => ({})) }));
+vi.mock("./wiki-knowledge-organize", async importOriginal => ({
+  ...await importOriginal<typeof import("./wiki-knowledge-organize")>(), organizeLedger: vi.fn(),
+}));
 vi.mock("./wiki-knowledge-session", async importOriginal => ({
   ...await importOriginal<typeof import("./wiki-knowledge-session")>(), reextractSessionKnowledge: vi.fn(),
 }));
@@ -135,6 +142,55 @@ it.each(["writing mode", "saved decisions"] as const)("reuses the ledger for %s 
   expect(next.wikiKnowledge?.draft?.writingMode).toBe(mode);
   expect(next.sections.find(section => section.id === "s0")?.body).toBe("My personal explanation");
   expect(next.wikiSuggestions?.s0?.body).toBe("Generated alternative");
+});
+
+it("extracts new materials before a full reorganization and keeps the combined intent on the candidate", async () => {
+  const db = await getDatabase();
+  await db.clear("messages");
+  for (const message of appended) await db.put("messages", message);
+  const sources = [{ id: "source", title: "Source", platform: "chatgpt" as const, url: "", messageCount: 5, updatedAt: 1 }];
+  const pinnedEvidence = { conversationId: "source", messageId: "m0", evidenceId: "e0", role: "user" as const,
+    pasted: false, messageIndex: 0, quote: messages[0].content, sourceSignature: sourceMessageSignature(messages[0].content) };
+  const savedUnit = { id: "sidecar:m0:decision", subject: "First stage", statement: messages[0].content, kind: "decision",
+    evidence: pinnedEvidence, adoption: { status: "unknown" }, details: [], delivery: "unknown" } satisfies WikiKnowledgeUnit;
+  const wikiKnowledge = { version: 1 as const, generatedAt: 1, status: "complete" as const, materials: 4,
+    batches: [{ sourceIds: ["e0"], status: "ok" as const, units: [savedUnit], rejected: {} }],
+    decisions: { [savedUnit.id]: { verdict: "confirmed" as const, locallyApplied: true as const, at: 2 } },
+    organizationInstruction: "Keep the design assumptions", organization: {
+      version: 1 as const, generatedAt: 1, status: "complete" as const, chapters: [], subjects: [], merged: [], relations: [], report: {},
+    } };
+  const old: FocusSession = { ...previous, mode: "work", wikiKnowledge, wikiEdition: "current-v2", wikiMainlineVersion: 1 };
+  const controller = new AbortController();
+  await expect(generateFocusUpdate(old, sources, "en", controller.signal, undefined, undefined, undefined, { reorganize: true })).rejects.toThrow("changed sources");
+  const steps: string[] = [];
+  const extracted = { ...wikiKnowledge, organization: undefined, materials: 5,
+    batches: [{ sourceIds: ["m0", "m4"], status: "ok" as const, units: [{ ...savedUnit, id: "model-copy" }], rejected: {} }] };
+  const instruction = "Keep the design assumptions\nGroup failure handling by trigger";
+  vi.mocked(reextractSessionKnowledge).mockImplementationOnce(async (session, _ai, _signal, prior) => {
+    steps.push("extract");
+    expect(session.scope).toEqual(old.scope);
+    expect(prior).toBe(wikiKnowledge);
+    return extracted;
+  });
+  vi.mocked(organizeLedger).mockImplementationOnce(async (book, options) => {
+    steps.push("organize");
+    expect(book.organizationInstruction).toBe(instruction);
+    expect(wikiLedgerUnits(book)).toEqual([savedUnit]);
+    expect(book.decisions?.[savedUnit.id]).toEqual(wikiKnowledge.decisions[savedUnit.id]);
+    expect(options).toMatchObject({ fresh: true, instruction });
+    return { ...book, organization: wikiKnowledge.organization };
+  });
+  vi.mocked(writeFocusWikiDraft).mockImplementationOnce(async book => {
+    steps.push("write");
+    expect(book.organizationInstruction).toBe(instruction);
+    return { ledger: book, title: old.title };
+  });
+  vi.mocked(ledgerDocumentSession).mockResolvedValueOnce({ ...patch, mode: "work" });
+  const result = await generateFocusUpdate(old, sources, "en", controller.signal, undefined, undefined, undefined,
+    { reorganize: true, syncChangedSources: true, reorganizeInstruction: " Group failure handling by trigger " });
+  expect(steps).toEqual(["extract", "organize", "write"]);
+  expect(result.wikiKnowledge).toMatchObject({ materials: 5, organizationInstruction: instruction });
+  expect(old.wikiKnowledge?.organizationInstruction).toBe("Keep the design assumptions");
 });
 
 it("plans an explicit one-time current-edition rebuild within the existing source scope",()=>{

@@ -1,13 +1,61 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FocusSession } from "../shared/focus-session";
 import { saveProjectQueryTurn, readProjectQueryThread } from "./project-query-threads";
 import { getDatabase } from "./db";
-import { attachFocusSession, focusMarkdown, listFocusSessions, saveFocusSession } from "./focus-sessions";
+import { attachFocusSession, createLivingProject, focusEditSignature, focusMarkdown, listFocusSessions, renameFocusProject, saveFocusSession, setFocusSessionDeleted, wikiPublishBasis } from "./focus-sessions";
+import { deleteProject, restoreProject } from "./project-deletion";
+import { setSidecarWritingMode } from "./sidecar-projects";
 import { BACKUP_STORES, createAtlasBackup, parseAtlasBackup, restoreAtlasBackup } from "./atlas-backup";
 
 const session: FocusSession = { id: "s", goal: "Review stability", mode: "review", title: "Stability", sourceConversationIds: ["new-source"], evidence: [{ id: "e1", conversationId: "new-source", messageId: "m", title: "Discussion", excerpt: "A supported explanation" }], sections: [{ id: "step", title: "Poles", kind: "review", body: "Original understanding", transition: "", evidenceIds: ["e1"] }], activeSectionId: "step", completedSectionIds: [], notes: "My later understanding", createdAt: 1, updatedAt: 2 };
 beforeEach(async () => { const db = await getDatabase(); for (const name of BACKUP_STORES) await db.clear(name); });
+
+afterEach(() => vi.unstubAllGlobals());
+
+it("announces committed versions, edits and trash changes while keeping previews local", async () => {
+  const sendMessage = vi.fn().mockRejectedValue(new Error("No receiver"));
+  vi.stubGlobal("chrome", { runtime: { sendMessage } });
+  const project = await createLivingProject("Polling", "", "en");
+  sendMessage.mockClear();
+  const preview = {...project,id:"preview",status:"preview" as const,rootSessionId:project.id,
+    createdAt:project.createdAt+1,wikiPublishBasis:wikiPublishBasis(project)};
+  await saveFocusSession(preview);
+  expect(sendMessage).not.toHaveBeenCalled();
+  const published = await saveFocusSession({...preview,status:"ready"});
+  expect(await (await getDatabase()).get("focusSessions", published.id)).toMatchObject({status:"ready"});
+  const edited = await saveFocusSession({...published,notes:"chapter review"},focusEditSignature(published));
+  await renameFocusProject(edited, "Saved project");
+  await setFocusSessionDeleted(edited.id,true);
+  await setFocusSessionDeleted(edited.id,false);
+  await deleteProject(project.canvasId!);
+  await expect(saveFocusSession({...edited,notes:"late write"})).rejects.toMatchObject({code:"WIKI_PREVIEW_STALE"});
+  await restoreProject(project.canvasId!);
+  expect(sendMessage.mock.calls.map(([message])=>message)).toEqual([
+    ...Array.from({length:5},()=>({type:"ATLAS_PROJECT_VERSION_SAVED"})),
+    {type:"ATLAS_PROJECT_TRASHED",projectId:project.canvasId},
+    {type:"ATLAS_PROJECT_RESTORED",projectId:project.canvasId},
+  ]);
+});
+
+it("retains the sidebar preference and pending links across publication and rejects overlapping edits", async () => {
+  const project=await createLivingProject("Concurrent project","","en","concise");
+  const preview={...project,id:"revision",status:"preview" as const,sidecarWritingMode:"handoff" as const,
+    rootSessionId:project.id,wikiPublishBasis:wikiPublishBasis(project),createdAt:project.createdAt+1};
+  await saveFocusSession(preview);
+  const sidebar=await setSidecarWritingMode(project,"audit",false);
+  const db=await getDatabase();
+  await db.put("focusSessions",{...sidebar,sidecarConversationIds:["pending-chat"]});
+  const published=await saveFocusSession({...preview,status:"ready"});
+  expect(published).toMatchObject({sidecarWritingMode:"audit",sidecarConversationIds:["pending-chat"]});
+  const basis=focusEditSignature(published);
+  const changes=await Promise.allSettled([
+    saveFocusSession({...published,notes:"first edit"},basis),
+    saveFocusSession({...published,notes:"second edit"},basis),
+  ]);
+  expect(changes.map(result=>result.status).sort()).toEqual(["fulfilled","rejected"]);
+  expect(await db.get("focusSessions",published.id)).toMatchObject({sidecarWritingMode:"audit",sidecarConversationIds:["pending-chat"]});
+});
 
 describe("independent reading sessions", () => {
   it("attaches saved prose with review feedback without confirming facts", async () => {

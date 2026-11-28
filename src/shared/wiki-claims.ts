@@ -5,7 +5,11 @@ import type { ConversationMessage } from "./types";
 import type { ClaimMeaningCheck } from "./claim-meaning";
 
 export interface WikiClaim {
+  /** Optional stable claim identifier for direct state updates. */
+  id?: string;
   text: string; quote: string; evidenceIds: string[]; verification?: "supported" | "uncertain";
+  /** Optional raw character offsets into the primary cited message for deterministic anchoring. */
+  quoteRange?: { start: number; end: number };
   /** The model meaning check the user ran on this claim, if any; a reading aid, it never edits the text. */
   meaning?: ClaimMeaningCheck;
   /** The knowledge ledger holds every unit of this claim as the user's decision (their words, or their verdict). */
@@ -18,6 +22,8 @@ export interface WikiClaim {
   unitIds?: string[];
   /** The last claim of a run of one holder in its paragraph: the one whose mark is labelled (the others show a dot). */
   holderMark?: boolean;
+  /** A claim saved by the user's side panel update, independent of the generated ledger. */
+  continuation?: true;
   /** Only places a holder mark (the end of a run of one holder): never a fact, a key conclusion or a status label. */
   markOnly?: boolean;
   /** Presentation metadata on the same grounded Wiki claim, never separate dashboard facts. */
@@ -65,21 +71,68 @@ export function wikiQuoteRange(content: string, quote: string): { start: number;
 /** Characters a quote and its message may differ in without differing in words: Markdown emphasis and code marks
  * ("**AI 对话的文件管理器**"), whitespace, and full- or half-width forms of the same punctuation. */
 const IGNORED = /[\s*_`~]/u;
+const BLOCK_PREFIX = /^[ \t]*(?:>+[ \t]*|#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+)/gmu;
 const looseChar = (char: string) => char.normalize("NFKC").toLocaleLowerCase();
-function looseQuoteRange(content: string, quote: string): { start: number; end: number } | undefined {
-  const needle = Array.from(quote).filter(char => !IGNORED.test(char)).map(looseChar).join("");
-  if (needle.length < 4) return undefined;
+
+function buildLooseIndex(text: string): { haystack: string; at: number[] } {
+  const skipped = new Set<number>();
+  for (const match of text.matchAll(BLOCK_PREFIX)) {
+    const start = match.index!;
+    for (let i = 0; i < match[0].length; i++) skipped.add(start + i);
+  }
   let haystack = "";
   const at: number[] = [];
   let offset = 0;
-  for (const char of Array.from(content)) {
-    if (!IGNORED.test(char)) { const loose = looseChar(char); haystack += loose; for (let i = 0; i < loose.length; i++) at.push(offset); }
+  for (const char of Array.from(text)) {
+    if (!skipped.has(offset) && !IGNORED.test(char)) {
+      const loose = looseChar(char);
+      haystack += loose;
+      for (let i = 0; i < loose.length; i++) at.push(offset);
+    }
     offset += char.length;
   }
+  return { haystack, at };
+}
+
+function looseNeedle(text: string): string {
+  return Array.from(text.replace(BLOCK_PREFIX, "")).filter(char => !IGNORED.test(char)).map(looseChar).join("");
+}
+
+function charEnd(content: string, start: number): number {
+  return start + ((content.codePointAt(start) ?? 0) > 0xffff ? 2 : 1);
+}
+
+function looseQuoteRange(content: string, quote: string): { start: number; end: number } | undefined {
+  const needle = looseNeedle(quote);
+  if (needle.length < 4) return undefined;
+  const { haystack, at } = buildLooseIndex(content);
   const found = haystack.indexOf(needle);
-  if (found < 0) return undefined;
-  const last = at[found + needle.length - 1];
-  return { start: at[found], end: last + (content.codePointAt(last)! > 0xffff ? 2 : 1) };
+  if (found >= 0) {
+    return { start: at[found], end: charEnd(content, at[found + needle.length - 1]) };
+  }
+  // Support quotes with ellipsis ("前文……后文") or minor middle omissions via head+tail dual anchoring.
+  const ellipsisParts = quote.split(/(?:\.{3,}|…+)/u).map(looseNeedle).filter(part => part.length >= 6);
+  const head = ellipsisParts.length >= 2 ? ellipsisParts[0].slice(0, 24) : needle.length >= 24 ? needle.slice(0, 14) : "";
+  const tail = ellipsisParts.length >= 2 ? ellipsisParts.at(-1)!.slice(-24) : needle.length >= 24 ? needle.slice(-14) : "";
+  if (head && tail && head !== tail) {
+    const maxSpan = Math.max(needle.length * 2.5, 600);
+    let searchFrom = 0;
+    let best: { start: number; end: number; span: number } | undefined;
+    while (searchFrom < haystack.length) {
+      const headAt = haystack.indexOf(head, searchFrom);
+      if (headAt < 0) break;
+      const tailAt = haystack.indexOf(tail, headAt + head.length);
+      if (tailAt >= 0) {
+        const endIdx = tailAt + tail.length - 1;
+        const start = at[headAt], end = charEnd(content, at[endIdx]);
+        const span = end - start;
+        if (span <= maxSpan && (!best || span < best.span)) best = { start, end, span };
+      }
+      searchFrom = headAt + head.length;
+    }
+    if (best) return { start: best.start, end: best.end };
+  }
+  return undefined;
 }
 
 /** Optional claim anchors survive only when the final raw message contains the quote. */

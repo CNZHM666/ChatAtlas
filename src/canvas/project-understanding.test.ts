@@ -3,7 +3,6 @@ import { expect, it } from "vitest";
 import type { FocusSection, FocusSession } from "../shared/focus-session";
 import { projectUnderstandingModel } from "./project-understanding";
 import { projectSession } from "../test/project-fixture";
-import { architectureGroups } from "./map-presentation";
 const section = (id: string, title: string, body: string): FocusSection => ({ id, title, body, kind: "review", transition: "", evidenceIds: [`e-${id}`] });
 const session: FocusSession = { id: "s", title: "硬件平台", goal: "恢复产品架构理解", mode: "work", sections: [
   section("one", "整体协作", "## 需求理解\n职责：提取目标与约束。\n输出给方案生成。\n## 方案生成\n职责：组织候选方案。"),
@@ -74,9 +73,9 @@ it("preserves saved phase groups for legacy semantic concepts without guessing a
   const node = { key: "ir", title: "Hardware IR", description: "统一方案", quote: "统一方案", status: "discussed" as const, evidenceIds: [] };
   const a = { ...section("a", "架构协作", "统一方案"), phase: "核心处理", semanticStructure: { nodes: [node], relations: [] } };
   const first = projectUnderstandingModel({ sections: [a] }, true);
-  expect(architectureGroups(first.nodes).map(group => group.title)).toEqual(["核心处理"]);
+  expect(first.nodes.map(item => item.phase)).toEqual(["核心处理"]);
   const second = projectUnderstandingModel({ sections: [a, { ...a, id: "b", phase: "交付与验证" }] }, true);
-  expect(architectureGroups(second.nodes)).toEqual([]);
+  expect(second.nodes.map(item => item.phase)).toEqual([undefined]);
   expect(second.nodes).toHaveLength(1);
   expect(a).not.toHaveProperty("layer");
 });

@@ -1,0 +1,61 @@
+.first-wiki-progress { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; min-width:0; padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--surface-solid); }
+.first-wiki-progress > header,.first-wiki-actions,.first-wiki-meter { display:flex; align-items:center; gap:8px; }
+.first-wiki-progress > header > strong { flex:1; min-width:0; font-size:14px; overflow-wrap:anywhere; }
+.first-wiki-progress > header > svg { color:var(--accent); flex:none; }
+.first-wiki-progress > header > button,.first-wiki-actions > button,.native-projects .native-first-actions > button {
+  display:inline-flex; align-items:center; justify-content:center; flex:none; gap:5px; min-height:32px; padding:4px 8px;
+  font:inherit; font-size:12px; white-space:nowrap; color:var(--muted); background:transparent;
+  border:1px solid transparent; border-radius:7px; cursor:pointer;
+}
+.first-wiki-progress > header > button:is(:hover,[aria-expanded="true"]),.first-wiki-actions > button:hover:not(:disabled) { background:var(--surface-muted); color:var(--text); }
+.first-wiki-actions { justify-content:flex-end; flex-wrap:wrap; }
+.first-wiki-actions:empty { display:none; }
+.first-wiki-actions > button.primary { background:var(--accent); color:white; font-weight:600; }
+.first-wiki-actions > button.primary:hover:not(:disabled) { background:var(--accent); color:white; filter:brightness(.94); }
+:root[data-theme="dark"] .first-wiki-actions > button.primary { color:#14201a; }
+.native-first-actions { flex:none; padding:8px 16px; border-block-start:1px solid var(--border); background:var(--surface-solid); }
+.native-project-content .first-wiki-progress { margin-top:12px; padding:6px 0 0; border:0; background:transparent; }
+@media (max-width:320px) { .first-wiki-pause > span { display:none; } }
+.native-projects .first-wiki-progress > .decision-steps { min-width:0; padding:12px; border-radius:10px; }
+.native-projects .first-wiki-progress .decision-steps-kind { margin-top:8px; }
+.native-projects .first-wiki-progress .decision-steps-kind:first-child { margin-top:0; }
+.native-projects .first-wiki-progress .decision-steps > h3 { font-size:14px; line-height:1.5; }
+.native-projects .first-wiki-progress .decision-steps-options[role="group"] {
+  gap:0; max-height:min(18rem, 42dvh); margin-top:10px; padding:0;
+  overflow-y:auto; overscroll-behavior:contain; border-block:1px solid var(--border);
+}
+.native-projects .first-wiki-progress .decision-steps-options [role="checkbox"] {
+  display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:8px;
+  min-height:36px; padding:6px 5px; border:0; border-radius:0; font-size:13px;
+}
+.native-projects .first-wiki-progress .decision-steps-options [role="checkbox"] + button { border-top:1px solid var(--border); }
+.native-projects .first-wiki-progress .decision-steps-options [role="checkbox"]:focus-visible { outline-offset:-2px; }
+.native-projects .first-wiki-progress .decision-steps-options [role="checkbox"] > span:nth-child(2) { overflow-wrap:anywhere; }
+.native-projects .first-wiki-progress .decision-steps-options [role="checkbox"] > em { max-width:9em; font-size:11px; text-align:end; }
+.native-projects .first-wiki-progress .decision-steps > footer { flex-wrap:wrap; margin-top:10px; }
+:root[data-theme="dark"] .native-projects .first-wiki-progress .decision-steps > footer .primary { color:#14201a; }
+.first-wiki-meter progress { flex:1; min-width:0; height:5px; accent-color:var(--accent); }
+.first-wiki-meter small { white-space:nowrap; color:var(--muted); font-variant-numeric:tabular-nums; }
+.first-wiki-progress > p { margin:0; color:var(--muted); font-size:13px; }
+.first-wiki-chapters > h3 { margin:0 0 5px; font-size:14px; }
+.first-wiki-chapters h3 small { margin-inline-start:3px; color:var(--muted); font-weight:400; }
+.first-wiki-chapters > ul { padding:0; margin:0; list-style:none; }
+.first-wiki-chapters > ul { border-block:1px solid var(--border); }
+.first-wiki-chapters > ul > li + li { border-block-start:1px solid var(--border); }
+.first-wiki-chapters .first-wiki-chapter-toggle { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;
+  min-height:38px; padding:6px 7px; border:0; border-radius:6px; background:transparent; color:var(--text); font-size:13px; text-align:start; cursor:pointer;
+}
+.first-wiki-chapters .first-wiki-chapter-toggle:hover { background:var(--surface-muted); }
+.first-wiki-chapter-toggle[aria-expanded="true"] { font-weight:600; }
+.first-wiki-chapter-toggle > span { min-width:0; overflow-wrap:anywhere; }
+.first-wiki-chapter-toggle > svg { flex:none; color:var(--muted); }
+.first-wiki-chapter-toggle[aria-expanded="true"] > svg { transform:rotate(180deg); }
+.first-wiki-chapter { min-width:0; padding:2px 8px 12px; }
+.first-wiki-chapter .chapter-guide { min-width:0; overflow-wrap:anywhere; }
+.first-wiki-progress .wiki-chapter-overview { margin-block:0 16px; }
+.first-wiki-progress .native-update-log { font-size:12px; color:var(--muted); padding:6px 0 0; border-top:1px solid var(--border); }
+.first-wiki-progress .native-update-log-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.first-wiki-progress .native-update-log ul { max-height:250px; padding:0; margin:4px 0 0; list-style:none; overflow:auto; }
+.first-wiki-progress .native-update-log li { padding:5px 0; border-top:1px solid var(--border); }
+.first-wiki-progress .native-update-log li > div { display:flex; flex-wrap:wrap; gap:4px 8px; }
+.first-wiki-progress .native-update-log p { margin:2px 0; }

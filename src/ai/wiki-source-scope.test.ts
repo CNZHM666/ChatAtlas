@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { WikiKnowledgeUnit } from "../shared/wiki-knowledge";
-import { measuredSourceScope, sourceScopedUnit, sourceScopeConflict } from "./wiki-source-scope";
+import { measuredSourceScope, sourceScopeConflict } from "./wiki-source-scope";
 
 const quote = `例如先启用邮件提醒。\n\n观察两周。\n\n如果发现：\n\n原来的内测用户中，\n\n**50%+ 启用了邮件提醒**\n\n**30%+ 连续记录 7 天**`;
 const broadened = "若原来的内测用户中超过50%启用所有新功能且30%连续记录7天，则判定扩展成功。";
@@ -17,18 +17,13 @@ it("keeps a count attached to its own metric and report date",()=>{
  expect(sourceScopeConflict("目标日活为22人。",[report])).toBe(false);
 });
 
-it("restores the scope of a uniquely sourced experiment while retaining its evidence and proposal status", () => {
-  const old = unit(broadened);
-  const corrected = sourceScopedUnit(old);
-  expect(corrected).toMatchObject({ id: old.id, evidence: old.evidence, adoption: old.adoption });
-  expect(corrected.statement).toContain("观察两周");
-  expect(corrected.statement).toContain("50%+ 启用了邮件提醒");
-  expect(corrected.statement).toContain("30%+ 连续记录 7 天");
-  expect(corrected.statement).not.toContain("扩展成功");
-  expect(sourceScopeConflict(corrected.statement, [corrected])).toBe(false);
-  expect(sourceScopedUnit(corrected)).toBe(corrected);
-  const accepted = { ...old, adoption: { status: "user_adopted" as const } };
-  expect(sourceScopedUnit(accepted)).toBe(accepted);
+it("detects that an experiment overstates what its source measured", () => {
+  const checked = measuredSourceScope(broadened, quote);
+  expect(checked?.conflict).toBe(true);
+  expect(checked?.excerpt).toContain("观察两周");
+  expect(checked?.excerpt).toContain("50%+ 启用了邮件提醒");
+  expect(checked?.excerpt).toContain("30%+ 连续记录 7 天");
+  expect(checked?.excerpt).not.toContain("扩展成功");
 });
 
 it("protects version, comparator and object for non-percentage limits", () => {
@@ -43,8 +38,6 @@ it("protects version, comparator and object for non-percentage limits", () => {
 it("does not join matching amounts from different experiments or restore an ambiguous block", () => {
   const twice = `${quote}\n\n## 新方案\n\n${quote.replaceAll("邮件提醒", "短信提醒")}`;
   expect(measuredSourceScope(broadened, twice)).toEqual({ conflict: true, excerpt: undefined });
-  const ambiguous = unit(broadened, twice);
-  expect(sourceScopedUnit(ambiguous)).toBe(ambiguous);
   expect(measuredSourceScope(broadened, "如果50%启用邮件提醒。\n\n如果30%连续记录7天。")).toBeUndefined();
   expect(measuredSourceScope(broadened, `\`\`\`text\n${quote}\n\`\`\``)).toBeUndefined();
   expect(measuredSourceScope(broadened, "如果50%启用邮件提醒。\n系统会记录，30%连续记录7天是上月的数据。")).toBeUndefined();

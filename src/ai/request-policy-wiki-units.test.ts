@@ -19,8 +19,8 @@ it("reserves a real output budget for statement fidelity recovery", () => {
 });
 
 it("gives a chapter placement review its requested output allowance", () => {
-  expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_chapter_fit" }) })).toMatchObject({ maxInputTokens: 14000, maxOutputTokens: 1600 });
-  expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_topic_chains" }) })).toMatchObject({ maxInputTokens: 12000, maxOutputTokens: 2400 });
+  expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_chapter_fit" }) })).toMatchObject({ maxInputTokens: 14000, maxOutputTokens: 3200 });
+  expect(requestBudget({ taskType: "other", system: "Return JSON.", prompt: JSON.stringify({ presentation: "wiki_topic_chains" }) })).toMatchObject({ maxInputTokens: 12000, maxOutputTokens: 3600 });
 });
 
 it("gives one paragraph written again with the user's answers a small allowance", () => {
