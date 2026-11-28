@@ -1,13 +1,16 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { BookMarked, Download, Github, Languages, LayoutDashboard, Moon, PanelRightOpen, Settings, Sun } from "lucide-react";
+import { BookMarked, Download, Github, Languages, LayoutDashboard, Moon, Settings, Sun } from "lucide-react";
 import { DocumentOverview } from "../canvas/components/DocumentOverview";
 import { KnowledgeLedger } from "../canvas/components/KnowledgeLedger";
 import { MapSidebar } from "../canvas/components/MapSidebar";
+import { PanelBoundary } from "../canvas/components/PanelBoundary";
+import { ProjectExportDialog } from "../canvas/components/ProjectExportDialog";
 import { ProjectNavigationLayout, ProjectNavigationOpen, useProjectNavigationLayout } from "../canvas/components/ProjectNavigationLayout";
 import { ProjectSourceList } from "../canvas/components/ProjectSourceList";
 import { ProjectWikiNavigation } from "../canvas/components/ProjectWikiNavigation";
 import { ReaderBackButton } from "../canvas/components/ReaderBackButton";
 import { ReaderConversation } from "../canvas/components/ReaderConversation";
+import { ReviewHome } from "../canvas/components/ReviewHome";
 import { WikiDocument } from "../canvas/components/WikiDocument";
 import { WorkspaceSourcePanel } from "../canvas/components/WorkspaceSourcePanel";
 import { documentEvidenceReview } from "../canvas/document-review";
@@ -20,13 +23,10 @@ import { OVERVIEW_CANVAS_ID } from "../shared/constants";
 import type { FocusEvidence } from "../shared/focus-session";
 import { createProjectReadingCache } from "../shared/project-reading-cache";
 import { architectureChapter, demoProject, type DemoLocale } from "./project";
-import { ContinuationDemo } from "./ContinuationDemo";
 
-const ProjectExportDialog = lazy(() => import("../canvas/components/ProjectExportDialog").then(module => ({ default: module.ProjectExportDialog })));
-const ReviewHome = lazy(() => import("../canvas/components/ReviewHome").then(module => ({ default: module.ReviewHome })));
 const SettingsPanel = lazy(() => import("../canvas/components/SettingsPanel").then(module => ({ default: module.SettingsPanel })));
 const repository = "https://github.com/CNZHM666/ChatAtlas";
-const installUrl = repository + "/releases";
+const installUrl = repository + "/releases/tag/v0.1.8";
 
 function readPreference(key: string) {
   try { return window.localStorage.getItem("chatatlas-demo-" + key); } catch { return null; }
@@ -42,12 +42,15 @@ function initialLocale(): DemoLocale {
 }
 
 export function DemoApp() {
+  const locale = initialLocale();
   const cache = useRef<ReturnType<typeof createProjectReadingCache>>();
   if (!cache.current) cache.current = createProjectReadingCache();
-  return <ProjectReadingCacheContext.Provider value={cache.current}>
-    <PreferencesProvider initialLocale={initialLocale() === "zh" ? "zh-CN" : "en"} initialTheme={readPreference("theme") === "dark" ? "dark" : "light"}
-      onLocaleChange={saveLocale} onThemeChange={saveTheme}><DemoWorkspace /></PreferencesProvider>
-  </ProjectReadingCacheContext.Provider>;
+  return <PanelBoundary zh={locale === "zh"}>
+    <ProjectReadingCacheContext.Provider value={cache.current}>
+      <PreferencesProvider initialLocale={locale === "zh" ? "zh-CN" : "en"} initialTheme={readPreference("theme") === "dark" ? "dark" : "light"}
+        onLocaleChange={saveLocale} onThemeChange={saveTheme}><DemoWorkspace /></PreferencesProvider>
+    </ProjectReadingCacheContext.Provider>
+  </PanelBoundary>;
 }
 
 function saveLocale(locale: Locale) {
@@ -71,7 +74,6 @@ function DemoWorkspace() {
   const [exportOpen, setExportOpen] = useState(false);
   const [settings, setSettings] = useState<"ai" | "data">();
   const [needsExtension, setNeedsExtension] = useState(false);
-  const [continuationOpen, setContinuationOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set<string>());
   const navigationLayout = useProjectNavigationLayout();
   const [headingTarget, setHeadingTarget] = useState<{ title: string; revision: number }>();
@@ -177,29 +179,29 @@ function DemoWorkspace() {
   return <div className={`app-shell demo-shell${isHome ? " is-canvas-view" : ""}`}>
     <header className="topbar">
       <button type="button" className="brand brand-home" onClick={readHome} aria-label={tr("ChatAtlas 工作台", "ChatAtlas Workbench")}><BrandMark className="brand-mark" /><span>ChatAtlas</span></button>
-      <span className="demo-badge">{tr("只读演示 · v0.1.8", "Read-only demo · v0.1.8")}</span>
+      <span className="demo-badge"><span className="demo-badge-dot" aria-hidden="true" /><span>{tr("只读演示", "Read-only demo")}</span><small>v0.1.8</small></span>
       <div className="topbar-actions demo-actions">
-        <button type="button" className="demo-continuation-trigger" onClick={() => setContinuationOpen(true)} aria-label={tr("体验侧栏续写", "Try sidebar continuation")} title={tr("体验侧栏续写", "Try sidebar continuation")}><PanelRightOpen size={16} aria-hidden="true"/><span>{tr("体验侧栏续写", "Try continuation")}</span></button>
-        <a className="demo-github" href={repository}><Github size={16} aria-hidden="true" />GitHub</a>
-        <a className="demo-install" href={installUrl}>{tr("安装扩展", "Install extension")}</a>
-        <button type="button" className="icon-button" onClick={() => setSettings("ai")} aria-label={tr("设置", "Settings")} title={tr("设置", "Settings")}><Settings size={17} aria-hidden="true" /></button>
-        <button type="button" className="icon-button" onClick={changeLanguage} aria-label={tr("切换为英文", "Switch to Chinese")} title={tr("切换为英文", "Switch to Chinese")}><Languages size={17} aria-hidden="true" /></button>
+        <a className="demo-link demo-github" href={repository} target="_blank" rel="noreferrer"><Github size={15} aria-hidden="true" /><span>GitHub</span></a>
+        <a className="demo-link demo-install" href={installUrl} target="_blank" rel="noreferrer"><Download size={14} aria-hidden="true" /><span>{tr("安装扩展", "Install extension")}</span></a>
+        <span className="demo-divider" aria-hidden="true" />
+        <button type="button" className="icon-button" onClick={() => setSettings("ai")} aria-label={tr("设置", "Settings")} title={tr("设置", "Settings")}><Settings size={16} aria-hidden="true" /></button>
+        <button type="button" className="icon-button" onClick={changeLanguage} aria-label={tr("切换为英文", "Switch to Chinese")} title={tr("切换为英文", "Switch to Chinese")}><Languages size={16} aria-hidden="true" /></button>
         <button type="button" className="icon-button" aria-label={tr("切换主题", "Switch theme")} title={tr("切换主题", "Switch theme")} onClick={() => {
           setTheme(theme === "light" ? "dark" : "light");
-        }}>{theme === "light" ? <Moon size={17} aria-hidden="true" /> : <Sun size={17} aria-hidden="true" />}</button>
+        }}>{theme === "light" ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}</button>
       </div>
     </header>
     <div className="workspace-shell">
       {isHome ? <>
         <MapSidebar canvases={canvases} activeId={OVERVIEW_CANVAS_ID} onSelect={id => id === OVERVIEW_CANVAS_ID ? readHome() : readOverview()} />
-        <div className="workspace"><Suspense fallback={null}><ReviewHome projectFirst
+        <div className="workspace"><ReviewHome projectFirst
           canvases={canvases} sessions={[session]} conversations={knowledge.conversations}
           selectedIds={selectedIds} onSelectedIds={setSelectedIds} importJob={null} importSource="web" recentReading={[]}
           onHistoryChange={readHome} onSession={readOverview}
           onReadConversation={readConversation} onPreviewAction={requireExtension} onConfigureAI={() => setSettings("ai")}
           onStart={requireExtension} onResume={readOverview} onSpace={readOverview} onPrioritize={requireExtension} onScan={requireExtension}
           onHydrate={requireExtension} onZip={requireExtension} onPause={requireExtension} onConnect={requireExtension} onDiscover={requireExtension}
-        /></Suspense></div>
+        /></div>
       </> : <ProjectExampleContext.Provider value={readers}>
         <WorkspaceEvidenceContext.Provider value={{ open, close, active: source && !original ? { ...source.options, shown: source.reference } : undefined }}>
           <div className={source && !original ? "focus-workspace has-original-panel" : "focus-workspace"}
@@ -289,17 +291,12 @@ function DemoWorkspace() {
         </WorkspaceEvidenceContext.Provider>
       </ProjectExampleContext.Provider>}
     </div>
-    {exportOpen && <Suspense fallback={<p className="sr-only" role="status">{tr("正在打开导出", "Opening export")}</p>}>
-      <ProjectExportDialog session={session} zh={zh} onClose={() => setExportOpen(false)} />
+    {exportOpen && <ProjectExportDialog session={session} zh={zh} onClose={() => setExportOpen(false)} />}
+    {settings && <Suspense fallback={<div className="demo-action-notice" role="status">{tr("正在打开设置…", "Opening settings…")}</div>}>
+      <SettingsPanel key={settings} initialTab={settings} onClose={() => setSettings(undefined)} installUrl={installUrl} />
     </Suspense>}
-    {settings && <Suspense fallback={null}><SettingsPanel key={settings} initialTab={settings} onClose={() => setSettings(undefined)} installUrl={installUrl} /></Suspense>}
-    {continuationOpen && <ContinuationDemo session={session} zh={zh} onClose={() => setContinuationOpen(false)} onEvidence={reference => {
-      setContinuationOpen(false);
-      read(architectureChapter);
-      open(reference, { references: [reference], quote: reference.excerpt, sectionId: architectureChapter });
-    }}/>}
     {needsExtension && <div className="demo-action-notice" role="status"><span>{tr("安装扩展后可操作自己的对话。", "Install the extension to work with your own conversations.")}</span>
-      <a href={installUrl}>{tr("安装扩展", "Install extension")}</a>
+      <a href={installUrl} target="_blank" rel="noreferrer">{tr("安装扩展", "Install extension")}</a>
       <button type="button" className="icon-button" onClick={() => setNeedsExtension(false)} aria-label={tr("关闭提示", "Dismiss notice")}>×</button>
     </div>}
   </div>;

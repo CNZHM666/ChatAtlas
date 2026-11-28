@@ -80,6 +80,10 @@
 .overview-plan-actions{display:flex;gap:2px;justify-content:flex-end}
 .overview-plan-line>.overview-question-detail{grid-column:2 / -1;min-width:0;padding:8px 0 4px}
 .document-overview .overview-pending .wiki-decision-card{margin:0;padding:0;border:0;border-top:1px solid var(--border)}
+.document-overview .overview-pending .wiki-decision-card>summary.workspace-disclosure-title{align-items:flex-start;padding:10px 6px;gap:8px;color:var(--text);font-size:14px;font-weight:500;line-height:1.5}
+.document-overview .overview-pending .wiki-decision-card>summary.workspace-disclosure-title>.disclosure-icon{color:#b45309}
+:root[data-theme="dark"] .document-overview .overview-pending .wiki-decision-card>summary.workspace-disclosure-title>.disclosure-icon{color:#fbbf24}
+.document-overview .overview-pending .wiki-decision-card>summary.workspace-disclosure-title>svg{margin-top:3px}
 .document-overview .overview-pending .wiki-decision-card .wiki-supplement-content{padding:0 6px 8px}
 .overview-personal-plan{font-size:14px;line-height:1.65}
 .overview-plan .overview-chapter-link{margin-top:6px;padding-inline-start:0}

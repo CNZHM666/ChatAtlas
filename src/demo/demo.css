@@ -1,32 +1,137 @@
 .demo-shell .project-reading-base { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .demo-shell .reading-outline { background: var(--page); }
-.demo-badge { font-size: var(--text-sm); color: var(--muted); white-space: nowrap; }
-.demo-actions a { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; text-decoration: none; padding: 0 8px; border-radius: 7px; color: var(--text); white-space: nowrap; font-size: var(--text-base); }
-.demo-actions a:hover { background: var(--surface-muted); }
-.demo-actions .demo-install { border: 1px solid var(--border); }
-.demo-github svg { flex-shrink: 0; }
-.demo-shell .workspace-source-title { margin: 0; padding: 4px 18px 10px; color: var(--muted); font-size: var(--text-sm); }
-.demo-action-notice { position: fixed; z-index: 40; inset: auto 16px 16px auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; max-width: calc(100% - 32px); padding: 8px 10px 8px 14px; background: var(--surface-solid); box-shadow: var(--shadow); border: 1px solid var(--border); border-radius: 10px; font-size: var(--text-sm); }
-.demo-action-notice a { color: var(--accent); }
-.demo-shell :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (max-width: 480px) {
-  .demo-shell .topbar { column-gap: 5px; padding-inline: 9px; }
-  .demo-actions { gap: 2px; }
-  .demo-actions a { padding-inline: 4px; gap: 4px; }
-  .demo-actions .icon-button { min-width: 29px; width: 29px; }
-  .demo-actions .demo-github { font-size: 0; }
-  .demo-badge { display: none; }
+.demo-shell .topbar { column-gap: 10px; }
+.demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-solid));
+  color: var(--text-secondary, var(--muted));
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
 }
-.demo-continuation-trigger { display:inline-flex; align-items:center; gap:5px; color:var(--text); background:var(--surface-muted); border:0; border-radius:8px; padding:6px 10px; font:inherit; white-space:nowrap; cursor:pointer; }
-@media (max-width: 480px) { .demo-continuation-trigger { padding:6px; } .demo-continuation-trigger span { display:none; } }
-.demo-continuation { width:min(480px,calc(100% - 28px)); border:1px solid var(--border); border-radius:14px; padding:0; color:var(--text); background:var(--surface-solid); }
-.demo-continuation::backdrop { background:#15181b50; }
-.demo-continuation > header { display:flex; justify-content:space-between; align-items:center; padding:10px 16px; border-bottom:1px solid var(--border); }
-.demo-continuation-inner { padding:16px; }
-.demo-continuation-inner h2 { margin:4px 0 12px; font-size:20px; }
-.demo-continuation-inner h3 { font-size:15px; }
-.demo-continuation-inner small { color:var(--muted); }
-.demo-continuation-inner textarea { width:100%; padding:10px; resize:vertical; border:1px solid var(--border); border-radius:8px; background:var(--surface-muted); color:var(--text); font:inherit; }
-.demo-continuation-inner footer { display:flex; justify-content:flex-end; margin-top:16px; }
-.demo-continuation-inner footer button { display:inline-flex; align-items:center; gap:5px; border:0; border-radius:8px; padding:7px 11px; background:var(--accent); color:white; font:inherit; cursor:pointer; }
-.demo-continuation-inner summary { cursor:pointer; }
+.demo-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  flex: none;
+}
+.demo-badge small {
+  padding-inline-start: 6px;
+  border-inline-start: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.demo-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: end;
+}
+.demo-actions .demo-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.demo-actions .demo-github {
+  color: var(--text-secondary, var(--text));
+  background: transparent;
+}
+.demo-actions .demo-github:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+  border-color: var(--border);
+}
+.demo-actions .demo-install {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-solid));
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+.demo-actions .demo-install:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+:root[data-theme="dark"] .demo-actions .demo-install:hover {
+  color: #101b15;
+}
+.demo-actions .demo-link svg { flex: none; }
+.demo-divider {
+  width: 1px;
+  height: 18px;
+  margin-inline: 2px;
+  background: var(--border);
+  flex: none;
+}
+.demo-actions .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  transition: background-color .15s ease, color .15s ease;
+}
+.demo-actions .icon-button:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+.demo-shell .workspace-source-title { margin: 0; padding: 4px 18px 10px; color: var(--muted); font-size: var(--text-sm); }
+.demo-action-notice {
+  position: fixed;
+  z-index: 40;
+  inset: auto 16px 16px auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  max-width: calc(100% - 32px);
+  padding: 9px 10px 9px 14px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: var(--text-sm);
+}
+.demo-action-notice a { color: var(--accent); font-weight: 550; text-decoration: none; }
+.demo-action-notice a:hover { text-decoration: underline; }
+.demo-shell :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .demo-shell .topbar { column-gap: 6px; padding-inline: 10px; }
+  .demo-badge { display: none; }
+  .demo-divider { display: none; }
+  .demo-actions { gap: 4px; }
+  .demo-actions .demo-github { padding: 0 8px; }
+  .demo-actions .demo-github span { display: none; }
+  .demo-actions .demo-install { padding: 0 10px; font-size: 12.5px; }
+}
