@@ -79,3 +79,37 @@ it("adapts platform attributes and aligns beside platform-specific top-right con
  expect(button).toHaveClass("atlas-navigator-trigger--toolbar");
  expect(button.style.getPropertyValue("--atlas-trigger-radius")).toBe("999px");
 });
+
+it("ignores centered welcome-page switcher tabs across other AI hosts and keeps the trigger in the top-right cluster", () => {
+  vi.stubGlobal("chrome", { runtime: { sendMessage: vi.fn(), getURL: (path: string) => `chrome-extension://atlas/${path}` } });
+  const main = document.createElement("main");
+  vi.spyOn(main, "getBoundingClientRect").mockReturnValue(new DOMRect(260, 0, 764, 800));
+  const header = document.createElement("header"); header.style.display = "flex";
+  const centerGroup = document.createElement("div"); centerGroup.setAttribute("role", "tablist");
+  const modeTab = document.createElement("button"); modeTab.setAttribute("role", "tab"); modeTab.textContent = "深度思考";
+  vi.spyOn(modeTab, "getBoundingClientRect").mockReturnValue(new DOMRect(630, 14, 72, 32));
+  centerGroup.append(modeTab);
+  const rightGroup = document.createElement("div"); rightGroup.style.display = "flex";
+  const topRightBtn = document.createElement("button"); topRightBtn.setAttribute("aria-label", "新对话");
+  vi.spyOn(topRightBtn, "getBoundingClientRect").mockReturnValue(new DOMRect(960, 14, 32, 32));
+  rightGroup.append(topRightBtn);
+  header.append(centerGroup, rightGroup);
+  main.append(header);
+  document.body.append(main);
+
+  const entry = webChatEntry("qwen");
+  entry.ensure();
+  const button = document.getElementById("atlas-web-chat-entry")!;
+  expect(button.closest('[role="tablist"]')).toBeNull();
+  expect(topRightBtn.previousElementSibling).toBe(button);
+  expect(button).toHaveClass("atlas-navigator-trigger--toolbar");
+
+  // If no top-right action exists on a welcome screen (only a centered button), fall back to the top-right edge.
+  rightGroup.remove();
+  modeTab.removeAttribute("role");
+  centerGroup.removeAttribute("role");
+  entry.ensure();
+  const edgeButton = document.getElementById("atlas-web-chat-entry")!;
+  expect(edgeButton).toHaveClass("atlas-navigator-trigger--edge");
+  expect(edgeButton.parentElement).toBe(document.body);
+});

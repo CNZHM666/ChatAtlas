@@ -6,6 +6,7 @@ import { sidecarStyle } from "./sidecar-style";
 import { brandLogos } from "../shared/brand-assets";
 import { ATLAS_TRIGGER_STYLE } from "./atlas-trigger-style";
 import { pageTheme } from "./page-theme";
+import { isVerticallyAligned } from "./top-right-anchor";
 
 const WIDTH_KEY = "atlas-navigator-width";
 
@@ -52,42 +53,85 @@ export class ConversationNavigator {
   }
   ensureTrigger(): void {
     let target = chatGPTEntryAnchor(Boolean(this.conversationId));
-    if(target&&this.clippedAnchors.has(target.anchor))target={anchor:document.body,placement:"prepend",variant:"edge"};
-    const anchor=target?.anchor;
+    const clippedFallback = Boolean(target && this.clippedAnchors.has(target.anchor));
+    const fallbackRect = clippedFallback ? (target?.metricsTarget ?? target?.anchor)?.getBoundingClientRect() : undefined;
+    if (clippedFallback) target = { anchor: document.body, placement: "prepend", variant: "edge" };
+    const anchor = target?.anchor;
     if (!target || !anchor?.parentElement) { this.trigger?.remove(); this.trigger = null; return; }
     const button = this.trigger?.isConnected ? this.trigger : this.button("", "atlas-navigator-trigger", () => { if (this.host) this.setCollapsed(!this.collapsed); else void this.open(); });
-    const className=`atlas-navigator-trigger${target.variant ? ` atlas-navigator-trigger--${target.variant}` : ""}`;
-    if(button.className!==className)button.className=className;
+    const alignEdgeTo = target.variant === "edge" && fallbackRect && fallbackRect.width > 0 && fallbackRect.top >= 0 && fallbackRect.top < 100 && fallbackRect.left > 60 ? fallbackRect : undefined;
+    const className = `atlas-navigator-trigger${target.variant ? ` atlas-navigator-trigger--${target.variant}` : ""}${alignEdgeTo ? " is-anchor-aligned" : ""}`;
+    if (button.className !== className) button.className = className;
     button.dataset.atlasPlatform = "chatgpt";
     button.dataset.atlasTheme = this.dark ? "dark" : "light";
     button.setAttribute("aria-label", this.zh ? "ChatAtlas 知识助手" : "ChatAtlas knowledge companion"); button.title = `${button.getAttribute("aria-label")} · Ctrl+Shift+Y`; button.setAttribute("aria-expanded", String(Boolean(this.host) && !this.collapsed));
     if (!document.getElementById("atlas-navigator-trigger-style")) {
       const style = document.createElement("style"); style.id = "atlas-navigator-trigger-style";
       style.textContent = ATLAS_TRIGGER_STYLE;
-      (document.head??document.documentElement).append(style);
+      (document.head ?? document.documentElement).append(style);
     }
-    const placed=this.trigger === button && (target.placement === "before" ? anchor.previousElementSibling === button : anchor.firstElementChild === button);
-    if(placed&&(target.variant==="edge"||chatGPTEntryVisible(button)))return;
-    if (!button.firstChild) { const mark = document.createElement("span"); mark.className = "atlas-trigger-mark"; mark.append(this.logoImage()); mark.setAttribute("aria-hidden", "true"); const label=document.createElement("span");label.className="atlas-trigger-label";label.textContent="ChatAtlas";button.append(mark,label); }
+    const metricsEl = target.metricsTarget ?? anchor;
+    const placed = this.trigger === button && (target.placement === "before" ? anchor.previousElementSibling === button : anchor.firstElementChild === button);
+    if (placed && (target.variant === "edge" || (chatGPTEntryVisible(button) && isVerticallyAligned(button.getBoundingClientRect(), metricsEl.getBoundingClientRect())))) {
+      if (alignEdgeTo) {
+        const size = Math.round(Math.min(36, Math.max(28, alignEdgeTo.height)));
+        button.style.top = `${Math.max(4, Math.round(alignEdgeTo.top + (alignEdgeTo.height - size) / 2))}px`;
+        button.style.right = `${Math.max(8, Math.round(window.innerWidth - alignEdgeTo.left + 8))}px`;
+      }
+      return;
+    }
+    if (!button.firstChild) { const mark = document.createElement("span"); mark.className = "atlas-trigger-mark"; mark.append(this.logoImage()); mark.setAttribute("aria-hidden", "true"); const label = document.createElement("span"); label.className = "atlas-trigger-label"; label.textContent = "ChatAtlas"; button.append(mark, label); }
     if (target.variant === "toolbar") {
-      const rect = anchor.getBoundingClientRect();
+      button.style.removeProperty("top");
+      button.style.removeProperty("right");
+      const rect = metricsEl.getBoundingClientRect();
       if (rect.height >= 16) {
         const size = Math.round(Math.min(38, Math.max(28, rect.height)));
         const icon = Math.round(Math.min(22, Math.max(18, size * 0.64)));
         button.style.setProperty("--atlas-trigger-size", `${size}px`);
         button.style.setProperty("--atlas-trigger-icon", `${icon}px`);
       }
-      const radius = getComputedStyle(anchor).borderRadius;
+      const radius = getComputedStyle(metricsEl).borderRadius;
       if (radius && radius !== "0px") button.style.setProperty("--atlas-trigger-radius", radius);
       else button.style.removeProperty("--atlas-trigger-radius");
+    } else if (alignEdgeTo) {
+      const size = Math.round(Math.min(36, Math.max(28, alignEdgeTo.height)));
+      const icon = Math.round(Math.min(22, Math.max(18, size * 0.64)));
+      button.style.setProperty("--atlas-trigger-size", `${size}px`);
+      button.style.setProperty("--atlas-trigger-icon", `${icon}px`);
+      button.style.removeProperty("--atlas-trigger-radius");
+      button.style.top = `${Math.max(4, Math.round(alignEdgeTo.top + (alignEdgeTo.height - size) / 2))}px`;
+      button.style.right = `${Math.max(8, Math.round(window.innerWidth - alignEdgeTo.left + 8))}px`;
     } else {
       button.style.removeProperty("--atlas-trigger-size");
       button.style.removeProperty("--atlas-trigger-icon");
       button.style.removeProperty("--atlas-trigger-radius");
+      button.style.removeProperty("top");
+      button.style.removeProperty("right");
     }
-    if(!placed){if(target.placement === "before")anchor.before(button);else anchor.prepend(button);}this.trigger = button;
-    if(target.variant!=="edge"&&!chatGPTEntryVisible(button)){
-      this.clippedAnchors.add(anchor);button.className="atlas-navigator-trigger atlas-navigator-trigger--edge";document.body.prepend(button);
+    if (!placed) { if (target.placement === "before") anchor.before(button); else anchor.prepend(button); }
+    this.trigger = button;
+    if (target.variant !== "edge") {
+      const anchorRect = metricsEl.getBoundingClientRect();
+      const visible = chatGPTEntryVisible(button);
+      const aligned = visible && isVerticallyAligned(button.getBoundingClientRect(), anchorRect);
+      if (!aligned) {
+        this.clippedAnchors.add(anchor);
+        if (visible && anchorRect.width > 0 && anchorRect.top >= 0 && anchorRect.top < 100 && anchorRect.left > 60) {
+          const size = Math.round(Math.min(36, Math.max(28, anchorRect.height)));
+          const icon = Math.round(Math.min(22, Math.max(18, size * 0.64)));
+          button.className = "atlas-navigator-trigger atlas-navigator-trigger--edge is-anchor-aligned";
+          button.style.setProperty("--atlas-trigger-size", `${size}px`);
+          button.style.setProperty("--atlas-trigger-icon", `${icon}px`);
+          button.style.top = `${Math.max(4, Math.round(anchorRect.top + (anchorRect.height - size) / 2))}px`;
+          button.style.right = `${Math.max(8, Math.round(window.innerWidth - anchorRect.left + 8))}px`;
+        } else {
+          button.className = "atlas-navigator-trigger atlas-navigator-trigger--edge";
+          button.style.removeProperty("top");
+          button.style.removeProperty("right");
+        }
+        document.body.prepend(button);
+      }
     }
   }
   async open(): Promise<void> {

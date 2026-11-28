@@ -4,9 +4,9 @@ import { webCaptureSite, type WebCapturePlatform } from "../shared/web-capture";
 import { ATLAS_TRIGGER_STYLE } from "./atlas-trigger-style";
 import { pageTheme } from "./page-theme";
 import { extensionAlive } from "./extension-alive";
+import { EXCLUDED_TOOLBAR_ANCESTORS, EXCLUDED_TOOLBAR_CONTROLS, isInRightCluster, isVerticallyAligned, toolbarRowSibling, topRightMinLeft } from "./top-right-anchor";
 
 const entries = new WeakSet<HTMLElement>();
-const excluded = 'aside, nav, article, form, [hidden], [aria-hidden="true"], [role="dialog"], [role="menu"], [data-message-author-role], [data-testid$="-message"]';
 const nativeAction = 'button, [role="button"], .ds-icon-button, [class*="icon-button"], [tabindex="0"][aria-label]';
 
 interface PlatformProfile {
@@ -25,7 +25,7 @@ interface PlatformProfile {
 const DEFAULT_PROFILE: PlatformProfile = {
   selectors: [],
   defaultRadius: "9px",
-  minLeftRatio: 0.55,
+  minLeftRatio: 0.62,
   maxBottom: 100,
   edgeGap: 8,
 };
@@ -34,7 +34,7 @@ const PLATFORM_PROFILES: Record<WebCapturePlatform, PlatformProfile> = {
   claude: {
     selectors: ['button[data-testid*="share" i]', 'header button[aria-label]', '[data-testid="chat-header"] button'],
     defaultRadius: "8px",
-    minLeftRatio: 0.55,
+    minLeftRatio: 0.62,
     maxBottom: 92,
     edgeGap: 6,
   },
@@ -48,14 +48,14 @@ const PLATFORM_PROFILES: Record<WebCapturePlatform, PlatformProfile> = {
       'top-bar-actions button',
     ],
     defaultRadius: "999px",
-    minLeftRatio: 0.58,
+    minLeftRatio: 0.62,
     maxBottom: 96,
     edgeGap: 8,
   },
   deepseek: {
     selectors: [".ds-icon-button", '[class*="header"] button', '[class*="top"] [role="button"]'],
     defaultRadius: "10px",
-    minLeftRatio: 0.55,
+    minLeftRatio: 0.62,
     maxBottom: 96,
     edgeGap: 8,
   },
@@ -68,7 +68,7 @@ const PLATFORM_PROFILES: Record<WebCapturePlatform, PlatformProfile> = {
       '[class*="top-bar"] [role="button"]',
     ],
     defaultRadius: "999px",
-    minLeftRatio: 0.55,
+    minLeftRatio: 0.62,
     maxBottom: 96,
     edgeGap: 8,
   },
@@ -80,7 +80,7 @@ const PLATFORM_PROFILES: Record<WebCapturePlatform, PlatformProfile> = {
       '[class*="action"] button',
     ],
     defaultRadius: "10px",
-    minLeftRatio: 0.55,
+    minLeftRatio: 0.62,
     maxBottom: 96,
     edgeGap: 8,
   },
@@ -92,7 +92,7 @@ const PLATFORM_PROFILES: Record<WebCapturePlatform, PlatformProfile> = {
       '[class*="header"] [role="button"]',
     ],
     defaultRadius: "10px",
-    minLeftRatio: 0.55,
+    minLeftRatio: 0.62,
     maxBottom: 96,
     edgeGap: 8,
   },
@@ -107,36 +107,16 @@ interface NativeAnchor {
   radius?: string;
 }
 
-function isHorizontalRow(element: HTMLElement): boolean {
-  const style = getComputedStyle(element);
-  if (/flex/u.test(style.display) && !/column|reverse/u.test(style.flexDirection)) return true;
-  if (/grid/u.test(style.display) && style.gridAutoFlow.includes("column")) return true;
-  return false;
-}
-
-/** Walks past single-child tooltip/popover wrappers so the trigger inserts into the real toolbar row. */
-function toolbarSiblingOf(action: HTMLElement): HTMLElement | undefined {
-  let node: HTMLElement | null = action;
-  for (let depth = 0; depth < 3 && node?.parentElement; depth++) {
-    const parent: HTMLElement = node.parentElement;
-    if (parent === document.body || parent === document.documentElement) return undefined;
-    if (isHorizontalRow(parent)) return node;
-    const siblingElements = Array.from(parent.children).filter(child => !child.classList.contains("atlas-navigator-trigger"));
-    if (siblingElements.length > 1) return undefined;
-    node = parent;
-  }
-  return undefined;
-}
-
 function toolbarAction(platform?: WebCapturePlatform): NativeAnchor | undefined {
   const profile = platform ? PLATFORM_PROFILES[platform] : DEFAULT_PROFILE;
+  const minLeft = topRightMinLeft(profile.minLeftRatio);
   const selector = profile.selectors.length ? `${nativeAction}, ${profile.selectors.join(", ")}` : nativeAction;
   const platformSelector = profile.selectors.join(", ");
   const seen = new Set<HTMLElement>();
   const candidates = Array.from(document.querySelectorAll<HTMLElement>(selector)).flatMap(action => {
     if (seen.has(action)) return [];
     seen.add(action);
-    if (action.classList.contains("atlas-navigator-trigger") || action.closest(excluded) || !action.parentElement) return [];
+    if (action.matches(EXCLUDED_TOOLBAR_CONTROLS) || action.closest(EXCLUDED_TOOLBAR_ANCESTORS) || !action.parentElement) return [];
     const share = action.matches('[data-testid*="share" i], [data-test-id*="share" i], [data-action="share"]') || [
       action.getAttribute("aria-label"), action.getAttribute("title"), action.getAttribute("data-tooltip"), action.textContent,
     ].some(label => /^(?:分享(?:聊天|对话)?|share(?: chat| conversation)?)$/iu.test(label?.trim() ?? ""));
@@ -145,13 +125,17 @@ function toolbarAction(platform?: WebCapturePlatform): NativeAnchor | undefined 
     const inHeader = Boolean(action.closest('header, [role="banner"], [role="toolbar"], [data-testid$="-header"]'));
     if (!share && !dsIcon && !platformMatch && !inHeader) return [];
     const rect = action.getBoundingClientRect();
-    if (rect.width < 16 || rect.height < 16 || rect.top < 0 || rect.bottom > profile.maxBottom || rect.left < window.innerWidth * profile.minLeftRatio) return [];
+    if (rect.width < 16 || rect.height < 16 || rect.top < 0 || rect.bottom > profile.maxBottom || rect.left < minLeft) return [];
     const style = getComputedStyle(action);
     if (style.visibility === "hidden" || style.opacity === "0") return [];
-    const sibling = toolbarSiblingOf(action);
+    const sibling = toolbarRowSibling(action);
     return [{ action, sibling, rect, share, dsIcon, platformMatch, radius: style.borderRadius }];
   });
-  const best = candidates.sort((a, b) =>
+  if (!candidates.length) return undefined;
+  const maxRight = Math.max(...candidates.map(item => item.rect.right));
+  const rightCluster = candidates.filter(item => item.share || isInRightCluster(item.rect, maxRight));
+  const pool = rightCluster.length ? rightCluster : candidates;
+  const best = pool.sort((a, b) =>
     Number(b.share) - Number(a.share)
     || Number(Boolean(b.sibling)) - Number(Boolean(a.sibling))
     || Number(b.dsIcon) - Number(a.dsIcon)
@@ -242,6 +226,14 @@ export function webChatEntry(explicitPlatform?: WebCapturePlatform) {
         button.style.removeProperty("top");
         button.style.removeProperty("right");
         if (anchor.sibling.previousElementSibling !== button) anchor.sibling.before(button);
+        if (!isVerticallyAligned(button.getBoundingClientRect(), anchor.rect)) {
+          button.className = "atlas-navigator-trigger atlas-navigator-trigger--edge is-anchor-aligned";
+          const top = Math.max(4, Math.round(anchor.rect.top + (anchor.rect.height - size) / 2));
+          const right = Math.max(8, Math.round(window.innerWidth - anchor.rect.left + profile.edgeGap));
+          button.style.top = `${top}px`;
+          button.style.right = `${right}px`;
+          if (button.parentElement !== document.body) document.body.append(button);
+        }
       } else {
         const top = Math.max(4, Math.round(anchor.rect.top + (anchor.rect.height - size) / 2));
         const right = Math.max(8, Math.round(window.innerWidth - anchor.rect.left + profile.edgeGap));

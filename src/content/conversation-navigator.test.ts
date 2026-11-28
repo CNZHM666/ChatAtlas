@@ -170,3 +170,35 @@ it("keeps only the companion entry on the start page and removes the old workben
  expect(document.querySelector(".atlas-workbench-trigger")).toBeNull();expect(document.querySelectorAll(".atlas-navigator-trigger")).toHaveLength(1);
  expect(sendMessage).not.toHaveBeenCalled();expect((document.querySelector("#prompt-textarea") as HTMLTextAreaElement).value).toBe("保留我的输入");
 });
+
+it("ignores centered Chat/Work switcher tabs on the welcome page and anchors to the top-right action bar", () => {
+  navigator.stop();
+  window.history.replaceState({}, "", "/");
+  document.body.innerHTML = '<aside style="width:260px"></aside><main><header style="display:flex"><div role="tablist" id="mode-pill"><button role="tab" aria-selected="true" id="tab-chat">聊天</button><button role="tab" aria-selected="false" id="tab-work">工作</button></div><div id="right-actions" style="display:flex"><a href="/#pricing" id="upgrade">续订</a><button aria-label="临时聊天" id="temp-chat">◌</button></div></header></main>';
+  const main = document.querySelector<HTMLElement>("main")!;
+  const tabChat = document.querySelector<HTMLElement>("#tab-chat")!;
+  const tabWork = document.querySelector<HTMLElement>("#tab-work")!;
+  const upgrade = document.querySelector<HTMLElement>("#upgrade")!;
+  const tempChat = document.querySelector<HTMLElement>("#temp-chat")!;
+  vi.spyOn(main, "getBoundingClientRect").mockReturnValue(new DOMRect(260, 0, 764, 800));
+  vi.spyOn(tabChat, "getBoundingClientRect").mockReturnValue(new DOMRect(570, 12, 64, 34));
+  vi.spyOn(tabWork, "getBoundingClientRect").mockReturnValue(new DOMRect(634, 12, 64, 34));
+  vi.spyOn(upgrade, "getBoundingClientRect").mockReturnValue(new DOMRect(910, 12, 56, 34));
+  vi.spyOn(tempChat, "getBoundingClientRect").mockReturnValue(new DOMRect(974, 12, 34, 34));
+
+  navigator.start();
+  const entry = document.querySelector<HTMLButtonElement>(".atlas-navigator-trigger")!;
+  expect(entry.closest("#mode-pill")).toBeNull();
+  expect(upgrade.previousElementSibling).toBe(entry);
+  expect(entry).toHaveClass("atlas-navigator-trigger--toolbar");
+
+  // Even without role="tablist", a centered button shifted right by an open sidebar must never hijack the trigger.
+  navigator.stop();
+  document.body.innerHTML = '<aside></aside><main><header style="display:flex"><div id="center-pill"><button id="plain-work">工作</button></div></header></main>';
+  vi.spyOn(document.querySelector<HTMLElement>("main")!, "getBoundingClientRect").mockReturnValue(new DOMRect(260, 0, 764, 800));
+  vi.spyOn(document.querySelector<HTMLElement>("#plain-work")!, "getBoundingClientRect").mockReturnValue(new DOMRect(640, 12, 64, 34));
+  navigator.start();
+  const fallbackEntry = document.querySelector<HTMLButtonElement>(".atlas-navigator-trigger")!;
+  expect(fallbackEntry.closest("#center-pill")).toBeNull();
+  expect(fallbackEntry).toHaveClass("atlas-navigator-trigger--edge");
+});

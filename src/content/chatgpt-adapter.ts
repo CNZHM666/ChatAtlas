@@ -4,6 +4,7 @@ import { findQuestionBlock, looseText, sameQuestionText } from "./question-text"
 import { domImageMarkdown, retainDomImages } from "./dom-images";
 import { DOM_TOOL_TRAFFIC, stripDomToolTraffic } from "./dom-tool-traffic";
 import { domUISnapshot } from "./dom-ui-snapshot";
+import { EXCLUDED_TOOLBAR_ANCESTORS, EXCLUDED_TOOLBAR_CONTROLS, isInRightCluster, toolbarRowSibling, topRightMinLeft } from "./top-right-anchor";
 
 import type {DetectedConversation,ParsedChatMessage} from "./capture-adapter";
 export type {DetectedConversation,ParsedChatMessage} from "./capture-adapter";
@@ -96,26 +97,50 @@ export function chatGPTEntryVisible(element:HTMLElement):boolean {
   return true;
 }
 /** Use the host's right-side actions when available; preserve the same corner during hydration. */
-export function chatGPTEntryAnchor(conversation: boolean): { anchor: HTMLElement; placement: "before" | "prepend"; variant: "toolbar" | "edge" } | undefined {
+export function chatGPTEntryAnchor(conversation: boolean): {
+  anchor: HTMLElement;
+  placement: "before" | "prepend";
+  variant: "toolbar" | "edge";
+  metricsTarget?: HTMLElement;
+} | undefined {
   if (!conversation && window.location.pathname !== "/" && !/^\/g\/[^/]+(?:\/|$)/u.test(window.location.pathname)) return undefined;
+  const minLeft = topRightMinLeft(0.62);
   // The current host can put Share in a toolbar without a semantic header.
   // Prefer its left neighbour; never match a share action inside a message or menu.
-  const share=Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(button=>{
-    if(button.classList.contains("atlas-navigator-trigger")||button.closest('nav, aside, #stage-slideover-sidebar, #stage-sidebar, [data-testid="sidebar"], [role="dialog"], [role="menu"], form, article, [data-message-author-role], [data-testid^="conversation-turn-"]'))return false;
-    const labels=[button.getAttribute("aria-label"),button.getAttribute("title"),button.textContent];
-    if(!button.matches('[data-testid="share-chat-button"], [data-testid="share-conversation-button"]')&&!labels.some(label=>/^(?:分享(?:聊天|对话)?|share(?: chat| conversation)?)$/iu.test(label?.trim()??"")))return false;
-    const rect=button.getBoundingClientRect();return rect.top>=0&&rect.top<100&&(!rect.width||rect.right>=window.innerWidth*.65)&&chatGPTEntryVisible(button);
-  });
-  if(share)return {anchor:share,placement:"before",variant:"toolbar"};
-  const toolbar = 'header button, #page-header button, [data-testid="conversation-header"] button, [data-testid="page-header"] button, button[data-testid="temporary-chat-button"], button[aria-label="临时聊天"], button[aria-label="Temporary Chat" i]';
-  const action = [...document.querySelectorAll<HTMLButtonElement>(toolbar)].flatMap(button => {
-    if (button.matches('.atlas-navigator-trigger, [data-testid="model-switcher-dropdown-button"], #model-switcher-dropdown-button') ||
-      button.closest('nav, aside, form, article, [role="dialog"], [role="menu"], #stage-sidebar, #stage-slideover-sidebar, [data-testid="sidebar"]')) return [];
+  const share = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(button => {
+    if (button.matches(EXCLUDED_TOOLBAR_CONTROLS) || button.closest(EXCLUDED_TOOLBAR_ANCESTORS)) return false;
+    const labels = [button.getAttribute("aria-label"), button.getAttribute("title"), button.textContent];
+    if (!button.matches('[data-testid="share-chat-button"], [data-testid="share-conversation-button"]') && !labels.some(label => /^(?:分享(?:聊天|对话)?|share(?: chat| conversation)?)$/iu.test(label?.trim() ?? ""))) return false;
     const rect = button.getBoundingClientRect();
-    return rect.width && rect.top >= 0 && rect.top < 90 && rect.left >= window.innerWidth * .6 && chatGPTEntryVisible(button) ? [{button, rect}] : [];
-  }).sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left)[0];
-  if (action) return {anchor:action.button,placement:"before",variant:"toolbar"};
-  return document.body?{anchor:document.body,placement:"prepend",variant:"edge"}:undefined;
+    return rect.top >= 0 && rect.top < 100 && (!rect.width || rect.left >= minLeft || rect.right >= window.innerWidth * 0.72) && chatGPTEntryVisible(button);
+  });
+  if (share) {
+    const sibling = share.getBoundingClientRect().width ? toolbarRowSibling(share) ?? share : share;
+    return { anchor: sibling, placement: "before", variant: "toolbar", metricsTarget: share };
+  }
+  const toolbar = 'header button, header a[href], #page-header button, #page-header a[href], [data-testid="conversation-header"] button, [data-testid="page-header"] button, button[data-testid="temporary-chat-button"], button[aria-label="临时聊天"], button[aria-label="Temporary Chat" i]';
+  const candidates = [...document.querySelectorAll<HTMLElement>(toolbar)].flatMap(control => {
+    if (control.matches(EXCLUDED_TOOLBAR_CONTROLS) || control.closest(EXCLUDED_TOOLBAR_ANCESTORS) || !control.parentElement) return [];
+    const rect = control.getBoundingClientRect();
+    if (!rect.width || !rect.height || rect.top < 0 || rect.top >= 90 || rect.left < minLeft || !chatGPTEntryVisible(control)) return [];
+    const tempChat = control.matches('button[data-testid="temporary-chat-button"], button[aria-label="临时聊天"], button[aria-label="Temporary Chat" i]');
+    const sibling = toolbarRowSibling(control);
+    return [{ control, sibling, rect, tempChat }];
+  });
+  if (candidates.length) {
+    const maxRight = Math.max(...candidates.map(item => item.rect.right));
+    const rightCluster = candidates.filter(item => isInRightCluster(item.rect, maxRight));
+    const pool = rightCluster.length ? rightCluster : candidates;
+    const action = pool.sort((a, b) =>
+      Number(Boolean(b.sibling)) - Number(Boolean(a.sibling))
+      || a.rect.top - b.rect.top
+      || a.rect.left - b.rect.left
+    )[0];
+    if (action) {
+      return { anchor: action.sibling ?? action.control, placement: "before", variant: "toolbar", metricsTarget: action.control };
+    }
+  }
+  return document.body ? { anchor: document.body, placement: "prepend", variant: "edge" } : undefined;
 }
 
 function elementText(element: HTMLElement): string {
