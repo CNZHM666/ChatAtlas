@@ -503,10 +503,8 @@ it("keeps files and sticky notes beside the document without writing them into t
   fireEvent.click(await screen.findByRole("button", { name: project.title }));
   expect(screen.getByRole("tab", { name: "文档" })).toHaveAttribute("aria-selected", "true");
   fireEvent.click(screen.getByRole("tab", { name: "资料" }));
-  const auto = await screen.findByRole("checkbox", { name: "自动收录本页上传" });
-  await waitFor(() => expect(auto).toBeEnabled());
-  fireEvent.click(auto);
-  await waitFor(() => expect(auto).toBeChecked());
+  expect(await screen.findByText("拖入、粘贴或点击添加资料")).toBeVisible();
+  expect(screen.queryByRole("checkbox", { name: "自动收录本页上传" })).toBeNull();
   fireEvent.click(screen.getByRole("tab", { name: "便利贴" }));
   const create = screen.getByRole("button", { name: "新建" });
   await waitFor(() => expect(create).toBeEnabled());
@@ -521,7 +519,7 @@ it("keeps files and sticky notes beside the document without writing them into t
   try {
     fireEvent.click(screen.getByRole("button", { name: "复制便利贴" }));
     expect(writeText).toHaveBeenCalledExactlyOnceWith("待会儿问暂停规则");
-    expect(await screen.findByText("已复制便利贴。")).toBeVisible();
+    expect(await screen.findByText(/已复制便利贴/)).toBeVisible();
   } finally {
     if (clipboard) Object.defineProperty(navigator, "clipboard", clipboard);
     else Reflect.deleteProperty(navigator, "clipboard");
@@ -581,8 +579,9 @@ it("switches three export presets, copies Markdown, renders chapter outline, and
   expect(within(wiki).getByRole("button", { name: "规则校验" })).toBeVisible();
 });
 
-it("shows document, files, and sticky note tabs even for workbench projects without a canvasId", async () => {
-  vi.stubGlobal("chrome", { runtime: { sendMessage: vi.fn() } });
+it("shows clean files tab without auto-upload toggle and supports dragging, pinning, and inserting sticky notes", async () => {
+  const sendMessage = vi.fn().mockResolvedValue({ ok: true });
+  vi.stubGlobal("chrome", { runtime: { sendMessage, onMessage: { addListener: vi.fn(), removeListener: vi.fn() } } });
   const db = await getDatabase();
   const project = { ...projectSession(), canvasId: undefined, rootSessionId: "wb-only-root" };
   await db.put("focusSessions", project);
@@ -591,6 +590,66 @@ it("shows document, files, and sticky note tabs even for workbench projects with
   expect(screen.getByRole("tablist", { name: "项目工作区" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "资料" })).toBeVisible();
   expect(screen.getByRole("tab", { name: "便利贴" })).toBeVisible();
+
   fireEvent.click(screen.getByRole("tab", { name: "资料" }));
-  expect(await screen.findByRole("checkbox", { name: "自动收录本页上传" })).toBeVisible();
+  expect(await screen.findByText("拖入、粘贴或点击添加资料")).toBeVisible();
+  expect(screen.queryByRole("checkbox", { name: "自动收录本页上传" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("tab", { name: "便利贴" }));
+  fireEvent.click(await screen.findByRole("button", { name: "新建" }));
+  const input = screen.getByRole("textbox", { name: "便利贴内容" });
+  fireEvent.change(input, { target: { value: "请按现有接口定义输出完整代码" } });
+  fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+  const list = await screen.findByRole("list", { name: "已保存的便利贴" });
+  const noteText = within(list).getByText("请按现有接口定义输出完整代码");
+  const card = noteText.closest("li")!;
+  expect(card).toHaveAttribute("draggable", "true");
+
+  const setData = vi.fn();
+  fireEvent.dragStart(card, { dataTransfer: { effectAllowed: "", setData } });
+  expect(setData).toHaveBeenCalledWith("text/plain", "请按现有接口定义输出完整代码");
+
+  fireEvent.click(within(card).getByRole("button", { name: "置顶便利贴" }));
+  expect(await within(card).findByText("置顶")).toBeVisible();
+
+  fireEvent.click(within(card).getByRole("button", { name: "填入当前输入区" }));
+  await waitFor(() => expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+    type: "ATLAS_SIDECAR_HANDOFF",
+    conversationId: "chat-wb",
+    text: "请按现有接口定义输出完整代码",
+  })));
+
+  // Dragging selected text from an AI conversation into the sticky notes panel creates a new note.
+  const notesPanel = screen.getByRole("region", { name: "项目便利贴" });
+  const externalDrag = {
+    types: ["text/plain"],
+    dropEffect: "",
+    getData: (type: string) => type === "text/plain" ? "优先采用本地 SQLite 同步方案" : "",
+  };
+  fireEvent.dragOver(notesPanel, { dataTransfer: externalDrag });
+  expect(screen.getByText("松开鼠标，直接存为便利贴")).toBeVisible();
+  fireEvent.drop(notesPanel, { dataTransfer: externalDrag });
+  expect(await within(screen.getByRole("list", { name: "已保存的便利贴" })).findByText("优先采用本地 SQLite 同步方案")).toBeVisible();
+
+  // Dropping our own sticky card back onto the panel must NOT duplicate it.
+  fireEvent.drop(notesPanel, {
+    dataTransfer: {
+      types: ["text/plain", "application/x-atlas-sticky"],
+      getData: (type: string) => type === "text/plain" ? "请按现有接口定义输出完整代码" : "self-id",
+    },
+  });
+  expect(within(screen.getByRole("list", { name: "已保存的便利贴" })).getAllByRole("listitem")).toHaveLength(2);
+
+  // Dragging selected text directly onto the Notes tab while reading Document saves and switches tabs.
+  fireEvent.click(screen.getByRole("tab", { name: "文档" }));
+  const notesTab = screen.getByRole("tab", { name: "便利贴" });
+  const tabDrop = {
+    types: ["text/plain"],
+    dropEffect: "",
+    getData: (type: string) => type === "text/plain" ? "切页拖入的接口约束" : "",
+  };
+  fireEvent.dragOver(notesTab, { dataTransfer: tabDrop });
+  fireEvent.drop(notesTab, { dataTransfer: tabDrop });
+  await waitFor(() => expect(notesTab).toHaveAttribute("aria-selected", "true"));
+  expect(await within(await screen.findByRole("list", { name: "已保存的便利贴" })).findByText("切页拖入的接口约束")).toBeVisible();
 });

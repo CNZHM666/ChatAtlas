@@ -20,6 +20,7 @@ import { savedFocusProjects } from "../canvas/focus-versions";
 import { SidecarHeader } from "./SidecarHeader";
 import { SidecarSheet } from "./SidecarSheet";
 import { ProjectDesk } from "./ProjectDesk";
+import { extractDroppedStickyText, isExternalStickyTextDrag, saveProjectSticky } from "../storage/project-desk";
 import { SidecarProjectWiki } from "./SidecarProjectWiki";
 import { ProjectNotice, ProjectUpdateStatus } from "./ProjectUpdateStatus";
 import { ProjectUpdateLog } from "./ProjectUpdateLog";
@@ -89,6 +90,8 @@ export function NativeProjects({ zh, onToggleLanguage, conversationId, conversat
   const [discardCandidate, setDiscardCandidate] = useState<string>();
   const [trashCandidate, setTrashCandidate] = useState<FocusSession>();
   const [sourceView, setSourceView] = useState<SidecarSource>();
+  const [notesTabDrop, setNotesTabDrop] = useState(false);
+  const [externalNoteSignal, setExternalNoteSignal] = useState<{ id: number; message: string }>();
   const sourceOrigin = useRef<HTMLElement>();
   const currentChat = useRef(conversationId);
   currentChat.current = conversationId;
@@ -703,12 +706,36 @@ export function NativeProjects({ zh, onToggleLanguage, conversationId, conversat
           }}>
           {deskTabs.map(({ id, cn, en, icon: Icon }) => <button key={id} type="button" role="tab" id={`desk-tab-${id}`}
             tabIndex={id === deskView ? 0 : -1} aria-selected={id === deskView} aria-controls="project-desk-panel"
-            disabled={Boolean(busy) && id !== deskView} onClick={() => { setDeskView(id); setChapterId(undefined); }}>
+            data-drop-target={id === "notes" && notesTabDrop ? true : undefined}
+            disabled={Boolean(busy) && id !== deskView} onClick={() => { setDeskView(id); setChapterId(undefined); }}
+            onDragOver={id === "notes" ? event => {
+              if (!deskProjectId || busy || !isExternalStickyTextDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+              setNotesTabDrop(true);
+            } : undefined}
+            onDragLeave={id === "notes" ? () => setNotesTabDrop(false) : undefined}
+            onDrop={id === "notes" ? event => {
+              setNotesTabDrop(false);
+              if (!deskProjectId || busy || !isExternalStickyTextDrag(event.dataTransfer)) return;
+              const { text, truncated } = extractDroppedStickyText(event.dataTransfer);
+              if (!text) return;
+              event.preventDefault();
+              void saveProjectSticky(deskProjectId, { id: crypto.randomUUID(), text, updatedAt: Date.now() }).then(() => {
+                setDeskView("notes");
+                setChapterId(undefined);
+                setExternalNoteSignal({
+                  id: Date.now(),
+                  message: truncated ? t("已保存前 2000 字为新便利贴", "Saved first 2,000 characters as a sticky note")
+                    : t("已拖入为新便利贴", "Saved dropped text as a sticky note"),
+                });
+              }).catch(() => undefined);
+            } : undefined}>
             <Icon size={15} aria-hidden="true"/>{t(cn, en)}
           </button>)}
         </div>}
         {deskProjectId && deskView !== "document" ? <div id="project-desk-panel" role="tabpanel" aria-labelledby={`desk-tab-${deskView}`}>
-          <ProjectDesk projectId={deskProjectId} conversationId={conversationId} canAttach={canInsert} view={deskView} zh={zh}/>
+          <ProjectDesk projectId={deskProjectId} conversationId={conversationId} canAttach={canInsert} view={deskView} zh={zh} externalNoteSignal={externalNoteSignal}/>
         </div> : <div className="project-desk-document" id="project-desk-panel"
           role={showDeskTabs ? "tabpanel" : undefined} aria-labelledby={showDeskTabs ? "desk-tab-document" : undefined}>
         {!reading && !reviewing && <section className="native-update-card" onKeyDown={event => {

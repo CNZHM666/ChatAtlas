@@ -38,7 +38,7 @@ function initialLocale(): DemoLocale {
   const requested = new URLSearchParams(location.search).get("lang");
   if (requested === "zh" || requested === "en") return requested;
   const preferred = readPreference("lang");
-  return preferred === "zh" || preferred === "en" ? preferred : navigator.language.startsWith("zh") ? "zh" : "en";
+  return preferred === "zh" || preferred === "en" ? preferred : "zh";
 }
 
 export function DemoApp() {

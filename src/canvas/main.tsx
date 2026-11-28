@@ -17,7 +17,7 @@ import "./history-workbench.css";
 document.documentElement.dataset.theme = preferredTheme();
 installUiFailureCapture();
 installBrandFavicon();
-document.documentElement.lang = localStorage.getItem("atlas-locale") === "zh-CN" ? "zh-CN" : "en";
+document.documentElement.lang = localStorage.getItem("atlas-locale") === "en" ? "en" : "zh-CN";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode><PanelBoundary zh={document.documentElement.lang === "zh-CN"}><PreferencesProvider><App /></PreferencesProvider></PanelBoundary></React.StrictMode>,

@@ -1,11 +1,40 @@
-import { AUTO_FILE_LIMIT, PROJECT_FILE_LIMIT, supportedProjectFile, type ProjectFileInfo } from "../shared/project-files";
+import { AUTO_FILE_LIMIT, PROJECT_FILE_DRAG, PROJECT_FILE_LIMIT, supportedProjectFile, type ProjectFileInfo } from "../shared/project-files";
 import { projectIdentity } from "../shared/project-continuation";
 import type { FocusSession } from "../shared/focus-session";
 import type { AtlasCanvas } from "../shared/types";
 import { getDatabase } from "./db";
 import { isDeletedProject } from "./project-deletion";
 
-export interface ProjectSticky { id: string; text: string; updatedAt: number }
+export const PROJECT_STICKY_DRAG = "application/x-atlas-sticky";
+export const STICKY_MAX_LENGTH = 2000;
+
+type DragTransferLike = { types?: ArrayLike<string>; getData?: (format: string) => string } | null | undefined;
+
+export function isExternalStickyTextDrag(transfer: DragTransferLike): boolean {
+  if (!transfer) return false;
+  const types = Array.from(transfer.types ?? []);
+  if (types.includes(PROJECT_STICKY_DRAG) || types.includes(PROJECT_FILE_DRAG) || types.includes("Files")) return false;
+  return types.includes("text/plain") || types.includes("text/html");
+}
+
+export function extractDroppedStickyText(transfer: DragTransferLike): { text: string; truncated: boolean } {
+  if (!transfer?.getData) return { text: "", truncated: false };
+  let raw = transfer.getData("text/plain") || "";
+  if (!raw.trim()) {
+    const html = transfer.getData("text/html") || "";
+    if (html.trim()) {
+      raw = typeof DOMParser === "function"
+        ? (new DOMParser().parseFromString(html, "text/html").body.textContent ?? "")
+        : html.replace(/<[^>]+>/g, " ");
+    }
+  }
+  const normalized = raw.replace(/\r\n?/g, "\n").trim();
+  if (!normalized) return { text: "", truncated: false };
+  const truncated = normalized.length > STICKY_MAX_LENGTH;
+  return { text: (truncated ? normalized.slice(0, STICKY_MAX_LENGTH) : normalized).trim(), truncated };
+}
+
+export interface ProjectSticky { id: string; text: string; updatedAt: number; pinned?: boolean }
 export interface ProjectDesk { id: string; notes: ProjectSticky[]; autoChats: string[] }
 export interface ProjectFile extends ProjectFileInfo { id: string; projectIds: string[]; blob: Blob; addedAt: number }
 
@@ -74,7 +103,11 @@ export async function saveProjectSticky(projectId: string, note: ProjectSticky, 
   const text = note.text.trim();
   if (!remove && (!text || text.length > 2000)) { await tx.done; throw new Error("Note is empty or too long"); }
   const next = desk.notes.filter(item => item.id !== note.id);
-  if (!remove) next.unshift({ ...note, text, updatedAt: Date.now() });
+  if (!remove) {
+    const saved: ProjectSticky = { ...note, text, updatedAt: Date.now() };
+    next.unshift(saved);
+  }
+  next.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
   await store.put({ ...desk, notes: next });
   await tx.done;
 }

@@ -99,8 +99,10 @@ it("supports files, sticky notes, and auto-uploads for workbench projects withou
   const bytes = new TextEncoder().encode("Board spec").buffer;
   await saveProjectFile("wb-root-1", { name: "board.md", type: "text/markdown", size: bytes.byteLength }, bytes, true);
   await saveProjectSticky("wb-root-1", { id: "s1", text: "Check MOSFET rating", updatedAt: 0 });
+  await saveProjectSticky("wb-root-1", { id: "s2", text: "Always verify 3.3V logic", updatedAt: 0, pinned: true });
+  await saveProjectSticky("wb-root-1", { id: "s3", text: "Later unpinned note", updatedAt: 0 });
   await setAutomaticProjectFiles("wb-root-1", chat, true);
   expect((await listProjectFiles("wb-root-1")).map(file => file.name)).toEqual(["board.md"]);
-  expect((await projectDesk("wb-root-1")).notes[0].text).toBe("Check MOSFET rating");
+  expect((await projectDesk("wb-root-1")).notes.map(note => note.id)).toEqual(["s2", "s3", "s1"]);
   expect(await uploadProjects(chat)).toEqual([{ id: "wb-root-1", name: "AI Hardware Canvas", auto: true }]);
 });
